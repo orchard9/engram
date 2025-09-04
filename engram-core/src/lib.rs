@@ -1,5 +1,6 @@
 //! Engram core graph engine with probabilistic operations.
 
+pub mod error;
 pub mod types;
 
 use serde::{Deserialize, Serialize};
@@ -321,5 +322,32 @@ mod tests {
         assert!(msg.contains("Example:"));
         assert!(msg.contains("did you mean"));
         assert!(msg.contains("user_124"));
+    }
+
+    #[test]
+    fn test_cognitive_error_conversion() {
+        use crate::error::CognitiveError;
+        use crate::types::CoreError;
+
+        let core_err = CoreError::node_not_found("test_node", vec!["node1".into(), "node2".into()]);
+        let cognitive_err: CognitiveError = core_err.into();
+
+        assert!(cognitive_err.summary.contains("test_node"));
+        assert_eq!(cognitive_err.similar, vec!["node1", "node2"]);
+        assert!(cognitive_err.confidence.mean >= 0.8);
+    }
+
+    #[test]
+    fn test_validation_error_with_cognitive_context() {
+        let node = MemoryNode::new_unvalidated("test".to_string(), vec![]);
+        let result = node.validate();
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        let msg = err.to_string();
+
+        assert!(msg.contains("empty"));
+        assert!(msg.contains("Non-empty content"));
+        assert!(msg.contains("Provide actual memory content"));
     }
 }

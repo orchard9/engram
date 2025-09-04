@@ -3,12 +3,14 @@
 //! Follows cognitive guidance principles: every error includes context, suggestion, and example
 //! to help developers resolve issues quickly, even when tired or under stress.
 
+use crate::error::CognitiveError;
+use crate::{Confidence, cognitive_error};
 use thiserror::Error;
 
-/// Core error types for the engram system
+/// Core error types for the engram system (legacy compatibility)
 ///
-/// Each error follows the Context-Suggestion-Example pattern to support
-/// System 1 (pattern recognition) thinking when debugging.
+/// This enum provides backward compatibility while internally using CognitiveError.
+/// New code should use CognitiveError directly for richer error context.
 #[derive(Error, Debug)]
 pub enum CoreError {
     #[error(
@@ -68,6 +70,108 @@ pub enum CoreError {
 }
 
 impl CoreError {
+    /// Convert to a CognitiveError with full context
+    pub fn to_cognitive(&self) -> CognitiveError {
+        match self {
+            Self::NodeNotFound { id, similar } => {
+                let similar_vec = if similar.is_empty() {
+                    vec![]
+                } else {
+                    similar
+                        .trim_start_matches(", or did you mean: ")
+                        .trim_end_matches('?')
+                        .split(", ")
+                        .map(String::from)
+                        .collect()
+                };
+
+                {
+                    let mut err = cognitive_error!(
+                        summary: format!("Memory node '{}' not found", id),
+                        context: expected = "Valid node ID from current graph",
+                                 actual = id.clone(),
+                        suggestion: "Use graph.nodes() to list available nodes",
+                        example: r#"let node = graph.get_node("node_id").or_insert_default();"#,
+                        confidence: Confidence::high()
+                    );
+                    err.similar = similar_vec;
+                    err
+                }
+            }
+            Self::InvalidActivation { value } => {
+                cognitive_error!(
+                    summary: format!("Invalid activation level: {}", value),
+                    context: expected = "Activation between 0.0 and 1.0",
+                             actual = format!("{}", value),
+                    suggestion: "Use activation.clamp(0.0, 1.0) to ensure valid range",
+                    example: "node.activate(energy.clamp(0.0, 1.0));",
+                    confidence: Confidence::exact(1.0)
+                )
+            }
+            Self::InsufficientActivation { level, threshold } => {
+                cognitive_error!(
+                    summary: "Reconstruction failed due to insufficient activation",
+                    context: expected = format!("Activation >= {:.3}", threshold),
+                             actual = format!("Activation = {:.3}", level),
+                    suggestion: "Increase activation through more recall attempts or lower threshold",
+                    example: "graph.activate_neighbors(node_id, boost=0.3).reconstruct_with_threshold(0.5)",
+                    confidence: Confidence::high()
+                )
+            }
+            Self::InvalidConfidence { mean, lower, upper } => {
+                cognitive_error!(
+                    summary: "Invalid confidence interval",
+                    context: expected = "mean ∈ [lower, upper] and all values ∈ [0, 1]",
+                             actual = format!("mean={:.3}, range=[{:.3}, {:.3}]", mean, lower, upper),
+                    suggestion: "Use Confidence::new_clamped() to automatically fix bounds",
+                    example: "let conf = Confidence::new_clamped(mean, lower, upper);",
+                    confidence: Confidence::exact(1.0)
+                )
+            }
+            Self::SerializationError { context, .. } => {
+                cognitive_error!(
+                    summary: "Serialization failed",
+                    context: expected = "Valid JSON-serializable memory structure",
+                             actual = context.clone(),
+                    suggestion: "Check for NaN/Infinity values in embeddings or confidence scores",
+                    example: "node.validate_serializable()?.to_json()",
+                    confidence: Confidence::high()
+                )
+            }
+            Self::ValidationError {
+                reason,
+                expected,
+                suggestion,
+                example,
+            } => {
+                cognitive_error!(
+                    summary: format!("Validation failed: {}", reason),
+                    context: expected = expected.clone(),
+                             actual = reason.clone(),
+                    suggestion: suggestion.clone(),
+                    example: example.clone(),
+                    confidence: Confidence::high()
+                )
+            }
+            Self::IoError {
+                context,
+                expected,
+                suggestion,
+                example,
+                ..
+            } => {
+                cognitive_error!(
+                    summary: "IO operation failed",
+                    context: expected = expected.clone(),
+                             actual = context.clone(),
+                    suggestion: suggestion.clone(),
+                    example: example.clone(),
+                    confidence: Confidence::high()
+                )
+            }
+        }
+    }
+
     /// Helper to create NodeNotFound with similar suggestions
     pub fn node_not_found(id: impl Into<String>, similar: Vec<String>) -> Self {
         let id = id.into();
@@ -99,3 +203,23 @@ impl CoreError {
 
 /// Result type alias for core operations
 pub type Result<T> = std::result::Result<T, CoreError>;
+
+/// Convert CoreError to CognitiveError for richer error context
+impl From<CoreError> for CognitiveError {
+    fn from(err: CoreError) -> Self {
+        err.to_cognitive()
+    }
+}
+
+/// Convert CognitiveError to CoreError for backward compatibility
+impl From<CognitiveError> for CoreError {
+    fn from(err: CognitiveError) -> Self {
+        // Create a generic validation error that preserves the cognitive error information
+        CoreError::ValidationError {
+            reason: err.summary.clone(),
+            expected: err.context.expected.clone(),
+            suggestion: err.suggestion.clone(),
+            example: err.example.clone(),
+        }
+    }
+}
