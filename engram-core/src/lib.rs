@@ -1,6 +1,7 @@
 //! Engram core graph engine with probabilistic operations.
 
 pub mod error;
+pub mod error_testing;
 pub mod types;
 
 use serde::{Deserialize, Serialize};

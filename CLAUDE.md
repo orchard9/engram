@@ -21,6 +21,17 @@ roadmap/milestone-0/: Tasks are stored as 001*{task_name}*{task_status}.md files
 
 If at any point anything gets stuck, move the task to \_blocked, write in the task file why it's blocked, and pause
 
+## How to acceptance test
+
+1. Identify the graph functionality that needs validation (spreading activation, memory consolidation, pattern completion)
+2. Use the graph-systems-acceptance-tester agent to design comprehensive test scenarios
+3. Validate against production workload patterns and edge cases
+4. Test API compatibility with existing graph database mental models (Neo4j, NetworkX)
+5. Verify confidence score calibration and probabilistic behavior correctness
+6. Run performance benchmarks to ensure acceptable throughput and latency
+7. Document any issues found and create follow-up tasks for fixes
+8. Only mark features as production-ready after all acceptance tests pass
+
 ## How to write content
 
 1. Read the current milestone we're working on, the most recent task completed, and upcoming tasks to understand the project as a whole
@@ -54,4 +65,5 @@ verification-testing-lead: Use for differential testing between Rust/Zig impleme
 systems-product-planner: Use for defining technical roadmaps, creating implementation specs, prioritizing features, or making architectural decisions
 technical-communication-lead: Use for explaining complex Engram concepts to external audiences, creating developer documentation, or writing blog posts about the project
 memory-systems-researcher: Use for validating memory consolidation algorithms, implementing hippocampal-neocortical interactions, or ensuring biological plausibility
+graph-systems-acceptance-tester: Use for validating graph database functionality, testing spreading activation algorithms, verifying memory consolidation behaviors, or ensuring API compatibility
 ...
