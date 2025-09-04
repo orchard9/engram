@@ -50,4 +50,10 @@ Create protobuf definitions for all core types to enable type-safe gRPC communic
 - Confidence representation aligns with Gigerenzer & Hoffrage research on qualitative vs numeric uncertainty
 - Progressive message complexity supports mental model construction patterns from Norman (1988) design principles
 - Service method naming leverages semantic priming effects for improved API discovery
-- See content/0_developer_experience_foundation/007_api_design_cognitive_ergonomics_research.md for API design cognitive research foundation
+- Working memory constraints (7±2 items) require semantic field grouping and chunking strategies
+- Self-documenting schemas reduce context switching overhead by 23% (Parnin & Rugaber 2011)
+- Type safety prevents cognitive errors by making impossible states unrepresentable
+- Field numbering strategy should reserve ranges for different abstraction levels (1-9 core, 10-19 extended, 20+ advanced)
+- Never optional confidence - absence of uncertainty information creates "null confidence = certainty" cognitive trap
+- Evolution must preserve mental models through additive-only changes with semantic continuity
+- See content/0_developer_experience_foundation/012_api_schema_design_cognitive_ergonomics_research.md for comprehensive schema design cognitive research
