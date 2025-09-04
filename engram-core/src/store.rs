@@ -4,7 +4,8 @@
 //! degrade gracefully under pressure, returning activation levels that
 //! indicate store quality.
 
-use crate::{Episode, Memory};
+use crate::{Confidence, Cue, CueType, Episode, Memory, TemporalPattern};
+use chrono::Utc;
 use dashmap::DashMap;
 use parking_lot::RwLock;
 use std::collections::BTreeMap;
@@ -208,6 +209,225 @@ impl MemoryStore {
     pub fn has_capacity(&self) -> bool {
         self.count() < self.max_memories
     }
+
+    /// Recall memories based on a cue, returning episodes with confidence scores
+    ///
+    /// # Returns
+    ///
+    /// Vector of (Episode, Confidence) tuples, sorted by confidence
+    /// - Empty vector if no matches found
+    /// - Low confidence results for partial matches
+    /// - Higher confidence for better matches
+    ///
+    /// # Cognitive Design
+    ///
+    /// Never returns errors because human recall doesn't "fail" - it returns
+    /// nothing, partial matches, or reconstructed memories with varying confidence.
+    pub fn recall(&self, cue: Cue) -> Vec<(Episode, Confidence)> {
+        let mut results = Vec::new();
+
+        // Get all episodes from WAL buffer
+        let episodes: Vec<(String, Episode)> = self
+            .wal_buffer
+            .iter()
+            .map(|entry| (entry.key().clone(), entry.value().clone()))
+            .collect();
+
+        // Match based on cue type
+        match &cue.cue_type {
+            CueType::Embedding { vector, threshold } => {
+                for (_id, episode) in episodes {
+                    let similarity = cosine_similarity(&episode.embedding, vector);
+                    let confidence = Confidence::exact(similarity);
+
+                    // Include if meets threshold
+                    if confidence.raw() >= threshold.raw() {
+                        results.push((episode, confidence));
+                    }
+                }
+            }
+            CueType::Context {
+                time_range,
+                location,
+                confidence_threshold,
+            } => {
+                for (_id, episode) in episodes {
+                    let mut match_score = 0.0;
+                    let mut max_score = 0.0;
+
+                    // Check time range if provided
+                    if let Some((start, end)) = time_range {
+                        max_score += 1.0;
+                        if episode.when >= *start && episode.when <= *end {
+                            match_score += 1.0;
+                        }
+                    }
+
+                    // Check location if provided
+                    if let Some(loc) = location {
+                        max_score += 1.0;
+                        if let Some(ep_loc) = &episode.where_location {
+                            if ep_loc.contains(loc) || loc.contains(ep_loc) {
+                                match_score += 1.0;
+                            }
+                        }
+                    }
+
+                    if max_score > 0.0 {
+                        let confidence_value = match_score / max_score;
+                        let confidence = Confidence::exact(confidence_value);
+
+                        if confidence.raw() >= confidence_threshold.raw() {
+                            results.push((episode, confidence));
+                        }
+                    }
+                }
+            }
+            CueType::Semantic {
+                content,
+                fuzzy_threshold,
+            } => {
+                for (_id, episode) in episodes {
+                    // Simple substring matching for now
+                    let match_score = if episode
+                        .what
+                        .to_lowercase()
+                        .contains(&content.to_lowercase())
+                    {
+                        1.0
+                    } else if content
+                        .to_lowercase()
+                        .contains(&episode.what.to_lowercase())
+                    {
+                        0.7
+                    } else {
+                        // Calculate word overlap
+                        let cue_words: Vec<&str> = content.split_whitespace().collect();
+                        let ep_words: Vec<&str> = episode.what.split_whitespace().collect();
+                        let matches = cue_words.iter().filter(|w| ep_words.contains(w)).count();
+
+                        if matches > 0 {
+                            (matches as f32 / cue_words.len().max(1) as f32) * 0.5
+                        } else {
+                            0.0
+                        }
+                    };
+
+                    if match_score > 0.0 {
+                        let confidence = Confidence::exact(match_score);
+
+                        if confidence.raw() >= fuzzy_threshold.raw() {
+                            results.push((episode, confidence));
+                        }
+                    }
+                }
+            }
+            CueType::Temporal {
+                pattern,
+                confidence_threshold,
+            } => {
+                for (_id, episode) in episodes {
+                    let is_match = match pattern {
+                        TemporalPattern::Before(time) => episode.when < *time,
+                        TemporalPattern::After(time) => episode.when > *time,
+                        TemporalPattern::Between(start, end) => {
+                            episode.when >= *start && episode.when <= *end
+                        }
+                        TemporalPattern::Recent(duration) => {
+                            let now = Utc::now();
+                            episode.when > now - *duration
+                        }
+                    };
+
+                    if is_match {
+                        let confidence = confidence_threshold.clone();
+                        results.push((episode, confidence));
+                    }
+                }
+            }
+        }
+
+        // Apply spreading activation for associative recall
+        results = self.apply_spreading_activation(results, &cue);
+
+        // Sort by confidence (highest first)
+        results.sort_by(|a, b| {
+            b.1.raw()
+                .partial_cmp(&a.1.raw())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        // Limit results to max_results from cue
+        results.truncate(cue.max_results);
+
+        results
+    }
+
+    /// Apply spreading activation to enhance recall results
+    fn apply_spreading_activation(
+        &self,
+        mut results: Vec<(Episode, Confidence)>,
+        cue: &Cue,
+    ) -> Vec<(Episode, Confidence)> {
+        // Get system pressure to modulate activation spreading
+        let pressure = self.pressure();
+        let spread_factor = 1.0 - pressure * 0.5; // Reduce spreading under pressure
+
+        // For each high-confidence result, boost related memories
+        let high_confidence_results: Vec<_> = results
+            .iter()
+            .filter(|(_, conf)| conf.is_high())
+            .cloned()
+            .collect();
+
+        for (ep, base_conf) in high_confidence_results {
+            // Find related episodes based on temporal proximity
+            let time_window = chrono::Duration::hours(1);
+            let start = ep.when - time_window;
+            let end = ep.when + time_window;
+
+            for entry in self.wal_buffer.iter() {
+                let related_ep = entry.value();
+                if related_ep.id != ep.id && related_ep.when >= start && related_ep.when <= end {
+                    // Calculate activation boost based on temporal proximity
+                    let time_diff = (ep.when - related_ep.when).num_seconds().abs() as f32;
+                    let max_diff = time_window.num_seconds() as f32;
+                    let proximity = 1.0 - (time_diff / max_diff);
+                    let boost = proximity * base_conf.raw() * spread_factor * 0.3;
+
+                    // Check if already in results
+                    let existing_idx = results.iter().position(|(e, _)| e.id == related_ep.id);
+
+                    if let Some(idx) = existing_idx {
+                        // Boost existing result
+                        let (ep, old_conf) = &results[idx];
+                        let new_value = (old_conf.raw() + boost).min(1.0);
+                        let new_conf = Confidence::exact(new_value);
+                        results[idx] = (ep.clone(), new_conf);
+                    } else if boost > cue.result_threshold.raw() * 0.5 {
+                        // Add as new low-confidence result
+                        let conf = Confidence::exact(boost);
+                        results.push((related_ep.clone(), conf));
+                    }
+                }
+            }
+        }
+
+        results
+    }
+}
+
+/// Calculate cosine similarity between two vectors
+fn cosine_similarity(a: &[f32; 768], b: &[f32; 768]) -> f32 {
+    let dot_product: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+    let magnitude_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+    let magnitude_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+
+    if magnitude_a == 0.0 || magnitude_b == 0.0 {
+        0.0
+    } else {
+        (dot_product / (magnitude_a * magnitude_b)).clamp(-1.0, 1.0)
+    }
 }
 
 /// Extension trait to convert Episode to Memory
@@ -231,7 +451,7 @@ impl EpisodeToMemory for Memory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Confidence, EpisodeBuilder};
+    use crate::{Confidence, Cue, EpisodeBuilder};
     use chrono::Utc;
 
     #[test]
@@ -347,6 +567,294 @@ mod tests {
 
         // Pressure should be high
         assert!(store.pressure() > 0.8);
+    }
+
+    #[test]
+    fn test_recall_returns_empty_for_no_matches() {
+        let store = MemoryStore::new(10);
+
+        // Store an episode
+        let episode = EpisodeBuilder::new()
+            .id("ep1".to_string())
+            .when(Utc::now())
+            .what("test episode".to_string())
+            .embedding([0.1; 768])
+            .confidence(Confidence::HIGH)
+            .build();
+
+        store.store(episode);
+
+        // Create cue that won't match
+        let cue = Cue::semantic(
+            "cue1".to_string(),
+            "completely different content".to_string(),
+            Confidence::HIGH,
+        );
+
+        let results = store.recall(cue);
+
+        // Should return empty vector, not error
+        assert_eq!(results.len(), 0);
+    }
+
+    #[test]
+    fn test_recall_with_embedding_cue() {
+        let store = MemoryStore::new(10);
+
+        // Store episodes with different embeddings
+        let mut embedding1 = [0.0; 768];
+        embedding1[0] = 1.0;
+
+        let mut embedding2 = [0.0; 768];
+        embedding2[1] = 1.0;
+
+        let episode1 = EpisodeBuilder::new()
+            .id("ep1".to_string())
+            .when(Utc::now())
+            .what("memory one".to_string())
+            .embedding(embedding1)
+            .confidence(Confidence::HIGH)
+            .build();
+
+        let episode2 = EpisodeBuilder::new()
+            .id("ep2".to_string())
+            .when(Utc::now())
+            .what("memory two".to_string())
+            .embedding(embedding2)
+            .confidence(Confidence::HIGH)
+            .build();
+
+        store.store(episode1.clone());
+        store.store(episode2);
+
+        // Search with embedding similar to first
+        let cue = Cue::embedding("cue1".to_string(), embedding1, Confidence::exact(0.9));
+
+        let results = store.recall(cue);
+
+        // Should find the matching episode
+        assert!(!results.is_empty());
+        assert_eq!(results[0].0.id, "ep1");
+        assert!(results[0].1.raw() > 0.9);
+    }
+
+    #[test]
+    fn test_recall_with_context_cue() {
+        let store = MemoryStore::new(10);
+
+        let now = Utc::now();
+        let yesterday = now - chrono::Duration::days(1);
+        let tomorrow = now + chrono::Duration::days(1);
+
+        // Store episodes at different times
+        let episode1 = EpisodeBuilder::new()
+            .id("ep1".to_string())
+            .when(now)
+            .what("today's memory".to_string())
+            .embedding([0.1; 768])
+            .confidence(Confidence::HIGH)
+            .where_location("office".to_string())
+            .build();
+
+        let episode2 = EpisodeBuilder::new()
+            .id("ep2".to_string())
+            .when(yesterday)
+            .what("yesterday's memory".to_string())
+            .embedding([0.1; 768])
+            .confidence(Confidence::HIGH)
+            .where_location("home".to_string())
+            .build();
+
+        store.store(episode1.clone());
+        store.store(episode2);
+
+        // Search for today's memories in office
+        let cue = Cue::context(
+            "cue1".to_string(),
+            Some((now - chrono::Duration::hours(1), tomorrow)),
+            Some("office".to_string()),
+            Confidence::MEDIUM,
+        );
+
+        let results = store.recall(cue);
+
+        // Should find only today's office memory
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0.id, "ep1");
+        assert!(results[0].1.raw() == 1.0); // Perfect match on both criteria
+    }
+
+    #[test]
+    fn test_recall_with_semantic_cue() {
+        let store = MemoryStore::new(10);
+        let now = Utc::now();
+
+        // Store episodes with different content and times to avoid spreading activation
+        let episode1 = EpisodeBuilder::new()
+            .id("ep1".to_string())
+            .when(now)
+            .what("meeting with team about project alpha".to_string())
+            .embedding([0.1; 768])
+            .confidence(Confidence::HIGH)
+            .build();
+
+        let episode2 = EpisodeBuilder::new()
+            .id("ep2".to_string())
+            .when(now - chrono::Duration::hours(2)) // Outside spreading activation window
+            .what("lunch at the cafeteria".to_string())
+            .embedding([0.2; 768])
+            .confidence(Confidence::HIGH)
+            .build();
+
+        let episode3 = EpisodeBuilder::new()
+            .id("ep3".to_string())
+            .when(now)
+            .what("project review meeting".to_string())
+            .embedding([0.3; 768])
+            .confidence(Confidence::HIGH)
+            .build();
+
+        store.store(episode1);
+        store.store(episode2);
+        store.store(episode3);
+
+        // Search for memories about meetings
+        let cue = Cue::semantic("cue1".to_string(), "meeting".to_string(), Confidence::LOW);
+
+        let results = store.recall(cue);
+
+        // Should find both meeting-related episodes
+        assert_eq!(results.len(), 2);
+        let ids: Vec<String> = results.iter().map(|(e, _)| e.id.clone()).collect();
+        assert!(ids.contains(&"ep1".to_string()));
+        assert!(ids.contains(&"ep3".to_string()));
+        assert!(!ids.contains(&"ep2".to_string()));
+    }
+
+    #[test]
+    fn test_recall_confidence_normalization() {
+        let store = MemoryStore::new(10);
+
+        let episode = EpisodeBuilder::new()
+            .id("ep1".to_string())
+            .when(Utc::now())
+            .what("test memory".to_string())
+            .embedding([0.5; 768])
+            .confidence(Confidence::MEDIUM)
+            .build();
+
+        store.store(episode);
+
+        // Create cue with partial match
+        let mut partial_embedding = [0.5; 768];
+        partial_embedding[0] = 0.3; // Make it slightly different
+
+        let cue = Cue::embedding("cue1".to_string(), partial_embedding, Confidence::LOW);
+
+        let results = store.recall(cue);
+
+        // Should return with confidence in valid range
+        assert!(!results.is_empty());
+        let confidence = results[0].1.raw();
+        assert!(confidence >= 0.0);
+        assert!(confidence <= 1.0);
+        assert!(confidence < 1.0); // Should be less than perfect match
+    }
+
+    #[test]
+    fn test_concurrent_recall_doesnt_block() {
+        use std::thread;
+
+        let store = Arc::new(MemoryStore::new(100));
+
+        // Store some episodes first
+        for i in 0..20 {
+            let episode = EpisodeBuilder::new()
+                .id(format!("ep{}", i))
+                .when(Utc::now())
+                .what(format!("memory {}", i))
+                .embedding([i as f32 * 0.01; 768])
+                .confidence(Confidence::HIGH)
+                .build();
+
+            store.store(episode);
+        }
+
+        let mut handles = vec![];
+
+        // Spawn multiple threads doing recalls concurrently
+        for i in 0..10 {
+            let store_clone = Arc::clone(&store);
+            let handle = thread::spawn(move || {
+                let cue = Cue::semantic(
+                    format!("cue{}", i),
+                    format!("memory {}", i),
+                    Confidence::LOW,
+                );
+
+                store_clone.recall(cue)
+            });
+            handles.push(handle);
+        }
+
+        // All recalls should complete without blocking
+        for handle in handles {
+            let results = handle.join().unwrap();
+            // Each should find at least one match
+            assert!(!results.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_spreading_activation() {
+        let store = MemoryStore::new(10);
+
+        let base_time = Utc::now();
+
+        // Store related episodes close in time
+        let episode1 = EpisodeBuilder::new()
+            .id("ep1".to_string())
+            .when(base_time)
+            .what("meeting about project".to_string())
+            .embedding([0.5; 768])
+            .confidence(Confidence::HIGH)
+            .build();
+
+        let episode2 = EpisodeBuilder::new()
+            .id("ep2".to_string())
+            .when(base_time + chrono::Duration::minutes(30))
+            .what("discussion with John".to_string())
+            .embedding([0.3; 768])
+            .confidence(Confidence::MEDIUM)
+            .build();
+
+        let episode3 = EpisodeBuilder::new()
+            .id("ep3".to_string())
+            .when(base_time + chrono::Duration::hours(2))
+            .what("unrelated task".to_string())
+            .embedding([0.1; 768])
+            .confidence(Confidence::LOW)
+            .build();
+
+        store.store(episode1);
+        store.store(episode2);
+        store.store(episode3);
+
+        // Search for meeting - should also pull in related discussion
+        let cue = Cue::semantic("cue1".to_string(), "meeting".to_string(), Confidence::LOW);
+
+        let results = store.recall(cue);
+
+        // Should find meeting directly and possibly discussion through spreading
+        assert!(!results.is_empty());
+        assert_eq!(results[0].0.id, "ep1"); // Direct match should be first
+
+        // If spreading activation worked, temporally related episode might be included
+        // (This depends on implementation details and thresholds)
+        if results.len() > 1 {
+            // Related episode should have lower confidence due to spreading
+            assert!(results[1].1.raw() < results[0].1.raw());
+        }
     }
 
     #[test]
