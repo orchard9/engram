@@ -26,5 +26,5 @@ Create complete OpenAPI 3.0 specification for the HTTP REST API, enabling client
 ## Notes
 - Use utoipa for Rust integration
 - Include rate limit headers
-- Document WebSocket upgrade
+- Document Server-Sent Events endpoints
 - Consider ReDoc for documentation

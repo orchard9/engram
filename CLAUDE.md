@@ -16,8 +16,9 @@ roadmap/milestone-0/: Tasks are stored as 001*{task_name}*{task_status}.md files
 7. Make any necessary changes based on review
 8. Follow the Pareto principle to integration test and fix any issues
 9. Make sure "watch-now --once" passes
-10. Rename the task file from \_in_progress to \_complete
-11. Use git status to add/ignore/remove what should be removed, then commit your work
+10. Verify implementation matches task requirements. Re-read the task file and compare against your changes to ensure full alignment with specifications. If requirements are not met, create a follow-up task in the same milestone using the original task name as a prefix.
+11. Rename the task file from \_in_progress to \_complete
+12. Use git status to add/ignore/remove what should be removed, then commit your work
 
 If at any point anything gets stuck, move the task to \_blocked, write in the task file why it's blocked, and pause
 
@@ -43,6 +44,7 @@ If at any point anything gets stuck, move the task to \_blocked, write in the ta
     - content/{milestone*number}*{milestone*name}/{content_number}*{content_title}\_medium.md (long-form technical article)
     - content/{milestone*number}*{milestone*name}/{content_number}*{content_title}\_twitter.md (thread format)
 7. Include specific citations from research in all content pieces
+8. Update relevant tasks with researched information
 
 ## Adhere to the following documentation
 
@@ -67,3 +69,7 @@ technical-communication-lead: Use for explaining complex Engram concepts to exte
 memory-systems-researcher: Use for validating memory consolidation algorithms, implementing hippocampal-neocortical interactions, or ensuring biological plausibility
 graph-systems-acceptance-tester: Use for validating graph database functionality, testing spreading activation algorithms, verifying memory consolidation behaviors, or ensuring API compatibility
 ...
+
+### Rules
+
+Never use emojis.

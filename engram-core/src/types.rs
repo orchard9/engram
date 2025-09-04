@@ -92,7 +92,7 @@ impl CoreError {
                                  actual = id.clone(),
                         suggestion: "Use graph.nodes() to list available nodes",
                         example: r#"let node = graph.get_node("node_id").or_insert_default();"#,
-                        confidence: Confidence::high()
+                        confidence: Confidence::HIGH
                     );
                     err.similar = similar_vec;
                     err
@@ -115,7 +115,7 @@ impl CoreError {
                              actual = format!("Activation = {:.3}", level),
                     suggestion: "Increase activation through more recall attempts or lower threshold",
                     example: "graph.activate_neighbors(node_id, boost=0.3).reconstruct_with_threshold(0.5)",
-                    confidence: Confidence::high()
+                    confidence: Confidence::HIGH
                 )
             }
             Self::InvalidConfidence { mean, lower, upper } => {
@@ -135,7 +135,7 @@ impl CoreError {
                              actual = context.clone(),
                     suggestion: "Check for NaN/Infinity values in embeddings or confidence scores",
                     example: "node.validate_serializable()?.to_json()",
-                    confidence: Confidence::high()
+                    confidence: Confidence::HIGH
                 )
             }
             Self::ValidationError {
@@ -150,7 +150,7 @@ impl CoreError {
                              actual = reason.clone(),
                     suggestion: suggestion.clone(),
                     example: example.clone(),
-                    confidence: Confidence::high()
+                    confidence: Confidence::HIGH
                 )
             }
             Self::IoError {
@@ -166,7 +166,7 @@ impl CoreError {
                              actual = context.clone(),
                     suggestion: suggestion.clone(),
                     example: example.clone(),
-                    confidence: Confidence::high()
+                    confidence: Confidence::HIGH
                 )
             }
         }

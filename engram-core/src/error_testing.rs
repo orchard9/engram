@@ -162,7 +162,7 @@ impl ProceduralLearningSimulator {
         let mut rate: f64 = 0.6; // Base 60% success rate
 
         // Improve based on error quality
-        if error.confidence.mean > 0.8 {
+        if error.confidence.raw() > 0.8 {
             rate += 0.15;
         }
 

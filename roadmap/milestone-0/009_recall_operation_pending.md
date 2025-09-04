@@ -3,7 +3,7 @@
 ## Status: PENDING
 
 ## Description
-Implement recall() operation that always returns results with confidence scores, never failing even when no exact matches exist.
+Implement recall() operation that always returns results with confidence scores, never failing even when no exact matches exist. This prevents the Option<Confidence> anti-pattern identified in cognitive research and provides graceful uncertainty handling.
 
 ## Requirements
 - Recall returns Vec<(Episode, Confidence)>, never Result
@@ -25,7 +25,28 @@ Implement recall() operation that always returns results with confidence scores,
 - Task 008 (store operation)
 
 ## Notes
-- Use activation spreading from vision.md
-- Consider async for long-running recalls
-- Empty vec != error condition
-- Implement basic similarity first, spreading later
+
+### Cognitive Design Principles
+- Recall operations return Vec<(Episode, Confidence)> instead of Result types for infallible operation patterns
+- Support three types of memory retrieval: vivid memories, vague recollections, reconstructed details
+- Empty results distinguished from low-confidence results to avoid binary thinking
+- Memory reconstruction should be explicit and transparent with confidence indicators
+- Spreading activation should follow familiar neural network mental models
+
+### Implementation Strategy  
+- Use activation spreading from vision.md with cognitive-friendly parameter naming
+- Consider async for long-running recalls without hiding confidence assessment
+- Empty vec != error condition - always provide retrieval quality assessment
+- Implement basic similarity first, spreading activation later with confidence propagation
+- Support multiple cue types (embedding, temporal, contextual) for comprehensive retrieval
+- Enable associative discovery through spreading activation patterns
+
+### Research Integration
+- Recognition vs recall confidence patterns should follow Mandler (1980) research
+- Memory retrieval is reconstructive, not reproductive (Bartlett 1932) 
+- Spreading activation confidence propagation aligns with neural network activation patterns
+- Multiple cue types support context-dependent memory retrieval (Godden & Baddeley 1975)
+- Human memory operates on confidence gradients with graceful degradation under pressure
+- Associative retrieval through spreading activation enables discovery beyond explicit queries
+- Reconstruction from schemas should indicate sources and confidence levels transparently
+- See content/0_developer_experience_foundation/010_memory_operations_cognitive_ergonomics_research.md for comprehensive recall operation cognitive research

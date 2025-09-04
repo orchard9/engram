@@ -175,19 +175,19 @@ Response: 200 OK
 }
 ```
 
-### WebSocket Streaming
+### Server-Sent Events Streaming
 ```javascript
-const ws = new WebSocket('ws://localhost:8080/api/v1/stream');
+const eventSource = new EventSource('/api/v1/monitor/events?min_activation=0.7');
 
-ws.send(JSON.stringify({
-  type: 'subscribe',
-  filter: {min_activation: 0.7}
-}));
-
-ws.onmessage = (event) => {
+eventSource.addEventListener('activation', (event) => {
   const activation = JSON.parse(event.data);
   console.log(`Episode ${activation.id}: ${activation.level}`);
-};
+});
+
+eventSource.addEventListener('consolidation', (event) => {
+  const progress = JSON.parse(event.data);
+  console.log(`Consolidation progress: ${progress.percentage}%`);
+});
 ```
 
 ### Performance Characteristics

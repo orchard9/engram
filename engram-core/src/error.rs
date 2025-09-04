@@ -153,7 +153,8 @@ impl fmt::Display for CognitiveError {
         writeln!(
             f,
             "{} (confidence: {:.1})",
-            self.summary, self.confidence.mean
+            self.summary,
+            self.confidence.raw()
         )?;
 
         // Level 2: Context and suggestion for quick resolution
@@ -366,7 +367,7 @@ impl<E: std::error::Error + Send + Sync + 'static> CognitiveContext for E {
             ErrorContext::new(expected, actual),
             suggestion,
             example,
-            Confidence::high(), // Default to high confidence when wrapping known errors
+            Confidence::HIGH, // Default to high confidence when wrapping known errors
         )
         .with_source(Box::new(self))
     }
@@ -401,19 +402,19 @@ impl<T> PartialResult<T> {
     }
 
     /// Check if this result meets a confidence threshold
-    pub fn is_confident(&self, threshold: f64) -> bool {
-        self.confidence.mean >= threshold
+    pub fn is_confident(&self, threshold: f32) -> bool {
+        self.confidence.raw() >= threshold
     }
 
     /// Convert to a Result, failing if confidence is below threshold
-    pub fn require_confidence(self, threshold: f64) -> Result<T, CognitiveError> {
-        if self.confidence.mean >= threshold {
+    pub fn require_confidence(self, threshold: f32) -> Result<T, CognitiveError> {
+        if self.confidence.raw() >= threshold {
             Ok(self.value)
         } else {
             Err(cognitive_error!(
-                summary: format!("Result confidence {} below required threshold {}", self.confidence.mean, threshold),
+                summary: format!("Result confidence {} below required threshold {}", self.confidence.raw(), threshold),
                 context: expected = format!("Confidence >= {}", threshold),
-                         actual = format!("Confidence = {}", self.confidence.mean),
+                         actual = format!("Confidence = {}", self.confidence.raw()),
                 suggestion: "Retry operation with more data or lower threshold",
                 example: "let result = operation().require_confidence(0.5)?;",
                 confidence: Confidence::exact(1.0)
@@ -434,7 +435,7 @@ mod tests {
             context: expected = "Valid node ID", actual = "user_999",
             suggestion: "Check available nodes with graph.nodes()",
             example: "graph.get_node(\"user_123\")",
-            confidence: Confidence::high(),
+            confidence: Confidence::HIGH,
             similar: ["user_123", "user_124"]
         );
 
@@ -474,12 +475,12 @@ mod tests {
             .context("expected", "actual")
             .suggestion("do this")
             .example("code here")
-            .confidence(Confidence::medium())
+            .confidence(Confidence::MEDIUM)
             .build()
             .unwrap();
 
         assert_eq!(err.summary, "Test error");
-        assert_eq!(err.confidence.mean, 0.5);
+        assert_eq!(err.confidence.raw(), 0.5);
     }
 
     #[test]
@@ -509,7 +510,7 @@ mod tests {
                      actual = "user_999",
             suggestion: "Use graph.nodes() to list available nodes",
             example: "let node = graph.get_node(\"user_124\").or_insert_default();",
-            confidence: Confidence::high(),
+            confidence: Confidence::HIGH,
             similar: ["user_123", "user_124"]
         );
 
@@ -582,10 +583,10 @@ mod tests {
         let complex_error = cognitive_error!(
             summary: "Serialization failed for memory node with embedded NaN values in confidence scores",
             context: expected = "Valid JSON-serializable memory structure with finite confidence values",
-                     actual = "MemoryNode with confidence.mean = NaN due to division by zero",
+                     actual = "MemoryNode with confidence.raw() = NaN due to division by zero",
             suggestion: "Check for NaN/Infinity values using f64::is_finite() before serialization",
-            example: "if node.confidence.mean.is_finite() { serialize(node) } else { fix_confidence(node) }",
-            confidence: Confidence::high()
+            example: "if node.confidence.raw().is_finite() { serialize(node) } else { fix_confidence(node) }",
+            confidence: Confidence::HIGH
         );
 
         let load_result = tester.test_cognitive_load_compatibility(&complex_error);
@@ -620,7 +621,7 @@ mod tests {
                      actual = "session_abc",
             suggestion: "Use session.list_nodes() to see available nodes",
             example: "let node = session.get_node(\"session_123\").unwrap_or_default();",
-            confidence: Confidence::high()
+            confidence: Confidence::HIGH
         );
 
         let node_error2 = cognitive_error!(
@@ -629,7 +630,7 @@ mod tests {
                      actual = "temp_xyz",
             suggestion: "Use graph.nodes() to list all available nodes",
             example: "let node = graph.get_node(\"temp_456\").or_insert_default();",
-            confidence: Confidence::high()
+            confidence: Confidence::HIGH
         );
 
         let result1 =
@@ -671,7 +672,7 @@ mod tests {
                      actual = "Invalid input",
             suggestion: "Fix the input",
             example: "validate_input(correct_input)",
-            confidence: Confidence::medium()
+            confidence: Confidence::MEDIUM
         );
 
         // Test formatting performance
@@ -711,7 +712,7 @@ mod tests {
                      actual = "Node activation = 1.8 (exceeds maximum)",
             suggestion: "Use node.clamp_activation(0.0, 1.0) to normalize activation levels",
             example: "node.set_activation(energy.min(1.0).max(0.0));",
-            confidence: Confidence::high()
+            confidence: Confidence::HIGH
         );
 
         let result = tester.test_cognitive_load_compatibility(&context_independent_error);
@@ -727,7 +728,7 @@ mod tests {
                      actual = "Failure",
             suggestion: "Fix it",
             example: "do_fix()",
-            confidence: Confidence::low()
+            confidence: Confidence::LOW
         );
 
         let bad_result = tester.test_cognitive_load_compatibility(&context_dependent_error);
@@ -785,7 +786,7 @@ mod proptests {
                          actual = actual,
                 suggestion: suggestion,
                 example: example,
-                confidence: Confidence::high()
+                confidence: Confidence::HIGH
             );
 
             let result = testing_framework.test_error_comprehensive(&error, ErrorFamily::NodeAccess);
@@ -810,7 +811,7 @@ mod proptests {
                          actual = actual,
                 suggestion: suggestion,
                 example: example,
-                confidence: Confidence::medium()
+                confidence: Confidence::MEDIUM
             );
 
             let mut resolution_times = Vec::new();
@@ -842,7 +843,7 @@ mod proptests {
                          actual = node_id.clone(),
                 suggestion: "Use graph.nodes() to list available nodes",
                 example: "let node = graph.get_node(\"user_123\").unwrap();",
-                confidence: Confidence::high()
+                confidence: Confidence::HIGH
             );
 
             let error_with_similar = cognitive_error!(
@@ -851,7 +852,7 @@ mod proptests {
                          actual = node_id.clone(),
                 suggestion: "Use graph.nodes() to list available nodes",
                 example: "let node = graph.get_node(\"user_123\").unwrap();",
-                confidence: Confidence::high(),
+                confidence: Confidence::HIGH,
                 similar: similar_ids
             );
 
@@ -877,7 +878,7 @@ mod proptests {
                          actual = actual,
                 suggestion: suggestion,
                 example: example,
-                confidence: Confidence::medium()
+                confidence: Confidence::MEDIUM
             );
 
             let mut normal_simulator = ProceduralLearningSimulator::new();
@@ -906,7 +907,7 @@ mod proptests {
                          actual = "Test input value",
                 suggestion: "Validate the test input",
                 example: "validate_test_input(input)",
-                confidence: Confidence::exact(confidence_value)
+                confidence: Confidence::exact(confidence_value as f32)
             );
 
             let resolution_time = simulator.simulate_error_encounter(ErrorFamily::Validation, &error);

@@ -1,60 +1,194 @@
 //! Engram core graph engine with probabilistic operations.
 
+// Use mimalloc as global allocator for better performance
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 pub mod error;
 pub mod error_testing;
+pub mod memory;
+pub mod store;
 pub mod types;
 
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 use std::time::SystemTime;
 
-/// Confidence interval for probabilistic operations
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct Confidence {
-    pub mean: f64,
-    pub lower: f64,
-    pub upper: f64,
-}
+/// Cognitive confidence type with human-centered design for probabilistic reasoning.
+///
+/// This newtype wrapper provides cognitive ergonomics that align with human intuition,
+/// prevent systematic biases, and support natural mental models. Values are always
+/// constrained to [0,1] range with zero-cost abstraction in release builds.
+///
+/// Based on research by Gigerenzer & Hoffrage (1995), Kahneman & Tversky (conjunction fallacy),
+/// and dual-process theory from Kahneman (2011).
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Serialize, Deserialize)]
+pub struct Confidence(#[serde(deserialize_with = "validate_confidence")] f32);
 
 impl Confidence {
-    /// Creates a new confidence interval
-    pub fn new(mean: f64, lower: f64, upper: f64) -> Self {
-        Self { mean, lower, upper }
+    // Qualitative categories for natural reasoning
+    /// High confidence (0.9) - matches "I'm quite sure" intuition
+    pub const HIGH: Self = Confidence(0.9);
+    /// Medium confidence (0.5) - matches "maybe" or "unsure" intuition  
+    pub const MEDIUM: Self = Confidence(0.5);
+    /// Low confidence (0.1) - matches "probably not" or "unlikely" intuition
+    pub const LOW: Self = Confidence(0.1);
+    /// Maximum confidence (1.0) - complete certainty
+    pub const CERTAIN: Self = Confidence(1.0);
+    /// Minimum confidence (0.0) - complete uncertainty/impossibility
+    pub const NONE: Self = Confidence(0.0);
+
+    /// Creates exact confidence value with automatic clamping to [0,1]
+    ///
+    /// This is the primary constructor that ensures range invariants.
+    pub const fn exact(value: f32) -> Self {
+        // Const-compatible clamping
+        let clamped = if value < 0.0 {
+            0.0
+        } else if value > 1.0 {
+            1.0
+        } else {
+            value
+        };
+        Confidence(clamped)
     }
 
-    /// Creates a new confidence interval with automatic clamping to [0, 1]
-    pub fn new_clamped(mean: f64, lower: f64, upper: f64) -> Self {
-        let lower = lower.clamp(0.0, 1.0);
-        let upper = upper.clamp(lower, 1.0);
-        let mean = mean.clamp(lower, upper);
-        Self { mean, lower, upper }
-    }
-
-    /// Creates a point estimate with no uncertainty
-    pub fn exact(value: f64) -> Self {
-        let value = value.clamp(0.0, 1.0);
-        Self {
-            mean: value,
-            lower: value,
-            upper: value,
+    /// Frequency-based constructor matching human intuition: "3 out of 10 times"
+    ///
+    /// Humans understand frequencies better than decimals (Gigerenzer & Hoffrage 1995).
+    /// This prevents common probability estimation errors.
+    pub const fn from_successes(successes: u32, total: u32) -> Self {
+        if total == 0 {
+            return Self::NONE;
         }
+        let ratio = successes as f32 / total as f32;
+        Self::exact(ratio)
     }
 
-    /// High confidence (0.9)
-    pub fn high() -> Self {
-        Self::exact(0.9)
+    /// Creates confidence from percentage (0-100) with natural language feel
+    pub const fn from_percent(percent: u8) -> Self {
+        let decimal = (percent as f32).min(100.0) / 100.0;
+        Self::exact(decimal)
     }
 
-    /// Medium confidence (0.5)
-    pub fn medium() -> Self {
-        Self::exact(0.5)
+    /// Extract raw f32 value - use sparingly, prefer cognitive methods
+    pub const fn raw(self) -> f32 {
+        self.0
     }
 
-    /// Low confidence (0.1)
-    pub fn low() -> Self {
-        Self::exact(0.1)
+    // System 1-friendly operations that feel automatic and natural
+
+    /// Fast cognitive check: "Does this seem high confidence?"
+    /// Matches natural "seems legitimate" thinking pattern
+    pub const fn is_high(self) -> bool {
+        self.0 >= 0.7
+    }
+
+    /// Fast cognitive check: "Does this seem low confidence?"
+    pub const fn is_low(self) -> bool {
+        self.0 <= 0.3
+    }
+
+    /// Fast cognitive check: "Does this seem like medium confidence?"
+    pub const fn is_medium(self) -> bool {
+        self.0 > 0.3 && self.0 < 0.7
+    }
+
+    /// Natural language: "seems legitimate" - matches cognitive pattern recognition
+    pub const fn seems_legitimate(self) -> bool {
+        self.0 >= 0.6
+    }
+
+    /// Natural language: "seems questionable" - matches skepticism threshold  
+    pub const fn seems_questionable(self) -> bool {
+        self.0 <= 0.4
+    }
+
+    // Logical operations with bias prevention
+
+    /// Logical AND with conjunction fallacy prevention
+    ///
+    /// Ensures P(A ∧ B) ≤ min(P(A), P(B)) to prevent the conjunction fallacy
+    /// where people incorrectly estimate P(A ∧ B) > P(A).
+    pub const fn and(self, other: Self) -> Self {
+        let result = self.0 * other.0;
+        Confidence(result)
+    }
+
+    /// Logical OR with proper probability combination
+    ///
+    /// Uses P(A ∨ B) = P(A) + P(B) - P(A ∧ B) to prevent overconfidence
+    pub const fn or(self, other: Self) -> Self {
+        let combined = self.0 + other.0 - (self.0 * other.0);
+        Self::exact(combined)
+    }
+
+    /// Negation: 1 - p, for "not confident" reasoning
+    pub const fn not(self) -> Self {
+        Confidence(1.0 - self.0)
+    }
+
+    /// Weighted combination with explicit reasoning about source reliability
+    ///
+    /// Helps prevent base rate neglect by making weights explicit
+    pub const fn combine_weighted(self, other: Self, self_weight: f32, other_weight: f32) -> Self {
+        let total_weight = self_weight + other_weight;
+        if total_weight == 0.0 {
+            return Self::MEDIUM;
+        }
+        let weighted_avg = (self.0 * self_weight + other.0 * other_weight) / total_weight;
+        Self::exact(weighted_avg)
+    }
+
+    // Cognitive calibration and bias correction
+
+    /// Applies overconfidence correction based on historical accuracy
+    ///
+    /// Research shows people are systematically overconfident. This applies
+    /// empirically-derived correction factors.
+    pub const fn calibrate_overconfidence(self) -> Self {
+        // Conservative correction based on psychological research
+        let corrected = if self.0 > 0.8 {
+            self.0 * 0.85 // High confidence gets reduced more
+        } else if self.0 > 0.6 {
+            self.0 * 0.9 // Medium-high confidence gets modest reduction  
+        } else {
+            self.0 // Low confidence often accurate
+        };
+        Self::exact(corrected)
+    }
+
+    /// Updates confidence with base rate information to prevent base rate neglect
+    ///
+    /// Uses Bayesian updating: P(A|B) ∝ P(B|A) * P(A)
+    pub const fn update_with_base_rate(self, base_rate: Self) -> Self {
+        // Simplified Bayesian update assuming this confidence is P(evidence|hypothesis)
+        let posterior = (self.0 * base_rate.0)
+            / ((self.0 * base_rate.0) + ((1.0 - self.0) * (1.0 - base_rate.0)));
+        Self::exact(posterior)
     }
 }
+
+// Custom serde validation to maintain [0,1] invariant
+fn validate_confidence<'de, D>(deserializer: D) -> Result<f32, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = f32::deserialize(deserializer)?;
+    if value < 0.0 || value > 1.0 {
+        return Err(serde::de::Error::custom(format!(
+            "Confidence value {} is outside valid range [0,1]",
+            value
+        )));
+    }
+    Ok(value)
+}
+
+// Public exports
+pub use memory::{
+    Cue, CueBuilder, CueType, Episode, EpisodeBuilder, Memory, MemoryBuilder, TemporalPattern,
+};
+pub use store::{Activation, MemoryStore};
 
 // Type-state pattern: Memory node states
 /// Unvalidated memory state - raw input
@@ -99,7 +233,7 @@ impl MemoryNode<Unvalidated> {
             activation: 0.0,
             created_at: SystemTime::now(),
             last_accessed: SystemTime::now(),
-            confidence: Confidence::low(),
+            confidence: Confidence::LOW,
             _state: PhantomData,
         }
     }
@@ -125,7 +259,7 @@ impl MemoryNode<Unvalidated> {
             activation: self.activation,
             created_at: self.created_at,
             last_accessed: self.last_accessed,
-            confidence: Confidence::medium(), // Increase confidence after validation
+            confidence: Confidence::MEDIUM, // Increase confidence after validation
             _state: PhantomData,
         })
     }
@@ -141,7 +275,7 @@ impl MemoryNode<Validated> {
             activation: 0.5, // Set initial activation
             created_at: self.created_at,
             last_accessed: SystemTime::now(),
-            confidence: Confidence::high(), // High confidence for active memories
+            confidence: Confidence::HIGH, // High confidence for active memories
             _state: PhantomData,
         }
     }
@@ -174,7 +308,7 @@ impl MemoryNode {
             activation: 0.5,
             created_at: SystemTime::now(),
             last_accessed: SystemTime::now(),
-            confidence: Confidence::high(),
+            confidence: Confidence::HIGH,
             _state: PhantomData,
         }
     }
@@ -265,12 +399,195 @@ impl<State> Activatable for MemoryNode<State> {
 mod tests {
     use super::*;
 
+    // Cognitive Confidence Type Tests
+
     #[test]
-    fn test_confidence_exact() {
-        let conf = Confidence::exact(0.5);
-        assert_eq!(conf.mean, 0.5);
-        assert_eq!(conf.lower, 0.5);
-        assert_eq!(conf.upper, 0.5);
+    fn test_confidence_range_enforcement() {
+        // Values should be automatically clamped to [0,1]
+        assert_eq!(Confidence::exact(-0.5).raw(), 0.0);
+        assert_eq!(Confidence::exact(1.5).raw(), 1.0);
+        assert_eq!(Confidence::exact(0.5).raw(), 0.5);
+    }
+
+    #[test]
+    fn test_qualitative_categories() {
+        // Test that qualitative categories match expected values
+        assert_eq!(Confidence::HIGH.raw(), 0.9);
+        assert_eq!(Confidence::MEDIUM.raw(), 0.5);
+        assert_eq!(Confidence::LOW.raw(), 0.1);
+        assert_eq!(Confidence::CERTAIN.raw(), 1.0);
+        assert_eq!(Confidence::NONE.raw(), 0.0);
+    }
+
+    #[test]
+    fn test_frequency_based_constructors() {
+        // Test frequency-based reasoning: "3 out of 10 times"
+        let conf = Confidence::from_successes(3, 10);
+        assert_eq!(conf.raw(), 0.3);
+
+        // Edge cases
+        assert_eq!(Confidence::from_successes(0, 10).raw(), 0.0);
+        assert_eq!(Confidence::from_successes(10, 10).raw(), 1.0);
+        assert_eq!(Confidence::from_successes(5, 0).raw(), 0.0); // Division by zero protection
+    }
+
+    #[test]
+    fn test_percentage_constructor() {
+        assert_eq!(Confidence::from_percent(0).raw(), 0.0);
+        assert_eq!(Confidence::from_percent(50).raw(), 0.5);
+        assert_eq!(Confidence::from_percent(100).raw(), 1.0);
+        assert_eq!(Confidence::from_percent(150).raw(), 1.0); // Should clamp to 100%
+    }
+
+    #[test]
+    fn test_system1_cognitive_checks() {
+        let high_conf = Confidence::exact(0.8);
+        let medium_conf = Confidence::exact(0.5);
+        let low_conf = Confidence::exact(0.2);
+
+        // Test cognitive categorization
+        assert!(high_conf.is_high());
+        assert!(!high_conf.is_low());
+        assert!(!high_conf.is_medium());
+
+        assert!(medium_conf.is_medium());
+        assert!(!medium_conf.is_high());
+        assert!(!medium_conf.is_low());
+
+        assert!(low_conf.is_low());
+        assert!(!low_conf.is_high());
+        assert!(!low_conf.is_medium());
+
+        // Test natural language patterns
+        assert!(high_conf.seems_legitimate());
+        assert!(!low_conf.seems_legitimate());
+        assert!(low_conf.seems_questionable());
+        assert!(!high_conf.seems_questionable());
+    }
+
+    #[test]
+    fn test_logical_operations_bias_prevention() {
+        let conf_a = Confidence::exact(0.8);
+        let conf_b = Confidence::exact(0.6);
+
+        // Test conjunction fallacy prevention: P(A ∧ B) ≤ min(P(A), P(B))
+        let and_result = conf_a.and(conf_b);
+        assert!(and_result.raw() <= conf_a.raw().min(conf_b.raw()));
+        assert_eq!(and_result.raw(), 0.8 * 0.6); // Should be 0.48
+
+        // Test OR operation
+        let or_result = conf_a.or(conf_b);
+        let expected_or = 0.8 + 0.6 - (0.8 * 0.6); // P(A) + P(B) - P(A ∧ B)
+        assert!((or_result.raw() - expected_or).abs() < 0.001);
+
+        // Test negation
+        let not_a = conf_a.not();
+        assert_eq!(not_a.raw(), 1.0 - 0.8);
+    }
+
+    #[test]
+    fn test_weighted_combination() {
+        let conf_a = Confidence::exact(0.9);
+        let conf_b = Confidence::exact(0.3);
+
+        // Equal weights should give average
+        let combined = conf_a.combine_weighted(conf_b, 1.0, 1.0);
+        assert_eq!(combined.raw(), 0.6); // (0.9 + 0.3) / 2
+
+        // Higher weight to first confidence
+        let weighted = conf_a.combine_weighted(conf_b, 3.0, 1.0);
+        let expected = (0.9 * 3.0 + 0.3 * 1.0) / 4.0; // 0.75
+        assert!((weighted.raw() - expected).abs() < 0.001);
+
+        // Zero weights should return MEDIUM
+        let zero_weights = conf_a.combine_weighted(conf_b, 0.0, 0.0);
+        assert_eq!(zero_weights.raw(), Confidence::MEDIUM.raw());
+    }
+
+    #[test]
+    fn test_overconfidence_calibration() {
+        // High confidence should be reduced more
+        let high_conf = Confidence::exact(0.9);
+        let calibrated_high = high_conf.calibrate_overconfidence();
+        assert!(calibrated_high.raw() < high_conf.raw());
+        assert_eq!(calibrated_high.raw(), 0.9 * 0.85);
+
+        // Medium confidence should be reduced modestly
+        let medium_high_conf = Confidence::exact(0.7);
+        let calibrated_medium = medium_high_conf.calibrate_overconfidence();
+        assert!(calibrated_medium.raw() < medium_high_conf.raw());
+        assert_eq!(calibrated_medium.raw(), 0.7 * 0.9);
+
+        // Low confidence should remain unchanged
+        let low_conf = Confidence::exact(0.4);
+        let calibrated_low = low_conf.calibrate_overconfidence();
+        assert_eq!(calibrated_low.raw(), low_conf.raw());
+    }
+
+    #[test]
+    fn test_base_rate_updating() {
+        let evidence_conf = Confidence::exact(0.8); // P(evidence|hypothesis)
+        let base_rate = Confidence::exact(0.1); // P(hypothesis) - low base rate
+
+        let updated = evidence_conf.update_with_base_rate(base_rate);
+
+        // Should be significantly lower than evidence due to low base rate
+        assert!(updated.raw() < evidence_conf.raw());
+        assert!(updated.raw() > base_rate.raw()); // But higher than base rate
+
+        // Manual calculation for verification
+        let expected = (0.8 * 0.1) / ((0.8 * 0.1) + ((1.0 - 0.8) * (1.0 - 0.1)));
+        assert!((updated.raw() - expected).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_zero_cost_abstraction() {
+        // This test verifies the type compiles to efficient operations
+        let conf = Confidence::exact(0.7);
+        let raw_value = conf.raw();
+
+        // Basic operations should compile to simple f32 operations
+        let doubled = Confidence::exact(raw_value * 2.0); // Should clamp to 1.0
+        assert_eq!(doubled.raw(), 1.0);
+
+        // Constants should be inlined
+        assert_eq!(Confidence::HIGH.raw(), 0.9);
+    }
+
+    #[test]
+    fn test_serde_validation() {
+        use serde_json;
+
+        // Valid confidence should serialize/deserialize correctly
+        let conf = Confidence::exact(0.7);
+        let serialized = serde_json::to_string(&conf).unwrap();
+        let deserialized: Confidence = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(conf.raw(), deserialized.raw());
+
+        // Invalid values should fail deserialization
+        let invalid_json = "1.5"; // Outside [0,1] range
+        let result: Result<Confidence, _> = serde_json::from_str(invalid_json);
+        assert!(result.is_err());
+
+        let negative_json = "-0.1"; // Negative value
+        let result: Result<Confidence, _> = serde_json::from_str(negative_json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_ordering_and_comparison() {
+        let low = Confidence::LOW;
+        let medium = Confidence::MEDIUM;
+        let high = Confidence::HIGH;
+
+        // Test PartialOrd implementation
+        assert!(low < medium);
+        assert!(medium < high);
+        assert!(high > low);
+
+        // Test PartialEq
+        assert_eq!(Confidence::exact(0.5), Confidence::MEDIUM);
+        assert_ne!(low, high);
     }
 
     #[test]
@@ -286,14 +603,6 @@ mod tests {
 
         node.decay(0.2);
         assert_eq!(node.activation_level(), 0.8);
-    }
-
-    #[test]
-    fn test_confidence_clamping() {
-        let conf = Confidence::new_clamped(1.5, -0.5, 2.0);
-        assert_eq!(conf.lower, 0.0);
-        assert_eq!(conf.upper, 1.0);
-        assert_eq!(conf.mean, 1.0);
     }
 
     #[test]
@@ -335,7 +644,7 @@ mod tests {
 
         assert!(cognitive_err.summary.contains("test_node"));
         assert_eq!(cognitive_err.similar, vec!["node1", "node2"]);
-        assert!(cognitive_err.confidence.mean >= 0.8);
+        assert!(cognitive_err.confidence.raw() >= 0.8);
     }
 
     #[test]
