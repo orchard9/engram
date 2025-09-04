@@ -83,3 +83,6 @@ logs/
 # Test artifacts
 test-results/
 test-output/
+
+# Development monitoring
+.watch-now.yaml

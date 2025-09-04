@@ -68,7 +68,7 @@
 - `rocksdb`: LSM tree structure mismatched for activation patterns
 - `ndarray`: Scientific computing focus, not SIMD-optimized
 - `candle`/`burn`: ML frameworks too heavyweight for embedding ops
-- `async-trait`: Dynamic dispatch overhead unacceptable
+- `async-trait`: Not needed with Edition 2024 native async traits
 - `once_cell`: Use `std::sync::OnceLock` instead
 - `serde`: Reflection overhead, use `rkyv` for performance
 

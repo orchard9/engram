@@ -1,0 +1,28 @@
+[package]
+name = "engram-storage"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+engram-core = { path = "../engram-core" }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+bincode = { workspace = true }
+tokio = { workspace = true }
+dashmap = { workspace = true }
+parking_lot = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+criterion = { workspace = true }
+proptest = { workspace = true }
+
+[lints]
+workspace = true

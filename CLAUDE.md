@@ -1,4 +1,37 @@
 Written by world class rust engineers that pride elegant efficiency and delivering a focused product.
+This project uses Rust Edition 2024 for all code.
+
+## Roadmap
+
+roadmap/milestone-0/: Tasks are stored as 001*{task_name}*{task_status}.md files
+
+## How to do a task
+
+1. Understand the requirements by reading the task file thoroughly
+2. Review the current code base, vision.md, and milestones.md to understand specifically how to implement it in a DRY and professional way
+3. Rename the task file from \_pending to \_in_progress
+4. Follow the Pareto principle to write tests for the code (80% coverage from 20% effort)
+5. Write the code until tests pass
+6. Review the code to ensure it works properly and adheres to the system architecture
+7. Make any necessary changes based on review
+8. Follow the Pareto principle to integration test and fix any issues
+9. Make sure "watch-now --once" passes
+10. Rename the task file from \_in_progress to \_complete
+11. Use git status to add/ignore/remove what should be removed, then commit your work
+
+If at any point anything gets stuck, move the task to \_blocked, write in the task file why it's blocked, and pause
+
+## How to write content
+
+1. Read the current milestone we're working on, the most recent task completed, and upcoming tasks to understand the project as a whole
+2. Write content/{milestone*number}*{milestone*name}/{content_number}*{content_title}\_research.md with a list of research topics
+3. Research each topic and append findings to the research document
+4. Develop perspectives from: cognitive-architecture, memory-systems, rust-graph-engine, systems-architecture
+5. Write perspectives to content/{milestone*number}*{milestone*name}/{content_number}*{content_title}\_perspectives.md
+6. Choose 1 perspective to highlight and write in that voice:
+    - content/{milestone*number}*{milestone*name}/{content_number}*{content_title}\_medium.md (long-form technical article)
+    - content/{milestone*number}*{milestone*name}/{content_number}*{content_title}\_twitter.md (thread format)
+7. Include specific citations from research in all content pieces
 
 ## Adhere to the following documentation
 

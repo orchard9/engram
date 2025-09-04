@@ -1,13 +1,55 @@
 # Coding Guidelines
 
+## Rust Edition 2024
+
+All code uses Rust Edition 2024. Leverage these edition features:
+- Native async traits (no `async-trait` crate needed)
+- `let-else` for cleaner error handling
+- Improved pattern matching and type inference
+- Field defaults with `#[derive(Default)]`
+
 ## Rust Conventions
 
-### Error Handling
+### Error Handling (Cognitive Guidance Principle)
+
+#### Core Philosophy
+Errors are not exceptions—they're cognitive signals that guide developers toward correct behavior. Every error must pass the "3am tired developer test" by supporting System 1 (pattern recognition) when System 2 (deliberate reasoning) is degraded.
+
+#### Requirements
 - Never use `unwrap()` except in tests
-- Never use `expect()` except with proof of impossibility
-- All errors implement `std::error::Error`
-- Use `thiserror` for error definitions
-- Propagate errors to caller, handle at boundaries
+- Never use `expect()` except with proof of impossibility  
+- All errors must include context, suggestion, and example
+- Use `CognitiveError` type with mandatory fields (no Options!)
+- Progressive disclosure: one-line summary → details → examples
+- Graceful degradation: return partial results with confidence scores over hard failures
+
+#### Implementation
+```rust
+// BAD: Just states the problem
+#[error("Node not found: {0}")]
+NodeNotFound(String),
+
+// GOOD: Context + Suggestion + Example
+cognitive_error!(
+    context: expected = "valid node ID",
+             actual = node_id.clone(),
+    suggestion: "Use graph.nodes() to list available nodes",
+    example: "let node = graph.get_node(\"user_124\").or_insert_default();",
+    confidence: Confidence::high(),
+    similar: graph.find_similar_nodes(&node_id) // "Did you mean?"
+);
+```
+
+#### Error Response Time
+- Error detection: <100ms (mirrors brain's ERN response)
+- Error formatting: <1ms (maintains <60s startup target)
+- Suggestion computation: <10ms (including edit distance)
+
+#### Biological Alignment
+- **ERN Principle**: Detect errors before conscious awareness (compile-time > runtime)
+- **Cerebellar Model**: Signal → Adjustment → Pattern (context → suggestion → example)
+- **Hippocampal Pattern Completion**: Partial results better than none
+- **Prediction Error**: Errors update future suggestions
 
 ### Memory Management
 - Prefer `Arc<T>` over `Rc<T>` for future concurrent access
@@ -35,6 +77,42 @@
 - Implement `Default` only when meaningful default exists
 - Use newtypes for domain concepts, not primitive aliases
 - Return `impl Trait` for iterator chains
+
+### Type-State Pattern (Compile-Time Validation)
+Make invalid states unrepresentable using phantom types:
+
+```rust
+// Memory states encoded in type system
+pub struct Memory<State> {
+    confidence: Confidence, // Always present, never Option<f32>
+    data: Vec<u8>,
+    _state: PhantomData<State>,
+}
+
+// States as zero-sized types
+pub struct Unvalidated;
+pub struct Validated;
+pub struct Consolidated;
+
+// State transitions enforced at compile time
+impl Memory<Unvalidated> {
+    pub fn validate(self) -> Result<Memory<Validated>, CognitiveError> {
+        // Validation logic
+    }
+}
+
+impl Memory<Validated> {
+    pub fn consolidate(self) -> Memory<Consolidated> {
+        // Can only consolidate validated memories
+    }
+}
+```
+
+Benefits:
+- 60% reduction in runtime errors (Aldrich et al., 2009)
+- Zero runtime overhead - types erased at compilation
+- Invalid state transitions become compilation errors
+- Self-documenting API through type signatures
 
 ## Zig Conventions
 
@@ -97,7 +175,7 @@
 4. **No primitive obsession** - Wrap domain concepts
 5. **No async in library code** - Let applications choose runtime
 6. **No macros for syntax sugar** - Only for compile-time code generation
-7. **No dependencies on unstable features** - Stable Rust only
+7. **No dependencies on unstable features** - Edition 2024 stable features only
 8. **No synchronous I/O in hot paths** - Always async or memory-mapped
 9. **No arbitrary limits** - Make configurable or unbounded
 10. **No silent failures** - Log or propagate every error
@@ -110,7 +188,11 @@
 - [ ] Tests include failure cases
 - [ ] Benchmarks included for performance claims
 - [ ] Documentation includes examples
-- [ ] Error messages actionable
+- [ ] **Error messages pass "3am tired developer test"**
+- [ ] **All errors include context, suggestion, and example**
+- [ ] **Confidence scores for partial results (no hard failures)**
+- [ ] **Type-state pattern used for compile-time validation**
+- [ ] **"Did you mean?" suggestions for similar options**
 - [ ] No TODO comments in production code
 - [ ] Resource cleanup verified
 - [ ] Thread safety documented
