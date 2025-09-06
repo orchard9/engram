@@ -8,6 +8,8 @@ repository.workspace = true
 homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
+description = "Tiered storage system for the Engram cognitive graph database"
+readme = "../README.md"
 
 [dependencies]
 engram-core = { path = "../engram-core" }

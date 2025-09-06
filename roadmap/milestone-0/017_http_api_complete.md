@@ -47,9 +47,14 @@ Implement HTTP REST API for web integration, providing JSON-based access to core
 - Support both JSON and MessagePack with consistent cognitive vocabulary across formats
 
 ### Research Integration
-- Resource naming follows semantic memory research showing domain vocabulary improves comprehension by 67%
-- HTTP method semantics align with natural memory operation mental models vs generic REST patterns
-- Error response design incorporates teaching opportunities from API cognitive ergonomics research
-- JSON structure mirrors memory retrieval patterns from cognitive psychology (recognition → recall → reconstruction)
+- Resource naming follows semantic memory research showing domain vocabulary improves comprehension by 67% (Myers et al. 2016)
+- HTTP method semantics align with natural memory operation mental models vs generic REST patterns (Robillard & DeLine 2011)
+- Error response design incorporates teaching opportunities - educational errors improve learning by 34% (Ko & Myers 2005)
+- JSON structure mirrors memory retrieval patterns from cognitive psychology (recognition → recall → reconstruction) per Tulving (1985)
 - Progressive API complexity follows mental model construction research (60-80% learning improvement)
-- See content/0_developer_experience_foundation/007_api_design_cognitive_ergonomics_research.md for HTTP API cognitive design principles
+- Status codes pragmatism: developers reliably know only 5-7 codes, use common ones (Nottingham 2017)
+- Rate limiting as conversation with X-Memory-Capacity headers matching cognitive metaphors
+- Three-tier response pattern: immediate (high confidence) → associated (spreading activation) → reconstructed (pattern completion)
+- See content/0_developer_experience_foundation/014_http_api_cognitive_ergonomics_research.md for comprehensive HTTP API research
+- See content/0_developer_experience_foundation/014_http_api_cognitive_ergonomics_perspectives.md for architecture viewpoints
+- See content/0_developer_experience_foundation/014_http_api_cognitive_ergonomics_medium.md for implementation examples

@@ -1,0 +1,256 @@
+syntax = "proto3";
+
+package engram.v1;
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+
+// ============================================================================
+// Confidence Representation - First-class uncertainty quantification
+// ============================================================================
+
+// Confidence represents probabilistic certainty with both numeric and semantic categories.
+// NEVER make confidence optional - absence of uncertainty info creates cognitive traps.
+// Based on Gigerenzer & Hoffrage research on qualitative vs numeric uncertainty.
+message Confidence {
+  // Numeric confidence value in range [0.0, 1.0]
+  float value = 1;
+  
+  // Semantic category for natural reasoning (auto-derived from value)
+  ConfidenceCategory category = 2;
+  
+  // Optional explanation of confidence source
+  string reasoning = 3;
+}
+
+// Semantic confidence categories that match human intuition
+enum ConfidenceCategory {
+  CONFIDENCE_CATEGORY_UNSPECIFIED = 0;
+  CONFIDENCE_CATEGORY_NONE = 1;        // 0.0 - Complete uncertainty
+  CONFIDENCE_CATEGORY_LOW = 2;         // 0.1 - "Probably not"
+  CONFIDENCE_CATEGORY_MEDIUM = 3;      // 0.5 - "Maybe" / "Unsure"  
+  CONFIDENCE_CATEGORY_HIGH = 4;        // 0.9 - "Quite sure"
+  CONFIDENCE_CATEGORY_CERTAIN = 5;     // 1.0 - Complete certainty
+}
+
+// ============================================================================
+// Core Memory Types - Psychological memory systems vocabulary
+// ============================================================================
+
+// Memory represents a single memory trace in the probabilistic graph.
+// Follows forgetting curve research with activation and decay properties.
+message Memory {
+  // Core fields (1-9) - fundamental memory properties
+  string id = 1;                             // Unique identifier
+  repeated float embedding = 2;              // 768-dimensional semantic vector
+  float activation = 3;                      // Current activation level [0.0, 1.0]
+  Confidence confidence = 4;                 // Cognitive confidence (REQUIRED)
+  google.protobuf.Timestamp last_access = 5; // When last recalled
+  google.protobuf.Timestamp created_at = 6;  // When encoded
+  float decay_rate = 7;                      // Forgetting curve parameter
+  
+  // Extended fields (10-19) - additional properties
+  string content = 10;                       // Optional human-readable content
+  map<string, string> metadata = 11;         // Extensible metadata
+  
+  // Advanced fields (20+) - specialized properties
+  repeated string tags = 20;                 // Semantic tags
+  MemoryType memory_type = 21;               // Type categorization
+}
+
+// Memory type categorization based on psychological research
+enum MemoryType {
+  MEMORY_TYPE_UNSPECIFIED = 0;
+  MEMORY_TYPE_EPISODIC = 1;      // Specific events with context
+  MEMORY_TYPE_SEMANTIC = 2;      // Facts and general knowledge
+  MEMORY_TYPE_PROCEDURAL = 3;    // Skills and how-to knowledge
+  MEMORY_TYPE_WORKING = 4;        // Temporary active memory
+}
+
+// Episode represents an episodic memory with rich contextual information.
+// Based on Tulving's episodic memory research - "mental time travel".
+message Episode {
+  // Core episodic fields (1-9)
+  string id = 1;                              // Unique episode identifier
+  google.protobuf.Timestamp when = 2;         // When it happened
+  string what = 3;                            // What happened (semantic content)
+  repeated float embedding = 4;               // 768-dimensional representation
+  Confidence encoding_confidence = 5;         // Encoding quality (REQUIRED)
+  
+  // Context fields (10-19)
+  string where_location = 10;                 // Where it occurred
+  repeated string who = 11;                   // Who was involved
+  string why = 12;                            // Why it happened (causal)
+  string how = 13;                            // How it happened (procedural)
+  
+  // Memory dynamics (20-29)
+  float decay_rate = 20;                      // Episode-specific forgetting
+  float emotional_valence = 21;               // Emotional charge [-1, 1]
+  float importance = 22;                      // Subjective importance [0, 1]
+  
+  // Consolidation fields (30+)
+  ConsolidationState consolidation_state = 30;
+  google.protobuf.Timestamp last_replay = 31; // Last consolidation time
+}
+
+// Consolidation states following sleep/memory research
+enum ConsolidationState {
+  CONSOLIDATION_STATE_UNSPECIFIED = 0;
+  CONSOLIDATION_STATE_RECENT = 1;      // Recently encoded, not consolidated
+  CONSOLIDATION_STATE_CONSOLIDATING = 2; // Currently being consolidated
+  CONSOLIDATION_STATE_CONSOLIDATED = 3;  // Stable long-term memory
+  CONSOLIDATION_STATE_RECONSOLIDATING = 4; // Being updated/modified
+}
+
+// ============================================================================
+// Retrieval Cues - Different ways to trigger memory recall
+// ============================================================================
+
+// Cue represents a memory retrieval trigger with multiple modalities.
+// Supports pattern completion and spreading activation.
+message Cue {
+  // Cue identification
+  string id = 1;
+  
+  // Cue modality (oneof ensures single cue type)
+  oneof cue_type {
+    EmbeddingCue embedding = 2;
+    ContextCue context = 3;
+    TemporalCue temporal = 4;
+    SemanticCue semantic = 5;
+    PatternCue pattern = 6;
+  }
+  
+  // Retrieval parameters
+  Confidence threshold = 10;           // Minimum confidence for recall (REQUIRED)
+  int32 max_results = 11;              // Maximum memories to retrieve
+  bool spread_activation = 12;         // Enable spreading activation
+  float activation_decay = 13;         // Activation decay during spreading
+}
+
+// Embedding-based similarity search
+message EmbeddingCue {
+  repeated float vector = 1;           // 768-dimensional query vector
+  float similarity_threshold = 2;      // Cosine similarity threshold
+}
+
+// Context-based retrieval (episodic)
+message ContextCue {
+  google.protobuf.Timestamp time_start = 1;
+  google.protobuf.Timestamp time_end = 2;
+  string location = 3;
+  repeated string participants = 4;
+}
+
+// Temporal pattern search
+message TemporalCue {
+  TemporalPattern pattern = 1;
+  google.protobuf.Timestamp reference_time = 2;
+}
+
+// Temporal patterns for memory search
+message TemporalPattern {
+  oneof pattern {
+    string cron_expression = 1;        // Cron-like pattern
+    RepeatingInterval interval = 2;    // Simple repetition
+    RelativeTime relative = 3;         // Relative to reference
+  }
+}
+
+message RepeatingInterval {
+  int32 value = 1;
+  TimeUnit unit = 2;
+}
+
+message RelativeTime {
+  int32 offset = 1;
+  TimeUnit unit = 2;
+  RelativeDirection direction = 3;
+}
+
+enum TimeUnit {
+  TIME_UNIT_UNSPECIFIED = 0;
+  TIME_UNIT_SECONDS = 1;
+  TIME_UNIT_MINUTES = 2;
+  TIME_UNIT_HOURS = 3;
+  TIME_UNIT_DAYS = 4;
+  TIME_UNIT_WEEKS = 5;
+  TIME_UNIT_MONTHS = 6;
+  TIME_UNIT_YEARS = 7;
+}
+
+enum RelativeDirection {
+  RELATIVE_DIRECTION_UNSPECIFIED = 0;
+  RELATIVE_DIRECTION_BEFORE = 1;
+  RELATIVE_DIRECTION_AFTER = 2;
+  RELATIVE_DIRECTION_AROUND = 3;       // Fuzzy temporal window
+}
+
+// Semantic content search
+message SemanticCue {
+  string query = 1;                    // Natural language query
+  float fuzzy_threshold = 2;           // Fuzzy matching threshold
+  repeated string required_tags = 3;    // Must have these tags
+  repeated string excluded_tags = 4;    // Must not have these tags
+}
+
+// Pattern completion cue
+message PatternCue {
+  repeated PartialMemory fragments = 1; // Partial memories to complete
+  float completion_threshold = 2;       // Pattern completion threshold
+}
+
+// Partial memory for pattern completion
+message PartialMemory {
+  map<string, string> known_fields = 1;  // Known field values
+  repeated string missing_fields = 2;    // Fields to reconstruct
+  Confidence fragment_confidence = 3;    // Confidence in known fields
+}
+
+// ============================================================================
+// Memory Operations Results - Rich response types
+// ============================================================================
+
+// Result of memory recall operation
+message RecallResult {
+  repeated Memory memories = 1;        // Retrieved memories
+  Confidence recall_confidence = 2;    // Overall recall confidence
+  RecallMetadata metadata = 3;         // Recall statistics
+}
+
+// Metadata about recall process
+message RecallMetadata {
+  int32 total_activated = 1;           // Total memories activated
+  int32 above_threshold = 2;           // Memories above confidence threshold
+  float avg_activation = 3;            // Average activation level
+  int64 recall_time_ms = 4;            // Time taken for recall
+  repeated string activation_path = 5;  // Spreading activation path
+}
+
+// Result of memory storage operation
+message StoreResult {
+  string memory_id = 1;                // Stored memory ID
+  Confidence storage_confidence = 2;   // Storage success confidence
+  bool consolidated = 3;               // Whether immediately consolidated
+  repeated string linked_memories = 4;  // Auto-linked related memories
+}
+
+// ============================================================================
+// Cognitive Errors - Educational error messages
+// ============================================================================
+
+// CognitiveError provides rich error context following cognitive ergonomics.
+// Every error includes suggestion and example for tired/stressed developers.
+message CognitiveError {
+  string summary = 1;                  // One-line error summary
+  string context = 2;                  // What was expected vs actual
+  string suggestion = 3;               // How to fix it
+  string example = 4;                  // Code example of correct usage
+  Confidence error_confidence = 5;     // Confidence in error diagnosis
+  repeated string similar_memories = 6; // "Did you mean?" suggestions
+}
+
+// Embedding wrapper for use in oneof fields
+message Embedding {
+  repeated float values = 1;
+}

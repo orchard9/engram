@@ -113,7 +113,6 @@ impl Memory {
     }
 
     /// Cognitive confidence methods using System 1 thinking patterns
-
     /// Natural confidence check: "Does this memory seem reliable?"
     pub fn seems_reliable(&self) -> bool {
         self.confidence.seems_legitimate()
@@ -239,7 +238,6 @@ impl Episode {
     }
 
     /// Cognitive confidence methods for episodes
-
     /// "Is this episode vivid and detailed?"
     pub fn is_vivid(&self) -> bool {
         self.vividness_confidence.is_high()
@@ -394,7 +392,6 @@ impl Cue {
     }
 
     /// Cognitive confidence methods for cues
-
     /// "Is this cue likely to return good results?"
     pub fn seems_effective(&self) -> bool {
         self.cue_confidence.seems_legitimate()

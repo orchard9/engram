@@ -82,30 +82,35 @@ impl CognitiveError {
     }
 
     /// Add detailed explanation for System 2 analysis
+    #[must_use]
     pub fn with_details(mut self, details: impl Into<String>) -> Self {
         self.details = Some(details.into());
         self
     }
 
     /// Add documentation references
+    #[must_use]
     pub fn with_documentation(mut self, docs: impl Into<String>) -> Self {
         self.documentation = Some(docs.into());
         self
     }
 
     /// Add "did you mean?" suggestions using edit distance
+    #[must_use]
     pub fn with_similar(mut self, similar: Vec<String>) -> Self {
         self.similar = similar;
         self
     }
 
     /// Chain with a source error
+    #[must_use]
     pub fn with_source(mut self, source: Box<dyn std::error::Error + Send + Sync>) -> Self {
         self.source = Some(source);
         self
     }
 
     /// Calculate edit distance between two strings (Levenshtein distance)
+    #[must_use]
     pub fn edit_distance(s1: &str, s2: &str) -> usize {
         let len1 = s1.chars().count();
         let len2 = s2.chars().count();
@@ -211,6 +216,7 @@ macro_rules! cognitive_error {
         $(, similar: $similar:expr)?
         $(, source: $source:expr)?
     ) => {{
+        #[allow(unused_mut)]
         let mut err = $crate::error::CognitiveError::new(
             $summary,
             $crate::error::ErrorContext::new($expected, $actual),
@@ -258,46 +264,55 @@ impl CognitiveErrorBuilder {
         }
     }
 
+    #[must_use]
     pub fn summary(mut self, summary: impl Into<String>) -> Self {
         self.summary = Some(summary.into());
         self
     }
 
+    #[must_use]
     pub fn context(mut self, expected: impl Into<String>, actual: impl Into<String>) -> Self {
         self.context = Some(ErrorContext::new(expected, actual));
         self
     }
 
+    #[must_use]
     pub fn suggestion(mut self, suggestion: impl Into<String>) -> Self {
         self.suggestion = Some(suggestion.into());
         self
     }
 
+    #[must_use]
     pub fn example(mut self, example: impl Into<String>) -> Self {
         self.example = Some(example.into());
         self
     }
 
+    #[must_use]
     pub fn confidence(mut self, confidence: Confidence) -> Self {
         self.confidence = Some(confidence);
         self
     }
 
+    #[must_use]
     pub fn details(mut self, details: impl Into<String>) -> Self {
         self.details = Some(details.into());
         self
     }
 
+    #[must_use]
     pub fn documentation(mut self, docs: impl Into<String>) -> Self {
         self.documentation = Some(docs.into());
         self
     }
 
+    #[must_use]
     pub fn similar(mut self, similar: Vec<String>) -> Self {
         self.similar = similar;
         self
     }
 
+    #[must_use]
     pub fn source(mut self, source: Box<dyn std::error::Error + Send + Sync>) -> Self {
         self.source = Some(source);
         self
@@ -396,6 +411,7 @@ impl<T> PartialResult<T> {
         }
     }
 
+    #[must_use]
     pub fn with_warning(mut self, warning: CognitiveError) -> Self {
         self.warnings.push(warning);
         self

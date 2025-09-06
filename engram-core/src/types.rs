@@ -85,18 +85,15 @@ impl CoreError {
                         .collect()
                 };
 
-                {
-                    let mut err = cognitive_error!(
-                        summary: format!("Memory node '{}' not found", id),
-                        context: expected = "Valid node ID from current graph",
-                                 actual = id.clone(),
-                        suggestion: "Use graph.nodes() to list available nodes",
-                        example: r#"let node = graph.get_node("node_id").or_insert_default();"#,
-                        confidence: Confidence::HIGH
-                    );
-                    err.similar = similar_vec;
-                    err
-                }
+                cognitive_error!(
+                    summary: format!("Memory node '{}' not found", id),
+                    context: expected = "Valid node ID from current graph",
+                             actual = id.clone(),
+                    suggestion: "Use graph.nodes() to list available nodes",
+                    example: r#"let node = graph.get_node("node_id").or_insert_default();"#,
+                    confidence: Confidence::HIGH,
+                    similar: similar_vec
+                )
             }
             Self::InvalidActivation { value } => {
                 cognitive_error!(

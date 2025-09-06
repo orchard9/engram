@@ -1,5 +1,9 @@
 //! Engram CLI library functions for testing
 
+pub mod api;
+pub mod benchmark_simple;
+pub mod grpc;
+
 use anyhow::Result;
 use std::time::Duration;
 use tokio::net::TcpListener;

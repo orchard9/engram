@@ -437,7 +437,7 @@ trait EpisodeToMemory {
 
 impl EpisodeToMemory for Memory {
     fn from_episode(episode: Episode, activation: f32) -> Self {
-        let mut memory = Memory::new(
+        let memory = Memory::new(
             format!("mem_{}", episode.id),
             episode.embedding,
             episode.encoding_confidence,

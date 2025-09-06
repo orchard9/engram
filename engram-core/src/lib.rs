@@ -4,8 +4,11 @@
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+pub mod differential;
 pub mod error;
+pub mod error_review;
 pub mod error_testing;
+pub mod graph;
 pub mod memory;
 pub mod store;
 pub mod types;

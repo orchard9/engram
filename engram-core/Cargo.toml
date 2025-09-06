@@ -8,6 +8,8 @@ repository.workspace = true
 homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
+description = "Core memory and cognitive architecture for the Engram graph database"
+readme = "../README.md"
 
 [dependencies]
 thiserror = { workspace = true }
@@ -20,11 +22,14 @@ dashmap = { workspace = true }
 parking_lot = { workspace = true }
 mimalloc = { workspace = true }
 atomic_float = { workspace = true }
+syn = { version = "2.0", features = ["full", "visit"] }
 
 [dev-dependencies]
 criterion = { workspace = true }
 proptest = { workspace = true }
 quickcheck = { workspace = true }
+bincode = { workspace = true }
+rand = { workspace = true }
 
 [lints]
 workspace = true

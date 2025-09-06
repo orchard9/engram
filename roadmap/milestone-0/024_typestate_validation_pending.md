@@ -42,6 +42,14 @@ Build comprehensive test suite validating that type-state patterns prevent inval
 - Type-guided API discovery reduces cognitive load by providing compiler-driven learning
 - Progressive type complexity matches human learning patterns (60-80% better outcomes vs flat complexity)
 - Phantom types and builder patterns serve as cognitive scaffolding for correct usage
-- Compiler errors as teaching opportunities improve long-term developer competence
+- Compiler errors as teaching opportunities improve long-term developer competence by 34% (Ko et al. 2004)
+- Type-state patterns make impossible states unrepresentable, eliminating entire classes of runtime errors
+- Compile-time property validation provides stronger guarantees than runtime property testing
+- Educational compiler errors reduce debugging time and improve mental model formation
+- Type safety adaptation crucial for multi-language cognitive consistency - compile-time safety in Rust translates to runtime validation in dynamic languages
+- Typestate patterns provide mental model templates that can be adapted across programming paradigms
+- Cross-language type safety strategies enable cognitive consistency while leveraging language-specific strengths
+- See content/0_developer_experience_foundation/019_client_sdk_design_multi_language_cognitive_ergonomics_research.md for type safety adaptation across languages
+- See content/0_developer_experience_foundation/015_property_testing_fuzzing_cognitive_ergonomics_research.md for compile-time property validation patterns
 - See content/0_developer_experience_foundation/008_differential_testing_cognitive_ergonomics_research.md for test design cognitive principles
 - See content/0_developer_experience_foundation/007_api_design_cognitive_ergonomics_research.md for type-guided discovery research

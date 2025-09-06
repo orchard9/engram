@@ -1,0 +1,450 @@
+syntax = "proto3";
+
+package engram.v1;
+
+import "engram/v1/memory.proto";
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+
+// ============================================================================
+// Engram Service - Cognitive memory operations following natural language
+// ============================================================================
+
+// EngramService provides cognitive memory operations with natural method names.
+// Methods follow semantic priming for improved API discovery.
+service EngramService {
+  // ========== Core Memory Operations (Basic) ==========
+  
+  // Remember stores a new memory (semantic priming: "remember" vs "create")
+  rpc Remember(RememberRequest) returns (RememberResponse);
+  
+  // Recall retrieves memories using various cue types
+  rpc Recall(RecallRequest) returns (RecallResponse);
+  
+  // Forget removes or suppresses memories
+  rpc Forget(ForgetRequest) returns (ForgetResponse);
+  
+  // Recognize checks if a memory pattern is familiar
+  rpc Recognize(RecognizeRequest) returns (RecognizeResponse);
+  
+  // ========== Episodic Operations (Intermediate) ==========
+  
+  // Experience records a new episodic memory
+  rpc Experience(ExperienceRequest) returns (ExperienceResponse);
+  
+  // Reminisce retrieves episodic memories with context
+  rpc Reminisce(ReminisceRequest) returns (ReminisceResponse);
+  
+  // ========== Consolidation Operations (Advanced) ==========
+  
+  // Consolidate triggers memory consolidation process
+  rpc Consolidate(ConsolidateRequest) returns (ConsolidateResponse);
+  
+  // Dream simulates dream-like memory replay for consolidation
+  rpc Dream(DreamRequest) returns (stream DreamResponse);
+  
+  // ========== Pattern Operations (Advanced) ==========
+  
+  // Complete performs pattern completion from partial cues
+  rpc Complete(CompleteRequest) returns (CompleteResponse);
+  
+  // Associate creates or strengthens associations between memories
+  rpc Associate(AssociateRequest) returns (AssociateResponse);
+  
+  // ========== Monitoring Operations ==========
+  
+  // Introspect provides system self-awareness and statistics
+  rpc Introspect(IntrospectRequest) returns (IntrospectResponse);
+  
+  // Stream provides real-time memory activity monitoring
+  rpc Stream(StreamRequest) returns (stream StreamResponse);
+  
+  // ========== Streaming Operations (Advanced) ==========
+  
+  // StreamingRemember for continuous memory formation
+  rpc StreamingRemember(stream RememberRequest) returns (stream RememberResponse);
+  
+  // StreamingRecall for continuous memory retrieval
+  rpc StreamingRecall(stream RecallRequest) returns (stream RecallResponse);
+  
+  // MemoryFlow provides bidirectional streaming for interactive sessions
+  rpc MemoryFlow(stream MemoryFlowRequest) returns (stream MemoryFlowResponse);
+}
+
+// ============================================================================
+// Request/Response Messages - Progressive complexity design
+// ============================================================================
+
+// ---------- Remember (Store) ----------
+
+message RememberRequest {
+  oneof memory_type {
+    Memory memory = 1;                 // Generic memory
+    Episode episode = 2;               // Episodic memory
+  }
+  
+  bool auto_link = 10;                 // Auto-link to related memories
+  float link_threshold = 11;           // Threshold for auto-linking
+}
+
+message RememberResponse {
+  string memory_id = 1;
+  Confidence storage_confidence = 2;
+  repeated string linked_memories = 3;
+  ConsolidationState initial_state = 4;
+}
+
+// ---------- Recall (Retrieve) ----------
+
+message RecallRequest {
+  Cue cue = 1;                         // Retrieval cue (various types)
+  
+  // Retrieval parameters
+  int32 max_results = 10;
+  bool include_metadata = 11;
+  bool trace_activation = 12;          // Include activation trace
+}
+
+message RecallResponse {
+  repeated Memory memories = 1;
+  Confidence recall_confidence = 2;
+  RecallMetadata metadata = 3;
+  repeated ActivationTrace traces = 4;
+}
+
+message ActivationTrace {
+  string memory_id = 1;
+  float activation_level = 2;
+  repeated string activation_path = 3;
+  google.protobuf.Timestamp timestamp = 4;
+}
+
+// ---------- Forget (Remove/Suppress) ----------
+
+message ForgetRequest {
+  oneof target {
+    string memory_id = 1;              // Specific memory
+    Cue pattern = 2;                   // Pattern of memories
+  }
+  
+  ForgetMode mode = 10;
+}
+
+enum ForgetMode {
+  FORGET_MODE_UNSPECIFIED = 0;
+  FORGET_MODE_SUPPRESS = 1;           // Reduce activation (reversible)
+  FORGET_MODE_DELETE = 2;             // Permanent removal
+  FORGET_MODE_OVERWRITE = 3;          // Replace with new memory
+}
+
+message ForgetResponse {
+  int32 memories_affected = 1;
+  Confidence forget_confidence = 2;
+  bool reversible = 3;
+}
+
+// ---------- Recognize (Familiarity Check) ----------
+
+message RecognizeRequest {
+  oneof input {
+    Memory memory = 1;
+    Embedding embedding = 2;
+    string content = 3;
+  }
+  
+  float recognition_threshold = 10;
+}
+
+message RecognizeResponse {
+  bool recognized = 1;
+  Confidence recognition_confidence = 2;
+  repeated Memory similar_memories = 3;
+  float familiarity_score = 4;
+}
+
+// ---------- Experience (Episodic Storage) ----------
+
+message ExperienceRequest {
+  Episode episode = 1;
+  bool immediate_consolidation = 2;
+  repeated string context_links = 3;   // Link to context memories
+}
+
+message ExperienceResponse {
+  string episode_id = 1;
+  Confidence encoding_quality = 2;
+  ConsolidationState state = 3;
+  int32 context_links_created = 4;
+}
+
+// ---------- Reminisce (Episodic Recall) ----------
+
+message ReminisceRequest {
+  oneof cue {
+    google.protobuf.Timestamp around_time = 1;
+    string at_location = 2;
+    PeopleList with_people = 3;
+    string about_topic = 4;
+  }
+  
+  google.protobuf.Timestamp time_window_start = 10;
+  google.protobuf.Timestamp time_window_end = 11;
+  bool include_emotional = 12;
+}
+
+message ReminisceResponse {
+  repeated Episode episodes = 1;
+  Confidence recall_vividness = 2;
+  map<string, float> emotional_summary = 3;
+  repeated string memory_themes = 4;
+}
+
+// ---------- Consolidate (Memory Consolidation) ----------
+
+message ConsolidateRequest {
+  oneof target {
+    google.protobuf.Empty all = 1;     // Consolidate all pending
+    MemoryIdList memory_ids = 2;       // Specific memories
+    ConsolidationCriteria criteria = 3; // Selective consolidation
+  }
+  
+  ConsolidationMode mode = 10;
+}
+
+message ConsolidationCriteria {
+  google.protobuf.Timestamp older_than = 1;
+  float importance_threshold = 2;
+  repeated MemoryType types = 3;
+}
+
+enum ConsolidationMode {
+  CONSOLIDATION_MODE_UNSPECIFIED = 0;
+  CONSOLIDATION_MODE_SYNAPTIC = 1;     // Fast, local consolidation
+  CONSOLIDATION_MODE_SYSTEMS = 2;      // Slow, distributed consolidation
+  CONSOLIDATION_MODE_RECONSOLIDATION = 3; // Update existing memories
+}
+
+message ConsolidateResponse {
+  int32 memories_consolidated = 1;
+  int32 new_associations = 2;
+  map<string, ConsolidationState> state_changes = 3;
+  google.protobuf.Timestamp next_consolidation = 4;
+}
+
+// ---------- Dream (Replay Simulation) ----------
+
+message DreamRequest {
+  int32 replay_cycles = 1;
+  float creativity_factor = 2;         // How much to vary replay
+  bool generate_insights = 3;          // Look for novel connections
+}
+
+message DreamResponse {
+  oneof content {
+    ReplaySequence replay = 1;
+    Insight insight = 2;
+    ConsolidationProgress progress = 3;
+  }
+}
+
+message ReplaySequence {
+  repeated string memory_ids = 1;
+  float sequence_novelty = 2;
+  string narrative = 3;                // Optional narrative description
+}
+
+message Insight {
+  string description = 1;
+  repeated string connected_memories = 2;
+  Confidence insight_confidence = 3;
+  string suggested_action = 4;
+}
+
+message ConsolidationProgress {
+  int32 memories_replayed = 1;
+  int32 new_connections = 2;
+  float consolidation_strength = 3;
+}
+
+// ---------- Complete (Pattern Completion) ----------
+
+message CompleteRequest {
+  PatternCue partial_pattern = 1;
+  float creativity = 2;                // How creative vs accurate
+  int32 max_completions = 3;
+}
+
+message CompleteResponse {
+  repeated Memory completions = 1;
+  Confidence completion_confidence = 2;
+  map<string, float> field_confidences = 3;
+}
+
+// ---------- Associate (Create Associations) ----------
+
+message AssociateRequest {
+  string source_memory = 1;
+  string target_memory = 2;
+  AssociationType association_type = 3;
+  float strength = 4;
+  string reason = 5;                   // Why this association
+}
+
+enum AssociationType {
+  ASSOCIATION_TYPE_UNSPECIFIED = 0;
+  ASSOCIATION_TYPE_SEMANTIC = 1;       // Meaning-based
+  ASSOCIATION_TYPE_TEMPORAL = 2;       // Time-based
+  ASSOCIATION_TYPE_CAUSAL = 3;         // Cause-effect
+  ASSOCIATION_TYPE_SPATIAL = 4;        // Location-based
+  ASSOCIATION_TYPE_EMOTIONAL = 5;      // Emotion-based
+}
+
+message AssociateResponse {
+  bool created = 1;
+  float final_strength = 2;
+  repeated string affected_paths = 3;  // Activation paths affected
+}
+
+// ---------- Introspect (Self-Awareness) ----------
+
+message IntrospectRequest {
+  repeated string metrics = 1;         // Specific metrics to return
+  bool include_health = 2;
+  bool include_statistics = 3;
+}
+
+message IntrospectResponse {
+  map<string, float> metrics = 1;
+  HealthStatus health = 2;
+  MemoryStatistics statistics = 3;
+  repeated string active_processes = 4;
+}
+
+message HealthStatus {
+  bool healthy = 1;
+  map<string, ComponentHealth> components = 2;
+  string summary = 3;
+}
+
+message ComponentHealth {
+  bool operational = 1;
+  float performance = 2;
+  string status_message = 3;
+}
+
+message MemoryStatistics {
+  int64 total_memories = 1;
+  map<string, int64> by_type = 2;
+  float avg_activation = 3;
+  float avg_confidence = 4;
+  int64 total_associations = 5;
+  google.protobuf.Timestamp oldest_memory = 6;
+  google.protobuf.Timestamp newest_memory = 7;
+}
+
+// ---------- Stream (Activity Monitoring) ----------
+
+message StreamRequest {
+  repeated StreamEventType event_types = 1;
+  float min_importance = 2;            // Minimum importance to stream
+}
+
+enum StreamEventType {
+  STREAM_EVENT_TYPE_UNSPECIFIED = 0;
+  STREAM_EVENT_TYPE_ACTIVATION = 1;    // Memory activation
+  STREAM_EVENT_TYPE_STORAGE = 2;       // New memory stored
+  STREAM_EVENT_TYPE_RECALL = 3;        // Memory recalled
+  STREAM_EVENT_TYPE_CONSOLIDATION = 4; // Consolidation event
+  STREAM_EVENT_TYPE_ASSOCIATION = 5;   // New association
+  STREAM_EVENT_TYPE_DECAY = 6;         // Memory decay
+}
+
+message StreamResponse {
+  StreamEventType event_type = 1;
+  google.protobuf.Timestamp timestamp = 2;
+  string description = 3;
+  map<string, string> metadata = 4;
+  float importance = 5;
+}
+
+// ---------- Wrapper Messages for Oneof Fields ----------
+
+// Wrapper for repeated string in oneof
+message PeopleList {
+  repeated string people = 1;
+}
+
+// Wrapper for repeated string in oneof
+message MemoryIdList {
+  repeated string ids = 1;
+}
+
+// ---------- Streaming Flow Messages ----------
+
+// Bidirectional memory flow for interactive sessions
+message MemoryFlowRequest {
+  oneof request {
+    RememberRequest remember = 1;       // Store a memory
+    RecallRequest recall = 2;           // Retrieve memories
+    StreamSubscription subscribe = 3;    // Subscribe to events
+    FlowControl control = 4;            // Flow control message
+  }
+  
+  string session_id = 10;               // Session identifier
+  int64 sequence_number = 11;           // For ordering
+}
+
+message MemoryFlowResponse {
+  oneof response {
+    RememberResponse remember_result = 1; // Storage result
+    RecallResponse recall_result = 2;     // Retrieval result
+    StreamResponse event = 3;             // Activity event
+    FlowStatus status = 4;                // Flow status
+  }
+  
+  string session_id = 10;               // Session identifier
+  int64 sequence_number = 11;           // For ordering
+  google.protobuf.Timestamp timestamp = 12;
+}
+
+// Subscription configuration for event streaming
+message StreamSubscription {
+  repeated StreamEventType event_types = 1;
+  float min_importance = 2;
+  int32 buffer_size = 3;                // Client buffer size
+  bool enable_backpressure = 4;         // Enable backpressure control
+}
+
+// Flow control for backpressure management
+message FlowControl {
+  enum Action {
+    ACTION_UNSPECIFIED = 0;
+    ACTION_PAUSE = 1;         // Pause stream
+    ACTION_RESUME = 2;        // Resume stream
+    ACTION_SLOW_DOWN = 3;     // Reduce rate
+    ACTION_SPEED_UP = 4;      // Increase rate
+    ACTION_BUFFER_STATUS = 5; // Report buffer status
+  }
+  
+  Action action = 1;
+  int32 buffer_remaining = 2;   // Remaining buffer capacity
+  float preferred_rate = 3;     // Preferred messages per second
+  string reason = 4;            // Human-readable reason
+}
+
+// Status information for streaming flows
+message FlowStatus {
+  enum State {
+    STATE_UNSPECIFIED = 0;
+    STATE_ACTIVE = 1;         // Stream active
+    STATE_PAUSED = 2;         // Stream paused
+    STATE_BUFFERING = 3;      // Building buffer
+    STATE_RECONNECTING = 4;   // Reconnection in progress
+    STATE_ERROR = 5;          // Error state
+  }
+  
+  State state = 1;
+  string message = 2;
+  map<string, string> metrics = 3;     // Performance metrics
+  google.protobuf.Timestamp last_activity = 4;
+}

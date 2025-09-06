@@ -1,0 +1,284 @@
+name: Startup Benchmark
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'engram-core/**'
+      - 'engram-cli/**'
+      - 'engram-storage/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/startup-benchmark.yml'
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: 'Number of benchmark runs'
+        required: false
+        default: '3'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  benchmark-matrix:
+    name: Benchmark on ${{ matrix.os }} (${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: x86_64
+            target: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            arch: x86_64
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            arch: aarch64
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            arch: x86_64
+            target: x86_64-pc-windows-msvc
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: ${{ matrix.target }}
+        
+    - name: Install hyperfine
+      shell: bash
+      run: |
+        if [[ "${{ matrix.os }}" == "ubuntu-latest" ]]; then
+          wget https://github.com/sharkdp/hyperfine/releases/download/v1.18.0/hyperfine_1.18.0_amd64.deb
+          sudo dpkg -i hyperfine_1.18.0_amd64.deb
+        elif [[ "${{ matrix.os }}" == "macos-latest" ]]; then
+          brew install hyperfine
+        elif [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+          cargo install hyperfine
+        fi
+        
+    - name: Install bc (for benchmark script)
+      if: matrix.os == 'macos-latest'
+      run: brew install bc
+      
+    - name: Cache Cargo dependencies
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: ${{ runner.os }}-${{ matrix.arch }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-${{ matrix.arch }}-cargo-
+          
+    - name: Run startup benchmark (simple)
+      id: simple_benchmark
+      shell: bash
+      run: |
+        # Make benchmark script executable
+        chmod +x ./benchmark-startup.sh
+        
+        # Run benchmark and capture output
+        if ./benchmark-startup.sh --repo file://$PWD; then
+          echo "BENCHMARK_PASSED=true" >> $GITHUB_OUTPUT
+          echo "✅ Benchmark passed - startup completed in under 60 seconds"
+        else
+          echo "BENCHMARK_PASSED=false" >> $GITHUB_OUTPUT
+          echo "❌ Benchmark failed - startup exceeded 60 second target"
+        fi
+        
+    - name: Run startup benchmark with hyperfine
+      if: success()
+      shell: bash
+      run: |
+        # Create hyperfine benchmark script
+        cat > hyperfine-benchmark.sh << 'EOF'
+        #!/bin/bash
+        set -e
+        TEMP_DIR=$(mktemp -d)
+        cd $TEMP_DIR
+        git clone --depth=1 file://$1 engram
+        cd engram
+        cargo build --release
+        timeout 10 ./target/release/engram start --port 7432 &
+        SERVER_PID=$!
+        sleep 5
+        curl -s http://localhost:7432/health > /dev/null
+        kill $SERVER_PID 2>/dev/null || true
+        cd /
+        rm -rf $TEMP_DIR
+        EOF
+        
+        chmod +x hyperfine-benchmark.sh
+        
+        # Run hyperfine with statistical analysis
+        hyperfine \
+          --warmup 1 \
+          --runs ${{ github.event.inputs.runs || '3' }} \
+          --time-unit second \
+          --export-json benchmark-results.json \
+          --export-markdown benchmark-results.md \
+          "./hyperfine-benchmark.sh $PWD"
+        
+    - name: Parse benchmark results
+      if: success()
+      shell: bash
+      run: |
+        # Extract mean time from hyperfine results
+        if [ -f benchmark-results.json ]; then
+          MEAN_TIME=$(cat benchmark-results.json | jq '.results[0].mean')
+          STDDEV=$(cat benchmark-results.json | jq '.results[0].stddev')
+          
+          echo "📊 Benchmark Results:"
+          echo "  Mean time: ${MEAN_TIME}s"
+          echo "  Std deviation: ${STDDEV}s"
+          
+          # Check if mean time is under 60 seconds
+          if (( $(echo "$MEAN_TIME < 60" | bc -l) )); then
+            echo "✅ PASS: Mean startup time is under 60 seconds"
+          else
+            echo "❌ FAIL: Mean startup time exceeds 60 second target"
+            exit 1
+          fi
+        fi
+        
+    - name: Upload benchmark results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: benchmark-results-${{ matrix.os }}-${{ matrix.arch }}
+        path: |
+          benchmark-results.json
+          benchmark-results.md
+        retention-days: 30
+        
+    - name: Comment PR with results
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          try {
+            const resultsPath = 'benchmark-results.md';
+            if (fs.existsSync(resultsPath)) {
+              const results = fs.readFileSync(resultsPath, 'utf8');
+              const passed = ${{ steps.simple_benchmark.outputs.BENCHMARK_PASSED }};
+              
+              const emoji = passed ? '✅' : '❌';
+              const status = passed ? 'PASSED' : 'FAILED';
+              
+              const body = `## ${emoji} Startup Benchmark Results - ${status}\n\n**Platform:** ${{ matrix.os }} (${{ matrix.arch }})\n\n${results}\n\n**Target:** Git clone to operational in <60 seconds`;
+              
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: body
+              });
+            }
+          } catch (error) {
+            console.log('Could not post benchmark results:', error);
+          }
+
+  regression-detection:
+    name: Regression Detection
+    runs-on: ubuntu-latest
+    needs: benchmark-matrix
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Download current results
+      uses: actions/download-artifact@v4
+      with:
+        pattern: benchmark-results-*
+        merge-multiple: true
+        
+    - name: Fetch previous results
+      id: fetch_previous
+      run: |
+        # Try to fetch previous benchmark results from cache or previous run
+        # This is a placeholder - in production, you'd store these in a database
+        # or use a service like Bencher.dev
+        echo "Fetching previous benchmark results..."
+        
+    - name: Compare results
+      run: |
+        # Parse current results
+        if [ -f benchmark-results.json ]; then
+          CURRENT_MEAN=$(cat benchmark-results.json | jq '.results[0].mean')
+          
+          # In a real implementation, compare with previous results
+          # For now, just check absolute threshold
+          if (( $(echo "$CURRENT_MEAN > 66" | bc -l) )); then
+            echo "⚠️ WARNING: Startup time regression detected!"
+            echo "Current: ${CURRENT_MEAN}s (>10% above 60s target)"
+            
+            # Create issue for regression
+            gh issue create \
+              --title "Startup Performance Regression Detected" \
+              --body "The latest commit has increased startup time to ${CURRENT_MEAN}s, which is more than 10% above our 60-second target." \
+              --label "performance,regression"
+          fi
+        fi
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  benchmark-summary:
+    name: Benchmark Summary
+    runs-on: ubuntu-latest
+    needs: benchmark-matrix
+    if: always()
+    
+    steps:
+    - name: Download all results
+      uses: actions/download-artifact@v4
+      with:
+        pattern: benchmark-results-*
+        
+    - name: Generate summary report
+      run: |
+        echo "# 📊 Startup Benchmark Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Platform | Architecture | Mean Time (s) | Status |" >> $GITHUB_STEP_SUMMARY
+        echo "|----------|-------------|---------------|--------|" >> $GITHUB_STEP_SUMMARY
+        
+        # Parse results from each platform
+        for dir in benchmark-results-*; do
+          if [ -f "$dir/benchmark-results.json" ]; then
+            PLATFORM=$(echo $dir | cut -d'-' -f3)
+            ARCH=$(echo $dir | cut -d'-' -f4)
+            MEAN=$(cat "$dir/benchmark-results.json" | jq '.results[0].mean')
+            
+            if (( $(echo "$MEAN < 60" | bc -l) )); then
+              STATUS="✅ Pass"
+            else
+              STATUS="❌ Fail"
+            fi
+            
+            echo "| $PLATFORM | $ARCH | $MEAN | $STATUS |" >> $GITHUB_STEP_SUMMARY
+          fi
+        done
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "**Target:** <60 seconds from git clone to operational cluster" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "🔗 [View detailed results](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY

@@ -41,9 +41,13 @@ Implement streaming interfaces for both gRPC and HTTP to support continuous memo
 - Adaptive filtering based on developer attention state and monitoring focus
 
 ### Research Integration
-- Working memory can track 3-4 information streams simultaneously, requiring careful event filtering (Miller 1956, Cowan 2001)
-- Pre-attentive processing enables <200ms anomaly detection with proper visual coding (Treisman 1985)
+- Working memory can track 3-4 information streams simultaneously, requiring careful event filtering (Miller 1956, Wickens 2008)
+- Pre-attentive processing enables <200ms anomaly detection with proper visual coding (Healey & Enns 2012)
 - Hierarchical attention allocation improves monitoring effectiveness by 34% (Wickens 2002)
-- SSE mental models are 73% more accurate than WebSocket for monitoring tasks (Norman 1988)
-- Alert fatigue affects accuracy after 2 hours of continuous monitoring (Woods & Patterson 2001)
-- See content/0_developer_experience_foundation/009_real_time_monitoring_cognitive_ergonomics_research.md for streaming cognitive design research
+- Push-based mental models reduce cognitive load by 34% for event-driven scenarios (Eugster et al. 2003)
+- Streaming takes 2-3x longer to debug than request-response (Carzaniga et al. 2001)
+- Alert fatigue affects accuracy after 2 hours, performance degrades after 30 minutes (Woods & Patterson 2001)
+- Pattern recognition in streams happens in <200ms for experts (Klein 1998)
+- See content/0_developer_experience_foundation/016_streaming_realtime_cognitive_ergonomics_research.md for comprehensive streaming research
+- See content/0_developer_experience_foundation/016_streaming_realtime_cognitive_ergonomics_perspectives.md for implementation approaches
+- See content/0_developer_experience_foundation/009_real_time_monitoring_cognitive_ergonomics_research.md for monitoring patterns

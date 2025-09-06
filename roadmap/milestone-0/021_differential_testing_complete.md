@@ -55,4 +55,10 @@ Create differential testing framework to ensure Rust and future Zig implementati
 - Mental model synchronization is key cognitive challenge requiring specialized error reporting and visualization
 - Cognitive accessibility follows principles from concurrent systems research showing hierarchical error reporting reduces debugging time
 - Aligns with linearizability testing research (Kingsbury 2013) showing automated differential testing catches 89% of bugs manual testing misses
+- Cross-language cognitive consistency validation essential for multi-language SDK development
+- Behavioral equivalence testing must preserve cognitive properties, not just mathematical results
+- Differential testing frameworks enable validation of mental model preservation across programming paradigms
+- See content/0_developer_experience_foundation/019_client_sdk_design_multi_language_cognitive_ergonomics_research.md for cross-language behavioral verification frameworks
 - See content/0_developer_experience_foundation/008_differential_testing_cognitive_ergonomics_research.md for comprehensive differential testing cognitive research
+- See content/0_developer_experience_foundation/015_property_testing_fuzzing_cognitive_ergonomics_research.md for property-based differential testing patterns
+- See content/0_developer_experience_foundation/015_property_testing_fuzzing_cognitive_ergonomics_perspectives.md for verification-testing perspective on differential properties

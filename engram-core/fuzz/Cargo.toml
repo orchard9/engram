@@ -1,0 +1,30 @@
+[package]
+name = "engram-core-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.engram-core]
+path = ".."
+
+[[bin]]
+name = "fuzz_target_1"
+path = "fuzz_targets/fuzz_target_1.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "confidence_operations"
+path = "fuzz_targets/confidence_operations.rs"
+test = false
+doc = false
+bench = false

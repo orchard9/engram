@@ -1,0 +1,31 @@
+[package]
+name = "engram-proto"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Protocol buffer definitions for Engram cognitive graph database"
+readme = "../README.md"
+
+[dependencies]
+prost = "0.12"
+prost-types = "0.12"
+tonic = { version = "0.10", features = ["transport", "tls"] }
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { version = "1.6", features = ["v4", "serde"] }
+
+[build-dependencies]
+tonic-build = "0.10"
+
+[lib]
+name = "engram_proto"
+path = "src/lib.rs"
+
+[lints]
+workspace = true
