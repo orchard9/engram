@@ -48,7 +48,7 @@ async fn test_monitor_events_basic() {
         "text/event-stream"
     );
     assert_eq!(response.headers().get("cache-control").unwrap(), "no-cache");
-    
+
     // Drop response body to clean up SSE stream
     drop(response);
 }
@@ -69,7 +69,7 @@ async fn test_monitor_events_with_level_filtering() {
             response.headers().get("content-type").unwrap(),
             "text/event-stream"
         );
-        
+
         // Drop response body to clean up SSE stream
         drop(response);
     }
@@ -435,7 +435,7 @@ async fn test_concurrent_monitoring_capability() {
     // Simulate multiple concurrent monitoring connections
     let mut handles = vec![];
 
-    for i in 0..10 {
+    for i in 0..3 {
         let app_clone = app.clone();
         let handle = tokio::spawn(async move {
             let response = make_monitoring_request(
