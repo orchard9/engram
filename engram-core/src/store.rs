@@ -20,21 +20,25 @@ pub struct Activation(f32);
 
 impl Activation {
     /// Create a new activation level
-    pub fn new(value: f32) -> Self {
+    #[must_use]
+    pub const fn new(value: f32) -> Self {
         Self(value.clamp(0.0, 1.0))
     }
 
     /// Get the raw activation value
-    pub fn value(&self) -> f32 {
+    #[must_use]
+    pub const fn value(&self) -> f32 {
         self.0
     }
 
     /// Check if activation indicates successful store
+    #[must_use]
     pub fn is_successful(&self) -> bool {
         self.0 > 0.5
     }
 
     /// Check if activation indicates degraded store
+    #[must_use]
     pub fn is_degraded(&self) -> bool {
         self.0 < 0.8
     }
@@ -69,7 +73,7 @@ pub struct MemoryStore {
     wal_buffer: Arc<DashMap<String, Episode>>,
 }
 
-/// Wrapper for f32 that implements Ord for BTreeMap
+/// Wrapper for f32 that implements Ord for `BTreeMap`
 #[derive(Clone, Copy, Debug)]
 struct OrderedFloat(f32);
 
@@ -95,6 +99,7 @@ impl Ord for OrderedFloat {
 
 impl MemoryStore {
     /// Create a new memory store with specified capacity
+    #[must_use]
     pub fn new(max_memories: usize) -> Self {
         Self {
             hot_memories: DashMap::new(),
@@ -134,7 +139,7 @@ impl MemoryStore {
         }
 
         // Calculate base activation from episode encoding confidence and pressure
-        let base_activation = episode.encoding_confidence.raw() * (1.0 - pressure * 0.5);
+        let base_activation = episode.encoding_confidence.raw() * pressure.mul_add(-0.5, 1.0);
 
         // Check if we need to evict
         if current_count >= self.max_memories {
@@ -340,7 +345,7 @@ impl MemoryStore {
                     };
 
                     if is_match {
-                        let confidence = confidence_threshold.clone();
+                        let confidence = *confidence_threshold;
                         results.push((episode, confidence));
                     }
                 }
@@ -371,7 +376,7 @@ impl MemoryStore {
     ) -> Vec<(Episode, Confidence)> {
         // Get system pressure to modulate activation spreading
         let pressure = self.pressure();
-        let spread_factor = 1.0 - pressure * 0.5; // Reduce spreading under pressure
+        let spread_factor = pressure.mul_add(-0.5, 1.0); // Reduce spreading under pressure
 
         // For each high-confidence result, boost related memories
         let high_confidence_results: Vec<_> = results
@@ -437,7 +442,7 @@ trait EpisodeToMemory {
 
 impl EpisodeToMemory for Memory {
     fn from_episode(episode: Episode, activation: f32) -> Self {
-        let memory = Memory::new(
+        let memory = Self::new(
             format!("mem_{}", episode.id),
             episode.embedding,
             episode.encoding_confidence,
@@ -480,7 +485,7 @@ mod tests {
         // Store many episodes to trigger eviction
         for i in 0..20 {
             let episode = EpisodeBuilder::new()
-                .id(format!("ep{}", i))
+                .id(format!("ep{i}"))
                 .when(Utc::now())
                 .what("test episode".to_string())
                 .embedding([0.1; 768])
@@ -511,7 +516,7 @@ mod tests {
             let store_clone = Arc::clone(&store);
             let handle = thread::spawn(move || {
                 let episode = EpisodeBuilder::new()
-                    .id(format!("ep_thread_{}", i))
+                    .id(format!("ep_thread_{i}"))
                     .when(Utc::now())
                     .what("concurrent episode".to_string())
                     .embedding([0.1; 768])
@@ -540,7 +545,7 @@ mod tests {
         // Fill store to capacity
         for i in 0..9 {
             let episode = EpisodeBuilder::new()
-                .id(format!("ep{}", i))
+                .id(format!("ep{i}"))
                 .when(Utc::now())
                 .what("test episode".to_string())
                 .embedding([0.1; 768])
@@ -624,7 +629,7 @@ mod tests {
             .confidence(Confidence::HIGH)
             .build();
 
-        store.store(episode1.clone());
+        store.store(episode1);
         store.store(episode2);
 
         // Search with embedding similar to first
@@ -665,7 +670,7 @@ mod tests {
             .where_location("home".to_string())
             .build();
 
-        store.store(episode1.clone());
+        store.store(episode1);
         store.store(episode2);
 
         // Search for today's memories in office
@@ -770,9 +775,9 @@ mod tests {
         // Store some episodes first
         for i in 0..20 {
             let episode = EpisodeBuilder::new()
-                .id(format!("ep{}", i))
+                .id(format!("ep{i}"))
                 .when(Utc::now())
-                .what(format!("memory {}", i))
+                .what(format!("memory {i}"))
                 .embedding([i as f32 * 0.01; 768])
                 .confidence(Confidence::HIGH)
                 .build();
@@ -786,11 +791,7 @@ mod tests {
         for i in 0..10 {
             let store_clone = Arc::clone(&store);
             let handle = thread::spawn(move || {
-                let cue = Cue::semantic(
-                    format!("cue{}", i),
-                    format!("memory {}", i),
-                    Confidence::LOW,
-                );
+                let cue = Cue::semantic(format!("cue{i}"), format!("memory {i}"), Confidence::LOW);
 
                 store_clone.recall(cue)
             });

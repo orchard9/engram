@@ -39,7 +39,8 @@ pub struct ComparisonResult {
 
 impl ComparisonResult {
     /// Check if this comparison shows divergences
-    pub fn has_divergences(&self) -> bool {
+    #[must_use]
+    pub const fn has_divergences(&self) -> bool {
         !self.equivalent
     }
 }
@@ -60,16 +61,16 @@ pub enum Implementation {
 impl fmt::Display for Implementation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Implementation::RustReference => write!(f, "Rust (Reference)"),
-            Implementation::RustOptimized => write!(f, "Rust (Optimized)"),
-            Implementation::Zig => write!(f, "Zig"),
-            Implementation::Cpp => write!(f, "C++"),
+            Self::RustReference => write!(f, "Rust (Reference)"),
+            Self::RustOptimized => write!(f, "Rust (Optimized)"),
+            Self::Zig => write!(f, "Zig"),
+            Self::Cpp => write!(f, "C++"),
         }
     }
 }
 
 /// Result of executing a differential operation
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OperationResult {
     /// The implementation that produced this result
     pub implementation: Implementation,
@@ -129,11 +130,11 @@ pub enum DivergenceSeverity {
 impl fmt::Display for DivergenceSeverity {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            DivergenceSeverity::Performance => write!(f, "Performance"),
-            DivergenceSeverity::Precision => write!(f, "Precision"),
-            DivergenceSeverity::ErrorHandling => write!(f, "Error Handling"),
-            DivergenceSeverity::Behavioral => write!(f, "Behavioral"),
-            DivergenceSeverity::Correctness => write!(f, "Correctness"),
+            Self::Performance => write!(f, "Performance"),
+            Self::Precision => write!(f, "Precision"),
+            Self::ErrorHandling => write!(f, "Error Handling"),
+            Self::Behavioral => write!(f, "Behavioral"),
+            Self::Correctness => write!(f, "Correctness"),
         }
     }
 }
@@ -202,38 +203,38 @@ pub enum DifferentialOperation {
 
 impl DifferentialOperation {
     /// Get a human-readable description of this operation
+    #[must_use]
     pub fn description(&self) -> String {
         match self {
-            DifferentialOperation::ConfidenceAnd { conf_a, conf_b } => {
-                format!("Confidence AND: {:.3} ∧ {:.3}", conf_a, conf_b)
+            Self::ConfidenceAnd { conf_a, conf_b } => {
+                format!("Confidence AND: {conf_a:.3} ∧ {conf_b:.3}")
             }
-            DifferentialOperation::ConfidenceOr { conf_a, conf_b } => {
-                format!("Confidence OR: {:.3} ∨ {:.3}", conf_a, conf_b)
+            Self::ConfidenceOr { conf_a, conf_b } => {
+                format!("Confidence OR: {conf_a:.3} ∨ {conf_b:.3}")
             }
-            DifferentialOperation::ConfidenceNot { conf } => {
-                format!("Confidence NOT: ¬{:.3}", conf)
+            Self::ConfidenceNot { conf } => {
+                format!("Confidence NOT: ¬{conf:.3}")
             }
-            DifferentialOperation::ConfidenceCombineWeighted {
+            Self::ConfidenceCombineWeighted {
                 conf_a,
                 conf_b,
                 weight_a,
                 weight_b,
             } => {
                 format!(
-                    "Weighted combination: {:.3}×{:.2} + {:.3}×{:.2}",
-                    conf_a, weight_a, conf_b, weight_b
+                    "Weighted combination: {conf_a:.3}×{weight_a:.2} + {conf_b:.3}×{weight_b:.2}"
                 )
             }
-            DifferentialOperation::ConfidenceCalibration { conf } => {
-                format!("Overconfidence calibration: {:.3}", conf)
+            Self::ConfidenceCalibration { conf } => {
+                format!("Overconfidence calibration: {conf:.3}")
             }
-            DifferentialOperation::ConfidenceFromSuccesses { successes, total } => {
-                format!("Frequency-based confidence: {} / {}", successes, total)
+            Self::ConfidenceFromSuccesses { successes, total } => {
+                format!("Frequency-based confidence: {successes} / {total}")
             }
-            DifferentialOperation::ConfidenceFromPercent { percent } => {
-                format!("Percentage confidence: {}%", percent)
+            Self::ConfidenceFromPercent { percent } => {
+                format!("Percentage confidence: {percent}%")
             }
-            DifferentialOperation::MemoryStore {
+            Self::MemoryStore {
                 id,
                 content,
                 confidence,
@@ -245,56 +246,53 @@ impl DifferentialOperation {
                     confidence
                 )
             }
-            DifferentialOperation::MemoryRecall { id } => {
-                format!("Memory recall: {}", id)
+            Self::MemoryRecall { id } => {
+                format!("Memory recall: {id}")
             }
-            DifferentialOperation::GraphSpreadingActivation {
+            Self::GraphSpreadingActivation {
                 start_node,
                 activation_energy,
             } => {
-                format!(
-                    "Spreading activation: {} with energy {:.3}",
-                    start_node, activation_energy
-                )
+                format!("Spreading activation: {start_node} with energy {activation_energy:.3}")
             }
         }
     }
 
     /// Get the expected cognitive complexity of this operation
-    pub fn cognitive_complexity(&self) -> CognitiveComplexity {
+    #[must_use]
+    pub const fn cognitive_complexity(&self) -> CognitiveComplexity {
         match self {
-            DifferentialOperation::ConfidenceNot { .. } => CognitiveComplexity::Simple,
-            DifferentialOperation::ConfidenceFromPercent { .. } => CognitiveComplexity::Simple,
-            DifferentialOperation::ConfidenceAnd { .. }
-            | DifferentialOperation::ConfidenceOr { .. } => CognitiveComplexity::Moderate,
-            DifferentialOperation::ConfidenceFromSuccesses { .. } => CognitiveComplexity::Moderate,
-            DifferentialOperation::ConfidenceCalibration { .. } => CognitiveComplexity::Complex,
-            DifferentialOperation::ConfidenceCombineWeighted { .. } => CognitiveComplexity::Complex,
-            DifferentialOperation::MemoryStore { .. }
-            | DifferentialOperation::MemoryRecall { .. } => CognitiveComplexity::Moderate,
-            DifferentialOperation::GraphSpreadingActivation { .. } => CognitiveComplexity::Complex,
+            Self::ConfidenceNot { .. } => CognitiveComplexity::Simple,
+            Self::ConfidenceFromPercent { .. } => CognitiveComplexity::Simple,
+            Self::ConfidenceAnd { .. } | Self::ConfidenceOr { .. } => CognitiveComplexity::Moderate,
+            Self::ConfidenceFromSuccesses { .. } => CognitiveComplexity::Moderate,
+            Self::ConfidenceCalibration { .. } => CognitiveComplexity::Complex,
+            Self::ConfidenceCombineWeighted { .. } => CognitiveComplexity::Complex,
+            Self::MemoryStore { .. } | Self::MemoryRecall { .. } => CognitiveComplexity::Moderate,
+            Self::GraphSpreadingActivation { .. } => CognitiveComplexity::Complex,
         }
     }
 
     /// Simplify the operation for bisection (reduce input complexity)
+    #[must_use]
     pub fn simplify(&self) -> Option<Self> {
         match self {
-            DifferentialOperation::ConfidenceCombineWeighted { conf_a, conf_b, .. } => {
+            Self::ConfidenceCombineWeighted { conf_a, conf_b, .. } => {
                 // Simplify to equal weights
-                Some(DifferentialOperation::ConfidenceCombineWeighted {
+                Some(Self::ConfidenceCombineWeighted {
                     conf_a: *conf_a,
                     conf_b: *conf_b,
                     weight_a: 1.0,
                     weight_b: 1.0,
                 })
             }
-            DifferentialOperation::ConfidenceFromSuccesses { successes, total } => {
+            Self::ConfidenceFromSuccesses { successes, total } => {
                 if *total > 10 {
                     // Simplify to smaller numbers
-                    let ratio = *successes as f64 / *total as f64;
+                    let ratio = f64::from(*successes) / f64::from(*total);
                     let new_total = 10u32;
-                    let new_successes = (ratio * new_total as f64).round() as u32;
-                    Some(DifferentialOperation::ConfidenceFromSuccesses {
+                    let new_successes = (ratio * f64::from(new_total)).round() as u32;
+                    Some(Self::ConfidenceFromSuccesses {
                         successes: new_successes,
                         total: new_total,
                     })
@@ -321,9 +319,9 @@ pub enum CognitiveComplexity {
 impl fmt::Display for CognitiveComplexity {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            CognitiveComplexity::Simple => write!(f, "Simple"),
-            CognitiveComplexity::Moderate => write!(f, "Moderate"),
-            CognitiveComplexity::Complex => write!(f, "Complex"),
+            Self::Simple => write!(f, "Simple"),
+            Self::Moderate => write!(f, "Moderate"),
+            Self::Complex => write!(f, "Complex"),
         }
     }
 }

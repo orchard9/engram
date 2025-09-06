@@ -31,19 +31,20 @@ pub struct Confidence(#[serde(deserialize_with = "validate_confidence")] f32);
 impl Confidence {
     // Qualitative categories for natural reasoning
     /// High confidence (0.9) - matches "I'm quite sure" intuition
-    pub const HIGH: Self = Confidence(0.9);
+    pub const HIGH: Self = Self(0.9);
     /// Medium confidence (0.5) - matches "maybe" or "unsure" intuition  
-    pub const MEDIUM: Self = Confidence(0.5);
+    pub const MEDIUM: Self = Self(0.5);
     /// Low confidence (0.1) - matches "probably not" or "unlikely" intuition
-    pub const LOW: Self = Confidence(0.1);
+    pub const LOW: Self = Self(0.1);
     /// Maximum confidence (1.0) - complete certainty
-    pub const CERTAIN: Self = Confidence(1.0);
+    pub const CERTAIN: Self = Self(1.0);
     /// Minimum confidence (0.0) - complete uncertainty/impossibility
-    pub const NONE: Self = Confidence(0.0);
+    pub const NONE: Self = Self(0.0);
 
     /// Creates exact confidence value with automatic clamping to [0,1]
     ///
     /// This is the primary constructor that ensures range invariants.
+    #[must_use]
     pub const fn exact(value: f32) -> Self {
         // Const-compatible clamping
         let clamped = if value < 0.0 {
@@ -53,13 +54,14 @@ impl Confidence {
         } else {
             value
         };
-        Confidence(clamped)
+        Self(clamped)
     }
 
     /// Frequency-based constructor matching human intuition: "3 out of 10 times"
     ///
     /// Humans understand frequencies better than decimals (Gigerenzer & Hoffrage 1995).
     /// This prevents common probability estimation errors.
+    #[must_use]
     pub const fn from_successes(successes: u32, total: u32) -> Self {
         if total == 0 {
             return Self::NONE;
@@ -69,12 +71,14 @@ impl Confidence {
     }
 
     /// Creates confidence from percentage (0-100) with natural language feel
+    #[must_use]
     pub const fn from_percent(percent: u8) -> Self {
         let decimal = (percent as f32).min(100.0) / 100.0;
         Self::exact(decimal)
     }
 
     /// Extract raw f32 value - use sparingly, prefer cognitive methods
+    #[must_use]
     pub const fn raw(self) -> f32 {
         self.0
     }
@@ -83,26 +87,31 @@ impl Confidence {
 
     /// Fast cognitive check: "Does this seem high confidence?"
     /// Matches natural "seems legitimate" thinking pattern
+    #[must_use]
     pub const fn is_high(self) -> bool {
         self.0 >= 0.7
     }
 
     /// Fast cognitive check: "Does this seem low confidence?"
+    #[must_use]
     pub const fn is_low(self) -> bool {
         self.0 <= 0.3
     }
 
     /// Fast cognitive check: "Does this seem like medium confidence?"
+    #[must_use]
     pub const fn is_medium(self) -> bool {
         self.0 > 0.3 && self.0 < 0.7
     }
 
     /// Natural language: "seems legitimate" - matches cognitive pattern recognition
+    #[must_use]
     pub const fn seems_legitimate(self) -> bool {
         self.0 >= 0.6
     }
 
     /// Natural language: "seems questionable" - matches skepticism threshold  
+    #[must_use]
     pub const fn seems_questionable(self) -> bool {
         self.0 <= 0.4
     }
@@ -113,27 +122,31 @@ impl Confidence {
     ///
     /// Ensures P(A ∧ B) ≤ min(P(A), P(B)) to prevent the conjunction fallacy
     /// where people incorrectly estimate P(A ∧ B) > P(A).
+    #[must_use]
     pub const fn and(self, other: Self) -> Self {
         let result = self.0 * other.0;
-        Confidence(result)
+        Self(result)
     }
 
     /// Logical OR with proper probability combination
     ///
     /// Uses P(A ∨ B) = P(A) + P(B) - P(A ∧ B) to prevent overconfidence
+    #[must_use]
     pub const fn or(self, other: Self) -> Self {
         let combined = self.0 + other.0 - (self.0 * other.0);
         Self::exact(combined)
     }
 
     /// Negation: 1 - p, for "not confident" reasoning
+    #[must_use]
     pub const fn not(self) -> Self {
-        Confidence(1.0 - self.0)
+        Self(1.0 - self.0)
     }
 
     /// Weighted combination with explicit reasoning about source reliability
     ///
     /// Helps prevent base rate neglect by making weights explicit
+    #[must_use]
     pub const fn combine_weighted(self, other: Self, self_weight: f32, other_weight: f32) -> Self {
         let total_weight = self_weight + other_weight;
         if total_weight == 0.0 {
@@ -149,6 +162,7 @@ impl Confidence {
     ///
     /// Research shows people are systematically overconfident. This applies
     /// empirically-derived correction factors.
+    #[must_use]
     pub const fn calibrate_overconfidence(self) -> Self {
         // Conservative correction based on psychological research
         let corrected = if self.0 > 0.8 {
@@ -164,6 +178,7 @@ impl Confidence {
     /// Updates confidence with base rate information to prevent base rate neglect
     ///
     /// Uses Bayesian updating: P(A|B) ∝ P(B|A) * P(A)
+    #[must_use]
     pub const fn update_with_base_rate(self, base_rate: Self) -> Self {
         // Simplified Bayesian update assuming this confidence is P(evidence|hypothesis)
         let posterior = (self.0 * base_rate.0)
@@ -178,10 +193,9 @@ where
     D: serde::Deserializer<'de>,
 {
     let value = f32::deserialize(deserializer)?;
-    if value < 0.0 || value > 1.0 {
+    if !(0.0..=1.0).contains(&value) {
         return Err(serde::de::Error::custom(format!(
-            "Confidence value {} is outside valid range [0,1]",
-            value
+            "Confidence value {value} is outside valid range [0,1]"
         )));
     }
     Ok(value)
@@ -228,6 +242,7 @@ pub struct MemoryNode<State = Active> {
 
 impl MemoryNode<Unvalidated> {
     /// Creates a new unvalidated memory node
+    #[must_use]
     pub fn new_unvalidated(id: String, content: Vec<u8>) -> Self {
         Self {
             id,
@@ -270,6 +285,7 @@ impl MemoryNode<Unvalidated> {
 
 impl MemoryNode<Validated> {
     /// Activates the memory node, transitioning to Active state
+    #[must_use]
     pub fn activate(self) -> MemoryNode<Active> {
         MemoryNode {
             id: self.id,
@@ -286,6 +302,7 @@ impl MemoryNode<Validated> {
 
 impl MemoryNode<Active> {
     /// Consolidates the memory node, transitioning to Consolidated state
+    #[must_use]
     pub fn consolidate(self) -> MemoryNode<Consolidated> {
         MemoryNode {
             id: self.id,
@@ -303,6 +320,7 @@ impl MemoryNode<Active> {
 // For backwards compatibility, default to Active state
 impl MemoryNode {
     /// Creates a new active memory node (backwards compatible)
+    #[must_use]
     pub fn new(id: String, content: Vec<u8>) -> Self {
         Self {
             id,
@@ -480,7 +498,7 @@ mod tests {
 
         // Test OR operation
         let or_result = conf_a.or(conf_b);
-        let expected_or = 0.8 + 0.6 - (0.8 * 0.6); // P(A) + P(B) - P(A ∧ B)
+        let expected_or = 0.8f32.mul_add(-0.6, 0.8 + 0.6); // P(A) + P(B) - P(A ∧ B)
         assert!((or_result.raw() - expected_or).abs() < 0.001);
 
         // Test negation
@@ -499,7 +517,7 @@ mod tests {
 
         // Higher weight to first confidence
         let weighted = conf_a.combine_weighted(conf_b, 3.0, 1.0);
-        let expected = (0.9 * 3.0 + 0.3 * 1.0) / 4.0; // 0.75
+        let expected = 0.9f32.mul_add(3.0, 0.3 * 1.0) / 4.0; // 0.75
         assert!((weighted.raw() - expected).abs() < 0.001);
 
         // Zero weights should return MEDIUM
@@ -539,7 +557,7 @@ mod tests {
         assert!(updated.raw() > base_rate.raw()); // But higher than base rate
 
         // Manual calculation for verification
-        let expected = (0.8 * 0.1) / ((0.8 * 0.1) + ((1.0 - 0.8) * (1.0 - 0.1)));
+        let expected = (0.8 * 0.1) / 0.8f32.mul_add(0.1, (1.0 - 0.8) * (1.0 - 0.1));
         assert!((updated.raw() - expected).abs() < 0.001);
     }
 

@@ -79,6 +79,7 @@ mod embedding_serde {
 
 impl Memory {
     /// Creates a new memory with given parameters
+    #[must_use]
     pub fn new(id: String, embedding: [f32; 768], confidence: Confidence) -> Self {
         let now = Utc::now();
         Self {
@@ -114,12 +115,12 @@ impl Memory {
 
     /// Cognitive confidence methods using System 1 thinking patterns
     /// Natural confidence check: "Does this memory seem reliable?"
-    pub fn seems_reliable(&self) -> bool {
+    pub const fn seems_reliable(&self) -> bool {
         self.confidence.seems_legitimate()
     }
 
     /// Natural confidence check: "Is this memory accurate?"
-    pub fn is_accurate(&self) -> bool {
+    pub const fn is_accurate(&self) -> bool {
         self.confidence.is_high()
     }
 
@@ -132,7 +133,7 @@ impl Memory {
     pub fn apply_forgetting_decay(&mut self, time_elapsed_hours: f64) {
         // Ebbinghaus forgetting curve: R = e^(-t/S)
         // where R is retention, t is time, S is memory strength
-        let strength = 1.0 / self.decay_rate as f64;
+        let strength = 1.0 / f64::from(self.decay_rate);
         let retention_factor = (-time_elapsed_hours / strength).exp();
 
         let current_confidence = self.confidence.raw();
@@ -142,12 +143,12 @@ impl Memory {
     }
 
     /// Update confidence using base rate information (prevents base rate neglect)
-    pub fn update_confidence_with_base_rate(&mut self, base_rate: Confidence) {
+    pub const fn update_confidence_with_base_rate(&mut self, base_rate: Confidence) {
         self.confidence = self.confidence.update_with_base_rate(base_rate);
     }
 
     /// Apply overconfidence calibration
-    pub fn calibrate_confidence(&mut self) {
+    pub const fn calibrate_confidence(&mut self) {
         self.confidence = self.confidence.calibrate_overconfidence();
     }
 }
@@ -214,6 +215,7 @@ pub struct Episode {
 
 impl Episode {
     /// Creates a new episode
+    #[must_use]
     pub fn new(
         id: String,
         when: DateTime<Utc>,
@@ -239,17 +241,20 @@ impl Episode {
 
     /// Cognitive confidence methods for episodes
     /// "Is this episode vivid and detailed?"
-    pub fn is_vivid(&self) -> bool {
+    #[must_use]
+    pub const fn is_vivid(&self) -> bool {
         self.vividness_confidence.is_high()
     }
 
     /// "Can I trust the details of this episode?"
-    pub fn is_detailed(&self) -> bool {
+    #[must_use]
+    pub const fn is_detailed(&self) -> bool {
         self.encoding_confidence.seems_legitimate()
     }
 
     /// "Does this episode feel real and accurate?"
-    pub fn feels_authentic(&self) -> bool {
+    #[must_use]
+    pub const fn feels_authentic(&self) -> bool {
         self.reliability_confidence.is_high() && self.encoding_confidence.seems_legitimate()
     }
 
@@ -269,7 +274,7 @@ impl Episode {
 
     /// Apply forgetting to all episode confidence measures
     pub fn apply_episode_forgetting(&mut self, time_elapsed_hours: f64) {
-        let strength = 1.0 / self.decay_rate as f64;
+        let strength = 1.0 / f64::from(self.decay_rate);
         let retention_factor = (-time_elapsed_hours / strength).exp() as f32;
 
         // Different confidence types decay at different rates
@@ -347,7 +352,8 @@ pub struct Cue {
 
 impl Cue {
     /// Creates a new embedding-based cue
-    pub fn embedding(id: String, vector: [f32; 768], threshold: Confidence) -> Self {
+    #[must_use]
+    pub const fn embedding(id: String, vector: [f32; 768], threshold: Confidence) -> Self {
         Self {
             id,
             cue_type: CueType::Embedding { vector, threshold },
@@ -358,7 +364,8 @@ impl Cue {
     }
 
     /// Creates a context-based cue
-    pub fn context(
+    #[must_use]
+    pub const fn context(
         id: String,
         time_range: Option<(DateTime<Utc>, DateTime<Utc>)>,
         location: Option<String>,
@@ -378,7 +385,8 @@ impl Cue {
     }
 
     /// Creates a semantic content cue
-    pub fn semantic(id: String, content: String, fuzzy_threshold: Confidence) -> Self {
+    #[must_use]
+    pub const fn semantic(id: String, content: String, fuzzy_threshold: Confidence) -> Self {
         Self {
             id,
             cue_type: CueType::Semantic {
@@ -393,17 +401,20 @@ impl Cue {
 
     /// Cognitive confidence methods for cues
     /// "Is this cue likely to return good results?"
-    pub fn seems_effective(&self) -> bool {
+    #[must_use]
+    pub const fn seems_effective(&self) -> bool {
         self.cue_confidence.seems_legitimate()
     }
 
     /// "Should I trust results from this cue?"
-    pub fn is_reliable(&self) -> bool {
+    #[must_use]
+    pub const fn is_reliable(&self) -> bool {
         self.cue_confidence.is_high()
     }
 
     /// Adjust result threshold based on cue confidence
-    pub fn adaptive_threshold(&self) -> Confidence {
+    #[must_use]
+    pub const fn adaptive_threshold(&self) -> Confidence {
         self.result_threshold.combine_weighted(
             self.cue_confidence,
             0.7, // Weight original threshold more
@@ -436,9 +447,16 @@ pub struct MemoryBuilder<State> {
     _state: PhantomData<State>,
 }
 
+impl Default for MemoryBuilder<memory_builder_states::NoId> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MemoryBuilder<memory_builder_states::NoId> {
     /// Start building a new memory
-    pub fn new() -> Self {
+    #[must_use]
+    pub const fn new() -> Self {
         Self {
             id: None,
             embedding: None,
@@ -452,6 +470,7 @@ impl MemoryBuilder<memory_builder_states::NoId> {
 
 impl<State> MemoryBuilder<State> {
     /// Set the memory ID
+    #[must_use]
     pub fn id(self, id: String) -> MemoryBuilder<memory_builder_states::NoEmbedding> {
         MemoryBuilder {
             id: Some(id),
@@ -466,6 +485,7 @@ impl<State> MemoryBuilder<State> {
 
 impl MemoryBuilder<memory_builder_states::NoEmbedding> {
     /// Set the embedding
+    #[must_use]
     pub fn embedding(
         self,
         embedding: [f32; 768],
@@ -483,6 +503,7 @@ impl MemoryBuilder<memory_builder_states::NoEmbedding> {
 
 impl MemoryBuilder<memory_builder_states::NoConfidence> {
     /// Set the confidence
+    #[must_use]
     pub fn confidence(self, confidence: Confidence) -> MemoryBuilder<memory_builder_states::Ready> {
         MemoryBuilder {
             id: self.id,
@@ -497,18 +518,21 @@ impl MemoryBuilder<memory_builder_states::NoConfidence> {
 
 impl MemoryBuilder<memory_builder_states::Ready> {
     /// Set optional content
+    #[must_use]
     pub fn content(mut self, content: String) -> Self {
         self.content = Some(content);
         self
     }
 
     /// Set decay rate
-    pub fn decay_rate(mut self, rate: f32) -> Self {
+    #[must_use]
+    pub const fn decay_rate(mut self, rate: f32) -> Self {
         self.decay_rate = rate.clamp(0.001, 1.0);
         self
     }
 
     /// Build the memory
+    #[must_use]
     pub fn build(self) -> Memory {
         let mut memory = Memory::new(
             self.id.unwrap(),
@@ -550,9 +574,16 @@ pub struct EpisodeBuilder<State> {
     _state: PhantomData<State>,
 }
 
+impl Default for EpisodeBuilder<episode_builder_states::NoId> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl EpisodeBuilder<episode_builder_states::NoId> {
     /// Start building a new episode
-    pub fn new() -> Self {
+    #[must_use]
+    pub const fn new() -> Self {
         Self {
             id: None,
             when: None,
@@ -569,6 +600,7 @@ impl EpisodeBuilder<episode_builder_states::NoId> {
 
 impl<State> EpisodeBuilder<State> {
     /// Set the episode ID
+    #[must_use]
     pub fn id(self, id: String) -> EpisodeBuilder<episode_builder_states::NoWhen> {
         EpisodeBuilder {
             id: Some(id),
@@ -586,6 +618,7 @@ impl<State> EpisodeBuilder<State> {
 
 impl EpisodeBuilder<episode_builder_states::NoWhen> {
     /// Set when the episode occurred
+    #[must_use]
     pub fn when(self, when: DateTime<Utc>) -> EpisodeBuilder<episode_builder_states::NoWhat> {
         EpisodeBuilder {
             id: self.id,
@@ -603,6 +636,7 @@ impl EpisodeBuilder<episode_builder_states::NoWhen> {
 
 impl EpisodeBuilder<episode_builder_states::NoWhat> {
     /// Set what happened
+    #[must_use]
     pub fn what(self, what: String) -> EpisodeBuilder<episode_builder_states::NoEmbedding> {
         EpisodeBuilder {
             id: self.id,
@@ -620,6 +654,7 @@ impl EpisodeBuilder<episode_builder_states::NoWhat> {
 
 impl EpisodeBuilder<episode_builder_states::NoEmbedding> {
     /// Set embedding
+    #[must_use]
     pub fn embedding(
         self,
         embedding: [f32; 768],
@@ -640,6 +675,7 @@ impl EpisodeBuilder<episode_builder_states::NoEmbedding> {
 
 impl EpisodeBuilder<episode_builder_states::NoConfidence> {
     /// Set encoding confidence
+    #[must_use]
     pub fn confidence(
         self,
         confidence: Confidence,
@@ -660,24 +696,28 @@ impl EpisodeBuilder<episode_builder_states::NoConfidence> {
 
 impl EpisodeBuilder<episode_builder_states::Ready> {
     /// Set location
+    #[must_use]
     pub fn where_location(mut self, location: String) -> Self {
         self.where_location = Some(location);
         self
     }
 
     /// Set participants
+    #[must_use]
     pub fn who(mut self, participants: Vec<String>) -> Self {
         self.who = Some(participants);
         self
     }
 
     /// Set decay rate
-    pub fn decay_rate(mut self, rate: f32) -> Self {
+    #[must_use]
+    pub const fn decay_rate(mut self, rate: f32) -> Self {
         self.decay_rate = rate.clamp(0.001, 1.0);
         self
     }
 
     /// Build the episode
+    #[must_use]
     pub fn build(self) -> Episode {
         let mut episode = Episode::new(
             self.id.unwrap(),
@@ -717,14 +757,21 @@ pub struct CueBuilder<State> {
     _state: PhantomData<State>,
 }
 
+impl Default for CueBuilder<cue_builder_states::NoId> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CueBuilder<cue_builder_states::NoId> {
     /// Start building a new cue
     ///
     /// # Cognitive Design
-    /// Beginning with NoId state guides developers through the natural
+    /// Beginning with `NoId` state guides developers through the natural
     /// construction sequence, preventing the common error of forgetting
     /// to set essential identifying information.
-    pub fn new() -> Self {
+    #[must_use]
+    pub const fn new() -> Self {
         Self {
             id: None,
             cue_type: None,
@@ -742,6 +789,7 @@ impl<State> CueBuilder<State> {
     /// # Cognitive Design  
     /// The ID is required first as it establishes the identity of the cue,
     /// matching how humans naturally think about naming before detailing.
+    #[must_use]
     pub fn id(self, id: String) -> CueBuilder<cue_builder_states::NoCueType> {
         CueBuilder {
             id: Some(id),
@@ -760,6 +808,7 @@ impl CueBuilder<cue_builder_states::NoCueType> {
     /// # Cognitive Design
     /// Semantic embedding search is the most intuitive for developers,
     /// so it's provided as a simple method that transitions to Ready state.
+    #[must_use]
     pub fn embedding_search(
         self,
         vector: [f32; 768],
@@ -780,6 +829,7 @@ impl CueBuilder<cue_builder_states::NoCueType> {
     /// # Cognitive Design
     /// Context search is natural for temporal/spatial queries,
     /// allowing optional parameters to match common use patterns.
+    #[must_use]
     pub fn context_search(
         self,
         time_range: Option<(DateTime<Utc>, DateTime<Utc>)>,
@@ -805,6 +855,7 @@ impl CueBuilder<cue_builder_states::NoCueType> {
     /// # Cognitive Design
     /// Temporal patterns match how humans naturally think about
     /// time-based queries (before, after, between, recent).
+    #[must_use]
     pub fn temporal_search(
         self,
         pattern: TemporalPattern,
@@ -828,6 +879,7 @@ impl CueBuilder<cue_builder_states::NoCueType> {
     /// # Cognitive Design
     /// Text-based search is intuitive for developers familiar with
     /// traditional search interfaces, with fuzzy matching support.
+    #[must_use]
     pub fn semantic_search(
         self,
         content: String,
@@ -853,7 +905,8 @@ impl CueBuilder<cue_builder_states::Ready> {
     /// # Cognitive Design
     /// Cue confidence defaults to MEDIUM, which is cognitively reasonable.
     /// Explicit setting available for fine-tuning retrieval behavior.
-    pub fn cue_confidence(mut self, confidence: Confidence) -> Self {
+    #[must_use]
+    pub const fn cue_confidence(mut self, confidence: Confidence) -> Self {
         self.cue_confidence = confidence;
         self
     }
@@ -863,7 +916,8 @@ impl CueBuilder<cue_builder_states::Ready> {
     /// # Cognitive Design
     /// Result threshold defaults to LOW to be inclusive, but can be
     /// raised to improve precision at the cost of recall.
-    pub fn result_threshold(mut self, threshold: Confidence) -> Self {
+    #[must_use]
+    pub const fn result_threshold(mut self, threshold: Confidence) -> Self {
         self.result_threshold = threshold;
         self
     }
@@ -873,6 +927,7 @@ impl CueBuilder<cue_builder_states::Ready> {
     /// # Cognitive Design
     /// Defaults to 10 results, which fits working memory constraints
     /// (Miller's 7±2) while allowing reasonable result sets.
+    #[must_use]
     pub fn max_results(mut self, max: usize) -> Self {
         self.max_results = max.clamp(1, 1000); // Prevent unreasonable limits
         self
@@ -884,6 +939,7 @@ impl CueBuilder<cue_builder_states::Ready> {
     /// Build method only available in Ready state, preventing construction
     /// of incomplete cues at compile time. This eliminates a common source
     /// of runtime errors and builds procedural knowledge about correct usage.
+    #[must_use]
     pub fn build(self) -> Cue {
         Cue {
             id: self.id.unwrap(),             // Safe unwrap - guaranteed by typestate
@@ -1121,7 +1177,7 @@ mod tests {
         let pattern = TemporalPattern::Recent(chrono::Duration::hours(24));
         let cue = CueBuilder::new()
             .id("temporal_cue".to_string())
-            .temporal_search(pattern.clone(), Confidence::MEDIUM)
+            .temporal_search(pattern, Confidence::MEDIUM)
             .build();
 
         match cue.cue_type {

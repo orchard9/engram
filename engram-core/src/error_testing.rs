@@ -82,6 +82,7 @@ pub struct ProceduralLearningSimulator {
 }
 
 impl ProceduralLearningSimulator {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             resolution_times: HashMap::new(),
@@ -91,7 +92,8 @@ impl ProceduralLearningSimulator {
     }
 
     /// Simulate high cognitive load (tired developer at 3am)
-    pub fn with_high_cognitive_load(mut self) -> Self {
+    #[must_use]
+    pub const fn with_high_cognitive_load(mut self) -> Self {
         self.cognitive_load_factor = 3.0; // 3x longer processing under load
         self
     }
@@ -108,9 +110,8 @@ impl ProceduralLearningSimulator {
         let exposures = self
             .resolution_times
             .get(&family)
-            .map(|v| v.len())
-            .unwrap_or(0);
-        let learning_factor = 1.0 / (1.0 + exposures as f64 * 0.1);
+            .map_or(0, std::vec::Vec::len);
+        let learning_factor = 1.0 / (exposures as f64).mul_add(0.1, 1.0);
 
         // Apply cognitive load
         let actual_time = Duration::from_millis(
@@ -166,7 +167,7 @@ impl ProceduralLearningSimulator {
             rate += 0.15;
         }
 
-        if error.example.contains("unwrap_or") || error.example.contains("?") {
+        if error.example.contains("unwrap_or") || error.example.contains('?') {
             rate += 0.1; // Proper error handling in examples
         }
 
@@ -178,11 +179,13 @@ impl ProceduralLearningSimulator {
     }
 
     /// Get learning curve data for an error family
+    #[must_use]
     pub fn get_learning_curve(&self, family: &ErrorFamily) -> Option<Vec<Duration>> {
         self.resolution_times.get(family).cloned()
     }
 
     /// Check if learning is occurring (resolution times decreasing)
+    #[must_use]
     pub fn is_learning_occurring(&self, family: &ErrorFamily) -> bool {
         if let Some(times) = self.resolution_times.get(family) {
             if times.len() < 3 {
@@ -194,13 +197,13 @@ impl ProceduralLearningSimulator {
 
             let early_avg = times[0..first_third]
                 .iter()
-                .map(|d| d.as_millis())
+                .map(std::time::Duration::as_millis)
                 .sum::<u128>()
                 / first_third as u128;
 
             let late_avg = times[last_third..]
                 .iter()
-                .map(|d| d.as_millis())
+                .map(std::time::Duration::as_millis)
                 .sum::<u128>()
                 / (times.len() - last_third) as u128;
 
@@ -219,13 +222,15 @@ pub struct CognitiveLoadTester {
 }
 
 impl CognitiveLoadTester {
-    pub fn new() -> Self {
+    #[must_use]
+    pub const fn new() -> Self {
         Self {
             max_chunks_under_load: 3,
         }
     }
 
     /// Test if error message fits within cognitive load constraints
+    #[must_use]
     pub fn test_cognitive_load_compatibility(&self, error: &CognitiveError) -> CognitiveLoadResult {
         let mut result = CognitiveLoadResult::new();
 
@@ -246,7 +251,7 @@ impl CognitiveLoadTester {
     }
 
     /// Count discrete information chunks in the error
-    fn count_information_chunks(&self, error: &CognitiveError) -> usize {
+    const fn count_information_chunks(&self, error: &CognitiveError) -> usize {
         let mut chunks = 0;
 
         // Each main section is a chunk, but count more carefully
@@ -285,7 +290,7 @@ impl CognitiveLoadTester {
     }
 
     /// Test if error has clear visual hierarchy
-    fn test_visual_hierarchy(&self, error: &CognitiveError) -> bool {
+    const fn test_visual_hierarchy(&self, error: &CognitiveError) -> bool {
         // Summary should be shorter than details
         let summary_short = error.summary.len() < 100;
 
@@ -298,7 +303,8 @@ impl CognitiveLoadTester {
     /// Test if error is understandable without prior context
     fn test_context_independence(&self, error: &CognitiveError) -> bool {
         // Check if error defines its terms or gives clear context
-        let has_clear_context = error.context.expected.len() > 10 && error.context.actual.len() > 0;
+        let has_clear_context =
+            error.context.expected.len() > 10 && !error.context.actual.is_empty();
 
         // Check if suggestion is self-contained and actionable
         let self_contained_suggestion = error.suggestion.len() > 10
@@ -322,7 +328,7 @@ pub struct CognitiveLoadResult {
 }
 
 impl CognitiveLoadResult {
-    fn new() -> Self {
+    const fn new() -> Self {
         Self {
             chunk_count: 0,
             fits_cognitive_limits: false,
@@ -333,7 +339,8 @@ impl CognitiveLoadResult {
     }
 
     /// Overall pass/fail for cognitive load compatibility
-    pub fn passes_cognitive_load_test(&self) -> bool {
+    #[must_use]
+    pub const fn passes_cognitive_load_test(&self) -> bool {
         self.fits_cognitive_limits
             && self.system1_recognizable
             && self.has_clear_hierarchy
@@ -346,18 +353,21 @@ impl CognitiveLoadResult {
 pub struct ErrorPerformanceMonitor;
 
 impl ErrorPerformanceMonitor {
-    pub fn new() -> Self {
+    #[must_use]
+    pub const fn new() -> Self {
         Self
     }
 
     /// Test that error formatting completes within 1ms
+    #[must_use]
     pub fn test_formatting_performance(&self, error: &CognitiveError) -> Duration {
         let start = Instant::now();
-        let _formatted = format!("{}", error);
+        let _formatted = format!("{error}");
         start.elapsed()
     }
 
     /// Simulate comprehension time (heuristic based on content)
+    #[must_use]
     pub fn estimate_comprehension_time(
         &self,
         error: &CognitiveError,
@@ -373,7 +383,7 @@ impl ErrorPerformanceMonitor {
     }
 
     fn count_words(&self, error: &CognitiveError) -> u64 {
-        let text = format!("{}", error);
+        let text = format!("{error}");
         text.split_whitespace().count() as u64
     }
 }
@@ -388,6 +398,7 @@ pub struct CognitiveErrorTesting {
 }
 
 impl CognitiveErrorTesting {
+    #[must_use]
     pub fn new() -> Self {
         let mut pattern_registry = HashMap::new();
 
@@ -532,7 +543,7 @@ impl CognitiveErrorTesting {
                 || error.suggestion.contains("Check ")
                 || error.suggestion.contains("Try "));
 
-        let mentions_methods = error.suggestion.contains("()") || error.suggestion.contains(".");
+        let mentions_methods = error.suggestion.contains("()") || error.suggestion.contains('.');
         let is_executable = !error.suggestion.contains("TODO") && !error.suggestion.contains("...");
 
         (!format.is_actionable || is_actionable)
@@ -547,7 +558,7 @@ impl CognitiveErrorTesting {
     ) -> bool {
         let is_rust = error.example.contains("let ")
             || error.example.contains("();")
-            || error.example.contains("?")
+            || error.example.contains('?')
             || error.example.contains("unwrap");
 
         let solves_problem = error.example.len() > 10 && !error.example.contains("TODO");
@@ -561,17 +572,19 @@ impl CognitiveErrorTesting {
             && (!chars.uses_realistic_names || realistic_names)
     }
 
-    fn is_context_independent(&self, error: &CognitiveError) -> bool {
+    const fn is_context_independent(&self, error: &CognitiveError) -> bool {
         // Error should be understandable without external context
         error.context.expected.len() > 10 && error.suggestion.len() > 10
     }
 
     /// Get learning curve for error family
+    #[must_use]
     pub fn get_learning_curve(&self, family: &ErrorFamily) -> Option<Vec<Duration>> {
         self.memory_simulator.get_learning_curve(family)
     }
 
     /// Test if procedural learning is occurring
+    #[must_use]
     pub fn is_procedural_learning_occurring(&self, family: &ErrorFamily) -> bool {
         self.memory_simulator.is_learning_occurring(family)
     }
@@ -587,7 +600,7 @@ pub struct PatternConsistencyResult {
 }
 
 impl PatternConsistencyResult {
-    fn new() -> Self {
+    const fn new() -> Self {
         Self {
             summary_matches: false,
             context_structure_valid: false,
@@ -596,7 +609,8 @@ impl PatternConsistencyResult {
         }
     }
 
-    pub fn passes_pattern_consistency(&self) -> bool {
+    #[must_use]
+    pub const fn passes_pattern_consistency(&self) -> bool {
         self.summary_matches
             && self.context_structure_valid
             && self.suggestion_format_valid
@@ -615,7 +629,7 @@ pub struct ErrorTestResult {
 }
 
 impl ErrorTestResult {
-    fn new() -> Self {
+    const fn new() -> Self {
         Self {
             pattern_consistency: PatternConsistencyResult::new(),
             cognitive_load: CognitiveLoadResult::new(),
@@ -626,6 +640,7 @@ impl ErrorTestResult {
     }
 
     /// Overall pass/fail for all cognitive requirements
+    #[must_use]
     pub fn passes_all_requirements(&self) -> bool {
         self.pattern_consistency.passes_pattern_consistency()
             && self.cognitive_load.passes_cognitive_load_test()
@@ -634,6 +649,7 @@ impl ErrorTestResult {
     }
 
     /// Get a detailed report of test results
+    #[must_use]
     pub fn detailed_report(&self) -> String {
         format!(
             "Error Test Results:\n\

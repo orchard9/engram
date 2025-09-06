@@ -4,7 +4,10 @@
 //! understand implementation differences through visual and textual reports
 //! designed with cognitive ergonomics principles.
 
-use super::*;
+use super::{
+    Confidence, DifferentialOperation, Divergence, DivergenceSeverity, Implementation,
+    OperationResult, PerformanceComparison, PerformanceStats,
+};
 use std::collections::HashMap;
 use std::fmt;
 use std::io::Write;
@@ -115,10 +118,10 @@ pub enum InsightImpact {
 impl fmt::Display for InsightImpact {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            InsightImpact::Low => write!(f, "Low"),
-            InsightImpact::Medium => write!(f, "Medium"),
-            InsightImpact::High => write!(f, "High"),
-            InsightImpact::Critical => write!(f, "Critical"),
+            Self::Low => write!(f, "Low"),
+            Self::Medium => write!(f, "Medium"),
+            Self::High => write!(f, "High"),
+            Self::Critical => write!(f, "Critical"),
         }
     }
 }
@@ -138,6 +141,7 @@ pub struct DetailedTestResult {
 
 impl DifferentialTestReport {
     /// Create a new report from test results
+    #[must_use]
     pub fn new(
         implementations: Vec<Implementation>,
         reference: Implementation,
@@ -158,7 +162,7 @@ impl DifferentialTestReport {
 
         let summary = Self::build_summary(&results);
         let performance_analysis = Self::build_performance_analysis(&results, &implementations);
-        let divergences = Self::extract_divergences(results.clone());
+        let divergences = Self::extract_divergences(results);
         let insights = Self::generate_insights(&summary, &performance_analysis, &divergences);
 
         Self {
@@ -172,6 +176,7 @@ impl DifferentialTestReport {
     }
 
     /// Enable detailed results for debugging
+    #[must_use]
     pub fn with_detailed_results(mut self) -> Self {
         // Would populate detailed results from the test data
         self.detailed_results = Some(Vec::new());
@@ -179,6 +184,7 @@ impl DifferentialTestReport {
     }
 
     /// Generate a human-readable text report
+    #[must_use]
     pub fn to_text(&self) -> String {
         let mut report = String::new();
 
@@ -200,7 +206,7 @@ impl DifferentialTestReport {
             self.session_info
                 .implementations
                 .iter()
-                .map(|i| i.to_string())
+                .map(std::string::ToString::to_string)
                 .collect::<Vec<_>>()
                 .join(", ")
         ));
@@ -224,7 +230,7 @@ impl DifferentialTestReport {
         report.push_str(&format!(
             "❌ Divergent: {} ({:.1}%)\n\n",
             self.summary.divergent_operations,
-            100.0 - self.summary.equivalence_rate * 100.0
+            self.summary.equivalence_rate.mul_add(-100.0, 100.0)
         ));
 
         // Performance analysis
@@ -239,7 +245,7 @@ impl DifferentialTestReport {
                     stats.success_rate * 100.0
                 ));
             }
-            report.push_str("\n");
+            report.push('\n');
         }
 
         // Insights
@@ -267,7 +273,7 @@ impl DifferentialTestReport {
                     report.push_str(&format!("   Action: {}\n", insight.suggested_actions[0]));
                 }
             }
-            report.push_str("\n");
+            report.push('\n');
         }
 
         // Divergences (if any)
@@ -287,7 +293,7 @@ impl DifferentialTestReport {
                 if !divergence.investigation_steps.is_empty() {
                     report.push_str(&format!("   Next: {}\n", divergence.investigation_steps[0]));
                 }
-                report.push_str("\n");
+                report.push('\n');
             }
 
             if self.divergences.len() > 3 {
@@ -324,7 +330,7 @@ impl DifferentialTestReport {
             .iter()
             .take(3)
         {
-            report.push_str(&format!("• {}\n", suggestion));
+            report.push_str(&format!("• {suggestion}\n"));
         }
 
         report.push_str(
@@ -335,10 +341,11 @@ impl DifferentialTestReport {
     }
 
     /// Generate an HTML report with interactive elements
+    #[must_use]
     pub fn to_html(&self) -> String {
         let mut html = String::new();
 
-        html.push_str(r#"<!DOCTYPE html>
+        html.push_str(r"<!DOCTYPE html>
 <html>
 <head>
     <title>Differential Testing Report</title>
@@ -358,7 +365,7 @@ impl DifferentialTestReport {
         th { background-color: #f2f2f2; }
     </style>
 </head>
-<body>"#);
+<body>");
 
         // Header
         html.push_str(&format!(
@@ -375,7 +382,7 @@ impl DifferentialTestReport {
             self.session_info
                 .implementations
                 .iter()
-                .map(|i| i.to_string())
+                .map(std::string::ToString::to_string)
                 .collect::<Vec<_>>()
                 .join(", "),
             self.session_info.reference_implementation
@@ -466,7 +473,7 @@ impl DifferentialTestReport {
         let total_operations = results.len() as u32;
         let equivalent_operations = results.iter().filter(|(_, _, equiv)| *equiv).count() as u32;
         let divergent_operations = total_operations - equivalent_operations;
-        let equivalence_rate = equivalent_operations as f64 / total_operations as f64;
+        let equivalence_rate = f64::from(equivalent_operations) / f64::from(total_operations);
 
         let mut operation_distribution = HashMap::new();
         for (op, _, _) in results {
@@ -552,7 +559,7 @@ impl DifferentialTestReport {
                     mean_execution_time_nanos: mean_time,
                     std_dev_execution_time_nanos: std_dev,
                     peak_memory_bytes: None,
-                    success_rate: success_count as f64 / total_count as f64,
+                    success_rate: f64::from(success_count) / f64::from(total_count),
                 },
             );
         }
@@ -579,7 +586,9 @@ impl DifferentialTestReport {
         results
             .into_iter()
             .filter_map(|(op, impl_results, equiv)| {
-                if !equiv {
+                if equiv {
+                    None
+                } else {
                     Some(Divergence {
                         operation: op.clone(),
                         results: impl_results,
@@ -590,8 +599,6 @@ impl DifferentialTestReport {
                             "Run bisection analysis".to_string(),
                         ],
                     })
-                } else {
-                    None
                 }
             })
             .collect()
@@ -674,8 +681,7 @@ impl DifferentialTestReport {
             insights.push(Insight {
                 category: InsightCategory::Correctness,
                 description: format!(
-                    "{} high-severity divergences require immediate attention",
-                    high_severity_count
+                    "{high_severity_count} high-severity divergences require immediate attention"
                 ),
                 confidence: Confidence::CERTAIN,
                 impact: InsightImpact::Critical,

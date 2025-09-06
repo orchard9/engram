@@ -4,7 +4,10 @@
 //! understand and fix implementation divergences by automatically narrowing down
 //! the root cause through systematic exploration.
 
-use super::*;
+use super::{
+    CognitiveComplexity, DifferentialExecutor, DifferentialOperation, HashMap, Implementation,
+    OperationResult,
+};
 use crate::Confidence;
 use std::collections::VecDeque;
 use std::fmt;
@@ -77,7 +80,7 @@ impl Default for BisectionConfig {
             max_simplification_depth: 5,
             explore_boundaries: true,
             test_special_values: true,
-            epsilon: f32::EPSILON as f64,
+            epsilon: f64::from(f32::EPSILON),
         }
     }
 }
@@ -99,12 +102,13 @@ pub enum BisectionStrategy {
 
 impl BisectionSession {
     /// Create a new bisection session
+    #[must_use]
     pub fn new(
         operation: DifferentialOperation,
         results: HashMap<Implementation, OperationResult>,
     ) -> Self {
         let mut session = Self {
-            original_operation: operation.clone(),
+            original_operation: operation,
             original_results: results,
             test_queue: VecDeque::new(),
             bisection_results: Vec::new(),
@@ -117,7 +121,8 @@ impl BisectionSession {
     }
 
     /// Configure the bisection session
-    pub fn with_config(mut self, config: BisectionConfig) -> Self {
+    #[must_use]
+    pub const fn with_config(mut self, config: BisectionConfig) -> Self {
         self.config = config;
         self
     }
@@ -347,8 +352,7 @@ impl BisectionSession {
         {
             if max_time > min_time * 2 {
                 insights.push(format!(
-                    "Performance varies significantly ({}ns to {}ns)",
-                    min_time, max_time
+                    "Performance varies significantly ({min_time}ns to {max_time}ns)"
                 ));
             }
         }
@@ -426,17 +430,14 @@ impl BisectionSession {
         } else {
             // If equivalent, we might have narrowed down the issue
             // Generate slightly more complex variations
-            match operation {
-                DifferentialOperation::ConfidenceAnd { conf_a, conf_b } => {
-                    // Try with slightly different values
-                    let epsilon = 0.001;
-                    self.test_queue
-                        .push_back(DifferentialOperation::ConfidenceAnd {
-                            conf_a: conf_a + epsilon,
-                            conf_b: *conf_b,
-                        });
-                }
-                _ => {}
+            if let DifferentialOperation::ConfidenceAnd { conf_a, conf_b } = operation {
+                // Try with slightly different values
+                let epsilon = 0.001;
+                self.test_queue
+                    .push_back(DifferentialOperation::ConfidenceAnd {
+                        conf_a: conf_a + epsilon,
+                        conf_b: *conf_b,
+                    });
             }
         }
     }
@@ -595,7 +596,7 @@ impl fmt::Display for BisectionReport {
         if !self.identified_patterns.is_empty() {
             writeln!(f, "🔍 Identified Patterns:")?;
             for pattern in &self.identified_patterns {
-                writeln!(f, "  • {}", pattern)?;
+                writeln!(f, "  • {pattern}")?;
             }
             writeln!(f)?;
         }
@@ -612,7 +613,7 @@ impl fmt::Display for BisectionReport {
             if !hypothesis.supporting_evidence.is_empty() {
                 writeln!(f, "  Supporting Evidence:")?;
                 for evidence in &hypothesis.supporting_evidence {
-                    writeln!(f, "    + {}", evidence)?;
+                    writeln!(f, "    + {evidence}")?;
                 }
             }
             writeln!(f)?;
@@ -620,7 +621,7 @@ impl fmt::Display for BisectionReport {
 
         writeln!(f, "📋 Recommendations:")?;
         for recommendation in &self.recommendations {
-            writeln!(f, "  {}", recommendation)?;
+            writeln!(f, "  {recommendation}")?;
         }
 
         Ok(())

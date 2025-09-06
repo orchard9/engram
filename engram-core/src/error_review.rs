@@ -3,13 +3,11 @@
 //! This module implements automated scanning, validation, and quality review of error
 //! messages to ensure they follow cognitive principles and include actionable guidance.
 
-use crate::Confidence;
-use crate::error::{CognitiveError, ErrorContext};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::path::{Path, PathBuf};
-use syn::{Expr, ExprMacro, File, Macro, parse_file, visit::Visit};
+use std::path::Path;
+use syn::{ExprMacro, Macro, parse_file, visit::Visit};
 
 /// Error review configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -152,6 +150,7 @@ pub struct ErrorDefinition {
 
 impl ErrorReviewer {
     /// Create a new error reviewer
+    #[must_use]
     pub fn new(config: ErrorReviewConfig) -> Self {
         Self {
             config,
@@ -234,7 +233,7 @@ impl ErrorReviewer {
                 quality_issues.push(QualityIssue {
                     issue_type: IssueType::VagueSuggestion,
                     severity: Severity::Error,
-                    description: format!("Suggestion '{}' is too vague", suggestion),
+                    description: format!("Suggestion '{suggestion}' is too vague"),
                     suggested_fix: "Provide specific, actionable steps".to_string(),
                 });
             }
@@ -269,7 +268,7 @@ impl ErrorReviewer {
                 quality_issues.push(QualityIssue {
                     issue_type: IssueType::LowConfidence,
                     severity: Severity::Info,
-                    description: format!("Confidence {} is below threshold", confidence),
+                    description: format!("Confidence {confidence} is below threshold"),
                     suggested_fix: "Improve error detection to increase confidence".to_string(),
                 });
             }
@@ -281,10 +280,7 @@ impl ErrorReviewer {
             quality_issues.push(QualityIssue {
                 issue_type: IssueType::HighCognitiveLoad,
                 severity: Severity::Warning,
-                description: format!(
-                    "Cognitive load score {} exceeds maximum",
-                    cognitive_load_score
-                ),
+                description: format!("Cognitive load score {cognitive_load_score} exceeds maximum"),
                 suggested_fix: "Simplify error message structure".to_string(),
             });
         }
@@ -321,10 +317,20 @@ impl ErrorReviewer {
         if error_def.summary.len() > 80 {
             score += 2;
         }
-        if error_def.suggestion.as_ref().map_or(0, |s| s.len()) > 150 {
+        if error_def
+            .suggestion
+            .as_ref()
+            .map_or(0, std::string::String::len)
+            > 150
+        {
             score += 1;
         }
-        if error_def.example.as_ref().map_or(0, |e| e.len()) > 200 {
+        if error_def
+            .example
+            .as_ref()
+            .map_or(0, std::string::String::len)
+            > 200
+        {
             score += 1;
         }
 
@@ -439,7 +445,7 @@ impl ErrorReviewer {
 
             by_severity
                 .entry(max_severity)
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(result.clone());
         }
 
@@ -485,6 +491,7 @@ pub struct ErrorReviewReport {
 
 impl ErrorReviewReport {
     /// Generate markdown documentation
+    #[must_use]
     pub fn to_markdown(&self) -> String {
         let mut md = String::new();
 
@@ -504,7 +511,7 @@ impl ErrorReviewReport {
 
         md.push_str("## Common Issues\n\n");
         for (issue_type, count) in &self.common_issues {
-            md.push_str(&format!("- {:?}: {} occurrences\n", issue_type, count));
+            md.push_str(&format!("- {issue_type:?}: {count} occurrences\n"));
         }
 
         md.push_str("\n## Failed Errors\n\n");
@@ -530,7 +537,7 @@ impl ErrorReviewReport {
             if !result.improvement_suggestions.is_empty() {
                 md.push_str("\n**Suggestions**:\n");
                 for suggestion in &result.improvement_suggestions {
-                    md.push_str(&format!("- {}\n", suggestion));
+                    md.push_str(&format!("- {suggestion}\n"));
                 }
             }
 
@@ -541,6 +548,7 @@ impl ErrorReviewReport {
     }
 
     /// Generate HTML documentation
+    #[must_use]
     pub fn to_html(&self) -> String {
         format!(
             r#"<!DOCTYPE html>
@@ -618,7 +626,7 @@ struct ErrorVisitor {
 }
 
 impl ErrorVisitor {
-    fn new(file_path: String) -> Self {
+    const fn new(file_path: String) -> Self {
         Self {
             file_path,
             errors: Vec::new(),
@@ -731,8 +739,7 @@ mod tests {
         let high_load = reviewer.calculate_cognitive_load(&complex_error);
         assert!(
             high_load >= 6,
-            "Complex error should have high cognitive load, got: {}",
-            high_load
+            "Complex error should have high cognitive load, got: {high_load}"
         );
     }
 

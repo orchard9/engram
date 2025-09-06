@@ -13,6 +13,7 @@ pub struct MemoryGraph {
 
 impl MemoryGraph {
     /// Create a new empty memory graph.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             nodes: HashMap::new(),
@@ -25,16 +26,19 @@ impl MemoryGraph {
     }
 
     /// Retrieve a memory node by ID.
+    #[must_use]
     pub fn get(&self, id: &str) -> Option<&MemoryNode> {
         self.nodes.get(id)
     }
 
     /// Get the number of nodes in the graph.
+    #[must_use]
     pub fn len(&self) -> usize {
         self.nodes.len()
     }
 
     /// Check if the graph is empty.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.nodes.is_empty()
     }

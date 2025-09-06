@@ -140,6 +140,7 @@ impl CognitiveError {
     }
 
     /// Find similar strings from a list using edit distance
+    #[must_use]
     pub fn find_similar(target: &str, candidates: &[String], max_distance: usize) -> Vec<String> {
         let mut similar: Vec<(String, usize)> = candidates
             .iter()
@@ -176,16 +177,16 @@ impl fmt::Display for CognitiveError {
 
         // Level 3: Optional details for deep analysis
         if let Some(ref details) = self.details {
-            writeln!(f, "\n  Details: {}", details)?;
+            writeln!(f, "\n  Details: {details}")?;
         }
 
         if let Some(ref docs) = self.documentation {
-            writeln!(f, "  Documentation: {}", docs)?;
+            writeln!(f, "  Documentation: {docs}")?;
         }
 
         // Chain source errors if present
         if let Some(ref source) = self.source {
-            write!(f, "\n  Caused by: {}", source)?;
+            write!(f, "\n  Caused by: {source}")?;
         }
 
         Ok(())
@@ -250,6 +251,7 @@ pub struct CognitiveErrorBuilder {
 }
 
 impl CognitiveErrorBuilder {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             summary: None,
@@ -289,7 +291,7 @@ impl CognitiveErrorBuilder {
     }
 
     #[must_use]
-    pub fn confidence(mut self, confidence: Confidence) -> Self {
+    pub const fn confidence(mut self, confidence: Confidence) -> Self {
         self.confidence = Some(confidence);
         self
     }
@@ -319,6 +321,7 @@ impl CognitiveErrorBuilder {
     }
 
     /// Build the error, returning None if required fields are missing
+    #[must_use]
     pub fn build(self) -> Option<CognitiveError> {
         Some(CognitiveError {
             summary: self.summary?,
@@ -334,6 +337,7 @@ impl CognitiveErrorBuilder {
     }
 
     /// Build the error, panicking if required fields are missing (for use in macros)
+    #[must_use]
     pub fn build_or_panic(self) -> CognitiveError {
         CognitiveError {
             summary: self.summary.expect("CognitiveError requires summary"),
@@ -403,7 +407,7 @@ pub struct PartialResult<T> {
 }
 
 impl<T> PartialResult<T> {
-    pub fn new(value: T, confidence: Confidence) -> Self {
+    pub const fn new(value: T, confidence: Confidence) -> Self {
         Self {
             value,
             confidence,
@@ -455,7 +459,7 @@ mod tests {
             similar: ["user_123", "user_124"]
         );
 
-        let display = format!("{}", err);
+        let display = format!("{err}");
         assert!(display.contains("Node not found"));
         assert!(display.contains("confidence: 0.9"));
         assert!(display.contains("Expected: Valid node ID"));
@@ -695,16 +699,14 @@ mod tests {
         let formatting_time = monitor.test_formatting_performance(&error);
         assert!(
             formatting_time < Duration::from_millis(1),
-            "Error formatting took {:?}, should be <1ms",
-            formatting_time
+            "Error formatting took {formatting_time:?}, should be <1ms"
         );
 
         // Test comprehension time estimation
         let comprehension_time = monitor.estimate_comprehension_time(&error, 1.0);
         assert!(
             comprehension_time < Duration::from_millis(30000),
-            "Error comprehension estimated at {:?}, should be <30s",
-            comprehension_time
+            "Error comprehension estimated at {comprehension_time:?}, should be <30s"
         );
 
         // Test under high cognitive load
@@ -865,7 +867,7 @@ mod proptests {
             let error_with_similar = cognitive_error!(
                 summary: format!("Memory node '{}' not found", node_id),
                 context: expected = "Valid node ID from current graph",
-                         actual = node_id.clone(),
+                         actual = node_id,
                 suggestion: "Use graph.nodes() to list available nodes",
                 example: "let node = graph.get_node(\"user_123\").unwrap();",
                 confidence: Confidence::HIGH,

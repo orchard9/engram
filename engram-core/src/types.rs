@@ -9,8 +9,8 @@ use thiserror::Error;
 
 /// Core error types for the engram system (legacy compatibility)
 ///
-/// This enum provides backward compatibility while internally using CognitiveError.
-/// New code should use CognitiveError directly for richer error context.
+/// This enum provides backward compatibility while internally using `CognitiveError`.
+/// New code should use `CognitiveError` directly for richer error context.
 #[derive(Error, Debug)]
 pub enum CoreError {
     #[error(
@@ -70,7 +70,7 @@ pub enum CoreError {
 }
 
 impl CoreError {
-    /// Convert to a CognitiveError with full context
+    /// Convert to a `CognitiveError` with full context
     pub fn to_cognitive(&self) -> CognitiveError {
         match self {
             Self::NodeNotFound { id, similar } => {
@@ -169,7 +169,7 @@ impl CoreError {
         }
     }
 
-    /// Helper to create NodeNotFound with similar suggestions
+    /// Helper to create `NodeNotFound` with similar suggestions
     pub fn node_not_found(id: impl Into<String>, similar: Vec<String>) -> Self {
         let id = id.into();
         let similar = if similar.is_empty() {
@@ -180,7 +180,7 @@ impl CoreError {
         Self::NodeNotFound { id, similar }
     }
 
-    /// Helper to create IoError with full context
+    /// Helper to create `IoError` with full context
     pub fn io_error(
         source: std::io::Error,
         context: impl Into<String>,
@@ -201,22 +201,22 @@ impl CoreError {
 /// Result type alias for core operations
 pub type Result<T> = std::result::Result<T, CoreError>;
 
-/// Convert CoreError to CognitiveError for richer error context
+/// Convert `CoreError` to `CognitiveError` for richer error context
 impl From<CoreError> for CognitiveError {
     fn from(err: CoreError) -> Self {
         err.to_cognitive()
     }
 }
 
-/// Convert CognitiveError to CoreError for backward compatibility
+/// Convert `CognitiveError` to `CoreError` for backward compatibility
 impl From<CognitiveError> for CoreError {
     fn from(err: CognitiveError) -> Self {
         // Create a generic validation error that preserves the cognitive error information
-        CoreError::ValidationError {
+        Self::ValidationError {
             reason: err.summary.clone(),
             expected: err.context.expected.clone(),
             suggestion: err.suggestion.clone(),
-            example: err.example.clone(),
+            example: err.example,
         }
     }
 }
