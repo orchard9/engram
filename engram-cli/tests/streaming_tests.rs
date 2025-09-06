@@ -51,6 +51,7 @@ async fn test_stream_activities_basic() {
 
     // Should have SSE headers
     assert!(response.headers().contains_key("cache-control"));
+    drop(response);
 }
 
 #[tokio::test]
@@ -67,6 +68,7 @@ async fn test_stream_activities_with_filters() {
         response.headers().get("content-type").unwrap(),
         "text/event-stream"
     );
+    drop(response);
 }
 
 #[tokio::test]
@@ -80,6 +82,7 @@ async fn test_stream_activities_with_session() {
     .await;
 
     assert_eq!(response.status(), StatusCode::OK);
+    drop(response);
 }
 
 #[tokio::test]
@@ -93,6 +96,7 @@ async fn test_stream_memories_basic() {
         response.headers().get("content-type").unwrap(),
         "text/event-stream"
     );
+    drop(response);
 }
 
 #[tokio::test]
@@ -105,6 +109,7 @@ async fn test_stream_memories_with_filters() {
     ).await;
 
     assert_eq!(response.status(), StatusCode::OK);
+    drop(response);
 }
 
 #[tokio::test]
@@ -118,6 +123,7 @@ async fn test_stream_consolidation_basic() {
         response.headers().get("content-type").unwrap(),
         "text/event-stream"
     );
+    drop(response);
 }
 
 #[tokio::test]
@@ -130,6 +136,7 @@ async fn test_stream_consolidation_with_filters() {
     ).await;
 
     assert_eq!(response.status(), StatusCode::OK);
+    drop(response);
 }
 
 #[tokio::test]
@@ -144,6 +151,7 @@ async fn test_stream_cognitive_constraints() {
     .await;
 
     assert_eq!(response.status(), StatusCode::OK);
+    drop(response);
 
     // Test importance threshold bounds
     let response = make_streaming_request(
@@ -153,6 +161,7 @@ async fn test_stream_cognitive_constraints() {
     .await;
 
     assert_eq!(response.status(), StatusCode::OK);
+    drop(response);
 
     let response = make_streaming_request(
         &app,
@@ -161,6 +170,7 @@ async fn test_stream_cognitive_constraints() {
     .await;
 
     assert_eq!(response.status(), StatusCode::OK);
+    drop(response);
 }
 
 #[tokio::test]
@@ -175,6 +185,7 @@ async fn test_stream_confidence_bounds() {
     .await;
 
     assert_eq!(response.status(), StatusCode::OK);
+    drop(response);
 
     let response = make_streaming_request(
         &app,
@@ -183,6 +194,7 @@ async fn test_stream_confidence_bounds() {
     .await;
 
     assert_eq!(response.status(), StatusCode::OK);
+    drop(response);
 }
 
 #[tokio::test]
@@ -197,6 +209,7 @@ async fn test_stream_novelty_bounds() {
     .await;
 
     assert_eq!(response.status(), StatusCode::OK);
+    drop(response);
 
     let response = make_streaming_request(
         &app,
@@ -205,6 +218,7 @@ async fn test_stream_novelty_bounds() {
     .await;
 
     assert_eq!(response.status(), StatusCode::OK);
+    drop(response);
 }
 
 #[tokio::test]
@@ -216,6 +230,7 @@ async fn test_stream_event_type_parsing() {
         make_streaming_request(&app, "/api/v1/stream/activities?event_types=activation").await;
 
     assert_eq!(response.status(), StatusCode::OK);
+    drop(response);
 
     // Test multiple event types
     let response = make_streaming_request(
@@ -225,6 +240,7 @@ async fn test_stream_event_type_parsing() {
     .await;
 
     assert_eq!(response.status(), StatusCode::OK);
+    drop(response);
 
     // Test with spaces (should be trimmed) - URL encode the spaces
     let response = make_streaming_request(
@@ -234,6 +250,7 @@ async fn test_stream_event_type_parsing() {
     .await;
 
     assert_eq!(response.status(), StatusCode::OK);
+    drop(response);
 }
 
 #[tokio::test]
@@ -245,6 +262,7 @@ async fn test_stream_memory_type_parsing() {
         make_streaming_request(&app, "/api/v1/stream/memories?memory_types=semantic").await;
 
     assert_eq!(response.status(), StatusCode::OK);
+    drop(response);
 
     // Test multiple memory types
     let response = make_streaming_request(
@@ -254,6 +272,7 @@ async fn test_stream_memory_type_parsing() {
     .await;
 
     assert_eq!(response.status(), StatusCode::OK);
+    drop(response);
 }
 
 #[tokio::test]
@@ -264,6 +283,7 @@ async fn test_stream_session_id_generation() {
     let response = make_streaming_request(&app, "/api/v1/stream/activities").await;
 
     assert_eq!(response.status(), StatusCode::OK);
+    drop(response);
 
     // With session_id - should use provided one
     let response = make_streaming_request(
@@ -273,6 +293,7 @@ async fn test_stream_session_id_generation() {
     .await;
 
     assert_eq!(response.status(), StatusCode::OK);
+    drop(response);
 }
 
 #[tokio::test]
@@ -290,6 +311,7 @@ async fn test_stream_boolean_parameters() {
             make_streaming_request(&app, &format!("/api/v1/stream/memories?{}", params)).await;
 
         assert_eq!(response.status(), StatusCode::OK);
+        drop(response);
     }
 
     // Test boolean parsing for consolidation stream
@@ -303,6 +325,7 @@ async fn test_stream_boolean_parameters() {
             make_streaming_request(&app, &format!("/api/v1/stream/consolidation?{}", params)).await;
 
         assert_eq!(response.status(), StatusCode::OK);
+        drop(response);
     }
 }
 
@@ -337,6 +360,7 @@ async fn test_stream_headers_compliance() {
         if let Some(connection) = response.headers().get("connection") {
             assert_ne!(connection, "close");
         }
+        drop(response);
     }
 }
 
@@ -354,6 +378,7 @@ async fn test_stream_cognitive_ergonomics() {
     .await;
 
     assert_eq!(response.status(), StatusCode::OK);
+    drop(response);
 
     // Test that importance filtering follows cognitive principles
     let response = make_streaming_request(
@@ -363,6 +388,7 @@ async fn test_stream_cognitive_ergonomics() {
     .await;
 
     assert_eq!(response.status(), StatusCode::OK);
+    drop(response);
 
     // Test that confidence thresholds are meaningful
     let response = make_streaming_request(
@@ -372,4 +398,5 @@ async fn test_stream_cognitive_ergonomics() {
     .await;
 
     assert_eq!(response.status(), StatusCode::OK);
+    drop(response);
 }

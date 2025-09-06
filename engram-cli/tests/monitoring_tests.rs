@@ -48,6 +48,9 @@ async fn test_monitor_events_basic() {
         "text/event-stream"
     );
     assert_eq!(response.headers().get("cache-control").unwrap(), "no-cache");
+    
+    // Drop response body to clean up SSE stream
+    drop(response);
 }
 
 #[tokio::test]
@@ -66,6 +69,9 @@ async fn test_monitor_events_with_level_filtering() {
             response.headers().get("content-type").unwrap(),
             "text/event-stream"
         );
+        
+        // Drop response body to clean up SSE stream
+        drop(response);
     }
 }
 
@@ -77,6 +83,7 @@ async fn test_monitor_events_with_focus_filtering() {
         make_monitoring_request(&app, "/api/v1/monitor/events?level=node&focus_id=node_123").await;
 
     assert_eq!(response.status(), StatusCode::OK);
+    drop(response);
 
     let response = make_monitoring_request(
         &app,
@@ -85,6 +92,7 @@ async fn test_monitor_events_with_focus_filtering() {
     .await;
 
     assert_eq!(response.status(), StatusCode::OK);
+    drop(response);
 }
 
 #[tokio::test]
@@ -103,6 +111,7 @@ async fn test_monitor_events_frequency_bounds() {
             make_monitoring_request(&app, &format!("/api/v1/monitor/events?{}", params)).await;
 
         assert_eq!(response.status(), expected_status);
+        drop(response);
     }
 }
 
@@ -114,11 +123,13 @@ async fn test_monitor_events_with_causality() {
         make_monitoring_request(&app, "/api/v1/monitor/events?include_causality=true").await;
 
     assert_eq!(response.status(), StatusCode::OK);
+    drop(response);
 
     let response =
         make_monitoring_request(&app, "/api/v1/monitor/events?include_causality=false").await;
 
     assert_eq!(response.status(), StatusCode::OK);
+    drop(response);
 }
 
 #[tokio::test]
@@ -130,6 +141,7 @@ async fn test_monitor_events_event_type_filtering() {
         make_monitoring_request(&app, "/api/v1/monitor/events?event_types=activation").await;
 
     assert_eq!(response.status(), StatusCode::OK);
+    drop(response);
 
     // Multiple event types
     let response = make_monitoring_request(
@@ -139,6 +151,7 @@ async fn test_monitor_events_event_type_filtering() {
     .await;
 
     assert_eq!(response.status(), StatusCode::OK);
+    drop(response);
 
     // Test URL encoding for spaces
     let response = make_monitoring_request(
@@ -148,6 +161,7 @@ async fn test_monitor_events_event_type_filtering() {
     .await;
 
     assert_eq!(response.status(), StatusCode::OK);
+    drop(response);
 }
 
 #[tokio::test]
@@ -161,6 +175,7 @@ async fn test_monitor_activations_basic() {
         response.headers().get("content-type").unwrap(),
         "text/event-stream"
     );
+    drop(response);
 }
 
 #[tokio::test]
@@ -181,6 +196,7 @@ async fn test_monitor_activations_with_thresholds() {
             make_monitoring_request(&app, &format!("/api/v1/monitor/activations?{}", params)).await;
 
         assert_eq!(response.status(), expected_status);
+        drop(response);
     }
 }
 
@@ -196,6 +212,7 @@ async fn test_monitor_activations_hierarchical_focus() {
     .await;
 
     assert_eq!(response.status(), StatusCode::OK);
+    drop(response);
 
     let response = make_monitoring_request(
         &app,
@@ -204,6 +221,7 @@ async fn test_monitor_activations_hierarchical_focus() {
     .await;
 
     assert_eq!(response.status(), StatusCode::OK);
+    drop(response);
 }
 
 #[tokio::test]
@@ -217,6 +235,7 @@ async fn test_monitor_causality_basic() {
         response.headers().get("content-type").unwrap(),
         "text/event-stream"
     );
+    drop(response);
 }
 
 #[tokio::test]
@@ -227,6 +246,7 @@ async fn test_monitor_causality_with_focus() {
         make_monitoring_request(&app, "/api/v1/monitor/causality?focus_id=operation_456").await;
 
     assert_eq!(response.status(), StatusCode::OK);
+    drop(response);
 
     // Test causality inclusion control
     let response = make_monitoring_request(
@@ -236,6 +256,7 @@ async fn test_monitor_causality_with_focus() {
     .await;
 
     assert_eq!(response.status(), StatusCode::OK);
+    drop(response);
 }
 
 #[tokio::test]
@@ -246,6 +267,7 @@ async fn test_session_management() {
     let response = make_monitoring_request(&app, "/api/v1/monitor/events").await;
 
     assert_eq!(response.status(), StatusCode::OK);
+    drop(response);
 
     // With provided session_id - should use it
     let response = make_monitoring_request(
@@ -255,6 +277,7 @@ async fn test_session_management() {
     .await;
 
     assert_eq!(response.status(), StatusCode::OK);
+    drop(response);
 
     // With last_sequence for resumption
     let response = make_monitoring_request(
@@ -264,6 +287,7 @@ async fn test_session_management() {
     .await;
 
     assert_eq!(response.status(), StatusCode::OK);
+    drop(response);
 }
 
 #[tokio::test]
@@ -279,6 +303,7 @@ async fn test_cognitive_constraints() {
     .await;
 
     assert_eq!(response.status(), StatusCode::OK);
+    drop(response);
 
     // Test activation threshold bounds
     let response = make_monitoring_request(
@@ -288,6 +313,7 @@ async fn test_cognitive_constraints() {
     .await;
 
     assert_eq!(response.status(), StatusCode::OK);
+    drop(response);
 
     // Test event type filtering respects working memory (≤4 types)
     let response = make_monitoring_request(
@@ -297,6 +323,7 @@ async fn test_cognitive_constraints() {
     .await;
 
     assert_eq!(response.status(), StatusCode::OK);
+    drop(response);
 }
 
 #[tokio::test]
@@ -322,6 +349,7 @@ async fn test_hierarchical_event_organization() {
             response.headers().get("content-type").unwrap(),
             "text/event-stream"
         );
+        drop(response);
     }
 }
 
@@ -352,6 +380,7 @@ async fn test_sse_headers_compliance() {
         if let Some(connection) = response.headers().get("connection") {
             assert_ne!(connection, "close");
         }
+        drop(response);
     }
 }
 
@@ -369,6 +398,7 @@ async fn test_latency_requirements() {
     assert_eq!(response.status(), StatusCode::OK);
     // Initial connection should be fast (<100ms simulated test)
     assert!(duration < std::time::Duration::from_millis(100));
+    drop(response);
 }
 
 #[tokio::test]
@@ -380,12 +410,14 @@ async fn test_parameter_parsing_edge_cases() {
 
     // Could be OK (empty list) or BAD_REQUEST depending on implementation
     assert!(response.status() == StatusCode::OK || response.status() == StatusCode::BAD_REQUEST);
+    drop(response);
 
     // Invalid level - should still work (implementation may ignore invalid levels)
     let response =
         make_monitoring_request(&app, "/api/v1/monitor/events?level=invalid_level").await;
 
     assert_eq!(response.status(), StatusCode::OK);
+    drop(response);
 
     // Invalid boolean values - should handle gracefully or return error
     let response =
@@ -393,6 +425,7 @@ async fn test_parameter_parsing_edge_cases() {
 
     // Could be OK (default false) or BAD_REQUEST depending on implementation
     assert!(response.status() == StatusCode::OK || response.status() == StatusCode::BAD_REQUEST);
+    drop(response);
 }
 
 #[tokio::test]
@@ -420,7 +453,8 @@ async fn test_concurrent_monitoring_capability() {
 
     // Wait for all connections
     for handle in handles {
-        let _response = handle.await.unwrap();
+        let response = handle.await.unwrap();
+        drop(response);
     }
 }
 
@@ -438,6 +472,7 @@ async fn test_monitoring_with_complex_queries() {
         response.headers().get("content-type").unwrap(),
         "text/event-stream"
     );
+    drop(response);
 }
 
 // NOTE: Full SSE event stream parsing and real-time event validation
