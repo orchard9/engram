@@ -30,6 +30,7 @@ proptest = { workspace = true }
 quickcheck = { workspace = true }
 bincode = { workspace = true }
 rand = { workspace = true }
+trybuild = "1.0"
 
 [lints]
 workspace = true
