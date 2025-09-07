@@ -1,0 +1,16 @@
+error[E0599]: no method named `build` found for struct `EpisodeBuilder<engram_core::memory::episode_builder_states::NoConfidence>` in the current scope
+  --> tests/compile_fail/episode_builder_missing_confidence.rs:16:10
+   |
+11 |       let _episode = EpisodeBuilder::new()
+   |  ____________________-
+12 | |         .id("test_episode".to_string())
+13 | |         .when(Utc::now())
+14 | |         .what("Something happened".to_string())
+15 | |         .embedding([0.1f32; 768])
+16 | |         .build(); //~ ERROR: method `build` not found for this value
+   | |         -^^^^^ method not found in `EpisodeBuilder<NoConfidence>`
+   | |_________|
+   |
+   |
+   = note: the method was found for
+           - `EpisodeBuilder<engram_core::memory::episode_builder_states::Ready>`

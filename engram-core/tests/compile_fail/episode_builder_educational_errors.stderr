@@ -1,0 +1,20 @@
+error[E0599]: no method named `build` found for struct `EpisodeBuilder<engram_core::memory::episode_builder_states::NoId>` in the current scope
+  --> tests/compile_fail/episode_builder_educational_errors.rs:10:42
+   |
+10 |     let _episode = EpisodeBuilder::new().build(); //~ ERROR: method `build` not found for this value
+   |                                          ^^^^^ method not found in `EpisodeBuilder<NoId>`
+   |
+   = note: the method was found for
+           - `EpisodeBuilder<engram_core::memory::episode_builder_states::Ready>`
+
+error[E0599]: no method named `embedding` found for struct `EpisodeBuilder<engram_core::memory::episode_builder_states::NoId>` in the current scope
+  --> tests/compile_fail/episode_builder_educational_errors.rs:17:25
+   |
+17 |     let _fail = builder.embedding([0.1f32; 768]); //~ ERROR: method `embedding` not found for this value
+   |                         ^^^^^^^^^ private field, not a method
+
+error[E0599]: no method named `where_location` found for struct `EpisodeBuilder<NoWhen>` in the current scope
+  --> tests/compile_fail/episode_builder_educational_errors.rs:25:28
+   |
+25 |     let _invalid = partial.where_location("somewhere".to_string()); //~ ERROR: method `where_location` not found for this value
+   |                            ^^^^^^^^^^^^^^ private field, not a method

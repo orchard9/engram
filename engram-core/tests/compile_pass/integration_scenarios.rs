@@ -33,7 +33,7 @@ fn main() {
                 
             let episode = EpisodeBuilder::new()
                 .id(format!("learning_{}", topic))
-                .when(now)
+                .when(Utc::now())
                 .what(format!("Learned about {}", topic))
                 .embedding(topic_embedding)
                 .confidence(confidence)

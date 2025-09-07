@@ -1,0 +1,13 @@
+error[E0599]: no method named `what` found for struct `EpisodeBuilder<NoWhen>` in the current scope
+  --> tests/compile_fail/episode_builder_missing_when.rs:13:10
+   |
+11 |       let _episode = EpisodeBuilder::new()
+   |                      ---------------------
+   |                      |
+   |  ____________________method `what` is available on `EpisodeBuilder<engram_core::memory::episode_builder_states::NoId>`
+   | |
+12 | |         .id("test_episode".to_string())
+13 | |         .what("Something happened".to_string())
+   | |         -^^^^ private field, not a method
+   | |_________|
+   |

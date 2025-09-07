@@ -62,7 +62,7 @@ fn main() {
         // Create learning episode
         let _learning = EpisodeBuilder::new()
             .id(episode_id)
-            .when(now - Duration::hours(2))
+            .when(Utc::now() - Duration::hours(2))
             .what(format!("Studied {}", description))
             .embedding([0.2f32; 768])
             .confidence(Confidence::MEDIUM)
@@ -124,7 +124,7 @@ fn main() {
             
         let episode = EpisodeBuilder::new()
             .id(format!("epi_{}", base_id))
-            .when(now)
+            .when(Utc::now())
             .what(format!("Encoded: {}", content))
             .embedding([0.4f32; 768])
             .confidence(confidence)

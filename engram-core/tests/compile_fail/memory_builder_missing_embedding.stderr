@@ -1,0 +1,13 @@
+error[E0599]: no method named `confidence` found for struct `MemoryBuilder<engram_core::memory::memory_builder_states::NoEmbedding>` in the current scope
+  --> tests/compile_fail/memory_builder_missing_embedding.rs:13:10
+   |
+11 |       let _memory = MemoryBuilder::new()
+   |                     --------------------
+   |                     |
+   |  ___________________method `confidence` is available on `MemoryBuilder<engram_core::memory::memory_builder_states::NoId>`
+   | |
+12 | |         .id("test_memory".to_string())
+13 | |         .confidence(Confidence::HIGH)
+   | |         -^^^^^^^^^^ private field, not a method
+   | |_________|
+   |

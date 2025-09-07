@@ -26,8 +26,10 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio_stream::{Stream, wrappers::ReceiverStream};
 use tracing::{error, info, warn};
+use utoipa::{IntoParams, ToSchema};
 
 use crate::grpc::MemoryService;
+use crate::openapi::{ErrorResponse, create_swagger_ui};
 use engram_core::graph::MemoryGraph;
 
 /// Shared application state
@@ -47,35 +49,12 @@ impl ApiState {
     }
 }
 
-/// Create cognitive-friendly API router
-pub fn create_api_routes() -> Router<ApiState> {
-    Router::new()
-        // Memory operations with cognitive-friendly paths
-        .route("/api/v1/memories/remember", post(remember_memory))
-        .route("/api/v1/memories/recall", get(recall_memories))
-        .route("/api/v1/memories/recognize", post(recognize_pattern))
-        // System health and introspection
-        .route("/api/v1/system/health", get(system_health))
-        .route("/api/v1/system/introspect", get(system_introspect))
-        // Episode-specific operations
-        .route("/api/v1/episodes/remember", post(remember_episode))
-        .route("/api/v1/episodes/replay", get(replay_episodes))
-        // Streaming operations (SSE)
-        .route("/api/v1/stream/activities", get(stream_activities))
-        .route("/api/v1/stream/memories", get(stream_memories))
-        .route("/api/v1/stream/consolidation", get(stream_consolidation))
-        // Real-time monitoring (specialized for debugging)
-        .route("/api/v1/monitor/events", get(monitor_events))
-        .route("/api/v1/monitor/activations", get(monitor_activations))
-        .route("/api/v1/monitor/causality", get(monitor_causality))
-}
-
 // ================================================================================================
 // Request/Response Types with Cognitive Design
 // ================================================================================================
 
 /// Request to remember a new memory with cognitive-friendly fields
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema, IntoParams)]
 pub struct RememberMemoryRequest {
     /// Human-readable identifier for this memory
     pub id: Option<String>,
@@ -98,7 +77,7 @@ pub struct RememberMemoryRequest {
 }
 
 /// Request to remember an episode with contextual information
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema, IntoParams)]
 pub struct RememberEpisodeRequest {
     /// Human-readable identifier for this episode
     pub id: Option<String>,
@@ -125,7 +104,7 @@ pub struct RememberEpisodeRequest {
 }
 
 /// Query parameters for recalling memories
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema, IntoParams)]
 pub struct RecallQuery {
     /// Search query using natural language
     pub query: Option<String>,
@@ -152,7 +131,7 @@ pub struct RecallQuery {
 }
 
 /// Query parameters for streaming activities
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema, IntoParams)]
 pub struct StreamActivityQuery {
     /// Event types to stream (comma-separated: activation,storage,recall,consolidation,association,decay)
     pub event_types: Option<String>,
@@ -167,7 +146,7 @@ pub struct StreamActivityQuery {
 }
 
 /// Query parameters for streaming memories
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema, IntoParams)]
 pub struct StreamMemoryQuery {
     /// Include new memory formations
     pub include_formation: Option<bool>,
@@ -184,7 +163,7 @@ pub struct StreamMemoryQuery {
 }
 
 /// Query parameters for streaming consolidation
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema, IntoParams)]
 pub struct StreamConsolidationQuery {
     /// Include replay sequences
     pub include_replay: Option<bool>,
@@ -199,7 +178,7 @@ pub struct StreamConsolidationQuery {
 }
 
 /// Query parameters for real-time monitoring (debugging-focused)
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema, IntoParams)]
 pub struct MonitoringQuery {
     /// Event hierarchy level (global, region, node, edge)
     pub level: Option<String>,
@@ -220,7 +199,7 @@ pub struct MonitoringQuery {
 }
 
 /// Query parameters for activation monitoring
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema, IntoParams)]
 pub struct ActivationMonitoringQuery {
     /// Node pattern to monitor (regex or specific IDs)
     pub node_pattern: Option<String>,
@@ -237,7 +216,7 @@ pub struct ActivationMonitoringQuery {
 }
 
 /// Query parameters for causality tracking
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema, IntoParams)]
 pub struct CausalityMonitoringQuery {
     /// Maximum causality chain length to track
     pub max_chain_length: Option<usize>,
@@ -254,7 +233,7 @@ pub struct CausalityMonitoringQuery {
 }
 
 /// Response for memory remember operations
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct RememberResponse {
     /// The ID assigned to this memory
     pub memory_id: String,
@@ -269,7 +248,7 @@ pub struct RememberResponse {
 }
 
 /// Response for memory recall operations
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct RecallResponse {
     /// Found memories organized by retrieval pattern
     pub memories: RecallResults,
@@ -284,7 +263,7 @@ pub struct RecallResponse {
 }
 
 /// Memories organized by cognitive retrieval patterns
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct RecallResults {
     /// Immediate, high-confidence matches
     pub vivid: Vec<MemoryResult>,
@@ -295,7 +274,7 @@ pub struct RecallResults {
 }
 
 /// Individual memory result with cognitive context
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct MemoryResult {
     pub id: String,
     pub content: String,
@@ -311,7 +290,7 @@ pub struct MemoryResult {
 }
 
 /// Auto-linking information
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct AutoLink {
     pub target_memory_id: String,
     pub similarity_score: f32,
@@ -319,7 +298,7 @@ pub struct AutoLink {
 }
 
 /// Confidence information with educational context
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct ConfidenceInfo {
     pub value: f32,
     pub category: String,
@@ -327,7 +306,7 @@ pub struct ConfidenceInfo {
 }
 
 /// Query analysis for educational feedback
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct QueryAnalysis {
     pub understood_intent: String,
     pub search_strategy: String,
@@ -336,7 +315,7 @@ pub struct QueryAnalysis {
 }
 
 /// Recall operation metadata
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct RecallMetadata {
     pub total_memories_searched: usize,
     pub activation_spread_hops: usize,
@@ -345,7 +324,7 @@ pub struct RecallMetadata {
 }
 
 /// Pattern recognition request
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema, IntoParams)]
 pub struct RecognizeRequest {
     /// Content or pattern to recognize
     pub input: String,
@@ -356,7 +335,7 @@ pub struct RecognizeRequest {
 }
 
 /// Pattern recognition response
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct RecognizeResponse {
     /// Whether the pattern was recognized
     pub recognized: bool,
@@ -369,7 +348,7 @@ pub struct RecognizeResponse {
 }
 
 /// Similar pattern information
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct SimilarPattern {
     pub memory_id: String,
     pub similarity_score: f32,
@@ -382,6 +361,17 @@ pub struct SimilarPattern {
 // ================================================================================================
 
 /// POST /api/v1/memories/remember - Store a new memory
+#[utoipa::path(
+    post,
+    path = "/api/v1/memories/remember",
+    tag = "memories",
+    request_body = RememberMemoryRequest,
+    responses(
+        (status = 201, description = "Memory successfully stored", body = RememberResponse),
+        (status = 400, description = "Invalid input", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    )
+)]
 pub async fn remember_memory(
     State(state): State<ApiState>,
     Json(request): Json<RememberMemoryRequest>,
@@ -501,6 +491,17 @@ pub async fn remember_memory(
 }
 
 /// POST /api/v1/episodes/remember - Store a new episode
+#[utoipa::path(
+    post,
+    path = "/api/v1/episodes/remember",
+    tag = "episodes",
+    request_body = RememberEpisodeRequest,
+    responses(
+        (status = 201, description = "Episode successfully stored", body = RememberResponse),
+        (status = 400, description = "Invalid episode data", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    )
+)]
 pub async fn remember_episode(
     State(state): State<ApiState>,
     Json(request): Json<RememberEpisodeRequest>,
@@ -564,6 +565,17 @@ pub async fn remember_episode(
 }
 
 /// GET /api/v1/memories/recall - Retrieve memories by query
+#[utoipa::path(
+    get,
+    path = "/api/v1/memories/recall",
+    tag = "memories",
+    params(RecallQuery),
+    responses(
+        (status = 200, description = "Memories found and organized by retrieval patterns", body = RecallResponse),
+        (status = 400, description = "Invalid query parameters", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    )
+)]
 pub async fn recall_memories(
     State(state): State<ApiState>,
     Query(params): Query<RecallQuery>,
@@ -694,6 +706,17 @@ pub async fn recall_memories(
 }
 
 /// POST /api/v1/memories/recognize - Pattern recognition
+#[utoipa::path(
+    post,
+    path = "/api/v1/memories/recognize",
+    tag = "memories",
+    request_body = RecognizeRequest,
+    responses(
+        (status = 200, description = "Pattern recognition results", body = RecognizeResponse),
+        (status = 400, description = "Invalid recognition request", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    )
+)]
 pub async fn recognize_pattern(
     State(_state): State<ApiState>,
     Json(request): Json<RecognizeRequest>,
@@ -745,6 +768,15 @@ pub async fn recognize_pattern(
 }
 
 /// GET /api/v1/system/health - Comprehensive system health
+#[utoipa::path(
+    get,
+    path = "/api/v1/system/health",
+    tag = "system",
+    responses(
+        (status = 200, description = "System health information", body = HealthResponse),
+        (status = 500, description = "System health check failed", body = ErrorResponse)
+    )
+)]
 pub async fn system_health(State(state): State<ApiState>) -> Result<impl IntoResponse, ApiError> {
     let graph = state.graph.read().await;
     let memory_count = graph.len();
@@ -772,6 +804,15 @@ pub async fn system_health(State(state): State<ApiState>) -> Result<impl IntoRes
 }
 
 /// GET /api/v1/system/introspect - System introspection
+#[utoipa::path(
+    get,
+    path = "/api/v1/system/introspect",
+    tag = "system",
+    responses(
+        (status = 200, description = "System introspection data", body = IntrospectionResponse),
+        (status = 500, description = "Introspection failed", body = ErrorResponse)
+    )
+)]
 pub async fn system_introspect(
     State(state): State<ApiState>,
 ) -> Result<impl IntoResponse, ApiError> {
@@ -804,6 +845,22 @@ pub async fn system_introspect(
 }
 
 /// GET /api/v1/episodes/replay - Replay episode memories
+#[utoipa::path(
+    get,
+    path = "/api/v1/episodes/replay",
+    tag = "episodes",
+    params(
+        ("time_range" = Option<String>, Query, description = "Time range for episodes (e.g., 'last_week', '2023-01-01_to_2023-12-31')"),
+        ("context" = Option<String>, Query, description = "Contextual filter for episodes"),
+        ("emotional_valence" = Option<String>, Query, description = "Filter by emotional valence ('positive', 'negative', 'neutral')"),
+        ("importance" = Option<String>, Query, description = "Minimum importance threshold (0.0-1.0)")
+    ),
+    responses(
+        (status = 200, description = "Episode replay results", body = RecallResponse),
+        (status = 400, description = "Invalid replay parameters", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    )
+)]
 pub async fn replay_episodes(
     State(_state): State<ApiState>,
     Query(params): Query<HashMap<String, String>>,
@@ -901,6 +958,16 @@ use uuid;
 /// Provides Server-Sent Events for monitoring memory activations, storage operations,
 /// recalls, consolidation events, association formations, and memory decay.
 /// Follows cognitive ergonomics with hierarchical event organization and backpressure control.
+#[utoipa::path(
+    get,
+    path = "/api/v1/stream/activities",
+    tag = "streaming",
+    params(StreamActivityQuery),
+    responses(
+        (status = 200, description = "Server-Sent Events stream", content_type = "text/event-stream"),
+        (status = 400, description = "Invalid streaming parameters", body = ErrorResponse)
+    )
+)]
 pub async fn stream_activities(
     State(state): State<ApiState>,
     Query(params): Query<StreamActivityQuery>,
@@ -941,6 +1008,16 @@ pub async fn stream_activities(
 ///
 /// Cognitive design: Stream of consciousness for memory operations with
 /// attention-aware filtering to prevent cognitive overload.
+#[utoipa::path(
+    get,
+    path = "/api/v1/stream/memories",
+    tag = "streaming",
+    params(StreamMemoryQuery),
+    responses(
+        (status = 200, description = "Server-Sent Events stream", content_type = "text/event-stream"),
+        (status = 400, description = "Invalid streaming parameters", body = ErrorResponse)
+    )
+)]
 pub async fn stream_memories(
     State(state): State<ApiState>,
     Query(params): Query<StreamMemoryQuery>,
@@ -987,6 +1064,16 @@ pub async fn stream_memories(
 ///
 /// Cognitive design: Dream-like consolidation streams with novelty filtering
 /// to surface interesting replay sequences and insights.
+#[utoipa::path(
+    get,
+    path = "/api/v1/stream/consolidation",
+    tag = "streaming",
+    params(StreamConsolidationQuery),
+    responses(
+        (status = 200, description = "Server-Sent Events stream", content_type = "text/event-stream"),
+        (status = 400, description = "Invalid streaming parameters", body = ErrorResponse)
+    )
+)]
 pub async fn stream_consolidation(
     State(state): State<ApiState>,
     Query(params): Query<StreamConsolidationQuery>,
@@ -1237,6 +1324,16 @@ fn create_consolidation_stream(
 // ================================================================================================
 
 /// Monitor real-time events with hierarchical debugging support
+#[utoipa::path(
+    get,
+    path = "/api/v1/monitor/events",
+    tag = "monitoring",
+    params(MonitoringQuery),
+    responses(
+        (status = 200, description = "Server-Sent Events stream", content_type = "text/event-stream"),
+        (status = 400, description = "Invalid monitoring parameters", body = ErrorResponse)
+    )
+)]
 pub async fn monitor_events(
     State(_state): State<ApiState>,
     Query(params): Query<MonitoringQuery>,
@@ -1284,6 +1381,16 @@ pub async fn monitor_events(
 }
 
 /// Monitor real-time activation levels with spreading traces
+#[utoipa::path(
+    get,
+    path = "/api/v1/monitor/activations",
+    tag = "monitoring",
+    params(ActivationMonitoringQuery),
+    responses(
+        (status = 200, description = "Server-Sent Events stream", content_type = "text/event-stream"),
+        (status = 400, description = "Invalid monitoring parameters", body = ErrorResponse)
+    )
+)]
 pub async fn monitor_activations(
     State(_state): State<ApiState>,
     Query(params): Query<ActivationMonitoringQuery>,
@@ -1309,6 +1416,16 @@ pub async fn monitor_activations(
 }
 
 /// Monitor causality chains for debugging distributed memory operations
+#[utoipa::path(
+    get,
+    path = "/api/v1/monitor/causality",
+    tag = "monitoring",
+    params(CausalityMonitoringQuery),
+    responses(
+        (status = 200, description = "Server-Sent Events stream", content_type = "text/event-stream"),
+        (status = 400, description = "Invalid monitoring parameters", body = ErrorResponse)
+    )
+)]
 pub async fn monitor_causality(
     State(_state): State<ApiState>,
     Query(params): Query<CausalityMonitoringQuery>,
@@ -1583,4 +1700,33 @@ fn create_causality_monitoring_stream(
     });
 
     ReceiverStream::new(rx)
+}
+
+// ================================================================================================
+// API Router Creation
+// ================================================================================================
+
+/// Create cognitive-friendly API router
+pub fn create_api_routes() -> Router<ApiState> {
+    Router::new()
+        // Memory operations with cognitive-friendly paths
+        .route("/api/v1/memories/remember", post(remember_memory))
+        .route("/api/v1/memories/recall", get(recall_memories))
+        .route("/api/v1/memories/recognize", post(recognize_pattern))
+        // System health and introspection
+        .route("/api/v1/system/health", get(system_health))
+        .route("/api/v1/system/introspect", get(system_introspect))
+        // Episode-specific operations
+        .route("/api/v1/episodes/remember", post(remember_episode))
+        .route("/api/v1/episodes/replay", get(replay_episodes))
+        // Streaming operations (SSE)
+        .route("/api/v1/stream/activities", get(stream_activities))
+        .route("/api/v1/stream/memories", get(stream_memories))
+        .route("/api/v1/stream/consolidation", get(stream_consolidation))
+        // Real-time monitoring (specialized for debugging)
+        .route("/api/v1/monitor/events", get(monitor_events))
+        .route("/api/v1/monitor/activations", get(monitor_activations))
+        .route("/api/v1/monitor/causality", get(monitor_causality))
+        // Swagger UI documentation
+        .merge(create_swagger_ui())
 }

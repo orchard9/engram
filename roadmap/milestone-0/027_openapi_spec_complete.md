@@ -47,6 +47,7 @@ Create complete OpenAPI 3.0 specification for the HTTP REST API, enabling client
 - Error recovery documentation reduces debugging time by 34% (Ko et al. 2004)
 - Minimalist documentation design: searchability more important than organization (Rettig 1991)
 - Task-oriented documentation beats feature-oriented by 45% (Carroll 1990)
+- See content/0_developer_experience_foundation/026_grpc_client_examples_multi_language_integration_cognitive_ergonomics_research.md for progressive complexity patterns in API documentation
 - See content/0_developer_experience_foundation/018_documentation_design_developer_learning_cognitive_ergonomics_research.md for comprehensive documentation design principles
 - See content/0_developer_experience_foundation/019_client_sdk_design_multi_language_cognitive_ergonomics_research.md for multi-language API documentation patterns
 - See content/0_developer_experience_foundation/017_operational_excellence_production_readiness_cognitive_ergonomics_research.md for documentation cognitive design

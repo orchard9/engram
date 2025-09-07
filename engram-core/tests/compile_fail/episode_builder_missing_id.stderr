@@ -1,0 +1,9 @@
+error[E0599]: no method named `when` found for struct `EpisodeBuilder<engram_core::memory::episode_builder_states::NoId>` in the current scope
+  --> tests/compile_fail/episode_builder_missing_id.rs:13:10
+   |
+12 |       let _episode = EpisodeBuilder::new()
+   |  ____________________-
+13 | |         .when(Utc::now())
+   | |         -^^^^ private field, not a method
+   | |_________|
+   |

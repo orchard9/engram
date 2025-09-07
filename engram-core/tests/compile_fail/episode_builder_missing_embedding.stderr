@@ -1,0 +1,15 @@
+error[E0599]: no method named `confidence` found for struct `EpisodeBuilder<engram_core::memory::episode_builder_states::NoEmbedding>` in the current scope
+  --> tests/compile_fail/episode_builder_missing_embedding.rs:16:10
+   |
+12 |       let _episode = EpisodeBuilder::new()
+   |  ____________________-
+13 | |         .id("test_episode".to_string())
+14 | |         .when(Utc::now())
+15 | |         .what("Something happened".to_string())
+16 | |         .confidence(Confidence::HIGH)
+   | |         -^^^^^^^^^^ method not found in `EpisodeBuilder<NoEmbedding>`
+   | |_________|
+   |
+   |
+   = note: the method was found for
+           - `EpisodeBuilder<engram_core::memory::episode_builder_states::NoConfidence>`

@@ -2,7 +2,10 @@
 
 pub mod api;
 pub mod benchmark_simple;
+pub mod cli;
+pub mod docs;
 pub mod grpc;
+pub mod openapi;
 
 use anyhow::Result;
 use std::time::Duration;

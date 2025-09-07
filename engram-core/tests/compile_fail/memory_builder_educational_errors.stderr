@@ -1,0 +1,20 @@
+error[E0599]: no method named `build` found for struct `MemoryBuilder<engram_core::memory::memory_builder_states::NoId>` in the current scope
+  --> tests/compile_fail/memory_builder_educational_errors.rs:10:40
+   |
+10 |     let _memory = MemoryBuilder::new().build(); //~ ERROR: method `build` not found for this value
+   |                                        ^^^^^ method not found in `MemoryBuilder<NoId>`
+   |
+   = note: the method was found for
+           - `MemoryBuilder<engram_core::memory::memory_builder_states::Ready>`
+
+error[E0599]: no method named `confidence` found for struct `MemoryBuilder<engram_core::memory::memory_builder_states::NoId>` in the current scope
+  --> tests/compile_fail/memory_builder_educational_errors.rs:17:25
+   |
+17 |     let _fail = builder.confidence(engram_core::Confidence::HIGH); //~ ERROR: method `confidence` not found for this value
+   |                         ^^^^^^^^^^ private field, not a method
+
+error[E0599]: no method named `content` found for struct `MemoryBuilder<engram_core::memory::memory_builder_states::NoEmbedding>` in the current scope
+  --> tests/compile_fail/memory_builder_educational_errors.rs:25:28
+   |
+25 |     let _invalid = partial.content("content".to_string()); //~ ERROR: method `content` not found for this value
+   |                            ^^^^^^^ private field, not a method

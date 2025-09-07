@@ -435,7 +435,7 @@ async fn test_concurrent_monitoring_capability() {
     // Test that multiple monitoring sessions can be distinguished and handled
     // Uses a rapid create-test-drop pattern to avoid resource buildup
     let session_ids = vec!["concurrent_0", "concurrent_1", "concurrent_2"];
-    
+
     for session_id in session_ids {
         // Create monitoring request with unique session
         let request = Request::builder()
@@ -451,14 +451,14 @@ async fn test_concurrent_monitoring_capability() {
 
         // Test that connection establishes successfully
         let response = app.clone().oneshot(request).await.unwrap();
-        
+
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(
             response.headers().get("content-type").unwrap(),
             "text/event-stream"
         );
         assert_eq!(response.headers().get("cache-control").unwrap(), "no-cache");
-        
+
         // Drop immediately to prevent resource accumulation
         drop(response);
     }

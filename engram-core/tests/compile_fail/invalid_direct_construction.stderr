@@ -1,0 +1,26 @@
+error: cannot construct `Memory` with struct literal syntax due to private fields
+  --> tests/compile_fail/invalid_direct_construction.rs:11:19
+   |
+11 |     let _memory = Memory {
+   |                   ^^^^^^
+...
+19 |         activation: atomic_float::AtomicF32::new(0.0), //~ ERROR: field `activation` of struct `Memory` is private
+   |         --------------------------------------------- private field
+   |
+help: you might have meant to use the `new` associated function
+   |
+11 -     let _memory = Memory {
+12 -         id: "test".to_string(),
+13 -         embedding: [0.1f32; 768],
+14 -         confidence: Confidence::HIGH,
+15 -         last_access: chrono::Utc::now(),
+16 -         created_at: chrono::Utc::now(),
+17 -         decay_rate: 0.1,
+18 -         content: None,
+19 -         activation: atomic_float::AtomicF32::new(0.0), //~ ERROR: field `activation` of struct `Memory` is private
+20 -         //~| NOTE: Memory construction requires builder pattern
+21 -         //~| HELP: Use MemoryBuilder::new().id(...).embedding(...).confidence(...).build()
+22 -         //~| HELP: Builder pattern ensures all required fields are set correctly
+23 -     };
+11 +     let _memory = Memory::new(_, _, _);
+   |

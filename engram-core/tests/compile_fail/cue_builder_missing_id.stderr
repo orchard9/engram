@@ -1,0 +1,12 @@
+error[E0599]: no method named `embedding_search` found for struct `CueBuilder<engram_core::memory::cue_builder_states::NoId>` in the current scope
+  --> tests/compile_fail/cue_builder_missing_id.rs:12:10
+   |
+11 |       let _cue = CueBuilder::new()
+   |  ________________-
+12 | |         .embedding_search([0.1f32; 768], Confidence::MEDIUM)
+   | |         -^^^^^^^^^^^^^^^^ method not found in `CueBuilder<NoId>`
+   | |_________|
+   |
+   |
+   = note: the method was found for
+           - `CueBuilder<NoCueType>`

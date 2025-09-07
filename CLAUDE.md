@@ -22,6 +22,27 @@ roadmap/milestone-0/: Tasks are stored as 001*{task_name}*{task_status}.md files
 
 If at any point anything gets stuck, move the task to \_blocked, write in the task file why it's blocked, and pause
 
+## How to plan a milestone
+
+1. Use the systems-product-planner agent to review the previous milestone status and create a comprehensive implementation plan
+2. Create roadmap/milestone-{number}/ directory for the new milestone
+3. Convert the agent's plan into individual task files (001_*_pending.md, 002_*_pending.md, etc.)
+4. For each task file, use the appropriate specialized agent to review and enhance:
+   - rust-graph-engine-architect: for graph engine and concurrent data structure tasks
+   - systems-architecture-optimizer: for storage, persistence, and performance tasks
+   - memory-systems-researcher: for cognitive dynamics and decay function tasks
+   - verification-testing-lead: for testing, benchmarking, and validation tasks
+   - gpu-acceleration-architect: for SIMD and parallel processing tasks
+5. Each enhanced task file should include:
+   - Precise technical specifications
+   - Integration points with existing codebase
+   - Specific file paths to create/modify
+   - Acceptance criteria and testing approach
+   - Dependencies and blocking relationships
+6. Review all tasks for consistency and completeness
+7. Ensure critical path is clearly identified
+8. Commit the milestone plan with all task files
+
 ## How to acceptance test
 
 1. Identify the graph functionality that needs validation (spreading activation, memory consolidation, pattern completion)

@@ -1,0 +1,13 @@
+error[E0599]: no method named `build` found for struct `CueBuilder<NoCueType>` in the current scope
+  --> tests/compile_fail/cue_builder_missing_cue_type.rs:12:10
+   |
+10 |       let _cue = CueBuilder::new()
+   |  ________________-
+11 | |         .id("test_cue".to_string())
+12 | |         .build(); //~ ERROR: method `build` not found for this value
+   | |         -^^^^^ method not found in `CueBuilder<NoCueType>`
+   | |_________|
+   |
+   |
+   = note: the method was found for
+           - `CueBuilder<engram_core::memory::cue_builder_states::Ready>`

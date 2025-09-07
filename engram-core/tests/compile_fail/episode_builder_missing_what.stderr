@@ -1,0 +1,15 @@
+error[E0599]: no method named `embedding` found for struct `EpisodeBuilder<NoWhat>` in the current scope
+  --> tests/compile_fail/episode_builder_missing_what.rs:15:10
+   |
+12 |       let _episode = EpisodeBuilder::new()
+   |                      ---------------------
+   |                      |
+   |  ____________________method `embedding` is available on `EpisodeBuilder<engram_core::memory::episode_builder_states::NoId>`
+   | |
+13 | |         .id("test_episode".to_string())
+   | |          ------------------------------ method `embedding` is available on `EpisodeBuilder<NoWhen>`
+14 | |         .when(Utc::now())
+15 | |         .embedding([0.1f32; 768])
+   | |         -^^^^^^^^^ private field, not a method
+   | |_________|
+   |
