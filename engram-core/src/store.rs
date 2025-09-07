@@ -12,6 +12,12 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+#[cfg(feature = "monitoring")]
+use std::time::Instant;
+
+#[cfg(feature = "monitoring")]
+use crate::metrics::{MetricsRegistry, cognitive::CognitiveMetric};
+
 #[cfg(feature = "pattern_completion")]
 use crate::completion::{
     PatternReconstructor, CompletionConfig, PartialEpisode,
@@ -232,6 +238,9 @@ impl MemoryStore {
     /// it degrades. Under stress or fatigue, memories form with lower
     /// confidence and are more likely to be forgotten.
     pub fn store(&self, episode: Episode) -> Activation {
+        #[cfg(feature = "monitoring")]
+        let start = Instant::now();
+        
         // Calculate system pressure
         let current_count = self.memory_count.load(Ordering::Relaxed);
         let pressure = (current_count as f32 / self.max_memories as f32).min(1.0);
@@ -322,6 +331,20 @@ impl MemoryStore {
 
         // Increment count
         self.memory_count.fetch_add(1, Ordering::Relaxed);
+        
+        #[cfg(feature = "monitoring")]
+        if let Some(ref metrics) = self.metrics {
+            // Record store operation metrics
+            metrics.increment_counter("memories_created_total", 1);
+            metrics.observe_histogram("store_activation", base_activation as f64);
+            metrics.observe_histogram("store_duration_seconds", start.elapsed().as_secs_f64());
+            
+            // Record cognitive metrics
+            metrics.record_cognitive(CognitiveMetric::CLSContribution {
+                hippocampal: 1.0 - pressure, // More hippocampal when less pressure
+                neocortical: pressure,       // More neocortical under pressure
+            });
+        }
 
         // Return activation adjusted for any degradation
         Activation::new(base_activation)
@@ -416,16 +439,37 @@ impl MemoryStore {
     /// Never returns errors because human recall doesn't "fail" - it returns
     /// nothing, partial matches, or reconstructed memories with varying confidence.
     pub fn recall(&self, cue: Cue) -> Vec<(Episode, Confidence)> {
+        #[cfg(feature = "monitoring")]
+        let start = Instant::now();
+        
         // Try persistent backend first if available
         #[cfg(feature = "memory_mapped_persistence")]
         {
             if let Some(ref backend) = self.persistent_backend {
-                return self.recall_with_persistence(cue, backend);
+                let results = self.recall_with_persistence(cue, backend);
+                
+                #[cfg(feature = "monitoring")]
+                if let Some(ref metrics) = self.metrics {
+                    metrics.increment_counter("queries_executed_total", 1);
+                    metrics.observe_histogram("query_duration_seconds", start.elapsed().as_secs_f64());
+                    metrics.observe_histogram("query_result_count", results.len() as f64);
+                }
+                
+                return results;
             }
         }
 
         // Fallback to in-memory recall
-        self.recall_in_memory(cue)
+        let results = self.recall_in_memory(cue);
+        
+        #[cfg(feature = "monitoring")]
+        if let Some(ref metrics) = self.metrics {
+            metrics.increment_counter("queries_executed_total", 1);
+            metrics.observe_histogram("query_duration_seconds", start.elapsed().as_secs_f64());
+            metrics.observe_histogram("query_result_count", results.len() as f64);
+        }
+        
+        results
     }
 
     /// Recall with persistent backend integration
@@ -615,6 +659,9 @@ impl MemoryStore {
     /// Complete a partial episode using pattern completion
     #[cfg(feature = "pattern_completion")]
     pub fn complete_pattern(&self, partial: PartialEpisode) -> CompletedEpisode {
+        #[cfg(feature = "monitoring")]
+        let start = Instant::now();
+        
         if let Some(ref reconstructor) = self.pattern_reconstructor {
             // Get episodes for context
             let episodes: Vec<Episode> = self.wal_buffer.iter()
@@ -627,7 +674,22 @@ impl MemoryStore {
             
             // Perform completion
             match reconstructor.complete(&partial) {
-                Ok(completed) => completed,
+                Ok(completed) => {
+                    #[cfg(feature = "monitoring")]
+                    if let Some(ref metrics) = self.metrics {
+                        metrics.increment_counter("pattern_completions_total", 1);
+                        metrics.observe_histogram("pattern_completion_duration_seconds", start.elapsed().as_secs_f64());
+                        metrics.observe_histogram("pattern_completion_confidence", completed.confidence.as_probability() as f64);
+                        
+                        // Record cognitive metrics
+                        metrics.record_cognitive(CognitiveMetric::PatternCompletion {
+                            plausibility: completed.confidence.as_probability(),
+                            is_false_memory: completed.confidence.as_probability() < 0.5,
+                        });
+                    }
+                    
+                    completed
+                }
                 Err(e) => {
                     tracing::warn!("Pattern completion failed: {:?}", e);
                     // Return a degraded completion

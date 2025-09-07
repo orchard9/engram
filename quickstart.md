@@ -41,9 +41,12 @@ Expected output:
 ```json
 {
   "memory_id": "mem_1234abcd",
-  "status": "stored",
-  "activation": 1.0,
-  "message": "Memory successfully encoded"
+  "storage_confidence": {
+    "value": 0.95,
+    "category": "High"
+  },
+  "consolidation_state": "Recent",
+  "system_message": "Memory successfully encoded with high confidence"
 }
 ```
 
@@ -58,20 +61,25 @@ curl -X GET "http://localhost:7432/api/v1/memories/recall?query=mitochondria" | 
 Expected output:
 ```json
 {
-  "memories": [
-    {
-      "id": "mem_1234abcd",
-      "content": "The mitochondria is the powerhouse of the cell",
-      "confidence": 0.95,
-      "activation": 0.89,
-      "relevance": 0.92
-    }
-  ],
-  "total": 1,
-  "query_analysis": {
-    "understood_as": "searching for: mitochondria",
-    "search_strategy": "semantic"
-  }
+  "memories": {
+    "vivid": [
+      {
+        "id": "mem_1234abcd",
+        "content": "The mitochondria is the powerhouse of the cell",
+        "confidence": {
+          "value": 0.95,
+          "category": "High"
+        },
+        "activation_level": 0.9,
+        "similarity_score": 0.92
+      }
+    ]
+  },
+  "recall_confidence": {
+    "value": 0.8,
+    "category": "High"
+  },
+  "system_message": "Recall completed. Found memories through direct matching."
 }
 ```
 
@@ -80,7 +88,7 @@ Expected output:
 1. **Started** a cognitive memory system (not a database!)
 2. **Stored** a memory with high confidence (0.95 = "very sure")
 3. **Recalled** it using partial information (just "mitochondria")
-4. **Activation** shows how "awake" the memory is (0.89 = highly active)
+4. **Activation level** shows how "awake" the memory is (0.9 = highly active)
 
 ## Next Steps
 

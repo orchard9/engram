@@ -1,0 +1,220 @@
+//! SIMD-optimized vector operations for Engram memory engine
+//!
+//! Provides high-performance implementations of vector operations critical to
+//! memory retrieval and activation spreading, with runtime CPU feature detection
+//! and automatic fallback to scalar implementations.
+
+use std::sync::OnceLock;
+
+pub mod dispatch;
+pub mod scalar;
+
+#[cfg(target_arch = "x86_64")]
+pub mod avx2;
+
+#[cfg(target_arch = "x86_64")]
+pub mod avx512;
+
+#[cfg(target_arch = "aarch64")]
+pub mod neon;
+
+/// CPU capability detection for optimal implementation selection
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CpuCapability {
+    #[cfg(target_arch = "x86_64")]
+    Avx512F,
+    #[cfg(target_arch = "x86_64")]
+    Avx2Fma,
+    #[cfg(target_arch = "x86_64")]
+    Avx2,
+    #[cfg(target_arch = "x86_64")]
+    Sse42,
+    #[cfg(target_arch = "aarch64")]
+    Neon,
+    Scalar,
+}
+
+/// Trait for vector operations with optimized implementations
+pub trait VectorOps: Send + Sync {
+    /// Compute cosine similarity between two 768-dimensional vectors
+    fn cosine_similarity_768(&self, a: &[f32; 768], b: &[f32; 768]) -> f32;
+
+    /// Batch cosine similarity computation
+    fn cosine_similarity_batch_768(&self, query: &[f32; 768], vectors: &[[f32; 768]]) -> Vec<f32>;
+
+    /// Compute dot product of two 768-dimensional vectors
+    fn dot_product_768(&self, a: &[f32; 768], b: &[f32; 768]) -> f32;
+
+    /// Compute L2 norm of a 768-dimensional vector
+    fn l2_norm_768(&self, vector: &[f32; 768]) -> f32;
+
+    /// Element-wise vector addition
+    fn vector_add_768(&self, a: &[f32; 768], b: &[f32; 768]) -> [f32; 768];
+
+    /// Scale vector by scalar
+    fn vector_scale_768(&self, vector: &[f32; 768], scale: f32) -> [f32; 768];
+
+    /// Weighted average of multiple vectors
+    fn weighted_average_768(&self, vectors: &[&[f32; 768]], weights: &[f32]) -> [f32; 768];
+}
+
+/// Runtime CPU feature detection
+static CPU_CAPS: OnceLock<CpuCapability> = OnceLock::new();
+
+/// Detect CPU features and return the best available capability
+pub fn detect_cpu_features() -> CpuCapability {
+    *CPU_CAPS.get_or_init(|| {
+        #[cfg(target_arch = "x86_64")]
+        {
+            if is_x86_feature_detected!("avx512f") && is_x86_feature_detected!("avx512dq") {
+                CpuCapability::Avx512F
+            } else if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
+                CpuCapability::Avx2Fma
+            } else if is_x86_feature_detected!("avx2") {
+                CpuCapability::Avx2
+            } else if is_x86_feature_detected!("sse4.2") {
+                CpuCapability::Sse42
+            } else {
+                CpuCapability::Scalar
+            }
+        }
+        #[cfg(target_arch = "aarch64")]
+        {
+            if std::arch::is_aarch64_feature_detected!("neon") {
+                CpuCapability::Neon
+            } else {
+                CpuCapability::Scalar
+            }
+        }
+        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+        {
+            CpuCapability::Scalar
+        }
+    })
+}
+
+/// Create vector operations implementation based on CPU capabilities
+pub fn create_vector_ops() -> Box<dyn VectorOps> {
+    #[cfg(feature = "force_scalar_compute")]
+    {
+        return Box::new(scalar::ScalarVectorOps::new());
+    }
+
+    match detect_cpu_features() {
+        #[cfg(target_arch = "x86_64")]
+        CpuCapability::Avx512F => Box::new(avx512::Avx512VectorOps::new()),
+        #[cfg(target_arch = "x86_64")]
+        CpuCapability::Avx2Fma | CpuCapability::Avx2 => Box::new(avx2::Avx2VectorOps::new()),
+        #[cfg(target_arch = "aarch64")]
+        CpuCapability::Neon => Box::new(neon::NeonVectorOps::new()),
+        _ => Box::new(scalar::ScalarVectorOps::new()),
+    }
+}
+
+/// Global vector operations instance
+static VECTOR_OPS: OnceLock<Box<dyn VectorOps>> = OnceLock::new();
+
+/// Get the global vector operations instance
+pub fn get_vector_ops() -> &'static dyn VectorOps {
+    VECTOR_OPS.get_or_init(create_vector_ops).as_ref()
+}
+
+/// Convenience function for cosine similarity
+#[inline]
+pub fn cosine_similarity_768(a: &[f32; 768], b: &[f32; 768]) -> f32 {
+    get_vector_ops().cosine_similarity_768(a, b)
+}
+
+/// Convenience function for batch cosine similarity
+#[inline]
+pub fn cosine_similarity_batch_768(query: &[f32; 768], vectors: &[[f32; 768]]) -> Vec<f32> {
+    get_vector_ops().cosine_similarity_batch_768(query, vectors)
+}
+
+/// Runtime validation of implementation correctness
+static VALIDATION_PASSED: OnceLock<bool> = OnceLock::new();
+
+/// Validate that SIMD implementations match scalar reference
+pub fn validate_implementation() -> bool {
+    *VALIDATION_PASSED.get_or_init(|| {
+        let test_a = [1.0f32; 768];
+        let test_b = [0.5f32; 768];
+
+        let scalar_ops = scalar::ScalarVectorOps::new();
+        let scalar_result = scalar_ops.cosine_similarity_768(&test_a, &test_b);
+        let simd_result = get_vector_ops().cosine_similarity_768(&test_a, &test_b);
+
+        (scalar_result - simd_result).abs() < 1e-6
+    })
+}
+
+/// Error types for compute operations
+#[derive(Debug, thiserror::Error)]
+pub enum ComputeError {
+    #[error("Batch capacity exceeded")]
+    BatchFull,
+    #[error("Invalid vector dimensions: expected 768, got {0}")]
+    InvalidDimensions(usize),
+    #[error("Weight and vector count mismatch: {weights} weights for {vectors} vectors")]
+    WeightMismatch { weights: usize, vectors: usize },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cpu_feature_detection() {
+        let capability = detect_cpu_features();
+        println!("Detected CPU capability: {:?}", capability);
+        // Should detect something on any platform
+        #[cfg(target_arch = "x86_64")]
+        {
+            assert!(matches!(
+                capability,
+                CpuCapability::Avx512F
+                    | CpuCapability::Avx2Fma
+                    | CpuCapability::Avx2
+                    | CpuCapability::Sse42
+                    | CpuCapability::Scalar
+            ));
+        }
+        #[cfg(target_arch = "aarch64")]
+        {
+            assert!(matches!(
+                capability,
+                CpuCapability::Neon | CpuCapability::Scalar
+            ));
+        }
+        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
+        {
+            assert!(matches!(capability, CpuCapability::Scalar));
+        }
+    }
+
+    #[test]
+    fn test_implementation_validation() {
+        assert!(
+            validate_implementation(),
+            "SIMD implementation diverged from scalar reference"
+        );
+    }
+
+    #[test]
+    fn test_cosine_similarity_basic() {
+        let a = [1.0f32; 768];
+        let b = [1.0f32; 768];
+        let similarity = cosine_similarity_768(&a, &b);
+        assert!(
+            (similarity - 1.0).abs() < 1e-6,
+            "Identical vectors should have similarity 1.0"
+        );
+
+        let c = [-1.0f32; 768];
+        let similarity = cosine_similarity_768(&a, &c);
+        assert!(
+            (similarity + 1.0).abs() < 1e-6,
+            "Opposite vectors should have similarity -1.0"
+        );
+    }
+}

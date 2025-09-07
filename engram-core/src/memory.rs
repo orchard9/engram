@@ -95,6 +95,17 @@ impl Memory {
         }
     }
 
+    /// Create a memory from an episode with initial activation
+    #[must_use]
+    pub fn from_episode(episode: Episode, activation: f32) -> Self {
+        let mut memory = Self::new(episode.id, episode.embedding, episode.encoding_confidence);
+        memory.set_activation(activation);
+        memory.content = Some(episode.what);
+        memory.created_at = episode.when;
+        memory.last_access = episode.when;
+        memory
+    }
+
     /// Gets current activation level (thread-safe)
     pub fn activation(&self) -> f32 {
         self.activation.load(Ordering::Relaxed)
@@ -288,6 +299,84 @@ impl Episode {
         self.encoding_confidence = encoding_decay;
         self.vividness_confidence = vividness_decay;
         self.reliability_confidence = reliability_decay;
+    }
+    
+    /// Create a partial episode from available fields for pattern completion
+    #[cfg(feature = "pattern_completion")]
+    pub fn to_partial(&self, mask_percentage: f32) -> crate::completion::PartialEpisode {
+        use std::collections::HashMap;
+        
+        let mut known_fields = HashMap::new();
+        
+        // Randomly mask some fields (simplified for now)
+        if mask_percentage < 0.25 {
+            known_fields.insert("what".to_string(), self.what.clone());
+        }
+        if mask_percentage < 0.5 {
+            if let Some(ref loc) = self.where_location {
+                known_fields.insert("where".to_string(), loc.clone());
+            }
+        }
+        if mask_percentage < 0.75 {
+            if let Some(ref who) = self.who {
+                known_fields.insert("who".to_string(), who.join(", "));
+            }
+        }
+        
+        // Mask embedding dimensions
+        let mut partial_embedding = Vec::with_capacity(768);
+        for i in 0..768 {
+            if (i as f32) / 768.0 > mask_percentage {
+                partial_embedding.push(Some(self.embedding[i]));
+            } else {
+                partial_embedding.push(None);
+            }
+        }
+        
+        crate::completion::PartialEpisode {
+            known_fields,
+            partial_embedding,
+            cue_strength: self.encoding_confidence,
+            temporal_context: Vec::new(),
+        }
+    }
+    
+    /// Check if this episode is complete (has all major fields)
+    pub fn is_complete(&self) -> bool {
+        !self.what.is_empty() && 
+        self.where_location.is_some() && 
+        self.who.is_some()
+    }
+    
+    /// Calculate completeness percentage
+    pub fn completeness(&self) -> f32 {
+        let mut score = 0.0;
+        let mut total = 0.0;
+        
+        // Check what field
+        if !self.what.is_empty() {
+            score += 1.0;
+        }
+        total += 1.0;
+        
+        // Check where field
+        if self.where_location.is_some() {
+            score += 1.0;
+        }
+        total += 1.0;
+        
+        // Check who field
+        if self.who.is_some() {
+            score += 1.0;
+        }
+        total += 1.0;
+        
+        // Check embedding quality (non-zero values)
+        let non_zero_count = self.embedding.iter().filter(|&&x| x != 0.0).count();
+        score += non_zero_count as f32 / 768.0;
+        total += 1.0;
+        
+        score / total
     }
 }
 

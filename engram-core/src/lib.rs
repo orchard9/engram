@@ -19,6 +19,8 @@ pub mod graph;
 #[cfg(feature = "hnsw_index")]
 pub mod index;
 pub mod memory;
+#[cfg(feature = "monitoring")]
+pub mod metrics;
 pub mod query;
 #[cfg(feature = "memory_mapped_persistence")]
 pub mod storage;

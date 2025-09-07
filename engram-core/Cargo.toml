@@ -24,6 +24,57 @@ mimalloc = { workspace = true }
 atomic_float = { workspace = true }
 syn = { version = "2.0", features = ["full", "visit"] }
 
+# Lock-free concurrent data structures for HNSW
+crossbeam-epoch = "0.9"
+crossbeam-queue = "0.3"
+crossbeam-deque = "0.8"
+crossbeam-skiplist = "0.1"
+crossbeam-utils = "0.8"
+
+# High-performance collections
+smallvec = { version = "1.13", features = ["union"] }
+bumpalo = { version = "3.16", optional = true }
+memmap2 = { version = "0.9", optional = true }
+
+# NUMA-aware allocation  
+# numa-rs = { version = "0.1", optional = true }
+
+# Additional synchronization
+# atomic-bitset = { version = "0.1", optional = true }
+
+# Memory-mapped persistence dependencies
+crc32c = { version = "0.6", optional = true }
+page_size = { version = "0.6", optional = true }
+libc = { version = "0.2", optional = true }
+rayon = { version = "1.7", optional = true }
+
+# Compression for persistence
+lz4 = { version = "1.24", optional = true }
+zstd = { version = "0.13", optional = true }
+
+# SIMD abstractions
+wide = { version = "0.7", optional = true }
+num-traits = "0.2"
+
+# Statistical and mathematical functions for psychological decay
+statrs = { version = "0.16", optional = true }
+libm = { version = "0.2", optional = true }
+rand_distr = { version = "0.4", optional = true }
+
+# Probabilistic query engine and formal verification
+z3 = { version = "0.12", optional = true }
+nalgebra = { version = "0.32", optional = true }
+
+# Production monitoring dependencies
+prometheus = { version = "0.13", optional = true }
+metrics = { version = "0.23", optional = true }
+metrics-exporter-prometheus = { version = "0.15", optional = true }
+metrics-util = { version = "0.17", optional = true }
+hwloc = { version = "0.5", optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+perf-event = { version = "0.4", optional = true }
+
 [dev-dependencies]
 criterion = { workspace = true }
 proptest = { workspace = true }
@@ -31,6 +82,74 @@ quickcheck = { workspace = true }
 bincode = { workspace = true }
 rand = { workspace = true }
 trybuild = "1.0"
+
+[features]
+default = ["hnsw_index", "psychological_decay", "probabilistic_queries", "pattern_completion", "monitoring"]
+
+# Core HNSW features
+hnsw_index = [
+    "memmap2", 
+    "lz4",
+    "wide",
+    "bumpalo"
+]
+
+# Memory-mapped persistence features
+memory_mapped_persistence = [
+    "memmap2",
+    "crc32c", 
+    "page_size",
+    "libc",
+    "rayon",
+    "lz4",
+    "zstd"
+]
+
+# Psychological decay functions with empirical validation
+psychological_decay = [
+    "statrs",
+    "libm", 
+    "rand_distr"
+]
+
+# Probabilistic query engine with formal verification
+probabilistic_queries = [
+    "statrs",
+    "nalgebra"
+]
+
+# Pattern completion with hippocampal dynamics
+pattern_completion = [
+    "nalgebra",
+    "statrs",
+    "rayon"
+]
+
+# SMT-based formal verification (experimental)
+smt_verification = [
+    "z3",
+    "probabilistic_queries"
+]
+
+# Production monitoring with lock-free metrics
+monitoring = [
+    "metrics",
+    "metrics-exporter-prometheus",
+    "metrics-util",
+    "prometheus",
+    "hwloc"
+]
+
+# Development and testing features
+testing = []
+
+# Fallback modes for compatibility
+force_scalar_compute = []
+single_threaded = []
+no_persistence = []
+
+# Experimental features
+# numa_aware = ["numa-rs"]
 
 [lints]
 workspace = true

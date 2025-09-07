@@ -58,19 +58,29 @@ If at any point anything gets stuck, move the task to \_blocked, write in the ta
 
 When asked to "write content <task file>":
 1. Read the specified task file to understand the implementation details
-2. Write content based on the task specifications and update the task file with any insights gained
+2. Identify the task number (e.g., 001, 002, 010) and task name from the file
+3. Write content to the appropriate task-specific directory
 
-For general content writing:
-1. Read the current milestone we're working on, the most recent task completed, and upcoming tasks to understand the project as a whole
-2. Write content/{milestone*number}*{milestone*name}/{content_number}*{content_title}\_research.md with a list of research topics
-3. Research each topic and append findings to the research document
-4. Develop perspectives from: cognitive-architecture, memory-systems, rust-graph-engine, systems-architecture
-5. Write perspectives to content/{milestone*number}*{milestone*name}/{content_number}*{content_title}\_perspectives.md
-6. Choose 1 perspective to highlight and write in that voice:
-    - content/{milestone*number}*{milestone*name}/{content_number}*{content_title}\_medium.md (long-form technical article)
-    - content/{milestone*number}*{milestone*name}/{content_number}*{content_title}\_twitter.md (thread format)
-7. Include specific citations from research in all content pieces
-8. Update relevant tasks with researched information
+Content is organized by milestone and task:
+- Base path: `content/milestone_{number}/{task_number}_{task_name}/`
+- Example: `content/milestone_1/001_simd_vector_operations/`
+- Example: `content/milestone_1/010_production_monitoring/`
+
+For each content piece, create the following files in the task directory:
+1. `{content_title}_research.md` - Research topics and findings
+2. `{content_title}_perspectives.md` - Multiple architectural perspectives:
+   - cognitive-architecture, memory-systems, rust-graph-engine, systems-architecture
+3. `{content_title}_medium.md` - Long-form technical article (choose one perspective)
+4. `{content_title}_twitter.md` - Twitter thread format
+
+Content writing process:
+1. Read the current milestone and specific task to understand context
+2. Research topics and document findings in the research file
+3. Develop perspectives from different architectural viewpoints
+4. Choose the most compelling perspective for the Medium article
+5. Create an engaging Twitter thread highlighting key insights
+6. Include specific citations from research in all content pieces
+7. Update the relevant task file with any new insights gained
 
 ## Adhere to the following documentation
 
