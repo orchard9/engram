@@ -3,8 +3,14 @@
 //! This module provides type-safe gRPC communication with cognitive-friendly
 //! message names and rich vocabulary that builds mental models.
 
-// Include the generated protobuf code
-tonic::include_proto!("engram.v1");
+// Suppress documentation warnings for generated protobuf code
+#[allow(missing_docs)]
+pub mod engram_v1 {
+    tonic::include_proto!("engram.v1");
+}
+
+// Re-export all generated types for convenience
+pub use engram_v1::*;
 
 use chrono::{DateTime, Utc};
 use prost_types::Timestamp;

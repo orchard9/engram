@@ -2,7 +2,6 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use crossbeam_utils::CachePadded;
-use atomic_float::AtomicF32;
 
 /// Hardware performance metrics collector
 pub struct HardwareMetrics {

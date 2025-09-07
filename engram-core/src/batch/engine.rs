@@ -35,6 +35,7 @@ struct BatchMetrics {
 }
 
 impl BatchEngine {
+    /// Create a new batch processing engine with the given memory store
     pub fn new(memory_store: Arc<MemoryStore>) -> Self {
         Self {
             memory_store,

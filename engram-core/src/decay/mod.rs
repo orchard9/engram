@@ -33,12 +33,8 @@
 
 use crate::{Confidence, Episode, Memory};
 use chrono::{DateTime, Duration, Utc};
-use std::time::{Duration as StdDuration, Instant};
+use std::time::Duration as StdDuration;
 
-#[cfg(feature = "psychological_decay")]
-use rand_distr::Normal;
-#[cfg(feature = "psychological_decay")]  
-use statrs::distribution::ContinuousCDF;
 
 pub mod hippocampal;
 pub mod neocortical;

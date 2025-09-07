@@ -1,6 +1,6 @@
 //! Entorhinal cortex-inspired context gathering with grid cell dynamics.
 
-use crate::{Confidence, Episode, Memory};
+use crate::{Episode, memory::Memory};
 use std::collections::HashMap;
 
 /// Grid module for spatial/temporal indexing
@@ -140,7 +140,7 @@ impl EntorhinalContext {
         
         for memory in memories {
             if let Some(ref content) = memory.content {
-                if content.contains(target_content) || target_content.contains(content) {
+                if content.contains(target_content) || target_content.contains(content.as_str()) {
                     context_memories.push(memory.clone());
                 }
             }

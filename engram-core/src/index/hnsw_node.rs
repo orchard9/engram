@@ -3,7 +3,6 @@
 use crate::{Confidence, Memory};
 use atomic_float::AtomicF32;
 use smallvec::SmallVec;
-use std::ptr::NonNull;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicPtr, AtomicU8, AtomicU32, AtomicU64, Ordering};
 

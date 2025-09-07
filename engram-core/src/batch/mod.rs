@@ -13,8 +13,9 @@ pub mod collector;
 
 pub use engine::BatchEngine;
 pub use buffers::BatchBuffer;
-#[cfg(feature = "streaming")]
-pub use streaming::StreamingBatchProcessor;
+// Streaming functionality requires additional dependencies - disabled for now
+// #[cfg(feature = "streaming")]
+// pub use streaming::StreamingBatchProcessor;
 pub use collector::AtomicResultCollector;
 
 /// High-throughput batch operations with streaming interfaces and bounded memory usage
@@ -75,11 +76,17 @@ impl Default for BatchConfig {
 /// Batch operation types that mirror existing MemoryStore operations
 #[derive(Debug, Clone)]
 pub enum BatchOperation {
+    /// Store an episode in memory
     Store(Episode),
+    /// Recall memories using a cue
     Recall(Cue),
+    /// Search for similar embeddings
     SimilaritySearch { 
+        /// 768-dimensional embedding vector to search with
         embedding: [f32; 768], 
+        /// Number of top results to return
         k: usize, 
+        /// Minimum confidence threshold for results
         threshold: Confidence 
     },
 }
@@ -95,16 +102,23 @@ pub struct BatchResult {
     pub metadata: BatchMetadata,
 }
 
+/// Result of a batch operation
 #[derive(Debug, Clone)]
 pub enum BatchOperationResult {
     /// Store result with activation level (cognitive semantics preserved)
-    Store { activation: Activation, memory_id: String },
+    Store { 
+        /// Activation level achieved during storage
+        activation: Activation, 
+        /// Unique identifier for the stored memory
+        memory_id: String 
+    },
     /// Recall results with confidence scores
     Recall(Vec<(Episode, Confidence)>),
     /// Similarity search results
     SimilaritySearch(Vec<(String, Confidence)>),
 }
 
+/// Metadata about batch operation processing
 #[derive(Debug, Clone)]
 pub struct BatchMetadata {
     /// Processing time in microseconds
@@ -130,6 +144,7 @@ pub struct BatchStoreResult {
     pub peak_memory_pressure: f32,
 }
 
+/// Result of batch recall operations
 #[derive(Debug)]
 pub struct BatchRecallResult {
     /// Results for each cue in the batch
@@ -140,6 +155,7 @@ pub struct BatchRecallResult {
     pub simd_accelerated_count: usize,
 }
 
+/// Result of batch similarity search operations
 #[derive(Debug)]
 pub struct BatchSimilarityResult {
     /// Top-k similar memories for each query
@@ -167,10 +183,18 @@ pub enum BackpressureStrategy {
 /// Batch processing errors
 #[derive(Debug, thiserror::Error)]
 pub enum BatchError {
+    /// Batch operation capacity was exceeded
     #[error("Batch capacity exceeded")]
     CapacityExceeded,
+    /// Memory limit was exceeded during batch processing
     #[error("Memory limit exceeded: {current_mb}MB > {limit_mb}MB")]
-    MemoryLimitExceeded { current_mb: usize, limit_mb: usize },
+    MemoryLimitExceeded { 
+        /// Current memory usage in MB
+        current_mb: usize, 
+        /// Memory limit in MB
+        limit_mb: usize 
+    },
+    /// Invalid batch configuration provided
     #[error("Invalid batch configuration: {0}")]
     InvalidConfig(String),
 }

@@ -2,7 +2,7 @@
 
 use crate::{Confidence, Episode};
 use super::{PartialEpisode, CompletionConfig};
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use chrono::Utc;
 
 /// Represents a hypothesis about a completed episode

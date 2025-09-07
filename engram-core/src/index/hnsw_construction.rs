@@ -1,6 +1,5 @@
 //! Lock-free construction algorithms for HNSW
 
-use super::{HnswEdge, HnswNode};
 use crate::Confidence;
 
 /// Builder for HNSW index with cognitive parameters

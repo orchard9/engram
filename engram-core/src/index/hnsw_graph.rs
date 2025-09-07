@@ -5,7 +5,6 @@ use crate::{Confidence, compute::VectorOps};
 use crossbeam_epoch::{self as epoch, Guard};
 use crossbeam_skiplist::SkipMap;
 use dashmap::DashMap;
-use smallvec::SmallVec;
 use std::cmp::Ordering as CmpOrdering;
 use std::collections::BinaryHeap;
 use std::sync::Arc;
@@ -160,12 +159,6 @@ impl HnswGraph {
 
             if !candidates.is_empty() {
                 current_nearest = candidates;
-
-                // If we're not at layer 0, use the best candidate as entry for next layer
-                if layer > 0 && !current_nearest.is_empty() {
-                    // Continue search from best candidate
-                    continue;
-                }
             }
         }
 

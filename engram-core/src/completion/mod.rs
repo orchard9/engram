@@ -3,12 +3,12 @@
 //! This module implements pattern completion for reconstructing missing parts of episodes
 //! using CA3 autoassociative dynamics, DG pattern separation, and System 2 reasoning.
 
-use crate::{Confidence, Episode, Memory};
+use crate::{Confidence, Episode};
 use std::collections::HashMap;
 use thiserror::Error;
 
 #[cfg(feature = "pattern_completion")]
-use nalgebra::{DMatrix, DVector};
+use nalgebra::DVector;
 
 pub mod hippocampal;
 pub mod reconstruction;

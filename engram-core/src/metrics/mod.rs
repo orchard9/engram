@@ -5,8 +5,8 @@
 //! wait-free data structures.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::time::{Duration, Instant};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
 use crossbeam_utils::CachePadded;
 
 pub mod lockfree;

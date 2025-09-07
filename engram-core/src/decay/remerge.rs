@@ -1,7 +1,7 @@
 //! REMERGE progressive episodic-to-semantic transformation processor.
 
-use crate::{Confidence, Episode, Memory};
-use chrono::{DateTime, Duration, Utc};
+use crate::{Confidence, Episode};
+use chrono::Utc;
 
 /// REMERGE processor implementing progressive episodic-to-semantic transformation
 #[derive(Debug, Clone)]

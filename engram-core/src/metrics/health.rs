@@ -1,7 +1,7 @@
 //! System health monitoring and checks
 
 use std::sync::atomic::{AtomicU64, AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use crossbeam_utils::CachePadded;
 use crate::Confidence;
 

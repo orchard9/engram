@@ -1,3 +1,5 @@
+//! Build script for generating Engram protocol buffer code.
+
 use std::env;
 use std::path::PathBuf;
 

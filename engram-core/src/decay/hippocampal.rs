@@ -14,8 +14,6 @@ use crate::Confidence;
 use std::time::{Duration, Instant};
 
 #[cfg(feature = "psychological_decay")]
-use libm::exp;
-
 /// Hippocampal fast decay system implementing Ebbinghaus exponential decay.
 ///
 /// Models the hippocampal memory system's fast forgetting characteristics with

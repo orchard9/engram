@@ -10,12 +10,8 @@
 //! - Zero-copy integration with existing MemoryStore
 
 use crate::{Confidence, Memory};
-use atomic_float::AtomicF32;
-use crossbeam_epoch::{self as epoch, Atomic, Guard, Owned, Shared};
-use crossbeam_skiplist::SkipMap;
-use dashmap::DashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU8, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
 pub mod confidence_metrics;
 pub mod hnsw_construction;

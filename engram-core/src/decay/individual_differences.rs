@@ -15,10 +15,6 @@
 use crate::Confidence;
 
 #[cfg(feature = "psychological_decay")]
-use rand_distr::Normal;
-#[cfg(feature = "psychological_decay")]
-use statrs::distribution::ContinuousCDF;
-
 /// Individual difference profile capturing cognitive variation in memory systems.
 ///
 /// Models individual differences in four key cognitive dimensions that affect

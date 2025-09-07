@@ -29,15 +29,22 @@ pub type NodeId = String;
 /// Lock-free activation record with atomic operations  
 #[repr(align(64))] // Cache line alignment
 pub struct ActivationRecord {
+    /// Unique identifier for this node
     pub node_id: NodeId,
-    pub activation: AtomicF32,        // Current activation level
-    pub timestamp: AtomicU64,         // Last update timestamp for ordering
-    pub decay_rate: f32,              // Node-specific decay coefficient
-    pub visits: AtomicUsize,          // Visit count for cycle detection
-    pub source_count: AtomicUsize,    // Number of pending source updates
+    /// Current activation level (0.0 to 1.0)
+    pub activation: AtomicF32,
+    /// Last update timestamp for ordering
+    pub timestamp: AtomicU64,
+    /// Node-specific decay coefficient
+    pub decay_rate: f32,
+    /// Visit count for cycle detection
+    pub visits: AtomicUsize,
+    /// Number of pending source updates
+    pub source_count: AtomicUsize,
 }
 
 impl ActivationRecord {
+    /// Create a new activation record with zero initial activation
     pub fn new(node_id: NodeId, decay_rate: f32) -> Self {
         Self {
             node_id,
@@ -77,10 +84,12 @@ impl ActivationRecord {
         }
     }
     
+    /// Get current activation level
     pub fn get_activation(&self) -> f32 {
         self.activation.load(Ordering::Relaxed)
     }
     
+    /// Reset activation and counters to zero
     pub fn reset(&self) {
         self.activation.store(0.0, Ordering::Relaxed);
         self.visits.store(0, Ordering::Relaxed);
@@ -91,15 +100,22 @@ impl ActivationRecord {
 /// Work-stealing task for parallel activation spreading
 #[derive(Clone, Debug)]
 pub struct ActivationTask {
+    /// Target node to spread activation to
     pub target_node: NodeId,
+    /// Activation level from source node
     pub source_activation: f32,
+    /// Edge weight connecting source to target
     pub edge_weight: f32,
+    /// Decay factor for this spreading step
     pub decay_factor: f32,
-    pub depth: u16,                   // Current spreading depth
-    pub max_depth: u16,               // Maximum allowed depth
+    /// Current spreading depth
+    pub depth: u16,
+    /// Maximum allowed depth
+    pub max_depth: u16,
 }
 
 impl ActivationTask {
+    /// Create a new activation spreading task
     pub fn new(
         target_node: NodeId,
         source_activation: f32,
@@ -118,10 +134,12 @@ impl ActivationTask {
         }
     }
     
+    /// Calculate the activation contribution this task will provide
     pub fn contribution(&self) -> f32 {
         self.source_activation * self.edge_weight * self.decay_factor
     }
     
+    /// Check if this task should continue spreading based on depth and threshold
     pub fn should_continue(&self) -> bool {
         self.depth < self.max_depth && self.contribution() > 0.01
     }
@@ -130,17 +148,23 @@ impl ActivationTask {
 /// Cache-optimized weighted edge with compression
 #[derive(Clone, Debug)]
 pub struct WeightedEdge {
+    /// Target node identifier
     pub target: NodeId,
+    /// Edge weight (0.0 to 1.0)
     pub weight: f32,
+    /// Type of neural connection
     pub edge_type: EdgeType,
 }
 
 /// Edge types for Dale's law compliance
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum EdgeType {
-    Excitatory,   // Positive influence
-    Inhibitory,   // Negative influence  
-    Modulatory,   // Context-dependent
+    /// Positive influence (increases activation)
+    Excitatory,
+    /// Negative influence (decreases activation) 
+    Inhibitory,
+    /// Context-dependent influence (depends on pattern)
+    Modulatory,
 }
 
 impl Default for EdgeType {
@@ -152,13 +176,30 @@ impl Default for EdgeType {
 /// Decay function implementations for different spreading dynamics
 #[derive(Clone, Debug)]
 pub enum DecayFunction {
-    Exponential { rate: f32 },
-    PowerLaw { exponent: f32 },
-    Linear { slope: f32 },
-    Custom { func: fn(u16) -> f32 },
+    /// Exponential decay with configurable rate
+    Exponential { 
+        /// Decay rate parameter
+        rate: f32 
+    },
+    /// Power law decay with configurable exponent
+    PowerLaw { 
+        /// Power law exponent
+        exponent: f32 
+    },
+    /// Linear decay with configurable slope
+    Linear { 
+        /// Linear decay slope
+        slope: f32 
+    },
+    /// Custom decay function
+    Custom { 
+        /// Custom decay function
+        func: fn(u16) -> f32 
+    },
 }
 
 impl DecayFunction {
+    /// Apply the decay function at the given depth
     pub fn apply(&self, depth: u16) -> f32 {
         match self {
             Self::Exponential { rate } => (-rate * depth as f32).exp(),
@@ -178,17 +219,26 @@ impl Default for DecayFunction {
 /// Performance metrics collection for optimization
 #[derive(Default, Debug)]
 pub struct SpreadingMetrics {
+    /// Total number of activation operations performed
     pub total_activations: AtomicU64,
+    /// Number of cache hits during spreading
     pub cache_hits: AtomicU64,
+    /// Number of cache misses during spreading
     pub cache_misses: AtomicU64,
+    /// Number of work stealing operations
     pub work_steals: AtomicU64,
+    /// Number of cycles detected in the graph
     pub cycles_detected: AtomicU64,
-    pub average_latency: AtomicU64, // In nanoseconds
+    /// Average latency in nanoseconds
+    pub average_latency: AtomicU64,
+    /// Peak memory usage in bytes
     pub peak_memory_usage: AtomicU64,
+    /// Parallel efficiency ratio (0.0 to 1.0)
     pub parallel_efficiency: AtomicF32,
 }
 
 impl SpreadingMetrics {
+    /// Calculate cache hit rate (0.0 to 1.0)
     pub fn cache_hit_rate(&self) -> f32 {
         let hits = self.cache_hits.load(Ordering::Relaxed) as f32;
         let misses = self.cache_misses.load(Ordering::Relaxed) as f32;
@@ -199,6 +249,7 @@ impl SpreadingMetrics {
         }
     }
     
+    /// Calculate work stealing rate (0.0 to 1.0)
     pub fn work_stealing_rate(&self) -> f32 {
         let steals = self.work_steals.load(Ordering::Relaxed) as f32;
         let total = self.total_activations.load(Ordering::Relaxed) as f32;
@@ -209,6 +260,7 @@ impl SpreadingMetrics {
         }
     }
     
+    /// Reset all metrics to zero
     pub fn reset(&self) {
         self.total_activations.store(0, Ordering::Relaxed);
         self.cache_hits.store(0, Ordering::Relaxed);
@@ -225,33 +277,50 @@ impl SpreadingMetrics {
 #[derive(Clone, Debug)]
 pub struct ParallelSpreadingConfig {
     // Parallelism control
-    pub num_threads: usize,              // Worker thread count
-    pub work_stealing_ratio: f32,        // Probability of stealing vs local work
-    pub batch_size: usize,               // Tasks processed per batch
+    /// Worker thread count for parallel processing
+    pub num_threads: usize,
+    /// Probability of stealing work vs processing local work
+    pub work_stealing_ratio: f32,
+    /// Number of tasks processed per batch
+    pub batch_size: usize,
     
     // Memory management
-    pub pool_initial_size: usize,        // Initial activation pool size
-    pub cache_line_size: usize,          // Target cache line alignment
-    pub numa_aware: bool,                // Enable NUMA-local allocation
+    /// Initial size of activation pool for memory reuse
+    pub pool_initial_size: usize,
+    /// Target cache line alignment in bytes
+    pub cache_line_size: usize,
+    /// Enable NUMA-aware memory allocation
+    pub numa_aware: bool,
     
     // Spreading dynamics
-    pub max_depth: u16,                  // Maximum spreading depth
-    pub decay_function: DecayFunction,   // Exponential, power-law, or custom
-    pub threshold: f32,                  // Minimum activation threshold
-    pub cycle_detection: bool,           // Enable cycle detection
+    /// Maximum spreading depth allowed
+    pub max_depth: u16,
+    /// Decay function for activation spreading
+    pub decay_function: DecayFunction,
+    /// Minimum activation threshold for processing
+    pub threshold: f32,
+    /// Enable cycle detection during spreading
+    pub cycle_detection: bool,
     
     // Integration parameters
-    pub simd_batch_size: usize,          // SIMD vector width for bulk operations
-    pub prefetch_distance: usize,        // Cache prefetch lookahead
+    /// SIMD vector width for bulk operations
+    pub simd_batch_size: usize,
+    /// Cache prefetch lookahead distance
+    pub prefetch_distance: usize,
     
     // Determinism and reproducibility
-    pub deterministic: bool,             // Enable deterministic mode
-    pub seed: Option<u64>,               // RNG seed for reproducible results
-    pub phase_sync_interval: Duration,   // Phase barrier sync interval
+    /// Enable deterministic execution mode
+    pub deterministic: bool,
+    /// RNG seed for reproducible results
+    pub seed: Option<u64>,
+    /// Phase barrier synchronization interval
+    pub phase_sync_interval: Duration,
     
     // Performance monitoring
-    pub enable_metrics: bool,            // Collect performance metrics
-    pub trace_activation_flow: bool,     // Detailed activation tracing
+    /// Enable performance metrics collection
+    pub enable_metrics: bool,
+    /// Enable detailed activation flow tracing
+    pub trace_activation_flow: bool,
 }
 
 impl Default for ParallelSpreadingConfig {
@@ -283,12 +352,16 @@ impl Default for ParallelSpreadingConfig {
 /// Error types for activation spreading
 #[derive(Debug, thiserror::Error)]
 pub enum ActivationError {
+    /// Invalid configuration provided
     #[error("Invalid configuration: {0}")]
     InvalidConfig(String),
+    /// Memory allocation failed during activation spreading
     #[error("Memory allocation failed")]
     AllocationFailed,
+    /// Cycle detected in activation graph
     #[error("Cycle detected in graph: {0:?}")]
     CycleDetected(Vec<NodeId>),
+    /// Threading or concurrency error occurred
     #[error("Threading error: {0}")]
     ThreadingError(String),
 }
@@ -303,12 +376,14 @@ pub struct MemoryGraph {
 }
 
 impl MemoryGraph {
+    /// Create a new empty memory graph
     pub fn new() -> Self {
         Self {
             adjacency_list: DashMap::new(),
         }
     }
     
+    /// Add a weighted edge between two nodes in the memory graph
     pub fn add_edge(&self, source: NodeId, target: NodeId, weight: f32, edge_type: EdgeType) {
         let edge = WeightedEdge {
             target,
@@ -322,16 +397,19 @@ impl MemoryGraph {
             .push(edge);
     }
     
+    /// Get all neighbors of a given node
     pub fn get_neighbors(&self, node_id: &NodeId) -> Option<Vec<WeightedEdge>> {
         self.adjacency_list
             .get(node_id)
             .map(|edges| edges.clone())
     }
     
+    /// Get the total number of nodes in the graph
     pub fn node_count(&self) -> usize {
         self.adjacency_list.len()
     }
     
+    /// Get the total number of edges in the graph
     pub fn edge_count(&self) -> usize {
         self.adjacency_list
             .iter()
