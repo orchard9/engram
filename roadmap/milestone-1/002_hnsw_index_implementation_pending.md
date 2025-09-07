@@ -1,9 +1,36 @@
 # Task 002: HNSW Index Implementation for Engram Graph Engine
 
-## Status: Complete ✅  
+## Status: Implementation Ready 📋  
 ## Priority: P0 - Critical Path
 ## Estimated Effort: 16 days (increased for cognitive memory semantics)
 ## Dependencies: Task 001 (SIMD Vector Operations)
+## Updated: 2025-01-20 - Ready for development sprint
+
+## Quick Start Implementation Plan
+
+### Phase 1: Core Structure (Days 1-4)
+1. **Create index module**: `engram-core/src/index/mod.rs`
+2. **Implement HnswNode**: Cache-optimized 64-byte aligned structure
+3. **Basic graph operations**: Insert, search with crossbeam collections
+4. **Feature flag integration**: Enable gradual rollout
+
+### Phase 2: Cognitive Integration (Days 5-8)
+1. **Confidence propagation**: Integrate with existing Confidence types
+2. **Memory pressure adaptation**: Dynamic parameter adjustment
+3. **MemoryStore integration**: Zero-copy references to Arc<Memory>
+4. **Activation spreading**: Graph-based enhancement
+
+### Phase 3: Performance (Days 9-12)
+1. **SIMD integration**: Leverage Task 001 vector operations
+2. **Lock-free optimization**: Crossbeam epoch-based reclamation
+3. **Cache optimization**: Memory layout and prefetching
+4. **Concurrent testing**: Stress tests and validation
+
+### Phase 4: Production (Days 13-16)
+1. **Error handling**: Graceful degradation mechanisms
+2. **Monitoring**: Performance metrics and circuit breakers
+3. **Documentation**: API docs and usage examples
+4. **Benchmarking**: Performance validation vs linear scan
 
 ## Objective
 Build a cognitive-aware hierarchical navigable small world (HNSW) graph index integrated with Engram's probabilistic memory store, achieving 90% recall@10 with <1ms query time while maintaining confidence-based retrieval semantics and graceful degradation under memory pressure.

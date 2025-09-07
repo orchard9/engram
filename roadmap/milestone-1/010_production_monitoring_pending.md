@@ -839,25 +839,31 @@ groups:
 ## Enhanced Acceptance Criteria
 
 ### Core Performance and Overhead Requirements
-- [ ] **<0.5% Performance Overhead**: Comprehensive benchmarking shows <0.5% CPU and memory overhead at 100K+ operations/second
-- [ ] **<50ns Metric Recording**: Counter increments complete in <50ns, histogram samples in <100ns
-- [ ] **<5ms Export Latency**: Full Prometheus metrics export completes in <5ms for typical 4KB payload
-- [ ] **<25ns Lock-Free Operations**: Queue operations and atomic updates maintain sub-25ns latency
-- [ ] **Zero-Allocation Hot Path**: No heap allocations during metric recording operations
+- [ ] **<0.3% Performance Overhead**: Comprehensive benchmarking shows <0.3% CPU and memory overhead at 100K+ operations/second with complete metrics collection enabled
+- [ ] **<20ns Counter Updates**: Lock-free counter increments using relaxed atomic operations complete in <20ns on modern x86_64 and ARM64
+- [ ] **<50ns Histogram Recording**: Cache-aligned atomic histogram bucket updates complete in <50ns with proper memory ordering
+- [ ] **<2ms Export Latency**: Full Prometheus metrics export with 10K+ metrics completes in <2ms using zero-copy streaming aggregation
+- [ ] **<15ns Lock-Free Queue Operations**: SPSC queue enqueue/dequeue operations maintain sub-15ns latency with hazard pointer protection
+- [ ] **Zero-Allocation Hot Path**: Guaranteed no heap allocations during metric recording operations, validated with allocation tracking
 
 ### Cognitive Architecture Monitoring Requirements  
-- [ ] **CLS Ratio Tracking**: Accurate hippocampal/neocortical weight ratio monitoring with <10μs update latency
-- [ ] **Consolidation State Monitoring**: Memory consolidation transitions tracked with <5μs recording overhead
-- [ ] **Pattern Completion Metrics**: Plausibility scores and false memory rates measured with <2μs precision
-- [ ] **Spreading Activation Tracking**: Depth, coverage, and branching factor metrics with graph-aware accuracy
-- [ ] **Biological Plausibility Validation**: Metrics correlate with published cognitive psychology research
+- [ ] **CLS Ratio Tracking**: Accurate hippocampal/neocortical weight ratio monitoring with <5μs update latency using atomic f32 operations
+- [ ] **Consolidation State Monitoring**: Memory consolidation state transitions tracked with <2μs recording overhead using lock-free state machines
+- [ ] **Pattern Completion Metrics**: Plausibility scores and false memory rates measured with <1μs precision using wait-free histogram updates
+- [ ] **Spreading Activation Tracking**: Real-time depth, coverage, and branching factor metrics with NUMA-aware graph traversal monitoring
+- [ ] **Confidence Score Calibration**: Integration with existing Confidence type for bias-aware metric collection and overconfidence correction
+- [ ] **Memory Node State Transitions**: Type-safe monitoring of Unvalidated→Validated→Active→Consolidated state changes with <100ns overhead
+- [ ] **Biological Plausibility Validation**: Metrics correlate with published cognitive psychology research within statistical significance thresholds
 
 ### Hardware Performance Monitoring Requirements
-- [ ] **SIMD Utilization Tracking**: Real-time SIMD instruction efficiency monitoring with <20ns overhead
-- [ ] **Cache Performance Integration**: L1/L2/L3 hit ratios from hardware counters with <15ns recording latency
-- [ ] **Branch Prediction Monitoring**: Accurate branch prediction statistics with <10ns measurement overhead
-- [ ] **NUMA Topology Awareness**: Per-socket metrics collection and remote access ratio tracking
-- [ ] **Memory Bandwidth Monitoring**: Real-time memory bandwidth utilization and cross-socket traffic measurement
+- [ ] **SIMD Utilization Tracking**: Real-time AVX-512, AVX2, and NEON instruction efficiency monitoring with <15ns overhead using perf event integration
+- [ ] **Vector Operations Monitoring**: Integration with existing VectorOps trait for cosine_similarity_768 and batch operations performance tracking
+- [ ] **CPU Capability Detection**: Runtime monitoring of SIMD capability changes and optimal implementation selection tracking
+- [ ] **Cache Performance Integration**: L1/L2/L3 hit ratios from hardware performance counters with <10ns recording latency using memory-mapped registers
+- [ ] **Branch Prediction Monitoring**: Accurate branch prediction statistics with <5ns measurement overhead for graph traversal optimization
+- [ ] **NUMA Topology Awareness**: Per-socket metrics collection, remote access ratio tracking, and cross-NUMA memory allocation monitoring
+- [ ] **Memory Bandwidth Saturation**: Real-time memory bandwidth utilization tracking with early warning at 80% saturation thresholds
+- [ ] **Cache Line Utilization**: 64-byte cache line alignment verification and false sharing detection for lock-free data structures
 
 ### Systems Health and Reliability Requirements
 - [ ] **Sub-Millisecond Health Checks**: Complete system health assessment in <500μs
@@ -867,11 +873,23 @@ groups:
 - [ ] **Real-Time Alert Generation**: Sub-second alert generation for critical system conditions
 
 ### Integration and Compatibility Requirements
-- [ ] **Milestone Task Integration**: Full monitoring integration with all Tasks 001-009 without performance impact
-- [ ] **Feature Flag Control**: Complete monitoring system toggleable via compile-time and runtime flags
-- [ ] **Cross-Platform Compatibility**: Validated operation on x86_64, ARM64, different NUMA topologies
-- [ ] **Prometheus Compatibility**: Full compliance with Prometheus metrics format and scraping protocols
-- [ ] **Grafana Dashboard Templates**: Production-ready dashboards for operational monitoring
+- [ ] **Deep Milestone Task Integration**: 
+  - Task 001: SIMD operations monitoring with vector instruction counting and cache efficiency tracking
+  - Task 002: HNSW index traversal metrics, cache locality measurements, and graph construction monitoring
+  - Task 003: Memory-mapped persistence layer instrumentation with I/O pattern analysis
+  - Task 004: Parallel activation spreading monitoring with thread pool efficiency and work-stealing metrics
+  - Task 005: Psychological decay function validation with biological plausibility correlation analysis
+  - Task 006: Probabilistic query engine performance with confidence score distribution tracking
+  - Task 007: Pattern completion engine monitoring with reconstruction accuracy and false memory detection
+  - Task 008: Batch operations API monitoring with throughput, backpressure, and memory pool utilization
+  - Task 009: Statistical benchmarking integration with automated regression detection and significance testing
+- [ ] **Engram-Core Integration**: Native integration with existing MemoryStore, Confidence types, and memory node state machines
+- [ ] **CLI Integration**: Seamless integration with engram-cli monitoring commands and real-time dashboard display
+- [ ] **API Integration**: Full SSE streaming integration with existing HTTP API endpoints for real-time monitoring
+- [ ] **Feature Flag Control**: Complete monitoring system toggleable via compile-time features and runtime configuration
+- [ ] **Cross-Platform Compatibility**: Validated operation on x86_64 (Intel/AMD), ARM64 (Graviton/Apple Silicon), different NUMA topologies
+- [ ] **Prometheus Compatibility**: Full compliance with Prometheus metrics format, scraping protocols, and service discovery
+- [ ] **OpenTelemetry Integration**: Standards-compliant tracing and metrics export for enterprise observability stacks
 
 ### Production Deployment Requirements
 - [ ] **24+ Hour Stability**: Continuous operation with stable memory usage and no performance degradation
@@ -915,37 +933,274 @@ groups:
 - Automated baseline comparison and drift detection
 - Integration with existing benchmark results for alert thresholds
 
-## Risk Mitigation Strategy
+## Advanced Risk Mitigation Strategy
 
 ### Technical Implementation Risks
-1. **Atomic Operation Contention**: High contention on shared counters could degrade performance
-   - **Mitigation**: Per-CPU/NUMA node counter arrays with aggregation for export
-   - **Monitoring**: Contention detection and automatic scaling
-   - **Fallback**: Sampling-based metrics collection under extreme contention
+1. **Lock-Free Data Structure Correctness**: ABA problems and memory ordering bugs in high-throughput scenarios
+   - **Mitigation**: Comprehensive Loom model checking, epoch-based reclamation using crossbeam-epoch, hazard pointers for safe concurrent access
+   - **Validation**: ThreadSanitizer integration, formal verification using TLA+ for critical data structures
+   - **Testing**: Stress testing with 10K+ concurrent threads, randomized testing with PropTest
+   - **Monitoring**: Real-time detection of memory ordering violations and atomic operation failures
 
-2. **Hardware Counter Accuracy**: Performance counters may not be available or accurate on all platforms
-   - **Mitigation**: Runtime capability detection with graceful degradation
-   - **Validation**: Cross-validation with known benchmark results
-   - **Fallback**: Software-based approximations for missing hardware counters
+2. **SIMD Implementation Divergence**: Vector operations producing different results across CPU architectures
+   - **Mitigation**: Runtime validation against scalar reference implementation, cross-platform CI testing on Intel, AMD, ARM64
+   - **Validation**: Bit-exact comparison testing, numerical stability analysis under different compiler optimizations
+   - **Fallback**: Automatic fallback to scalar operations on validation failure with detailed error reporting
+   - **Monitoring**: Real-time SIMD accuracy validation with statistical significance testing
 
-3. **Memory Ordering Complexity**: Incorrect memory ordering in lock-free structures could cause subtle bugs
-   - **Mitigation**: Extensive use of proven crossbeam primitives and Loom model checking
-   - **Validation**: Memory model testing across different CPU architectures
-   - **Testing**: Stress testing with thousands of concurrent operations
+3. **Hardware Performance Counter Reliability**: Inconsistent or unavailable performance counters across platforms
+   - **Mitigation**: Multi-tier capability detection (hardware counters → software approximation → estimation), graceful degradation hierarchy
+   - **Validation**: Cross-validation with known benchmarks, correlation analysis with external monitoring tools
+   - **Calibration**: Platform-specific correction factors, temperature and throttling compensation
+   - **Documentation**: Per-platform accuracy specifications and limitation disclosures
 
 ### Performance and Scalability Risks
-4. **Metrics Collection Overhead**: Monitoring could exceed the <1% overhead target under extreme load
-   - **Mitigation**: Adaptive sampling rates and metric disabling under pressure
-   - **Monitoring**: Self-monitoring of monitoring overhead with automatic adaptation
-   - **Fallback**: Complete metrics disabling via feature flags
+4. **Memory Pressure Under Load**: Monitoring system consuming excessive memory during high-throughput operations
+   - **Mitigation**: Fixed-size memory pools, circular buffers for metric history, aggressive memory reclamation policies
+   - **Monitoring**: Memory pressure detection with automatic metric pruning and sampling rate adjustment
+   - **Adaptive Behavior**: Dynamic buffer sizing, priority-based metric retention, emergency low-memory mode
+   - **Validation**: Extended load testing with memory constrained environments
 
-5. **NUMA Scalability Issues**: Poor NUMA awareness could cause performance degradation on large systems
-   - **Mitigation**: Per-NUMA node metric collection with topology-aware aggregation
-   - **Testing**: Validation on 2-socket, 4-socket, and single-socket systems
-   - **Monitoring**: Real-time NUMA balance monitoring and automatic rebalancing
+5. **Cache Coherence Bottlenecks**: False sharing and cache line bouncing in multi-socket NUMA systems
+   - **Mitigation**: 64-byte cache line alignment for all hot data structures, per-socket metric collectors, NUMA-local aggregation
+   - **Detection**: Hardware performance counter monitoring of cache coherence traffic, false sharing pattern analysis
+   - **Optimization**: Dynamic thread/memory affinity adjustment, cache-conscious data structure layout
+   - **Testing**: NUMA topology simulation, cross-socket bandwidth saturation testing
 
-### Production Deployment Risks
-6. **Alert Noise and Accuracy**: Poorly calibrated alerts could create operational burden
-   - **Mitigation**: Statistical validation of alert thresholds using historical data
-   - **Calibration**: Machine learning-based dynamic threshold adjustment
-   - **Documentation**: Comprehensive runbooks for each alert condition
+6. **Real-Time Monitoring Accuracy**: Time-sensitive metrics becoming stale or inconsistent under load
+   - **Mitigation**: High-resolution timestamp integration (TSC/monotonic), lockless timestamp ordering, causal consistency guarantees
+   - **Validation**: Clock synchronization verification, temporal ordering consistency checks
+   - **Fallback**: Best-effort timestamps with accuracy disclaimers, statistical interpolation for missing data points
+   - **Calibration**: NTP synchronization requirements, system clock drift compensation
+
+### Production Deployment and Operational Risks
+7. **Alert Fatigue and Accuracy**: High false positive rates leading to ignored critical alerts
+   - **Mitigation**: Machine learning-based anomaly detection, dynamic baseline adjustment, confidence-weighted alerting
+   - **Validation**: Historical alert accuracy analysis, ROC curve optimization for alert thresholds
+   - **Feedback Loop**: Alert outcome tracking, operator feedback integration, automated threshold refinement
+   - **Documentation**: Decision trees for alert triage, escalation procedures, historical context for each alert type
+
+8. **Monitoring System Failure**: The monitoring system itself becoming a single point of failure
+   - **Mitigation**: Redundant metric collection pathways, monitoring-of-monitoring health checks, graceful degradation modes
+   - **Resilience**: Circuit breaker patterns for failing metric endpoints, retry policies with exponential backoff
+   - **Recovery**: Automatic recovery procedures, metric backfill from persistent storage, state reconstruction capabilities
+   - **Testing**: Chaos engineering for monitoring infrastructure, failure injection testing
+
+9. **Data Privacy and Security**: Sensitive cognitive data exposure through metrics and monitoring
+   - **Mitigation**: Metric sanitization policies, differential privacy for aggregated statistics, encryption for metric transport
+   - **Access Control**: Role-based access to different metric granularities, audit logging for metric access
+   - **Compliance**: GDPR/CCPA compliance for cognitive data handling, data retention policies
+   - **Validation**: Regular security audits, penetration testing of monitoring endpoints
+
+### Correlation Analysis and Pattern Discovery
+
+**Cross-Metric Correlation Engine:**
+```rust
+/// Discovers patterns and correlations across different metric types
+pub struct CorrelationAnalyzer {
+    /// Sliding window of metric values for correlation analysis
+    metric_windows: DashMap<String, CircularBuffer<f64, 1000>>,
+    /// Discovered correlation patterns
+    correlation_patterns: RwLock<Vec<CorrelationPattern>>,
+    /// Statistical significance thresholds
+    significance_threshold: f64,
+    /// Correlation strength thresholds
+    correlation_threshold: f64,
+}
+
+#[derive(Debug, Clone)]
+pub struct CorrelationPattern {
+    pub metric_a: String,
+    pub metric_b: String,
+    pub correlation_coefficient: f64,
+    pub p_value: f64,
+    pub discovery_timestamp: SystemTime,
+    pub cognitive_interpretation: String,
+}
+
+impl CorrelationAnalyzer {
+    /// Analyze correlations between cognitive metrics
+    pub fn analyze_cognitive_correlations(&self) -> Vec<CognitiveInsight> {
+        let patterns = self.correlation_patterns.read();
+        patterns.iter()
+            .filter(|p| p.p_value < self.significance_threshold)
+            .map(|p| self.interpret_cognitive_pattern(p))
+            .collect()
+    }
+    
+    fn interpret_cognitive_pattern(&self, pattern: &CorrelationPattern) -> CognitiveInsight {
+        match (pattern.metric_a.as_str(), pattern.metric_b.as_str()) {
+            ("cls_hippocampal_weight", "false_memory_rate") => {
+                CognitiveInsight {
+                    insight_type: InsightType::MemorySystem,
+                    description: "Higher hippocampal dominance correlates with increased false memory generation".to_string(),
+                    confidence: Confidence::exact(pattern.correlation_coefficient.abs()),
+                    biological_relevance: "Consistent with pattern completion theory in cognitive neuroscience".to_string(),
+                    actionable_recommendation: "Consider adjusting hippocampal/neocortical balance parameters".to_string(),
+                }
+            },
+            ("simd_utilization", "cache_hit_ratio") => {
+                CognitiveInsight {
+                    insight_type: InsightType::Performance,
+                    description: "SIMD efficiency strongly correlates with cache performance".to_string(),
+                    confidence: Confidence::exact(pattern.correlation_coefficient.abs()),
+                    biological_relevance: "Parallels efficient neural computation in cortical columns".to_string(),
+                    actionable_recommendation: "Optimize memory access patterns for vector operations".to_string(),
+                }
+            },
+            _ => CognitiveInsight::generic_correlation(pattern)
+        }
+    }
+}
+```
+
+### Predictive Health Monitoring
+
+**Predictive System Health:**
+```rust
+/// Predictive health monitoring using machine learning on metric trends
+pub struct PredictiveHealthMonitor {
+    /// Time series forecasting models for key metrics
+    forecasting_models: DashMap<String, LinearRegressionModel>,
+    /// Anomaly detection using isolation forests
+    anomaly_detector: IsolationForest,
+    /// Health score calculation weights
+    health_weights: HealthWeights,
+    /// Prediction confidence thresholds
+    confidence_thresholds: ConfidenceThresholds,
+}
+
+pub struct HealthPrediction {
+    pub overall_health_score: f32,
+    pub predicted_issues: Vec<PredictedIssue>,
+    pub time_to_critical: Option<Duration>,
+    pub confidence: Confidence,
+    pub recommended_actions: Vec<MaintenanceAction>,
+}
+
+pub struct PredictedIssue {
+    pub issue_type: IssueType,
+    pub severity: Severity,
+    pub probability: f32,
+    pub estimated_occurrence: SystemTime,
+    pub contributing_metrics: Vec<String>,
+    pub cognitive_impact: CognitiveImpact,
+}
+
+impl PredictiveHealthMonitor {
+    /// Generate health prediction based on current and historical metrics
+    pub fn predict_system_health(&self, horizon: Duration) -> HealthPrediction {
+        let mut predictions = Vec::new();
+        
+        // Analyze memory pressure trends
+        if let Some(memory_trend) = self.analyze_memory_pressure_trend(horizon) {
+            if memory_trend.slope > 0.1 && memory_trend.confidence > 0.8 {
+                predictions.push(PredictedIssue {
+                    issue_type: IssueType::MemoryPressure,
+                    severity: Severity::Warning,
+                    probability: memory_trend.confidence,
+                    estimated_occurrence: SystemTime::now() + memory_trend.estimated_time_to_threshold,
+                    contributing_metrics: vec!["memory_pool_utilization".to_string(), "allocation_rate".to_string()],
+                    cognitive_impact: CognitiveImpact {
+                        affected_systems: vec![CognitiveSystem::WorkingMemory, CognitiveSystem::LongTermMemory],
+                        expected_degradation: 0.3,
+                        user_visible: true,
+                    },
+                });
+            }
+        }
+        
+        // Calculate overall health score
+        let health_score = self.calculate_composite_health_score(&predictions);
+        let overall_confidence = self.calculate_prediction_confidence(&predictions);
+        
+        HealthPrediction {
+            overall_health_score: health_score,
+            predicted_issues: predictions,
+            time_to_critical: self.estimate_time_to_critical_failure(),
+            confidence: overall_confidence,
+            recommended_actions: self.generate_maintenance_recommendations(&predictions),
+        }
+    }
+}
+```
+
+### Real-Time Dashboard and Visualization
+
+**Cognitive-Friendly Monitoring Dashboard:**
+```rust
+/// Terminal-based monitoring dashboard with cognitive ergonomics
+pub struct MonitoringDashboard {
+    /// Terminal interface for real-time display
+    terminal: Terminal<CrosstermBackend<io::Stdout>>,
+    /// Metric data sources
+    metric_sources: Vec<Box<dyn MetricSource>>,
+    /// Dashboard layout configuration
+    layout_config: DashboardLayout,
+    /// Update frequency (respects cognitive processing limits)
+    update_frequency: Duration,
+    /// Alert prioritization
+    alert_prioritizer: AlertPrioritizer,
+}
+
+pub struct DashboardLayout {
+    /// Primary focus area for most important metrics
+    primary_focus: FocusPanel,
+    /// Secondary panels for detailed metrics
+    secondary_panels: Vec<DetailPanel>,
+    /// Alert notification area
+    alert_area: AlertPanel,
+    /// System overview area
+    overview_area: OverviewPanel,
+}
+
+impl MonitoringDashboard {
+    /// Render cognitive-friendly dashboard update
+    pub fn render_frame(&mut self) -> Result<(), DashboardError> {
+        let mut frame = self.terminal.get_frame()?;
+        
+        // Primary focus: Most critical metrics with large, clear displays
+        self.render_primary_focus(&mut frame, {
+            "Memory Pressure": self.get_memory_pressure_visualization(),
+            "Cognitive Load": self.get_cognitive_load_visualization(),
+            "System Health": self.get_system_health_visualization(),
+        })?;
+        
+        // Secondary detail panels with drill-down capability
+        self.render_secondary_panels(&mut frame, vec![
+            ("SIMD Performance", self.get_simd_metrics()),
+            ("Memory Systems", self.get_memory_system_metrics()),
+            ("Graph Operations", self.get_graph_metrics()),
+        ])?;
+        
+        // Alert area with cognitive prioritization
+        self.render_alerts(&mut frame, self.alert_prioritizer.get_prioritized_alerts())?;
+        
+        // System overview with predictive health
+        self.render_system_overview(&mut frame, self.get_system_overview())?;
+        
+        self.terminal.flush()?;
+        Ok(())
+    }
+    
+    /// Generate memory pressure visualization with cognitive context
+    fn get_memory_pressure_visualization(&self) -> PressureVisualization {
+        let current_pressure = self.get_current_memory_pressure();
+        let pressure_trend = self.get_pressure_trend();
+        let cognitive_impact = self.assess_cognitive_impact(current_pressure);
+        
+        PressureVisualization {
+            current_level: current_pressure,
+            trend: pressure_trend,
+            color_coding: self.get_cognitive_color_coding(current_pressure),
+            text_description: match current_pressure {
+                p if p < 0.3 => "Memory system operating comfortably",
+                p if p < 0.6 => "Moderate memory pressure - still within normal range", 
+                p if p < 0.8 => "High memory pressure - performance may be affected",
+                _ => "Critical memory pressure - immediate attention required",
+            }.to_string(),
+            recommendations: self.get_pressure_recommendations(current_pressure),
+        }
+    }
+}
+```

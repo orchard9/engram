@@ -114,20 +114,28 @@ impl PowerAnalysisCalculator {
 }
 ```
 
-### 2. Differential Testing Against Multiple Baselines
+### 2. Advanced Differential Testing with Metamorphic Testing
 
-**Baseline Implementation Matrix**:
+**Enhanced Baseline Implementation Matrix with Academic References**:
 ```rust
-/// Comprehensive differential testing framework
+/// Comprehensive differential testing framework with metamorphic testing
 pub struct DifferentialTestingHarness {
-    /// Vector database baselines
+    /// Vector database baselines with version tracking
     vector_baselines: Vec<Box<dyn VectorDatabaseBaseline>>,
-    /// Graph database baselines  
-    graph_baselines: Vec<Box<dyn GraphDatabaseBaseline>>,
-    /// Memory system baselines
+    /// Graph database baselines with query semantics validation
+    graph_baselines: Vec<Box<dyn GraphDatabaseBaseline>>,  
+    /// Memory system baselines with cognitive accuracy metrics
     memory_baselines: Vec<Box<dyn MemorySystemBaseline>>,
+    /// Academic reference implementations
+    reference_implementations: Vec<Box<dyn AcademicReferenceImplementation>>,
+    /// Metamorphic testing engine for relation validation
+    metamorphic_engine: MetamorphicTestingEngine,
     /// Test case generators for comprehensive coverage
     test_generators: TestCaseGeneratorSuite,
+    /// Oracle functions for correctness validation
+    test_oracles: TestOracleDatabase,
+    /// Semantic equivalence checker
+    semantic_checker: SemanticEquivalenceChecker,
 }
 
 /// Vector database baseline implementations
@@ -164,6 +172,123 @@ pub struct Neo4jBaseline {
 }
 
 pub struct NetworkXBaseline; // Reference implementation
+
+/// Academic reference implementations for cognitive accuracy validation
+pub trait AcademicReferenceImplementation: Send + Sync {
+    fn paper_citation(&self) -> &'static str;
+    fn implementation_url(&self) -> &'static str;
+    fn validate_cognitive_accuracy(&self, scenario: &CognitiveScenario) -> CognitiveAccuracyMetrics;
+}
+
+/// DRM false memory reference from Roediger & McDermott (1995)
+pub struct DRMReferenceImplementation {
+    word_lists: HashMap<String, Vec<String>>,
+    false_memory_rates: HashMap<String, f64>,
+}
+
+impl AcademicReferenceImplementation for DRMReferenceImplementation {
+    fn paper_citation(&self) -> &'static str {
+        "Roediger, H. L., & McDermott, K. B. (1995). Creating false memories: Remembering words not presented in lists. Journal of Experimental Psychology, 21(4), 803-814."
+    }
+    
+    fn implementation_url(&self) -> &'static str {
+        "https://github.com/engram-design/drm-reference"
+    }
+}
+
+/// Boundary extension reference from Intraub & Richardson (1989)
+pub struct BoundaryExtensionReferenceImplementation;
+
+impl AcademicReferenceImplementation for BoundaryExtensionReferenceImplementation {
+    fn paper_citation(&self) -> &'static str {
+        "Intraub, H., & Richardson, M. (1989). Wide-angle memories of close-up scenes. Journal of Experimental Psychology: Learning, Memory, and Cognition, 15(2), 179-187."
+    }
+}
+
+/// Metamorphic testing engine for relation validation
+pub struct MetamorphicTestingEngine {
+    /// Metamorphic relations for vector operations
+    vector_relations: Vec<MetamorphicRelation>,
+    /// Metamorphic relations for graph operations
+    graph_relations: Vec<MetamorphicRelation>,
+    /// Metamorphic relations for cognitive operations
+    cognitive_relations: Vec<MetamorphicRelation>,
+}
+
+#[derive(Debug, Clone)]
+pub struct MetamorphicRelation {
+    pub name: String,
+    pub description: String,
+    pub input_transformation: Box<dyn Fn(&TestInput) -> TestInput>,
+    pub output_relation: Box<dyn Fn(&TestOutput, &TestOutput) -> bool>,
+    pub violation_severity: ViolationSeverity,
+}
+
+impl MetamorphicTestingEngine {
+    /// Execute metamorphic testing for SIMD operations
+    pub fn test_simd_metamorphic_relations(&self, implementation: &impl SIMDImplementation) -> MetamorphicTestResults {
+        let mut results = MetamorphicTestResults::new();
+        
+        // Relation: Scale invariance of cosine similarity
+        let scale_invariance = MetamorphicRelation {
+            name: "cosine_similarity_scale_invariance".to_string(),
+            description: "cosine_similarity(a, b) == cosine_similarity(k*a, b) for k > 0".to_string(),
+            input_transformation: Box::new(|input: &TestInput| {
+                let mut scaled_input = input.clone();
+                scaled_input.vector_a = scaled_input.vector_a.iter().map(|&x| x * 2.0).collect();
+                scaled_input
+            }),
+            output_relation: Box::new(|original: &TestOutput, transformed: &TestOutput| {
+                (original.similarity - transformed.similarity).abs() < 1e-10
+            }),
+            violation_severity: ViolationSeverity::Critical,
+        };
+        
+        // Relation: Symmetry of cosine similarity
+        let symmetry = MetamorphicRelation {
+            name: "cosine_similarity_symmetry".to_string(),
+            description: "cosine_similarity(a, b) == cosine_similarity(b, a)".to_string(),
+            input_transformation: Box::new(|input: &TestInput| {
+                let mut swapped_input = input.clone();
+                std::mem::swap(&mut swapped_input.vector_a, &mut swapped_input.vector_b);
+                swapped_input
+            }),
+            output_relation: Box::new(|original: &TestOutput, transformed: &TestOutput| {
+                (original.similarity - transformed.similarity).abs() < 1e-12
+            }),
+            violation_severity: ViolationSeverity::Critical,
+        };
+        
+        // Relation: Addition of orthogonal component doesn't affect similarity
+        let orthogonal_addition = MetamorphicRelation {
+            name: "orthogonal_component_invariance".to_string(),
+            description: "Adding orthogonal component preserves cosine similarity".to_string(),
+            input_transformation: Box::new(|input: &TestInput| {
+                // Add orthogonal component to vector_a
+                let mut modified_input = input.clone();
+                let orthogonal_component = self.generate_orthogonal_vector(&input.vector_a, &input.vector_b);
+                modified_input.vector_a = modified_input.vector_a.iter()
+                    .zip(orthogonal_component.iter())
+                    .map(|(&orig, &orth)| orig + orth)
+                    .collect();
+                modified_input
+            }),
+            output_relation: Box::new(|original: &TestOutput, transformed: &TestOutput| {
+                (original.similarity - transformed.similarity).abs() < 1e-10
+            }),
+            violation_severity: ViolationSeverity::Medium,
+        };
+        
+        let relations = vec![scale_invariance, symmetry, orthogonal_addition];
+        
+        for relation in relations {
+            let test_result = self.execute_metamorphic_relation(implementation, &relation);
+            results.add_relation_result(relation.name, test_result);
+        }
+        
+        results
+    }
+}
 
 impl DifferentialTestingHarness {
     /// Execute comprehensive differential testing
@@ -226,20 +351,26 @@ impl DifferentialTestingHarness {
 }
 ```
 
-### 3. Performance Fuzzing for Worst-Case Detection
+### 3. Advanced Performance Fuzzing with Coverage-Guided Mutation
 
-**Grammar-Based Fuzzing for SIMD Operations**:
+**Grammar-Based Fuzzing for SIMD Operations with Structure-Aware Mutation**:
 ```rust
-/// Performance fuzzing framework designed to find worst-case scenarios
+/// Advanced performance fuzzing framework with AFL-style coverage guidance
 pub struct PerformanceFuzzer {
-    /// Grammar-based test case generator
-    test_grammar: TestCaseGrammar,
-    /// Coverage-guided fuzzing engine
-    coverage_engine: CoverageGuidedEngine,
-    /// Performance cliff detector
-    cliff_detector: PerformanceCliffDetector,
-    /// Worst-case scenario database
+    /// Grammar-based test case generator with context-free grammars
+    test_grammar: ContextFreeTestGrammar,
+    /// Coverage-guided fuzzing engine with edge coverage tracking
+    coverage_engine: AFL_StyleCoverageEngine,
+    /// Performance cliff detector with statistical process control
+    cliff_detector: StatisticalPerformanceCliffDetector,
+    /// Worst-case scenario database with automated minimization
     worst_cases: WorstCaseDatabase,
+    /// Mutation strategies for structure-aware fuzzing
+    mutation_strategies: StructureAwareMutationEngine,
+    /// Seed corpus manager for maintaining interesting test cases
+    seed_corpus: SeedCorpusManager,
+    /// Energy allocation for fitness-proportional fuzzing
+    energy_allocator: FitnessProportionalEnergyAllocator,
 }
 
 /// Grammar for generating structured test cases
@@ -485,47 +616,91 @@ impl HardwareVariationTester {
 }
 ```
 
-### 5. Formal Verification Integration
+### 5. Advanced Formal Verification Integration with Model Checking
 
-**SMT-Based Correctness Verification**:
+**SMT-Based Correctness Verification with Multiple Solver Backends**:
 ```rust
-/// Formal verification framework for algorithmic correctness
+/// Comprehensive formal verification framework for algorithmic correctness
 pub struct FormalVerificationSuite {
-    /// Z3 solver interface for constraint verification
+    /// Z3 solver interface for nonlinear arithmetic and bitvectors
     z3_solver: Z3SolverInterface,
-    /// CVC4 solver for cross-validation
-    cvc4_solver: CVC4SolverInterface,
-    /// Property specification language
-    property_spec: PropertySpecificationLanguage,
-    /// Counterexample minimizer
-    counterexample_minimizer: CounterexampleMinimizer,
+    /// CVC5 solver for finite model finding and string reasoning
+    cvc5_solver: CVC5SolverInterface,
+    /// Yices solver for lightweight SMT solving
+    yices_solver: YicesSolverInterface,
+    /// MathSAT solver for interpolation-based verification
+    mathsat_solver: MathSATSolverInterface,
+    /// Property specification language with temporal logic support
+    property_spec: TemporalPropertySpecificationLanguage,
+    /// Counterexample minimizer using delta debugging
+    counterexample_minimizer: DeltaDebuggingMinimizer,
+    /// Model checker for concurrent algorithm verification
+    model_checker: SpinModelChecker,
+    /// Bounded model checker for finite-state verification
+    bmc_engine: BoundedModelCheckingEngine,
+    /// Abstract interpretation engine for static analysis
+    abstract_interpreter: AbstractInterpretationEngine,
 }
 
 impl FormalVerificationSuite {
     /// Verify SIMD operations maintain mathematical equivalence
     pub fn verify_simd_correctness(&self) -> VerificationResult {
-        // Define mathematical properties for cosine similarity
+        // Define comprehensive mathematical properties for cosine similarity with temporal logic
         let properties = vec![
             Property::Commutative {
                 operation: "cosine_similarity",
                 variables: vec!["vector_a", "vector_b"],
                 assertion: "cosine_similarity(a, b) == cosine_similarity(b, a)",
+                tolerance: 1e-12,
+                quantifier_scope: QuantifierScope::Universal,
             },
             Property::Bounded {
-                operation: "cosine_similarity",
+                operation: "cosine_similarity", 
                 variables: vec!["vector_a", "vector_b"],
                 assertion: "cosine_similarity(a, b) >= -1.0 && cosine_similarity(a, b) <= 1.0",
+                precondition: "non_zero_magnitude(a) && non_zero_magnitude(b)",
+                violation_severity: ViolationSeverity::Critical,
             },
             Property::IdentityCase {
                 operation: "cosine_similarity",
                 variables: vec!["vector_a"],
-                assertion: "cosine_similarity(a, a) == 1.0 (within epsilon)",
+                assertion: "abs(cosine_similarity(a, a) - 1.0) <= epsilon",
+                epsilon: 1e-10,
+                precondition: "non_zero_magnitude(a)",
             },
             Property::OrthogonalCase {
                 operation: "cosine_similarity",
                 variables: vec!["vector_a", "vector_b"],
-                precondition: "dot_product(a, b) == 0",
-                assertion: "cosine_similarity(a, b) == 0.0",
+                precondition: "dot_product(a, b) == 0 && non_zero_magnitude(a) && non_zero_magnitude(b)",
+                assertion: "abs(cosine_similarity(a, b)) <= epsilon",
+                epsilon: 1e-10,
+            },
+            Property::TriangleInequality {
+                operation: "cosine_similarity",
+                variables: vec!["vector_a", "vector_b", "vector_c"],
+                assertion: "cosine_distance(a, c) <= cosine_distance(a, b) + cosine_distance(b, c)",
+                note: "Cosine distance = 1 - cosine_similarity",
+            },
+            Property::Cauchy-Schwarz {
+                operation: "cosine_similarity",
+                variables: vec!["vector_a", "vector_b"],
+                assertion: "abs(dot_product(a, b)) <= magnitude(a) * magnitude(b)",
+                derived_property: "Implies cosine similarity is well-defined",
+            },
+            Property::MonotonicityUnderScaling {
+                operation: "cosine_similarity",
+                variables: vec!["vector_a", "vector_b", "scalar_k"],
+                precondition: "k > 0",
+                assertion: "cosine_similarity(a, b) == cosine_similarity(k*a, b) == cosine_similarity(a, k*b)",
+                note: "Scale invariance property",
+            },
+            Property::NumericalStability {
+                operation: "cosine_similarity",
+                variables: vec!["vector_a", "vector_b"],
+                assertion: "bounded_error_propagation(a, b, input_epsilon) <= acceptable_epsilon",
+                input_epsilon: 1e-7,
+                acceptable_epsilon: 1e-6,
+                method: "Interval arithmetic analysis",
             },
         ];
         
@@ -980,28 +1155,77 @@ impl PatternCompletionBenchmarks {
 ### Implementation Details
 
 **Files to Create:**
-- `benchmarks/milestone_1/mod.rs` - Comprehensive benchmark harness with statistical framework
-- `benchmarks/milestone_1/statistical_framework.rs` - Statistical validation and regression detection
-- `benchmarks/milestone_1/differential_testing.rs` - Multi-baseline comparison framework  
-- `benchmarks/milestone_1/performance_fuzzing.rs` - Coverage-guided performance cliff detection
-- `benchmarks/milestone_1/formal_verification.rs` - SMT-based correctness verification
-- `benchmarks/milestone_1/hardware_variation.rs` - Multi-architecture testing framework
-- `benchmarks/milestone_1/vector_ops.rs` - SIMD operation benchmarks with roofline analysis
-- `benchmarks/milestone_1/hnsw_index.rs` - HNSW construction and query benchmarks  
-- `benchmarks/milestone_1/activation_spreading.rs` - Parallel activation spreading scalability
-- `benchmarks/milestone_1/probabilistic_query.rs` - Uncertainty propagation and calibration
-- `benchmarks/milestone_1/pattern_completion.rs` - Cognitive plausibility and speed validation
-- `benchmarks/milestone_1/batch_operations.rs` - Throughput and latency under load
-- `benchmarks/milestone_1/integration_scenarios.rs` - End-to-end workflow benchmarks
-- `benchmarks/milestone_1/baseline_comparisons.rs` - Neo4j, Pinecone, Weaviate comparisons
-- `benchmarks/milestone_1/regression_detection.rs` - Automated performance regression analysis
-- `benchmarks/milestone_1/report_generation.rs` - Automated benchmark reporting and visualization
+- `benchmarks/milestone_1/mod.rs` - Comprehensive benchmark harness orchestration and main entry point
+- `benchmarks/milestone_1/statistical_framework.rs` - Advanced statistical validation with Bayesian analysis and ARIMA modeling
+- `benchmarks/milestone_1/differential_testing.rs` - Multi-baseline comparison framework with metamorphic testing
+- `benchmarks/milestone_1/performance_fuzzing.rs` - AFL-style coverage-guided performance cliff detection with grammar-based generation
+- `benchmarks/milestone_1/formal_verification.rs` - Multi-solver SMT-based correctness verification (Z3, CVC5, Yices, MathSAT)
+- `benchmarks/milestone_1/metamorphic_testing.rs` - Metamorphic relation testing for algorithmic correctness validation
+- `benchmarks/milestone_1/hardware_variation.rs` - Multi-architecture testing framework with roofline model analysis
+- `benchmarks/milestone_1/vector_ops.rs` - SIMD operation benchmarks with cache hierarchy profiling
+- `benchmarks/milestone_1/hnsw_index.rs` - HNSW construction and query benchmarks across graph topologies
+- `benchmarks/milestone_1/activation_spreading.rs` - Parallel activation spreading scalability with work distribution analysis
+- `benchmarks/milestone_1/probabilistic_query.rs` - Uncertainty propagation and calibration with Bayesian validation
+- `benchmarks/milestone_1/pattern_completion.rs` - Cognitive plausibility validation against academic baselines
+- `benchmarks/milestone_1/batch_operations.rs` - Throughput and latency analysis under concurrent load patterns
+- `benchmarks/milestone_1/integration_scenarios.rs` - End-to-end workflow benchmarks with realistic user patterns
+- `benchmarks/milestone_1/baseline_comparisons.rs` - Industry baseline comparisons (Neo4j, Pinecone, Weaviate, FAISS, ScaNN)
+- `benchmarks/milestone_1/academic_references.rs` - Academic reference implementation validation (DRM, boundary extension)
+- `benchmarks/milestone_1/regression_detection.rs` - Automated performance regression analysis with time series modeling
+- `benchmarks/milestone_1/report_generation.rs` - Automated benchmark reporting with statistical visualization
+- `benchmarks/milestone_1/oracle_functions.rs` - Test oracle implementations for complex correctness validation
+- `benchmarks/milestone_1/property_based_testing.rs` - QuickCheck-style property-based testing with SMT solver integration
 
 **Files to Modify:**
-- `Cargo.toml` - Add benchmark dependencies (criterion, proptest, z3, statistical libraries)
-- `.github/workflows/benchmark.yml` - CI integration with performance tracking
-- `benches/comprehensive.rs` - Main benchmark entry point  
-- `engram-core/Cargo.toml` - Add formal verification and fuzzing dependencies
+- `Cargo.toml` - Add advanced benchmark dependencies and statistical analysis libraries
+- `.github/workflows/comprehensive-benchmarks.yml` - Enhanced CI integration with multi-architecture testing
+- `benches/comprehensive.rs` - Main benchmark entry point with statistical orchestration
+- `engram-core/Cargo.toml` - Add formal verification, fuzzing, and metamorphic testing dependencies
+
+**New Dependencies Required:**
+```toml
+# Statistical analysis and hypothesis testing
+[dependencies]
+statrs = "0.16"              # Statistical functions and distributions  
+nalgebra = "0.32"            # Linear algebra for statistical computations
+ndarray = "0.15"             # N-dimensional arrays for data analysis
+argmin = "0.8"               # Optimization algorithms for model fitting
+
+# Formal verification and SMT solving
+z3-sys = "0.8"               # Z3 SMT solver bindings
+cvc5-sys = "0.1"             # CVC5 SMT solver bindings  
+yices2-sys = "0.1"           # Yices SMT solver bindings
+mathsat-sys = "0.1"          # MathSAT SMT solver bindings
+
+# Advanced fuzzing and property-based testing
+proptest = "1.4"             # Property-based testing framework
+arbitrary = "1.3"            # Arbitrary trait for fuzzing
+bolero = "0.10"              # Structured fuzzing framework
+quickcheck = "1.0"           # QuickCheck-style property testing
+
+# Coverage tracking and instrumentation  
+cargo-cov = "0.3"            # Coverage tracking for fuzzing
+mioco = "0.9"                # Lightweight threading for concurrent benchmarks
+
+# Time series analysis
+timeseries = "0.1"           # ARIMA modeling and forecasting
+chrono-tz = "0.8"            # Timezone-aware temporal analysis
+
+# Visualization and reporting
+plotters = "0.3"             # Statistical plot generation
+comrak = "0.18"              # Markdown report generation
+serde_yaml = "0.9"           # Configuration file parsing
+
+# Hardware performance monitoring
+perf-event = "0.5"           # Hardware performance counter access
+cpuinfo = "0.1"              # CPU capability detection
+x86 = "0.52"                 # x86 specific CPUID intrinsics
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports", "csv_output"] }
+pprof = { version = "0.12", features = ["flamegraph", "protobuf-codec"] }
+tracing-flame = "0.2"        # Performance profiling integration
+```
 
 ### Comprehensive Performance Targets with Statistical Guarantees
 
@@ -1279,21 +1503,34 @@ jobs:
         fi
 ```
 
-## Enhanced Acceptance Criteria with Verification Focus
+## Comprehensive Acceptance Criteria with Scientific Verification Focus
 
-### Statistical Rigor Requirements
-- [ ] **Power Analysis**: All benchmark comparisons achieve 99.5% statistical power for detecting 5% effect sizes
-- [ ] **Multiple Testing**: Benjamini-Hochberg FDR control applied to all simultaneous comparisons  
-- [ ] **Effect Size Reporting**: Cohen's d calculated and reported for all performance metrics
-- [ ] **Confidence Intervals**: 95% bootstrap confidence intervals for all latency percentiles
-- [ ] **Non-parametric Testing**: Mann-Whitney U tests for non-normal distributions
+### Advanced Statistical Rigor Requirements  
+- [ ] **Power Analysis**: All benchmark comparisons achieve 99.5% statistical power for detecting 5% effect sizes using G*Power methodology
+- [ ] **Multiple Testing**: Benjamini-Hochberg FDR control with Holm-Bonferroni secondary validation applied to all simultaneous comparisons
+- [ ] **Effect Size Reporting**: Cohen's d, Hedges' g (bias-corrected), and Glass's delta calculated for all performance metrics  
+- [ ] **Bootstrap Confidence Intervals**: 95% bias-corrected and accelerated (BCa) bootstrap CIs with 20,000+ samples
+- [ ] **Distribution Comparison**: Kolmogorov-Smirnov and Mann-Whitney U tests for comprehensive distribution analysis
+- [ ] **Bayesian Analysis**: Bayes factor calculation for evidence quantification beyond frequentist testing
+- [ ] **Time Series Validation**: ARIMA modeling for temporal performance trend analysis with seasonal decomposition
 
-### Formal Verification Requirements
-- [ ] **Property Coverage**: 100% of mathematical properties verified using SMT solvers
-- [ ] **Cross-Solver Validation**: Z3 and CVC4 agreement on all property verifications
-- [ ] **Counterexample Minimization**: Minimal failing test cases generated for any property violations
-- [ ] **Numerical Stability**: Formal bounds on floating-point error propagation
-- [ ] **Probability Axiom Compliance**: Verified adherence to all probability laws
+### Comprehensive Formal Verification Requirements
+- [ ] **Multi-Solver Property Coverage**: 100% of mathematical properties verified using Z3, CVC5, Yices, and MathSAT solvers
+- [ ] **Cross-Solver Agreement**: All four SMT solvers must agree on property verification results
+- [ ] **Temporal Logic Properties**: Linear temporal logic (LTL) properties verified for concurrent algorithm correctness
+- [ ] **Counterexample Minimization**: Delta debugging applied to generate minimal failing test cases
+- [ ] **Bounded Model Checking**: Finite-state verification for critical concurrent algorithms
+- [ ] **Abstract Interpretation**: Static analysis for numerical stability and memory safety properties
+- [ ] **Numerical Stability Analysis**: Interval arithmetic validation of floating-point error bounds
+- [ ] **Probability Axiom Verification**: Formal verification of all Kolmogorov probability axioms
+
+### Advanced Metamorphic Testing Requirements
+- [ ] **Relation Coverage**: Comprehensive metamorphic relations tested for all core operations
+- [ ] **Scale Invariance**: Cosine similarity scale invariance verified across magnitude ranges
+- [ ] **Symmetry Properties**: Commutative and symmetric properties verified with ultra-high precision
+- [ ] **Orthogonality Relations**: Orthogonal vector behavior validated with formal guarantees
+- [ ] **Transformation Equivalence**: Input transformations preserve expected output relationships
+- [ ] **Academic Baseline Validation**: Metamorphic relations validated against published academic results
 
 ### Differential Testing Requirements
 - [ ] **Baseline Coverage**: Testing against Neo4j, Pinecone, Weaviate, FAISS, ScaNN
@@ -1364,7 +1601,25 @@ jobs:
 - Community contribution of benchmark results from diverse hardware
 - Statistical modeling of performance across hardware variations
 
-This comprehensive benchmarking framework ensures that Engram's milestone-1 features are validated with scientific rigor, providing confidence in both correctness and performance across diverse deployment scenarios.
+### Scientific Reproducibility and Methodology Validation Requirements
+- [ ] **Reproducible Results**: All benchmark results must be reproducible within 1% variance across independent runs
+- [ ] **Seed Control**: Deterministic random number generation with documented seeds for all probabilistic tests
+- [ ] **Environment Documentation**: Complete hardware, software, and environmental parameter documentation
+- [ ] **Statistical Method Validation**: All statistical methods validated against known test datasets with documented expected results
+- [ ] **External Review**: Statistical methodology reviewed by qualified statisticians before implementation
+- [ ] **Open Science Compliance**: All test data, code, and results made available for independent verification
+- [ ] **Academic Citation**: Proper citation of all academic papers and implementations used as baselines
+- [ ] **Confidence Calibration**: Probabilistic predictions calibrated against ground truth using reliability diagrams
+
+### Research Ethics and Scientific Integrity
+- [ ] **No P-Hacking**: Pre-registered statistical analysis plans prevent post-hoc hypothesis modification
+- [ ] **Effect Size Over Significance**: Practical significance emphasized over statistical significance alone
+- [ ] **Negative Results Reporting**: Failed experiments and null results documented and reported
+- [ ] **Assumption Validation**: All statistical test assumptions explicitly validated before application
+- [ ] **Outlier Handling**: Transparent and principled outlier detection and handling procedures
+- [ ] **Multiple Comparisons**: Conservative correction methods prevent inflated Type I error rates
+
+This comprehensive benchmarking framework ensures that Engram's milestone-1 features are validated with academic-level scientific rigor, providing the highest confidence in both algorithmic correctness and performance characteristics across diverse deployment scenarios. The framework combines the best practices from compiler testing research, formal verification methodology, and empirical software engineering to create a verification system that meets the standards of peer-reviewed academic research.
 
 ## Integration Notes with Milestone-1 Dependencies
 
