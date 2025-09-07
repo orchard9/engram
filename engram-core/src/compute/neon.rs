@@ -3,8 +3,6 @@
 //! Provides SIMD implementations using ARM NEON instructions
 //! for ARM-based systems (Apple Silicon, AWS Graviton, etc).
 
-#![cfg(target_arch = "aarch64")]
-
 use super::VectorOps;
 use super::scalar::ScalarVectorOps;
 

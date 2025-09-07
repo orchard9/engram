@@ -378,7 +378,7 @@ impl BisectionSession {
     fn update_hypothesis(
         &mut self,
         operation: &DifferentialOperation,
-        results: &HashMap<Implementation, OperationResult>,
+        _results: &HashMap<Implementation, OperationResult>,
         divergent: bool,
     ) {
         // This is where we'd implement more sophisticated hypothesis updating

@@ -47,9 +47,10 @@ pub struct MetricsRegistry {
     /// System health monitoring
     health: Arc<SystemHealth>,
     
-    /// NUMA-aware collectors (if available)
-    #[cfg(feature = "monitoring")]
-    numa_collectors: Option<Arc<numa_aware::NumaCollectors>>,
+    // NUMA collectors temporarily disabled due to hwloc Send/Sync issues
+    // TODO: Wrap hwloc types properly for thread safety
+    // #[cfg(feature = "monitoring")]
+    // numa_collectors: Option<Arc<numa_aware::NumaCollectors>>,
 }
 
 impl MetricsRegistry {
@@ -62,8 +63,9 @@ impl MetricsRegistry {
             hardware: Arc::new(HardwareMetrics::new()),
             streaming: Arc::new(StreamingAggregator::new()),
             health: Arc::new(SystemHealth::new()),
-            #[cfg(feature = "monitoring")]
-            numa_collectors: numa_aware::NumaCollectors::new().map(Arc::new),
+            // NUMA collectors temporarily disabled
+            // #[cfg(feature = "monitoring")]
+            // numa_collectors: numa_aware::NumaCollectors::new().map(Arc::new),
         }
     }
     
@@ -227,6 +229,27 @@ pub fn init() -> Arc<MetricsRegistry> {
 /// Get the global metrics registry
 pub fn metrics() -> Option<Arc<MetricsRegistry>> {
     METRICS.get().cloned()
+}
+
+/// Increment a counter metric
+pub fn increment_counter(name: &'static str, value: u64) {
+    if let Some(metrics) = metrics() {
+        metrics.increment_counter(name, value);
+    }
+}
+
+/// Observe a value in a histogram
+pub fn observe_histogram(name: &'static str, value: f64) {
+    if let Some(metrics) = metrics() {
+        metrics.observe_histogram(name, value);
+    }
+}
+
+/// Record a cognitive metric
+pub fn record_cognitive(metric: cognitive::CognitiveMetric) {
+    if let Some(metrics) = metrics() {
+        metrics.record_cognitive(metric);
+    }
 }
 
 impl Default for MetricsRegistry {

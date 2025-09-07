@@ -3,7 +3,7 @@
 //! High-performance activation accumulation using SIMD vector operations
 //! from Task 001, with support for batch processing and cache optimization.
 
-use crate::activation::{ActivationRecord, NodeId, ActivationResult, ActivationError};
+use crate::activation::{ActivationRecord, NodeId, ActivationResult};
 use crate::compute::{cosine_similarity_768, cosine_similarity_batch_768};
 use dashmap::DashMap;
 use std::sync::Arc;

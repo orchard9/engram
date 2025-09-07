@@ -4,8 +4,8 @@
 //! with biological constraints and NUMA awareness.
 
 use crate::activation::{
-    ActivationTask, MemoryGraph, NodeId, WeightedEdge, EdgeType, DecayFunction,
-    ActivationRecord, ActivationResult, ActivationError
+    MemoryGraph, NodeId, EdgeType, DecayFunction,
+    ActivationResult, ActivationError
 };
 use dashmap::DashMap;
 use std::collections::{VecDeque, HashSet};

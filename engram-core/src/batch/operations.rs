@@ -8,7 +8,6 @@ use crate::batch::{
     BatchOperations, BatchConfig, BatchStoreResult, BatchRecallResult,
     BatchSimilarityResult,
 };
-use std::sync::Arc;
 use std::time::Instant;
 use rayon::prelude::*;
 
@@ -17,21 +16,17 @@ impl BatchOperations for MemoryStore {
     fn batch_store(&self, episodes: Vec<Episode>, _config: BatchConfig) -> BatchStoreResult {
         let start = Instant::now();
         let initial_pressure = self.pressure();
-        let mut peak_pressure = initial_pressure;
         
         // Process episodes in parallel while maintaining cognitive semantics
         let activations: Vec<Activation> = episodes
             .into_par_iter()
             .map(|episode| {
-                let activation = self.store(episode);
-                // Track peak pressure (thread-safe due to store's internal locking)
-                let current_pressure = self.pressure();
-                if current_pressure > peak_pressure {
-                    peak_pressure = current_pressure;
-                }
-                activation
+                self.store(episode)
             })
             .collect();
+        
+        // Get peak pressure after all operations
+        let peak_pressure = self.pressure();
         
         let successful_count = activations.iter().filter(|a| a.is_successful()).count();
         let degraded_count = activations.iter().filter(|a| a.is_degraded()).count();

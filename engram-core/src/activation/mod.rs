@@ -4,13 +4,10 @@
 //! that replaces the simple temporal-proximity spreading with sophisticated
 //! work-stealing graph traversal engine following biological principles.
 
-use crate::{Confidence, Memory};
-use crossbeam_deque::{Injector, Stealer, Worker};
-use crossbeam_queue::SegQueue;
+// Removed unused imports
 use dashmap::DashMap;
 use atomic_float::AtomicF32;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 // pub mod parallel;  // Complex work-stealing implementation - disabled for now
@@ -75,7 +72,7 @@ impl ActivationRecord {
                     self.timestamp.store(now, Ordering::Relaxed);
                     return true;
                 }
-                Err(_) => continue, // Retry on contention
+                Err(_) => {} // Retry on contention
             }
         }
     }

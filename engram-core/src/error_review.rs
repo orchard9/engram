@@ -199,7 +199,7 @@ impl ErrorReviewer {
 
     /// Validate all found errors
     fn validate_all_errors(&mut self) {
-        for (id, error_def) in &self.error_catalog {
+        for (_id, error_def) in &self.error_catalog {
             let result = self.validate_error(error_def);
             self.results.push(result);
         }
@@ -633,7 +633,7 @@ impl ErrorVisitor {
         }
     }
 
-    fn extract_error_from_macro(&mut self, mac: &Macro, line_number: usize) {
+    fn extract_error_from_macro(&mut self, _mac: &Macro, line_number: usize) {
         // This is a simplified extraction - in practice, we'd parse the macro tokens
         // For now, create a placeholder
         let error_def = ErrorDefinition {

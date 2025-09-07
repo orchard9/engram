@@ -102,6 +102,12 @@ impl Confidence {
     pub fn from_raw(value: f32) -> Self {
         Self(value.clamp(0.0, 1.0))
     }
+    
+    /// Create from a probability value (alias for from_raw)
+    #[must_use]
+    pub fn from_probability(value: f32) -> Self {
+        Self::from_raw(value)
+    }
 
     // System 1-friendly operations that feel automatic and natural
 
@@ -274,12 +280,19 @@ pub struct Consolidated;
 /// The state parameter ensures invalid state transitions are caught at compile time.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryNode<State = Active> {
+    /// Unique identifier for the memory node
     pub id: String,
+    /// Content payload of the memory
     pub content: Vec<u8>,
+    /// Optional embedding vector for similarity comparisons
     pub embedding: Option<Vec<f32>>,
+    /// Current activation level (0.0-1.0)
     pub activation: f64,
+    /// Timestamp when the memory was created
     pub created_at: SystemTime,
+    /// Timestamp of last access
     pub last_accessed: SystemTime,
+    /// Confidence score for this memory
     pub confidence: Confidence,
     #[serde(skip)]
     _state: PhantomData<State>,
@@ -383,32 +396,46 @@ impl MemoryNode {
 /// Memory edge representing relationships
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryEdge {
+    /// Source node ID
     pub source: String,
+    /// Target node ID
     pub target: String,
+    /// Edge weight/strength (0.0-1.0)
     pub weight: f64,
+    /// Type of relationship
     pub edge_type: EdgeType,
+    /// Confidence in this edge
     pub confidence: Confidence,
 }
 
 /// Types of edges in the memory graph
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EdgeType {
+    /// Semantic similarity relationship
     Semantic,
+    /// Temporal co-occurrence relationship
     Temporal,
+    /// Causal relationship
     Causal,
+    /// General associative relationship
     Associative,
 }
 
 /// Trait for activatable memory elements
 pub trait Activatable {
+    /// Activate the element with given energy
     fn activate(&mut self, energy: f64);
+    /// Apply decay at given rate
     fn decay(&mut self, rate: f64);
+    /// Get current activation level
     fn activation_level(&self) -> f64;
 }
 
 /// Trait for decayable memory elements
 pub trait Decayable {
+    /// Apply time-based decay
     fn apply_decay(&mut self, delta_time: f64);
+    /// Get current decay rate
     fn decay_rate(&self) -> f64;
 }
 

@@ -3,9 +3,7 @@
 //! Provides streaming batch operations with lock-free concurrency, SIMD acceleration,
 //! and bounded memory usage while maintaining cognitive semantics.
 
-use crate::{Activation, Confidence, Cue, Episode, Memory};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use crate::{Activation, Confidence, Cue, Episode};
 
 pub mod engine;
 pub mod operations;

@@ -1,9 +1,8 @@
 //! Lock-free result collection and aggregation
 
-use crate::batch::{BatchResult, BatchOperationResult, BatchMetadata};
+use crate::batch::{BatchResult, BatchOperationResult};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use crossbeam_queue::SegQueue;
-use std::collections::HashMap;
 
 /// Lock-free atomic result collector
 pub struct AtomicResultCollector {

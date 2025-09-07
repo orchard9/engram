@@ -21,7 +21,7 @@ pub struct NumaCollectors {
 impl NumaCollectors {
     /// Create NUMA-aware collectors if available
     pub fn new() -> Option<Self> {
-        let topology = Topology::new().ok()?;
+        let topology = Topology::new();
         
         // Check if we have multiple NUMA nodes
         let numa_nodes = topology.objects_with_type(&ObjectType::NUMANode).ok()?;
@@ -56,9 +56,11 @@ impl NumaCollectors {
     /// Get the collector for a specific CPU
     pub fn collector_for_cpu(&self, cpu_id: usize) -> &SocketCollector {
         // Find which socket this CPU belongs to
-        for collector in &self.socket_collectors {
-            if collector.cpuset.is_set(cpu_id).unwrap_or(false) {
-                return collector;
+        if cpu_id < 64 {
+            for collector in &self.socket_collectors {
+                if (collector.cpu_mask & (1 << cpu_id)) != 0 {
+                    return collector;
+                }
             }
         }
         
@@ -129,8 +131,8 @@ pub struct SocketCollector {
     /// Socket ID
     pub socket_id: usize,
     
-    /// CPUs in this socket
-    pub cpuset: CpuSet,
+    /// CPUs in this socket (stored as bit vector)
+    pub cpu_mask: u64,
     
     /// Socket-local metrics (cache-aligned)
     pub operations: CachePadded<AtomicU64>,
@@ -141,9 +143,17 @@ pub struct SocketCollector {
 
 impl SocketCollector {
     fn new(socket_id: usize, cpuset: CpuSet) -> Self {
+        // Convert CpuSet to a simple bit mask (supports up to 64 CPUs)
+        let mut cpu_mask = 0u64;
+        for i in 0..64 {
+            if cpuset.is_set(i as u32) {
+                cpu_mask |= 1 << i;
+            }
+        }
+        
         Self {
             socket_id,
-            cpuset,
+            cpu_mask,
             operations: CachePadded::new(AtomicU64::new(0)),
             cache_hits: CachePadded::new(AtomicU64::new(0)),
             cache_misses: CachePadded::new(AtomicU64::new(0)),
@@ -326,7 +336,9 @@ mod tests {
     
     #[test]
     fn test_socket_collector() {
-        let collector = SocketCollector::new(0, CpuSet::new());
+        // Create a simple cpuset for testing
+        let cpuset = CpuSet::new();
+        let collector = SocketCollector::new(0, cpuset);
         
         collector.record_operation();
         collector.record_cache_access(true);

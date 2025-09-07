@@ -100,7 +100,7 @@ impl ConsolidationEngine {
         
         // Add to replay buffer
         self.replay_buffer.push_back(replay_event.clone());
-        if self.replay_buffer.len() > self.config.replay_buffer_size {
+        if self.replay_buffer.len() > self.config.working_memory_capacity {
             self.replay_buffer.pop_front();
         }
         

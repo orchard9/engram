@@ -1,20 +1,19 @@
 //! Lock-free batch processing engine with work-stealing parallelism
 
 use crate::{
-    Activation, Confidence, Cue, Episode, Memory,
+    Activation, Confidence, Cue, Episode,
     store::MemoryStore,
     compute::{self, VectorOps},
 };
 use crate::batch::{
     BatchOperations, BatchConfig, BatchStoreResult, BatchRecallResult, 
-    BatchSimilarityResult, BatchOperation, BatchOperationResult, BatchError,
+    BatchSimilarityResult, BatchOperation, BatchOperationResult,
 };
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 use rayon::prelude::*;
 use crossbeam_queue::SegQueue;
-use parking_lot::RwLock;
 
 /// High-performance batch processing engine
 pub struct BatchEngine {
@@ -104,18 +103,7 @@ impl BatchEngine {
         
         // Extract embeddings for batch similarity computation
         let embeddings: Vec<[f32; 768]> = memories.iter()
-            .filter_map(|(_, mem)| {
-                // Extract embedding from the first episode if available
-                mem.episodes.first().and_then(|ep| {
-                    if ep.embedding.len() == 768 {
-                        let mut arr = [0.0f32; 768];
-                        arr.copy_from_slice(&ep.embedding);
-                        Some(arr)
-                    } else {
-                        None
-                    }
-                })
-            })
+            .map(|(_, mem)| mem.embedding)
             .collect();
         
         if embeddings.is_empty() {
@@ -254,10 +242,10 @@ impl BatchEngine {
             return vec![];
         }
         
-        // Get all episodes for similarity comparison
-        let all_episodes: Vec<Episode> = self.memory_store.hot_memories
+        // Get all episodes for similarity comparison from WAL buffer
+        let all_episodes: Vec<Episode> = self.memory_store.wal_buffer
             .iter()
-            .flat_map(|entry| entry.value().episodes.clone())
+            .map(|entry| entry.value().clone())
             .collect();
         
         // Process each query embedding
@@ -266,15 +254,7 @@ impl BatchEngine {
             .map(|(query_embedding, cue)| {
                 // Extract embeddings from episodes
                 let episode_embeddings: Vec<[f32; 768]> = all_episodes.iter()
-                    .filter_map(|ep| {
-                        if ep.embedding.len() == 768 {
-                            let mut arr = [0.0f32; 768];
-                            arr.copy_from_slice(&ep.embedding);
-                            Some(arr)
-                        } else {
-                            None
-                        }
-                    })
+                    .map(|ep| ep.embedding)
                     .collect();
                 
                 if episode_embeddings.is_empty() {

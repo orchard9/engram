@@ -10,7 +10,6 @@ use super::{
 };
 use std::collections::HashMap;
 use std::fmt;
-use std::io::Write;
 
 /// Comprehensive report of differential testing results
 #[derive(Debug)]
@@ -477,7 +476,7 @@ impl DifferentialTestReport {
 
         let mut operation_distribution = HashMap::new();
         for (op, _, _) in results {
-            let op_type = std::mem::discriminant(op);
+            let _op_type = std::mem::discriminant(op);
             let op_name = match op {
                 DifferentialOperation::ConfidenceAnd { .. } => "ConfidenceAnd",
                 DifferentialOperation::ConfidenceOr { .. } => "ConfidenceOr",

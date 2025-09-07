@@ -81,12 +81,12 @@ impl MemoryStore {
         aggregator: &mut EvidenceAggregator,
     ) -> u64 {
         let evidence = match &cue.cue_type {
-            CueType::Embedding(query_embedding) => {
+            CueType::Embedding { vector, threshold } => {
                 // Vector similarity evidence
-                let similarity = self.compute_embedding_similarity(&episode.embedding, query_embedding);
+                let similarity = self.compute_embedding_similarity(&episode.embedding, &vector);
                 Evidence {
                     source: EvidenceSource::VectorSimilarity {
-                        query_vector: *query_embedding,
+                        query_vector: *vector,
                         result_distance: 1.0 - similarity,
                         index_confidence: *confidence,
                     },
@@ -95,11 +95,11 @@ impl MemoryStore {
                     dependencies: Vec::new(),
                 }
             }
-            CueType::Semantic(semantic_query) => {
+            CueType::Semantic { content, .. } => {
                 // Semantic match evidence
                 Evidence {
                     source: EvidenceSource::DirectMatch {
-                        cue_id: format!("semantic_{}", semantic_query.len()),
+                        cue_id: format!("semantic_{}", content.len()),
                         similarity_score: confidence.raw(),
                         match_type: MatchType::Semantic,
                     },
@@ -108,7 +108,7 @@ impl MemoryStore {
                     dependencies: Vec::new(),
                 }
             }
-            CueType::Temporal(temporal_pattern) => {
+            CueType::Context { time_range, .. } => {
                 // Temporal match evidence with decay
                 let time_since_episode = SystemTime::now()
                     .duration_since(SystemTime::UNIX_EPOCH)
@@ -136,11 +136,11 @@ impl MemoryStore {
                 
                 return aggregator.add_evidence(decay_evidence);
             }
-            CueType::Contextual(context) => {
+            CueType::Temporal { pattern, .. } => {
                 // Contextual match evidence
                 Evidence {
                     source: EvidenceSource::DirectMatch {
-                        cue_id: format!("context_{}", context.len()),
+                        cue_id: format!("context_temporal"),
                         similarity_score: confidence.raw(),
                         match_type: MatchType::Context,
                     },

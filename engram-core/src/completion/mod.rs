@@ -95,7 +95,7 @@ pub struct SourceMap {
 }
 
 /// Indicates the source of a memory field
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MemorySource {
     /// Original memory
     Recalled,

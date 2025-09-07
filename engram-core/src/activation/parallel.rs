@@ -166,18 +166,14 @@ impl ParallelSpreadingEngine {
             // Try to get work from local queue first
             if let Some(task) = context.local_queue.pop() {
                 Self::process_task(&context, task);
-                continue;
             }
-            
             // Try global queue
-            if let Some(task) = context.global_queue.pop() {
+            else if let Some(task) = context.global_queue.pop() {
                 Self::process_task(&context, task);
-                continue;
             }
-            
             // Work stealing from other workers
-            if Self::try_work_stealing(&mut context) {
-                continue;
+            else if !Self::try_work_stealing(&mut context) {
+                // No work available - will yield thread below
             }
             
             // Deterministic mode barrier synchronization

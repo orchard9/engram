@@ -40,16 +40,16 @@ impl GridModule {
         let shifted_y = rotated_y - self.phase.1;
         
         // Generate hexagonal pattern using three cosine waves
-        let angle1 = 0.0;
-        let angle2 = 2.0 * std::f32::consts::PI / 3.0;
-        let angle3 = 4.0 * std::f32::consts::PI / 3.0;
+        let angle1: f32 = 0.0;
+        let angle2: f32 = 2.0 * std::f32::consts::PI / 3.0;
+        let angle3: f32 = 4.0 * std::f32::consts::PI / 3.0;
         
-        let wave1 = (2.0 * std::f32::consts::PI * 
-            (shifted_x * angle1.cos() + shifted_y * angle1.sin()) / self.scale).cos();
-        let wave2 = (2.0 * std::f32::consts::PI * 
-            (shifted_x * angle2.cos() + shifted_y * angle2.sin()) / self.scale).cos();
-        let wave3 = (2.0 * std::f32::consts::PI * 
-            (shifted_x * angle3.cos() + shifted_y * angle3.sin()) / self.scale).cos();
+        let wave1 = ((2.0 * std::f32::consts::PI * 
+            (shifted_x * angle1.cos() + shifted_y * angle1.sin())) / self.scale).cos();
+        let wave2 = ((2.0 * std::f32::consts::PI * 
+            (shifted_x * angle2.cos() + shifted_y * angle2.sin())) / self.scale).cos();
+        let wave3 = ((2.0 * std::f32::consts::PI * 
+            (shifted_x * angle3.cos() + shifted_y * angle3.sin())) / self.scale).cos();
         
         // Combine waves and normalize
         let activation = (wave1 + wave2 + wave3) / 3.0;
