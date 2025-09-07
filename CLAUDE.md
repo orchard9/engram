@@ -56,6 +56,11 @@ If at any point anything gets stuck, move the task to \_blocked, write in the ta
 
 ## How to write content
 
+When asked to "write content <task file>":
+1. Read the specified task file to understand the implementation details
+2. Write content based on the task specifications and update the task file with any insights gained
+
+For general content writing:
 1. Read the current milestone we're working on, the most recent task completed, and upcoming tasks to understand the project as a whole
 2. Write content/{milestone*number}*{milestone*name}/{content_number}*{content_title}\_research.md with a list of research topics
 3. Research each topic and append findings to the research document
