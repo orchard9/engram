@@ -12,6 +12,22 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+#[cfg(feature = "pattern_completion")]
+use crate::completion::{
+    PatternReconstructor, CompletionConfig, PartialEpisode,
+    PatternCompleter, CompletedEpisode,
+};
+
+#[cfg(feature = "hnsw_index")]
+use crate::index::{CognitiveHnswIndex, IndexUpdate, UpdatePriority};
+#[cfg(feature = "hnsw_index")]
+use crossbeam_queue::SegQueue;
+
+#[cfg(feature = "memory_mapped_persistence")]
+use crate::storage::{
+    CognitiveTierArchitecture, FsyncMode, StorageConfig, StorageMetrics, wal::WalWriter,
+};
+
 /// Activation level returned by store operations
 ///
 /// Indicates the quality of a store operation from 0.0 to 1.0
@@ -55,7 +71,7 @@ impl Activation {
 /// - Concurrent stores don't block (like parallel memory formation)
 pub struct MemoryStore {
     /// Lock-free map for high-activation memories
-    hot_memories: DashMap<String, Arc<Memory>>,
+    pub(crate) hot_memories: DashMap<String, Arc<Memory>>,
 
     /// Sorted map for eviction candidates (by activation level)
     eviction_queue: RwLock<BTreeMap<(OrderedFloat, String), Arc<Memory>>>,
@@ -70,7 +86,31 @@ pub struct MemoryStore {
     pressure: RwLock<f32>,
 
     /// Write-ahead log for durability (non-blocking)
-    wal_buffer: Arc<DashMap<String, Episode>>,
+    pub(crate) wal_buffer: Arc<DashMap<String, Episode>>,
+
+    /// HNSW index for fast similarity search
+    #[cfg(feature = "hnsw_index")]
+    hnsw_index: Option<Arc<CognitiveHnswIndex>>,
+
+    /// Queue for background index updates
+    #[cfg(feature = "hnsw_index")]
+    index_update_queue: Option<Arc<SegQueue<IndexUpdate>>>,
+
+    /// Persistent storage backend
+    #[cfg(feature = "memory_mapped_persistence")]
+    persistent_backend: Option<Arc<CognitiveTierArchitecture>>,
+
+    /// Write-ahead log for durability
+    #[cfg(feature = "memory_mapped_persistence")]
+    wal_writer: Option<Arc<WalWriter>>,
+
+    /// Storage metrics
+    #[cfg(feature = "memory_mapped_persistence")]
+    storage_metrics: Arc<StorageMetrics>,
+    
+    /// Pattern completion engine
+    #[cfg(feature = "pattern_completion")]
+    pattern_reconstructor: Option<Arc<RwLock<PatternReconstructor>>>,
 }
 
 /// Wrapper for f32 that implements Ord for `BTreeMap`
@@ -108,7 +148,71 @@ impl MemoryStore {
             max_memories,
             pressure: RwLock::new(0.0),
             wal_buffer: Arc::new(DashMap::new()),
+            #[cfg(feature = "hnsw_index")]
+            hnsw_index: None,
+            #[cfg(feature = "hnsw_index")]
+            index_update_queue: None,
+            #[cfg(feature = "memory_mapped_persistence")]
+            persistent_backend: None,
+            #[cfg(feature = "memory_mapped_persistence")]
+            wal_writer: None,
+            #[cfg(feature = "memory_mapped_persistence")]
+            storage_metrics: Arc::new(StorageMetrics::new()),
+            #[cfg(feature = "pattern_completion")]
+            pattern_reconstructor: None,
         }
+    }
+
+    /// Create a memory store with HNSW index enabled
+    #[cfg(feature = "hnsw_index")]
+    #[must_use]
+    pub fn with_hnsw_index(mut self) -> Self {
+        self.hnsw_index = Some(Arc::new(CognitiveHnswIndex::new()));
+        self.index_update_queue = Some(Arc::new(SegQueue::new()));
+        self
+    }
+
+    /// Create a memory store with persistent backend enabled
+    #[cfg(feature = "memory_mapped_persistence")]
+    #[must_use]
+    pub fn with_persistence<P: AsRef<std::path::Path>>(
+        mut self,
+        data_dir: P,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let storage_metrics = Arc::clone(&self.storage_metrics);
+
+        // Create persistent backend
+        let persistent_backend = Arc::new(CognitiveTierArchitecture::new(
+            data_dir.as_ref(),
+            self.max_memories,       // hot capacity
+            self.max_memories * 10,  // warm capacity
+            self.max_memories * 100, // cold capacity
+            storage_metrics.clone(),
+        )?);
+
+        // Create WAL writer
+        let wal_dir = data_dir.as_ref().join("wal");
+        let wal_writer = Arc::new(WalWriter::new(
+            wal_dir,
+            FsyncMode::PerBatch,
+            storage_metrics.clone(),
+        )?);
+
+        self.persistent_backend = Some(persistent_backend);
+        self.wal_writer = Some(wal_writer);
+
+        Ok(self)
+    }
+
+    /// Initialize the persistent backend (start background workers)
+    #[cfg(feature = "memory_mapped_persistence")]
+    pub fn initialize_persistence(
+        &mut self,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        if let Some(ref mut wal_writer) = self.wal_writer {
+            Arc::get_mut(wal_writer).unwrap().start()?;
+        }
+        Ok(())
     }
 
     /// Store an episode, returning activation level indicating store quality
@@ -160,12 +264,61 @@ impl MemoryStore {
             let mut queue = self.eviction_queue.write();
             queue.insert(
                 (OrderedFloat(base_activation), memory_id.clone()),
-                memory_arc,
+                memory_arc.clone(),
             );
         }
 
         // Store in WAL buffer (non-blocking)
-        self.wal_buffer.insert(memory_id, episode);
+        self.wal_buffer.insert(memory_id.clone(), episode.clone());
+
+        // Persist to storage backend with graceful degradation
+        #[cfg(feature = "memory_mapped_persistence")]
+        {
+            if let Some(ref wal_writer) = self.wal_writer {
+                if let Ok(wal_entry) = crate::storage::wal::WalEntry::new_episode(&episode) {
+                    if let Err(e) = wal_writer.write_async(wal_entry) {
+                        tracing::warn!("WAL write failed: {}, continuing with in-memory only", e);
+                        // Graceful degradation: reduce activation to indicate storage issues
+                        return Activation::new(base_activation * 0.9);
+                    }
+                }
+            }
+
+            if let Some(ref backend) = self.persistent_backend {
+                // Try to store in persistent backend asynchronously
+                // Note: In production this would be async, simplified for now
+                if let Err(e) = std::thread::spawn({
+                    let backend_clone = Arc::clone(backend);
+                    let memory_clone = Arc::clone(&memory_arc);
+                    move || {
+                        // Simplified synchronous persistence
+                        tracing::info!("Would persist memory {} in background", memory_clone.id);
+                    }
+                })
+                .join()
+                {
+                    tracing::warn!("Background persistence thread failed: {:?}", e);
+                }
+            }
+        }
+
+        // Queue for HNSW indexing
+        #[cfg(feature = "hnsw_index")]
+        {
+            if let Some(ref queue) = self.index_update_queue {
+                queue.push(IndexUpdate::Insert {
+                    memory_id: memory_id.clone(),
+                    memory: memory_arc.clone(),
+                    generation: 0,
+                    priority: UpdatePriority::Normal,
+                });
+            }
+
+            // Try to insert immediately if index is available
+            if let Some(ref hnsw) = self.hnsw_index {
+                let _ = hnsw.insert_memory(memory_arc.clone());
+            }
+        }
 
         // Increment count
         self.memory_count.fetch_add(1, Ordering::Relaxed);
@@ -205,6 +358,40 @@ impl MemoryStore {
         *self.pressure.read()
     }
 
+    /// Get storage metrics (if persistence enabled)
+    #[cfg(feature = "memory_mapped_persistence")]
+    pub fn storage_metrics(&self) -> Arc<StorageMetrics> {
+        Arc::clone(&self.storage_metrics)
+    }
+
+    /// Get tier statistics (if persistence enabled)
+    #[cfg(feature = "memory_mapped_persistence")]
+    pub fn tier_statistics(&self) -> Option<crate::storage::TierArchitectureStats> {
+        self.persistent_backend
+            .as_ref()
+            .map(|backend| backend.get_tier_statistics())
+    }
+
+    /// Perform maintenance on storage tiers
+    #[cfg(feature = "memory_mapped_persistence")]
+    pub fn maintenance(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        if let Some(ref _backend) = self.persistent_backend {
+            tracing::info!("Would perform maintenance on persistent backend");
+        }
+        Ok(())
+    }
+
+    /// Gracefully shutdown storage backend
+    #[cfg(feature = "memory_mapped_persistence")]
+    pub fn shutdown(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        if let Some(ref mut wal_writer) = self.wal_writer {
+            if let Some(writer) = Arc::get_mut(wal_writer) {
+                writer.shutdown()?;
+            }
+        }
+        Ok(())
+    }
+
     /// Get current memory count
     pub fn count(&self) -> usize {
         self.memory_count.load(Ordering::Relaxed)
@@ -229,6 +416,63 @@ impl MemoryStore {
     /// Never returns errors because human recall doesn't "fail" - it returns
     /// nothing, partial matches, or reconstructed memories with varying confidence.
     pub fn recall(&self, cue: Cue) -> Vec<(Episode, Confidence)> {
+        // Try persistent backend first if available
+        #[cfg(feature = "memory_mapped_persistence")]
+        {
+            if let Some(ref backend) = self.persistent_backend {
+                return self.recall_with_persistence(cue, backend);
+            }
+        }
+
+        // Fallback to in-memory recall
+        self.recall_in_memory(cue)
+    }
+
+    /// Recall with persistent backend integration
+    #[cfg(feature = "memory_mapped_persistence")]
+    fn recall_with_persistence(
+        &self,
+        cue: Cue,
+        backend: &Arc<CognitiveTierArchitecture>,
+    ) -> Vec<(Episode, Confidence)> {
+        // Simplified synchronous recall for now
+        let results = {
+            tracing::info!("Would recall from persistent backend");
+            Vec::new() // Placeholder
+        };
+
+        // If persistent backend returned insufficient results, supplement with in-memory
+        if results.len() < cue.max_results {
+            let mut combined = results;
+            let mut in_memory = self.recall_in_memory(cue);
+
+            // Remove duplicates and merge
+            in_memory.retain(|(episode, _)| {
+                !combined
+                    .iter()
+                    .any(|(existing, _)| existing.id == episode.id)
+            });
+
+            combined.extend(in_memory);
+            combined.truncate(cue.max_results);
+            combined
+        } else {
+            results
+        }
+    }
+
+    /// In-memory recall implementation
+    fn recall_in_memory(&self, cue: Cue) -> Vec<(Episode, Confidence)> {
+        // Try to use HNSW index if available and appropriate
+        #[cfg(feature = "hnsw_index")]
+        {
+            if let Some(ref hnsw) = self.hnsw_index {
+                if let CueType::Embedding { vector, threshold } = &cue.cue_type {
+                    return self.recall_with_hnsw(cue.clone(), hnsw, vector, *threshold);
+                }
+            }
+        }
+
         let mut results = Vec::new();
 
         // Get all episodes from WAL buffer
@@ -368,6 +612,77 @@ impl MemoryStore {
         results
     }
 
+    /// Complete a partial episode using pattern completion
+    #[cfg(feature = "pattern_completion")]
+    pub fn complete_pattern(&self, partial: PartialEpisode) -> CompletedEpisode {
+        if let Some(ref reconstructor) = self.pattern_reconstructor {
+            // Get episodes for context
+            let episodes: Vec<Episode> = self.wal_buffer.iter()
+                .map(|entry| entry.value().clone())
+                .collect();
+            
+            // Update reconstructor with current episodes
+            let mut reconstructor = reconstructor.write();
+            reconstructor.update(&episodes);
+            
+            // Perform completion
+            match reconstructor.complete(&partial) {
+                Ok(completed) => completed,
+                Err(e) => {
+                    tracing::warn!("Pattern completion failed: {:?}", e);
+                    // Return a degraded completion
+                    use crate::completion::SourceMap;
+                    CompletedEpisode {
+                        episode: Episode::new(
+                            format!("failed_{}", chrono::Utc::now().timestamp()),
+                            chrono::Utc::now(),
+                            "Failed pattern completion".to_string(),
+                            [0.0; 768],
+                            Confidence::exact(0.1),
+                        ),
+                        completion_confidence: Confidence::exact(0.1),
+                        source_attribution: SourceMap::default(),
+                        alternative_hypotheses: Vec::new(),
+                        metacognitive_confidence: Confidence::exact(0.1),
+                        activation_evidence: Vec::new(),
+                    }
+                }
+            }
+        } else {
+            // No pattern completion available, return minimal completion
+            use crate::completion::SourceMap;
+            CompletedEpisode {
+                episode: Episode::new(
+                    format!("unavailable_{}", chrono::Utc::now().timestamp()),
+                    chrono::Utc::now(),
+                    "Pattern completion not available".to_string(),
+                    [0.0; 768],
+                    Confidence::exact(0.0),
+                ),
+                completion_confidence: Confidence::exact(0.0),
+                source_attribution: SourceMap::default(),
+                alternative_hypotheses: Vec::new(),
+                metacognitive_confidence: Confidence::exact(0.0),
+                activation_evidence: Vec::new(),
+            }
+        }
+    }
+    
+    /// Enable pattern completion with default configuration
+    #[cfg(feature = "pattern_completion")]
+    pub fn enable_pattern_completion(&mut self) {
+        let config = CompletionConfig::default();
+        let reconstructor = PatternReconstructor::new(config);
+        self.pattern_reconstructor = Some(Arc::new(RwLock::new(reconstructor)));
+    }
+    
+    /// Enable pattern completion with custom configuration
+    #[cfg(feature = "pattern_completion")]
+    pub fn enable_pattern_completion_with_config(&mut self, config: CompletionConfig) {
+        let reconstructor = PatternReconstructor::new(config);
+        self.pattern_reconstructor = Some(Arc::new(RwLock::new(reconstructor)));
+    }
+    
     /// Apply spreading activation to enhance recall results
     fn apply_spreading_activation(
         &self,
@@ -420,19 +735,49 @@ impl MemoryStore {
 
         results
     }
+
+    /// Recall using HNSW index for fast similarity search
+    #[cfg(feature = "hnsw_index")]
+    fn recall_with_hnsw(
+        &self,
+        cue: Cue,
+        hnsw: &CognitiveHnswIndex,
+        vector: &[f32; 768],
+        threshold: Confidence,
+    ) -> Vec<(Episode, Confidence)> {
+        // Use HNSW for fast similarity search
+        let candidates = hnsw.search_with_confidence(
+            vector,
+            cue.max_results * 2, // Get more candidates for diversity
+            threshold,
+        );
+
+        let mut results = Vec::new();
+        for (memory_id, confidence) in candidates {
+            if let Some(episode) = self.wal_buffer.get(&memory_id) {
+                results.push((episode.clone(), confidence));
+            }
+        }
+
+        // Apply spreading activation using HNSW graph structure
+        let pressure = *self.pressure.read();
+        results = hnsw.apply_spreading_activation(results, &cue, pressure);
+
+        // Sort and limit results
+        results.sort_by(|a, b| {
+            b.1.raw()
+                .partial_cmp(&a.1.raw())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        results.truncate(cue.max_results);
+        results
+    }
 }
 
 /// Calculate cosine similarity between two vectors
 fn cosine_similarity(a: &[f32; 768], b: &[f32; 768]) -> f32 {
-    let dot_product: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
-    let magnitude_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
-    let magnitude_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
-
-    if magnitude_a == 0.0 || magnitude_b == 0.0 {
-        0.0
-    } else {
-        (dot_product / (magnitude_a * magnitude_b)).clamp(-1.0, 1.0)
-    }
+    crate::compute::cosine_similarity_768(a, b)
 }
 
 /// Extension trait to convert Episode to Memory

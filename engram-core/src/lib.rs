@@ -4,12 +4,24 @@
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+pub mod activation;
+pub mod batch;
+#[cfg(feature = "pattern_completion")]
+pub mod completion;
+pub mod compute;
+#[cfg(feature = "psychological_decay")]
+pub mod decay;
 pub mod differential;
 pub mod error;
 pub mod error_review;
 pub mod error_testing;
 pub mod graph;
+#[cfg(feature = "hnsw_index")]
+pub mod index;
 pub mod memory;
+pub mod query;
+#[cfg(feature = "memory_mapped_persistence")]
+pub mod storage;
 pub mod store;
 pub mod types;
 
@@ -81,6 +93,12 @@ impl Confidence {
     #[must_use]
     pub const fn raw(self) -> f32 {
         self.0
+    }
+    
+    /// Create from raw value (will be clamped to [0,1])
+    #[must_use]
+    pub fn from_raw(value: f32) -> Self {
+        Self(value.clamp(0.0, 1.0))
     }
 
     // System 1-friendly operations that feel automatic and natural
@@ -206,6 +224,31 @@ pub use memory::{
     Cue, CueBuilder, CueType, Episode, EpisodeBuilder, Memory, MemoryBuilder, TemporalPattern,
 };
 pub use store::{Activation, MemoryStore};
+pub use query::{
+    ConfidenceInterval, Evidence, EvidenceSource, MatchType, UncertaintySource,
+    ProbabilisticError, ProbabilisticQueryResult, ProbabilisticRecall, ProbabilisticResult,
+};
+pub use batch::{
+    BatchOperations, BatchConfig, BatchOperation, BatchResult, BatchOperationResult,
+    BatchStoreResult, BatchRecallResult, BatchSimilarityResult,
+    BackpressureStrategy, BatchError, BatchEngine,
+};
+
+#[cfg(feature = "psychological_decay")]
+pub use decay::{
+    BiologicalDecaySystem, DecayIntegration, DecayError, DecayResult,
+    HippocampalDecayFunction, NeocorticalDecayFunction, TwoComponentModel,
+    IndividualDifferenceProfile, RemergeProcessor,
+};
+
+#[cfg(feature = "pattern_completion")]
+pub use completion::{
+    CompletedEpisode, CompletionConfig, CompletionError, CompletionResult,
+    HippocampalCompletion, PatternCompleter, PatternReconstructor,
+    PartialEpisode, SourceMap, MemorySource, ActivationTrace, ActivationPathway,
+    EntorhinalContext, GridModule, System2Reasoner, Hypothesis,
+    ConsolidationEngine, MetacognitiveConfidence,
+};
 
 // Type-state pattern: Memory node states
 /// Unvalidated memory state - raw input
