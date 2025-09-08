@@ -1,7 +1,7 @@
 //! Lock-free DashMap-based memory backend for high-concurrency scenarios
 
-use crate::memory::traits::{GraphBackend, MemoryBackend, MemoryError};
-use crate::{Memory, Cue};
+use crate::memory_graph::traits::{GraphBackend, MemoryBackend, MemoryError};
+use crate::Memory;
 use atomic_float::AtomicF32;
 use dashmap::DashMap;
 use rayon::prelude::*;
@@ -51,7 +51,7 @@ impl Default for DashMapBackend {
 impl MemoryBackend for DashMapBackend {
     fn store(&self, id: Uuid, memory: Memory) -> Result<(), MemoryError> {
         // Store initial activation in cache
-        self.activation_cache.insert(id, AtomicF32::new(memory.activation));
+        self.activation_cache.insert(id, AtomicF32::new(memory.activation()));
         self.memories.insert(id, Arc::new(memory));
         Ok(())
     }

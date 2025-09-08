@@ -7,6 +7,9 @@ pub mod backends;
 pub mod graph;
 pub mod traits;
 
+#[cfg(test)]
+mod tests;
+
 // Re-export core types
 pub use graph::UnifiedMemoryGraph;
 pub use traits::{GraphBackend, MemoryBackend, MemoryError};

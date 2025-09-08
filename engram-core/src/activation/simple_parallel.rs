@@ -5,7 +5,7 @@
 
 use crate::activation::{
     ActivationError, ActivationRecord, ActivationResult, ActivationTask, MemoryGraph, NodeId,
-    ParallelSpreadingConfig, SpreadingMetrics,
+    ParallelSpreadingConfig, SpreadingMetrics, ActivationGraphExt,
 };
 use crossbeam_queue::SegQueue;
 use dashmap::DashMap;

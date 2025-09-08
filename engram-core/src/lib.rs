@@ -1,5 +1,23 @@
 //! Engram core graph engine with probabilistic operations.
 
+// Safety-focused Clippy lints to prevent unsafe error handling regression
+#![warn(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    clippy::unimplemented,
+    clippy::todo,
+)]
+#![deny(
+    clippy::unwrap_in_result,
+    clippy::panic_in_result_fn,
+)]
+
+// Allow in tests only
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+// mod test_helpers; // TODO: Create test_helpers module
+
 // Use mimalloc as global allocator for better performance
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
@@ -20,6 +38,7 @@ pub mod graph;
 #[cfg(feature = "hnsw_index")]
 pub mod index;
 pub mod memory;
+pub mod memory_graph;
 #[cfg(feature = "monitoring")]
 pub mod metrics;
 pub mod query;

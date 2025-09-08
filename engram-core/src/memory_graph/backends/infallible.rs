@@ -3,12 +3,13 @@
 //! This backend never returns errors, instead degrading gracefully under pressure.
 //! It returns reduced quality indicators when operations can't be fully completed.
 
-use crate::memory::traits::{GraphBackend, MemoryBackend, MemoryError};
-use crate::{Memory, Cue, Activation};
+use crate::memory_graph::traits::{GraphBackend, MemoryBackend, MemoryError};
+use crate::memory::Memory;
 use dashmap::DashMap;
 use parking_lot::RwLock;
 use std::collections::{BTreeMap, HashSet, VecDeque};
-use std::sync::atomic::{AtomicF32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use atomic_float::AtomicF32;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -156,13 +157,13 @@ impl MemoryBackend for InfallibleBackend {
             self.record_quality(1.0);
         } else {
             // Store in cold storage with eviction priority
-            let priority = OrderedFloat(memory.activation * (1.0 - pressure));
+            let priority = OrderedFloat(memory.activation() * (1.0 - pressure));
             self.cold_memories.write().insert((priority, id), Arc::new(memory.clone()));
             self.record_quality(0.7);
         }
         
         // Update activation cache
-        self.activation_cache.insert(id, AtomicF32::new(memory.activation));
+        self.activation_cache.insert(id, AtomicF32::new(memory.activation()));
         
         // Update count and pressure
         self.memory_count.fetch_add(1, Ordering::Relaxed);

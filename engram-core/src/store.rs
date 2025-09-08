@@ -5,6 +5,7 @@
 //! indicate store quality.
 
 use crate::{Confidence, Cue, CueType, Episode, Memory, TemporalPattern};
+use crate::memory_graph::{UnifiedMemoryGraph, InfallibleBackend, GraphConfig};
 use chrono::Utc;
 use dashmap::DashMap;
 use parking_lot::RwLock;
@@ -73,20 +74,11 @@ impl Activation {
 /// - Graceful degradation mirrors biological memory under stress
 /// - Concurrent stores don't block (like parallel memory formation)
 pub struct MemoryStore {
-    /// Lock-free map for high-activation memories
+    /// Unified memory graph with infallible backend
+    graph: UnifiedMemoryGraph<InfallibleBackend>,
+    
+    /// Legacy compatibility: hot memories reference
     pub(crate) hot_memories: DashMap<String, Arc<Memory>>,
-
-    /// Sorted map for eviction candidates (by activation level)
-    eviction_queue: RwLock<BTreeMap<(OrderedFloat, String), Arc<Memory>>>,
-
-    /// Current memory count
-    memory_count: AtomicUsize,
-
-    /// Maximum memories before eviction
-    max_memories: usize,
-
-    /// System pressure indicator (0.0 = no pressure, 1.0 = max pressure)
-    pressure: RwLock<f32>,
 
     /// Write-ahead log for durability (non-blocking)
     pub(crate) wal_buffer: Arc<DashMap<String, Episode>>,
@@ -144,12 +136,20 @@ impl MemoryStore {
     /// Create a new memory store with specified capacity
     #[must_use]
     pub fn new(max_memories: usize) -> Self {
+        let config = GraphConfig {
+            max_results: 100,
+            enable_spreading: true,
+            decay_rate: 0.8,
+            max_depth: 3,
+            activation_threshold: 0.01,
+        };
+        
+        let backend = InfallibleBackend::new(max_memories);
+        let graph = UnifiedMemoryGraph::new(backend, config);
+        
         Self {
+            graph,
             hot_memories: DashMap::new(),
-            eviction_queue: RwLock::new(BTreeMap::new()),
-            memory_count: AtomicUsize::new(0),
-            max_memories,
-            pressure: RwLock::new(0.0),
             wal_buffer: Arc::new(DashMap::new()),
             #[cfg(feature = "hnsw_index")]
             hnsw_index: None,

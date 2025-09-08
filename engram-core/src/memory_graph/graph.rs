@@ -216,23 +216,23 @@ impl<B: GraphBackend> UnifiedMemoryGraph<B> {
 }
 
 /// Convenience constructors for common backend configurations
-impl UnifiedMemoryGraph<crate::memory::backends::HashMapBackend> {
+impl UnifiedMemoryGraph<crate::memory_graph::backends::HashMapBackend> {
     /// Create a simple single-threaded memory graph
     pub fn simple() -> Self {
-        Self::with_backend(crate::memory::backends::HashMapBackend::new())
+        Self::with_backend(crate::memory_graph::backends::HashMapBackend::new())
     }
 }
 
-impl UnifiedMemoryGraph<crate::memory::backends::DashMapBackend> {
+impl UnifiedMemoryGraph<crate::memory_graph::backends::DashMapBackend> {
     /// Create a concurrent memory graph optimized for parallel access
     pub fn concurrent() -> Self {
-        Self::with_backend(crate::memory::backends::DashMapBackend::new())
+        Self::with_backend(crate::memory_graph::backends::DashMapBackend::new())
     }
 }
 
-impl UnifiedMemoryGraph<crate::memory::backends::InfallibleBackend> {
+impl UnifiedMemoryGraph<crate::memory_graph::backends::InfallibleBackend> {
     /// Create an infallible memory graph that degrades gracefully
     pub fn infallible(max_capacity: usize) -> Self {
-        Self::with_backend(crate::memory::backends::InfallibleBackend::new(max_capacity))
+        Self::with_backend(crate::memory_graph::backends::InfallibleBackend::new(max_capacity))
     }
 }
