@@ -19,9 +19,15 @@ impl Default for OscillatoryConstraints {
 }
 
 impl OscillatoryConstraints {
-    pub fn new() -> Self { Self::default() }
-    
+    /// Create new oscillatory constraints with default settings
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Compute theta wave modulation for given phase (0.0-1.0)
+    #[must_use]
     pub fn theta_modulation(&self, phase: f32) -> f32 {
-        1.0 + 0.1 * (phase * 2.0 * std::f32::consts::PI).sin()
+        0.1f32.mul_add((phase * 2.0 * std::f32::consts::PI).sin(), 1.0)
     }
 }

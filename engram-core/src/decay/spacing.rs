@@ -15,26 +15,32 @@ impl Default for SpacedRepetitionOptimizer {
     fn default() -> Self {
         Self {
             spacing_multiplier: 2.5, // Empirical optimal spacing
-            testing_effect: 1.3, // 30% boost from testing
+            testing_effect: 1.3,     // 30% boost from testing
         }
     }
 }
 
 impl SpacedRepetitionOptimizer {
+    /// Create a new spaced repetition optimizer with default settings
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
-    
+
     /// Computes optimal spacing interval
+    #[must_use]
     pub fn optimal_spacing_interval(&self, current_interval: Duration, success: bool) -> Duration {
         if success {
-            Duration::from_secs((current_interval.as_secs() as f32 * self.spacing_multiplier) as u64)
+            Duration::from_secs(
+                (current_interval.as_secs() as f32 * self.spacing_multiplier) as u64,
+            )
         } else {
             Duration::from_secs(86400) // Reset to 1 day on failure
         }
     }
-    
+
     /// Applies testing effect boost to memory strength
+    #[must_use]
     pub fn apply_testing_effect(&self, base_strength: f32, retrieval_success: bool) -> f32 {
         if retrieval_success {
             base_strength * self.testing_effect

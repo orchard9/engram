@@ -63,7 +63,7 @@ pub enum StorageError {
 }
 
 impl StorageError {
-    /// Helper to create OperationFailed with full context
+    /// Helper to create `OperationFailed` with full context
     pub fn operation_failed(
         reason: impl Into<String>,
         context: impl Into<String>,
@@ -78,7 +78,7 @@ impl StorageError {
         }
     }
 
-    /// Helper to create NodeNotFound with tier hints
+    /// Helper to create `NodeNotFound` with tier hints
     pub fn node_not_found(id: impl Into<String>, current_tier: impl Into<String>) -> Self {
         let tier = current_tier.into();
         let suggested = match tier.as_str() {
@@ -102,16 +102,22 @@ pub type Result<T> = std::result::Result<T, StorageError>;
 /// Storage tier trait for different storage layers
 pub trait StorageTier: Send + Sync {
     /// Store a memory node
-    async fn store_node(&self, node: MemoryNode) -> Result<()>;
+    fn store_node(&self, node: MemoryNode) -> impl std::future::Future<Output = Result<()>> + Send;
 
     /// Retrieve a memory node by ID
-    async fn get_node(&self, id: &str) -> Result<Option<MemoryNode>>;
+    fn get_node(
+        &self,
+        id: &str,
+    ) -> impl std::future::Future<Output = Result<Option<MemoryNode>>> + Send;
 
     /// Store a memory edge
-    async fn store_edge(&self, edge: MemoryEdge) -> Result<()>;
+    fn store_edge(&self, edge: MemoryEdge) -> impl std::future::Future<Output = Result<()>> + Send;
 
     /// Get edges for a node
-    async fn get_edges(&self, node_id: &str) -> Result<Vec<MemoryEdge>>;
+    fn get_edges(
+        &self,
+        node_id: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<MemoryEdge>>> + Send;
 
     /// Check if tier can accept more data
     fn can_accept(&self) -> bool;
@@ -123,7 +129,10 @@ pub trait StorageTier: Send + Sync {
 /// Trait for migrateable data between tiers
 pub trait Migratable {
     /// Migrate data to another tier
-    async fn migrate_to<T: StorageTier + ?Sized>(&self, target: Arc<T>) -> Result<()>;
+    fn migrate_to<T: StorageTier + ?Sized>(
+        &self,
+        target: Arc<T>,
+    ) -> impl std::future::Future<Output = Result<()>> + Send;
 
     /// Check if migration is needed
     fn needs_migration(&self) -> bool;
@@ -131,9 +140,10 @@ pub trait Migratable {
 
 /// Hot tier - in-memory storage with lock-free concurrent access
 pub mod hot {
-    use super::*;
+    use super::{MemoryEdge, MemoryNode, Result, StorageTier};
     use dashmap::DashMap;
 
+    /// High-performance in-memory storage tier with concurrent access
     pub struct HotStorage {
         nodes: DashMap<String, MemoryNode>,
         edges: DashMap<String, Vec<MemoryEdge>>,
@@ -141,6 +151,8 @@ pub mod hot {
     }
 
     impl HotStorage {
+        /// Create a new hot storage tier with specified maximum capacity
+        #[must_use]
         pub fn new(max_size: usize) -> Self {
             Self {
                 nodes: DashMap::new(),
@@ -164,7 +176,7 @@ pub mod hot {
         async fn store_edge(&self, edge: MemoryEdge) -> Result<()> {
             self.edges
                 .entry(edge.source.clone())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(edge);
             Ok(())
         }
@@ -181,7 +193,7 @@ pub mod hot {
             self.nodes.len() < self.max_size
         }
 
-        fn tier_name(&self) -> &str {
+        fn tier_name(&self) -> &'static str {
             "hot"
         }
     }

@@ -24,30 +24,36 @@ impl Default for ConsolidationProcessor {
 }
 
 impl ConsolidationProcessor {
+    /// Create a new consolidation processor with default settings
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
-    
+
     /// Detects sharp-wave ripple patterns
+    #[must_use]
     pub fn detect_ripple(&self, activation_pattern: &[f32]) -> bool {
         if activation_pattern.len() < 5 {
             return false;
         }
-        
+
         let mean = activation_pattern.iter().sum::<f32>() / activation_pattern.len() as f32;
-        let variance = activation_pattern.iter()
+        let variance = activation_pattern
+            .iter()
             .map(|&x| (x - mean).powi(2))
-            .sum::<f32>() / activation_pattern.len() as f32;
-        
+            .sum::<f32>()
+            / activation_pattern.len() as f32;
+
         mean > self.ripple_threshold && variance > 0.1 && mean < 0.7
     }
-    
+
     /// Records consolidation event
     pub fn record_consolidation(&mut self) {
         self.last_consolidation = Some(Utc::now());
     }
-    
+
     /// Gets consolidation boost factor
+    #[must_use]
     pub fn consolidation_boost(&self) -> f32 {
         if let Some(last) = self.last_consolidation {
             let hours_since = (Utc::now() - last).num_hours() as f32;

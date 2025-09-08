@@ -7,7 +7,7 @@
 //! - SIMD-optimized similarity computations from the compute module
 //! - Confidence-aware search with probabilistic ranking
 //! - Memory pressure adaptation for graceful degradation
-//! - Zero-copy integration with existing MemoryStore
+//! - Zero-copy integration with existing `MemoryStore`
 
 use crate::{Confidence, Memory};
 use std::sync::Arc;
@@ -26,36 +26,56 @@ pub use hnsw_search::SearchResult;
 /// Update types for background indexing
 #[derive(Clone)]
 pub enum IndexUpdate {
+    /// Insert a new memory into the index
     Insert {
+        /// Unique identifier for the memory
         memory_id: String,
+        /// Memory object to be indexed
         memory: Arc<Memory>,
+        /// Version number for ordering updates
         generation: u64,
+        /// Processing priority level
         priority: UpdatePriority,
     },
+    /// Remove a memory from the index
     Remove {
+        /// Unique identifier of memory to remove
         memory_id: String,
+        /// Version number for ordering updates
         generation: u64,
     },
+    /// Update activation level for a single memory
     UpdateActivation {
+        /// Unique identifier of memory to update
         memory_id: String,
+        /// New activation value (0.0 to 1.0)
         activation: f32,
+        /// Version number for ordering updates
         generation: u64,
     },
+    /// Batch update activation levels for multiple memories
     BatchActivationUpdate {
+        /// List of (`memory_id`, activation) pairs
         updates: Vec<(String, f32)>,
+        /// Version number for ordering updates
         generation: u64,
     },
 }
 
+/// Priority levels for index update operations
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum UpdatePriority {
+    /// Process immediately, preempting other operations
     Immediate = 0,
+    /// High priority, process before normal operations
     High = 1,
+    /// Standard priority for routine operations
     Normal = 2,
+    /// Low priority, process during idle periods
     Low = 3,
 }
 
-/// Cognitive-aware HNSW index integrated with MemoryStore
+/// Cognitive-aware HNSW index integrated with `MemoryStore`
 pub struct CognitiveHnswIndex {
     /// Lock-free graph layers using crossbeam data structures
     graph: Arc<HnswGraph>,
@@ -100,7 +120,7 @@ struct PressureAdapter {
 }
 
 impl PressureAdapter {
-    fn new(sensitivity: f32) -> Self {
+    const fn new(sensitivity: f32) -> Self {
         Self {
             last_pressure_check: AtomicU64::new(0),
             pressure_sensitivity: sensitivity,
@@ -133,6 +153,7 @@ struct HnswMetrics {
 
 impl CognitiveHnswIndex {
     /// Create a new HNSW index with default parameters
+    #[must_use]
     pub fn new() -> Self {
         let params = Arc::new(CognitiveHnswParams {
             m_max: AtomicUsize::new(16),
@@ -242,7 +263,7 @@ impl CognitiveHnswIndex {
                 // Combine confidences with decay
                 let combined_confidence = confidence.and(neighbor_confidence);
                 *confidence = Confidence::exact(
-                    confidence.raw() + decayed_activation * combined_confidence.raw(),
+                    decayed_activation.mul_add(combined_confidence.raw(), confidence.raw()),
                 );
             }
         }
@@ -275,12 +296,14 @@ impl CognitiveHnswIndex {
         static LAYER_SEED: AtomicU32 = AtomicU32::new(1);
 
         let seed = LAYER_SEED.fetch_add(1, Ordering::Relaxed);
-        let mut rng = ((seed.wrapping_mul(1103515245).wrapping_add(12345)) >> 16) as f32 / 32768.0;
+        let mut rng =
+            ((seed.wrapping_mul(1_103_515_245).wrapping_add(12345)) >> 16) as f32 / 32768.0;
 
         while rng < ml && layer < 16 {
             layer += 1;
-            let new_seed = seed.wrapping_add(layer as u32);
-            rng = ((new_seed.wrapping_mul(1103515245).wrapping_add(12345)) >> 16) as f32 / 32768.0;
+            let new_seed = seed.wrapping_add(u32::from(layer));
+            rng =
+                ((new_seed.wrapping_mul(1_103_515_245).wrapping_add(12345)) >> 16) as f32 / 32768.0;
         }
 
         layer
@@ -290,15 +313,19 @@ impl CognitiveHnswIndex {
 /// Error types for HNSW operations
 #[derive(Debug, thiserror::Error)]
 pub enum HnswError {
+    /// Failed to allocate memory for graph node
     #[error("Failed to allocate node: {0}")]
     AllocationError(String),
 
+    /// Embedding vector has wrong number of dimensions
     #[error("Invalid embedding dimension: expected 768, got {0}")]
     InvalidDimension(usize),
 
+    /// Graph data structure integrity check failed
     #[error("Graph structure corrupted: {0}")]
     CorruptedGraph(String),
 
+    /// Requested memory was not found in the index
     #[error("Memory not found: {0}")]
     MemoryNotFound(String),
 }

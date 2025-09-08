@@ -5,7 +5,6 @@
 //! organized hierarchically and can be extracted programmatically.
 
 use indoc::indoc;
-use std::collections::HashMap;
 
 /// Documentation sections organized by cognitive load and operational context
 #[derive(Debug, Clone)]
@@ -29,8 +28,9 @@ pub struct OperationalDocs;
 
 impl OperationalDocs {
     /// Get the complete operational guide as markdown
-    pub fn complete_guide() -> &'static str {
-        indoc! {r#"
+    #[must_use]
+    pub const fn complete_guide() -> &'static str {
+        indoc! {r"
             # Engram Operational Guide
 
             *Production-ready procedures designed for cognitive ergonomics under stress*
@@ -43,11 +43,12 @@ impl OperationalDocs {
             - [🔥 Incident Response](#incident-response) (Playbooks)
 
             Use `engram docs <section>` to view specific sections.
-        "#}
+        "}
     }
 
     /// Emergency procedures for immediate system recovery
-    pub fn emergency_procedures() -> &'static str {
+    #[must_use]
+    pub const fn emergency_procedures() -> &'static str {
         indoc! {r#"
             # 🚨 Emergency Procedures (Cognitive Load: LOW)
 
@@ -104,7 +105,8 @@ impl OperationalDocs {
     }
 
     /// Common operational procedures
-    pub fn common_operations() -> &'static str {
+    #[must_use]
+    pub const fn common_operations() -> &'static str {
         indoc! {r#"
             # 📋 Common Operations (Cognitive Load: LOW-MEDIUM)
 
@@ -203,7 +205,8 @@ impl OperationalDocs {
     }
 
     /// Advanced operational procedures
-    pub fn advanced_operations() -> &'static str {
+    #[must_use]
+    pub const fn advanced_operations() -> &'static str {
         indoc! {r#"
             # 🎯 Advanced Operations (Cognitive Load: HIGH)
 
@@ -310,7 +313,8 @@ impl OperationalDocs {
     }
 
     /// Troubleshooting decision trees  
-    pub fn troubleshooting_trees() -> &'static str {
+    #[must_use]
+    pub const fn troubleshooting_trees() -> &'static str {
         indoc! {r#"
             # 🔍 Troubleshooting Guide
 
@@ -1096,7 +1100,8 @@ impl OperationalDocs {
     }
 
     /// Incident response playbooks
-    pub fn incident_response() -> &'static str {
+    #[must_use]
+    pub const fn incident_response() -> &'static str {
         indoc! {r#"
             # 🔥 Incident Response Playbooks
 
@@ -1206,8 +1211,9 @@ impl OperationalDocs {
     }
 
     /// Reference information and command quick reference
-    pub fn reference() -> &'static str {
-        indoc! {r#"
+    #[must_use]
+    pub const fn reference() -> &'static str {
+        indoc! {r"
             # 📚 Reference Information
 
             ## Command Reference
@@ -1282,11 +1288,12 @@ impl OperationalDocs {
             # Test connectivity
             curl http://localhost:7432/api/v1/system/health
             ```
-        "#}
+        "}
     }
 
     /// Get documentation by section
-    pub fn get_section(section: DocSection) -> &'static str {
+    #[must_use]
+    pub const fn get_section(section: DocSection) -> &'static str {
         match section {
             DocSection::Emergency => Self::emergency_procedures(),
             DocSection::Common => Self::common_operations(),
@@ -1298,6 +1305,7 @@ impl OperationalDocs {
     }
 
     /// Get all available sections
+    #[must_use]
     pub fn available_sections() -> Vec<(&'static str, DocSection)> {
         vec![
             ("emergency", DocSection::Emergency),
@@ -1316,13 +1324,13 @@ impl std::str::FromStr for DocSection {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "emergency" | "emerg" => Ok(DocSection::Emergency),
-            "common" | "ops" => Ok(DocSection::Common),
-            "advanced" | "adv" => Ok(DocSection::Advanced),
-            "troubleshooting" | "trouble" | "debug" => Ok(DocSection::Troubleshooting),
-            "incident" | "response" | "playbook" => Ok(DocSection::IncidentResponse),
-            "reference" | "ref" | "help" => Ok(DocSection::Reference),
-            _ => Err(format!("Unknown documentation section: {}", s)),
+            "emergency" | "emerg" => Ok(Self::Emergency),
+            "common" | "ops" => Ok(Self::Common),
+            "advanced" | "adv" => Ok(Self::Advanced),
+            "troubleshooting" | "trouble" | "debug" => Ok(Self::Troubleshooting),
+            "incident" | "response" | "playbook" => Ok(Self::IncidentResponse),
+            "reference" | "ref" | "help" => Ok(Self::Reference),
+            _ => Err(format!("Unknown documentation section: {s}")),
         }
     }
 }

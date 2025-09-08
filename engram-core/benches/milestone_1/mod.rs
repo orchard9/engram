@@ -1,33 +1,33 @@
 use criterion::{Criterion, black_box};
 use std::time::Duration;
 
-pub mod statistical_framework;
-pub mod differential_testing;
-pub mod metamorphic_testing;
-pub mod performance_fuzzing;
-pub mod hardware_variation;
-pub mod formal_verification;
-pub mod vector_ops;
-pub mod hnsw_index;
-pub mod activation_spreading;
-pub mod probabilistic_query;
-pub mod pattern_completion;
-pub mod batch_operations;
-pub mod integration_scenarios;
-pub mod baseline_comparisons;
 pub mod academic_references;
+pub mod activation_spreading;
+pub mod baseline_comparisons;
+pub mod batch_operations;
+pub mod differential_testing;
+pub mod formal_verification;
+pub mod hardware_variation;
+pub mod hnsw_index;
+pub mod integration_scenarios;
+pub mod metamorphic_testing;
+pub mod oracle_functions;
+pub mod pattern_completion;
+pub mod performance_fuzzing;
+pub mod probabilistic_query;
+pub mod property_based_testing;
 pub mod regression_detection;
 pub mod report_generation;
-pub mod oracle_functions;
-pub mod property_based_testing;
+pub mod statistical_framework;
+pub mod vector_ops;
 
-use statistical_framework::StatisticalBenchmarkFramework;
 use differential_testing::DifferentialTestingHarness;
-use performance_fuzzing::PerformanceFuzzer;
 use formal_verification::FormalVerificationSuite;
 use hardware_variation::HardwareVariationTester;
+use performance_fuzzing::PerformanceFuzzer;
 use regression_detection::RegressionDetector;
 use report_generation::BenchmarkReportGenerator;
+use statistical_framework::StatisticalBenchmarkFramework;
 
 #[derive(Debug, Clone)]
 pub struct ComprehensiveBenchmarkResults {
@@ -107,89 +107,99 @@ impl ComprehensiveBenchmarkSuite {
 
     pub fn execute_comprehensive_benchmarks(&mut self) -> ComprehensiveBenchmarkResults {
         let mut results = ComprehensiveBenchmarkResults::new();
-        
+
         // Phase 1: Formal verification (must pass before performance testing)
         println!("Phase 1: Formal verification of algorithmic correctness...");
         let verification_results = self.verification_suite.verify_all_properties();
         if !verification_results.all_properties_verified() {
-            panic!("Formal verification failed: {:?}", verification_results.violations());
+            panic!(
+                "Formal verification failed: {:?}",
+                verification_results.violations()
+            );
         }
         results.set_verification_results(verification_results);
-        
+
         // Phase 2: Hardware variation testing for correctness
         println!("Phase 2: Cross-architecture correctness validation...");
         let hardware_results = self.hardware_tester.test_all_architectures();
         if !hardware_results.all_architectures_correct() {
-            panic!("Hardware variation testing failed: {:?}", hardware_results.discrepancies());
+            panic!(
+                "Hardware variation testing failed: {:?}",
+                hardware_results.discrepancies()
+            );
         }
         results.set_hardware_results(hardware_results);
-        
+
         // Phase 3: Performance fuzzing to find worst cases
         println!("Phase 3: Performance fuzzing for worst-case detection...");
         let fuzzing_results = self.performance_fuzzer.fuzz_all_operations(100_000);
         results.set_fuzzing_results(fuzzing_results);
-        
+
         // Phase 4: Differential testing against baselines
         println!("Phase 4: Differential testing against baseline implementations...");
         let differential_results = self.differential_testing.run_comprehensive_tests();
         results.set_differential_results(differential_results);
-        
+
         // Phase 5: Statistical benchmarking with regression detection
         println!("Phase 5: Statistical benchmarking with regression detection...");
         let benchmark_results = self.execute_statistical_benchmarks();
         results.set_benchmark_results(benchmark_results);
-        
+
         // Phase 6: Performance regression analysis
         println!("Phase 6: Performance regression analysis...");
-        let regression_analysis = self.regression_detector.analyze_performance_trends(&results);
+        let regression_analysis = self
+            .regression_detector
+            .analyze_performance_trends(&results);
         results.set_regression_analysis(regression_analysis);
-        
+
         // Phase 7: Report generation
         println!("Phase 7: Generating comprehensive benchmark report...");
-        let report = self.report_generator.generate_comprehensive_report(&results);
+        let report = self
+            .report_generator
+            .generate_comprehensive_report(&results);
         results.set_report(report);
-        
+
         results
     }
-    
+
     fn execute_statistical_benchmarks(&self) -> StatisticalBenchmarkResults {
         let mut results = StatisticalBenchmarkResults::new();
-        
+
         // Task 001: SIMD Vector Operations
         let simd_benchmarks = vector_ops::SIMDOperationBenchmarks::new();
         let simd_results = simd_benchmarks.run_comprehensive_benchmarks();
         results.add_task_results("001_simd_vector_operations", simd_results);
-        
+
         // Task 002: HNSW Index Implementation
         let hnsw_benchmarks = hnsw_index::HNSWIndexBenchmarks::new();
         let hnsw_results = hnsw_benchmarks.run_comprehensive_benchmarks();
         results.add_task_results("002_hnsw_index", hnsw_results);
-        
+
         // Task 004: Parallel Activation Spreading
         let activation_benchmarks = activation_spreading::ParallelActivationBenchmarks::new();
         let activation_results = activation_benchmarks.run_comprehensive_benchmarks();
         results.add_task_results("004_activation_spreading", activation_results);
-        
+
         // Task 006: Probabilistic Query Engine
         let probabilistic_benchmarks = probabilistic_query::ProbabilisticQueryBenchmarks::new();
         let probabilistic_results = probabilistic_benchmarks.run_comprehensive_benchmarks();
         results.add_task_results("006_probabilistic_query", probabilistic_results);
-        
+
         // Task 007: Pattern Completion Engine
         let completion_benchmarks = pattern_completion::PatternCompletionBenchmarks::new();
         let completion_results = completion_benchmarks.run_comprehensive_benchmarks();
         results.add_task_results("007_pattern_completion", completion_results);
-        
+
         // Task 008: Batch Operations API
         let batch_benchmarks = batch_operations::BatchOperationsBenchmarks::new();
         let batch_results = batch_benchmarks.run_comprehensive_benchmarks();
         results.add_task_results("008_batch_operations", batch_results);
-        
+
         // Integration scenarios
         let integration_benchmarks = integration_scenarios::IntegrationScenarioBenchmarks::new();
         let integration_results = integration_benchmarks.run_comprehensive_benchmarks();
         results.add_task_results("integration_scenarios", integration_results);
-        
+
         results
     }
 }
@@ -205,19 +215,20 @@ pub type RegressionAnalysisResults = regression_detection::RegressionAnalysisRes
 // Main benchmark entry point
 pub fn benchmark_milestone_1(c: &mut Criterion) {
     let mut suite = ComprehensiveBenchmarkSuite::new();
-    
+
     let mut group = c.benchmark_group("milestone_1_comprehensive");
-    group.confidence_level(0.995) // 99.5% confidence
+    group
+        .confidence_level(0.995) // 99.5% confidence
         .sample_size(246) // From power analysis
         .measurement_time(Duration::from_secs(30))
         .warm_up_time(Duration::from_secs(5));
-    
+
     group.bench_function("full_comprehensive_suite", |b| {
         b.iter(|| {
             let _results = suite.execute_comprehensive_benchmarks();
             black_box(_results)
         });
     });
-    
+
     group.finish();
 }

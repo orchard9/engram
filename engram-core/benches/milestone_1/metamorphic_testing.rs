@@ -63,12 +63,12 @@ impl MetamorphicTestingEngine {
             // Scale invariance of cosine similarity
             MetamorphicRelation {
                 name: "cosine_similarity_scale_invariance".to_string(),
-                description: "cosine_similarity(a, b) == cosine_similarity(k*a, b) for k > 0".to_string(),
+                description: "cosine_similarity(a, b) == cosine_similarity(k*a, b) for k > 0"
+                    .to_string(),
                 input_transformation: |input| {
                     let mut scaled_input = input.clone();
-                    scaled_input.vector_a = scaled_input.vector_a.iter()
-                        .map(|&x| x * 2.0)
-                        .collect();
+                    scaled_input.vector_a =
+                        scaled_input.vector_a.iter().map(|&x| x * 2.0).collect();
                     scaled_input
                 },
                 output_relation: |original, transformed| {
@@ -110,9 +110,7 @@ impl MetamorphicTestingEngine {
                 description: "cosine_similarity(a, b) == -cosine_similarity(-a, b)".to_string(),
                 input_transformation: |input| {
                     let mut negated_input = input.clone();
-                    negated_input.vector_a = negated_input.vector_a.iter()
-                        .map(|&x| -x)
-                        .collect();
+                    negated_input.vector_a = negated_input.vector_a.iter().map(|&x| -x).collect();
                     negated_input
                 },
                 output_relation: |original, transformed| {
@@ -134,9 +132,7 @@ impl MetamorphicTestingEngine {
                     }
                     orthogonal_input
                 },
-                output_relation: |_original, transformed| {
-                    transformed.similarity.abs() < 1e-7
-                },
+                output_relation: |_original, transformed| transformed.similarity.abs() < 1e-7,
                 violation_severity: ViolationSeverity::Medium,
             },
         ]
@@ -159,8 +155,9 @@ impl MetamorphicTestingEngine {
                     enhanced_input
                 },
                 output_relation: |original, transformed| {
-                    if let (Some(orig_act), Some(trans_act)) = 
-                        (&original.activations, &transformed.activations) {
+                    if let (Some(orig_act), Some(trans_act)) =
+                        (&original.activations, &transformed.activations)
+                    {
                         let orig_total: f32 = orig_act.values().sum();
                         let trans_total: f32 = trans_act.values().sum();
                         trans_total >= orig_total - 1e-6
@@ -173,21 +170,27 @@ impl MetamorphicTestingEngine {
             // Activation symmetry for undirected graphs
             MetamorphicRelation {
                 name: "activation_symmetry".to_string(),
-                description: "Reversing edge direction shouldn't change activation in undirected graphs".to_string(),
+                description:
+                    "Reversing edge direction shouldn't change activation in undirected graphs"
+                        .to_string(),
                 input_transformation: |input| {
                     let mut reversed_input = input.clone();
                     if let Some(ref mut graph) = reversed_input.graph_data {
-                        graph.edges = graph.edges.iter()
+                        graph.edges = graph
+                            .edges
+                            .iter()
                             .map(|&(from, to, weight)| (to, from, weight))
                             .collect();
                     }
                     reversed_input
                 },
                 output_relation: |original, transformed| {
-                    if let (Some(orig_act), Some(trans_act)) = 
-                        (&original.activations, &transformed.activations) {
+                    if let (Some(orig_act), Some(trans_act)) =
+                        (&original.activations, &transformed.activations)
+                    {
                         orig_act.iter().all(|(node, val)| {
-                            trans_act.get(node)
+                            trans_act
+                                .get(node)
                                 .map_or(false, |trans_val| (val - trans_val).abs() < 1e-6)
                         })
                     } else {
@@ -210,9 +213,12 @@ impl MetamorphicTestingEngine {
                     input.clone()
                 },
                 output_relation: |original, transformed| {
-                    if let (Some(orig_pat), Some(trans_pat)) = 
-                        (&original.pattern, &transformed.pattern) {
-                        orig_pat.iter().zip(trans_pat.iter())
+                    if let (Some(orig_pat), Some(trans_pat)) =
+                        (&original.pattern, &transformed.pattern)
+                    {
+                        orig_pat
+                            .iter()
+                            .zip(trans_pat.iter())
                             .all(|(o, t)| (o - t).abs() < 1e-5)
                     } else {
                         true
@@ -230,8 +236,9 @@ impl MetamorphicTestingEngine {
                 },
                 output_relation: |original, transformed| {
                     // Memory strength should be lower after more time
-                    if let (Some(orig_pat), Some(trans_pat)) = 
-                        (&original.pattern, &transformed.pattern) {
+                    if let (Some(orig_pat), Some(trans_pat)) =
+                        (&original.pattern, &transformed.pattern)
+                    {
                         let orig_strength: f32 = orig_pat.iter().map(|x| x.abs()).sum();
                         let trans_strength: f32 = trans_pat.iter().map(|x| x.abs()).sum();
                         trans_strength <= orig_strength + 1e-6
@@ -245,16 +252,16 @@ impl MetamorphicTestingEngine {
     }
 
     pub fn test_simd_metamorphic_relations(
-        &self, 
-        implementation: &impl SIMDImplementation
+        &self,
+        implementation: &impl SIMDImplementation,
     ) -> MetamorphicTestResults {
         let mut results = MetamorphicTestResults::new();
-        
+
         for relation in &self.vector_relations {
             let test_result = self.execute_metamorphic_relation(implementation, relation);
             results.add_relation_result(&relation.name, test_result);
         }
-        
+
         results
     }
 
@@ -266,12 +273,12 @@ impl MetamorphicTestingEngine {
         let test_inputs = self.generate_test_inputs();
         let mut violations = Vec::new();
         let mut total_tests = 0;
-        
+
         for input in test_inputs {
             let original_output = self.execute_test(implementation, &input);
             let transformed_input = (relation.input_transformation)(&input);
             let transformed_output = self.execute_test(implementation, &transformed_input);
-            
+
             if !(relation.output_relation)(&original_output, &transformed_output) {
                 violations.push(MetamorphicViolation {
                     relation_name: relation.name.clone(),
@@ -282,10 +289,10 @@ impl MetamorphicTestingEngine {
                     severity: relation.violation_severity.clone(),
                 });
             }
-            
+
             total_tests += 1;
         }
-        
+
         MetamorphicTestResult {
             relation_name: relation.name.clone(),
             total_tests,
@@ -300,7 +307,7 @@ impl MetamorphicTestingEngine {
         input: &TestInput,
     ) -> TestOutput {
         let similarity = implementation.cosine_similarity(&input.vector_a, &input.vector_b);
-        
+
         TestOutput {
             similarity,
             activations: None,
@@ -312,23 +319,24 @@ impl MetamorphicTestingEngine {
         use rand::prelude::*;
         let mut rng = thread_rng();
         let mut inputs = Vec::new();
-        
+
         // Normal vectors
         for _ in 0..10 {
             inputs.push(TestInput {
-                vector_a: (0..768).map(|_| rng.gen::<f32>() - 0.5).collect(),
-                vector_b: (0..768).map(|_| rng.gen::<f32>() - 0.5).collect(),
+                vector_a: (0..768).map(|_| rng.r#gen::<f32>() - 0.5).collect(),
+                vector_b: (0..768).map(|_| rng.r#gen::<f32>() - 0.5).collect(),
                 graph_data: None,
             });
         }
-        
+
         // Sparse vectors
         for _ in 0..5 {
             let mut vector_a = vec![0.0; 768];
             let mut vector_b = vec![0.0; 768];
-            for i in 0..77 { // 10% non-zero
-                vector_a[i * 10] = rng.gen::<f32>() - 0.5;
-                vector_b[i * 10] = rng.gen::<f32>() - 0.5;
+            for i in 0..77 {
+                // 10% non-zero
+                vector_a[i * 10] = rng.r#gen::<f32>() - 0.5;
+                vector_b[i * 10] = rng.r#gen::<f32>() - 0.5;
             }
             inputs.push(TestInput {
                 vector_a,
@@ -336,20 +344,20 @@ impl MetamorphicTestingEngine {
                 graph_data: None,
             });
         }
-        
+
         // Edge cases
         inputs.push(TestInput {
             vector_a: vec![1.0; 768],
             vector_b: vec![1.0; 768],
             graph_data: None,
         });
-        
+
         inputs.push(TestInput {
             vector_a: vec![1e-10; 768],
             vector_b: vec![1e10; 768],
             graph_data: None,
         });
-        
+
         inputs
     }
 
@@ -358,41 +366,37 @@ impl MetamorphicTestingEngine {
         if a.len() < 3 {
             return vec![0.0; a.len()];
         }
-        
+
         // Use Gram-Schmidt process
         let mut orthogonal = vec![0.0; a.len()];
-        
+
         // Start with a random vector
         use rand::prelude::*;
         let mut rng = thread_rng();
         for i in 0..a.len() {
-            orthogonal[i] = rng.gen::<f32>() - 0.5;
+            orthogonal[i] = rng.r#gen::<f32>() - 0.5;
         }
-        
+
         // Project out component along a
-        let dot_a: f32 = orthogonal.iter().zip(a.iter())
-            .map(|(o, a)| o * a)
-            .sum();
+        let dot_a: f32 = orthogonal.iter().zip(a.iter()).map(|(o, a)| o * a).sum();
         let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
-        
+
         if norm_a > 1e-10 {
             for i in 0..orthogonal.len() {
                 orthogonal[i] -= (dot_a / (norm_a * norm_a)) * a[i];
             }
         }
-        
+
         // Project out component along b
-        let dot_b: f32 = orthogonal.iter().zip(b.iter())
-            .map(|(o, b)| o * b)
-            .sum();
+        let dot_b: f32 = orthogonal.iter().zip(b.iter()).map(|(o, b)| o * b).sum();
         let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
-        
+
         if norm_b > 1e-10 {
             for i in 0..orthogonal.len() {
                 orthogonal[i] -= (dot_b / (norm_b * norm_b)) * b[i];
             }
         }
-        
+
         // Normalize
         let norm: f32 = orthogonal.iter().map(|x| x * x).sum::<f32>().sqrt();
         if norm > 1e-10 {
@@ -400,7 +404,7 @@ impl MetamorphicTestingEngine {
                 *x /= norm;
             }
         }
-        
+
         orthogonal
     }
 }
@@ -426,7 +430,8 @@ impl MetamorphicTestResults {
     }
 
     pub fn critical_violations(&self) -> Vec<&MetamorphicViolation> {
-        self.results.values()
+        self.results
+            .values()
             .flat_map(|r| &r.violations)
             .filter(|v| matches!(v.severity, ViolationSeverity::Critical))
             .collect()

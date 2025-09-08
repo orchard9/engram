@@ -169,7 +169,7 @@ fn generate_catalog(path: PathBuf, output: PathBuf) -> Result<()> {
 
     // Group errors by file
     let mut by_file: std::collections::HashMap<String, Vec<_>> = std::collections::HashMap::new();
-    for (id, error_def) in &report.error_catalog {
+    for (_id, error_def) in &report.error_catalog {
         by_file
             .entry(error_def.file_path.clone())
             .or_insert_with(Vec::new)

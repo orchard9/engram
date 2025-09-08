@@ -233,7 +233,7 @@ async fn start_interactive_shell() -> Result<()> {
     loop {
         match rl.readline("engram> ") {
             Ok(line) => {
-                rl.add_history_entry(&line);
+                let _ = rl.add_history_entry(&line);
                 let trimmed = line.trim();
 
                 if trimmed == "exit" || trimmed == "quit" {

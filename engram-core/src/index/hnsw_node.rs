@@ -63,6 +63,7 @@ impl HnswNode {
     }
 
     /// Get the embedding for this node
+    #[allow(unsafe_code)]
     pub fn get_embedding(&self) -> &[f32; 768] {
         unsafe {
             let ptr = self.embedding_ptr.load(Ordering::Acquire);
@@ -81,6 +82,7 @@ impl HnswNode {
     }
 
     /// Get connections for a specific layer
+    #[allow(unsafe_code)]
     pub fn get_connections(&self, layer: usize) -> Option<&[HnswEdge]> {
         let connections_ptr = self.connections_ptr.load(Ordering::Acquire);
         if connections_ptr.is_null() {
@@ -98,6 +100,7 @@ impl HnswNode {
     }
 
     /// Add a connection atomically
+    #[allow(unsafe_code)]
     pub fn add_connection(&self, layer: usize, edge: HnswEdge) -> Result<(), super::HnswError> {
         let connections_ptr = self.connections_ptr.load(Ordering::Acquire);
 
@@ -108,20 +111,23 @@ impl HnswNode {
             let new_ptr = Box::into_raw(connections);
 
             // Try to install the new connections
-            match self.connections_ptr.compare_exchange(
-                std::ptr::null_mut(),
-                new_ptr,
-                Ordering::Release,
-                Ordering::Acquire,
-            ) {
-                Ok(_) => Ok(()),
-                Err(_) => {
-                    // Another thread initialized it, clean up and retry
-                    unsafe {
-                        Box::from_raw(new_ptr);
-                    }
-                    self.add_connection(layer, edge)
+            if self
+                .connections_ptr
+                .compare_exchange(
+                    std::ptr::null_mut(),
+                    new_ptr,
+                    Ordering::Release,
+                    Ordering::Acquire,
+                )
+                .is_ok()
+            {
+                Ok(())
+            } else {
+                // Another thread initialized it, clean up and retry
+                unsafe {
+                    drop(Box::from_raw(new_ptr));
                 }
+                self.add_connection(layer, edge)
             }
         } else {
             // Add to existing connections
@@ -134,12 +140,13 @@ impl HnswNode {
 }
 
 impl Drop for HnswNode {
+    #[allow(unsafe_code)]
     fn drop(&mut self) {
         // Clean up allocated embedding
         let embedding_ptr = self.embedding_ptr.load(Ordering::Acquire);
         if !embedding_ptr.is_null() {
             unsafe {
-                Box::from_raw(embedding_ptr);
+                drop(Box::from_raw(embedding_ptr));
             }
         }
 
@@ -147,7 +154,7 @@ impl Drop for HnswNode {
         let connections_ptr = self.connections_ptr.load(Ordering::Acquire);
         if !connections_ptr.is_null() {
             unsafe {
-                Box::from_raw(connections_ptr);
+                drop(Box::from_raw(connections_ptr));
             }
         }
     }
@@ -164,8 +171,15 @@ pub struct ConnectionBlock {
     pub generation: u32,
 }
 
+impl Default for ConnectionBlock {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ConnectionBlock {
     /// Create a new connection block
+    #[must_use]
     pub fn new() -> Self {
         Self {
             layer_connections: (0..16).map(|_| SmallVec::new()).collect(),
@@ -178,8 +192,7 @@ impl ConnectionBlock {
     pub fn add_edge(&mut self, layer: usize, edge: HnswEdge) -> Result<(), super::HnswError> {
         if layer >= self.layer_connections.len() {
             return Err(super::HnswError::CorruptedGraph(format!(
-                "Layer {} exceeds maximum",
-                layer
+                "Layer {layer} exceeds maximum"
             )));
         }
 
@@ -221,6 +234,7 @@ pub struct HnswEdge {
 
 impl HnswEdge {
     /// Create a new edge
+    #[must_use]
     pub fn new(target_id: u32, distance: f32, confidence: Confidence) -> Self {
         Self {
             target_id,
@@ -231,6 +245,7 @@ impl HnswEdge {
     }
 
     /// Get the confidence-weighted distance
+    #[must_use]
     pub fn weighted_distance(&self) -> f32 {
         self.cached_distance * (1.0 - self.confidence_weight)
     }
@@ -270,8 +285,8 @@ mod tests {
 
     #[test]
     fn test_node_creation() {
-        use crate::MemoryBuilder;
-        use chrono::Utc;
+        // use crate::MemoryBuilder;
+        // use chrono::Utc;
 
         // Create memory directly instead of through episode conversion
         let memory = Arc::new(crate::Memory::new(

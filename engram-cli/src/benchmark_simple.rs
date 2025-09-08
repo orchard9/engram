@@ -5,7 +5,6 @@
 
 use anyhow::{Context, Result};
 use std::fs;
-use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -30,7 +29,7 @@ pub async fn run_benchmark(repo_url: String, use_release: bool, verbose: bool) -
     let clone_start = Instant::now();
 
     let clone_result = Command::new("git")
-        .args(&["clone", "--depth=1", &repo_url, temp_dir.to_str().unwrap()])
+        .args(["clone", "--depth=1", &repo_url, temp_dir.to_str().unwrap()])
         .stdout(if verbose {
             Stdio::inherit()
         } else {
@@ -97,7 +96,7 @@ pub async fn run_benchmark(repo_url: String, use_release: bool, verbose: bool) -
 
     // Start server in background
     let mut server = Command::new(&binary_path)
-        .args(&["start", "--port", "7432", "--grpc-port", "50051"])
+        .args(["start", "--port", "7432", "--grpc-port", "50051"])
         .current_dir(&temp_dir)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -111,7 +110,7 @@ pub async fn run_benchmark(repo_url: String, use_release: bool, verbose: bool) -
 
         // Try to connect to health endpoint
         let health_check = Command::new("curl")
-            .args(&["-s", "http://localhost:7432/health"])
+            .args(["-s", "http://localhost:7432/health"])
             .output();
 
         if let Ok(output) = health_check {
@@ -135,7 +134,7 @@ pub async fn run_benchmark(repo_url: String, use_release: bool, verbose: bool) -
     let query_start = Instant::now();
 
     let query_result = Command::new("curl")
-        .args(&["-s", "http://localhost:7432/health"])
+        .args(["-s", "http://localhost:7432/health"])
         .output()
         .context("Failed to execute health check")?;
 
@@ -243,22 +242,21 @@ pub async fn run_with_hyperfine(
     };
 
     let script_content = format!(
-        r#"#!/bin/bash
+        r"#!/bin/bash
 set -e
 TEMP_DIR=$(mktemp -d)
 cd $TEMP_DIR
-git clone --depth=1 {} engram
+git clone --depth=1 {repo_url} engram
 cd engram
-{}
-{} start --port 7432 &
+{build_cmd}
+{binary} start --port 7432 &
 SERVER_PID=$!
 sleep 5
 curl -s http://localhost:7432/health > /dev/null
 kill $SERVER_PID 2>/dev/null || true
 cd /
 rm -rf $TEMP_DIR
-"#,
-        repo_url, build_cmd, binary
+"
     );
 
     fs::write(&script_path, script_content)?;
@@ -274,7 +272,7 @@ rm -rf $TEMP_DIR
 
     // Run hyperfine
     let output = Command::new("hyperfine")
-        .args(&[
+        .args([
             "--warmup",
             &warmup_runs.to_string(),
             "--runs",
@@ -302,7 +300,7 @@ rm -rf $TEMP_DIR
 fn print_phase(title: &str) {
     println!();
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    println!("{}", title);
+    println!("{title}");
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 }
 

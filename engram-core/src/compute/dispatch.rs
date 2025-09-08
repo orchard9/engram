@@ -20,8 +20,15 @@ pub struct DispatchVectorOps {
     implementation: Box<dyn VectorOps>,
 }
 
+impl Default for DispatchVectorOps {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DispatchVectorOps {
     /// Create new dispatching implementation based on CPU features
+    #[must_use]
     pub fn new() -> Self {
         let implementation: Box<dyn VectorOps> = match detect_cpu_features() {
             #[cfg(target_arch = "x86_64")]

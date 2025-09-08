@@ -5,7 +5,17 @@
 
 use engram_core::graph::MemoryGraph;
 use engram_proto::engram_service_server::{EngramService, EngramServiceServer};
-use engram_proto::*;
+use engram_proto::{
+    AssociateRequest, AssociateResponse, CompleteRequest, CompleteResponse, Confidence,
+    ConsolidateRequest, ConsolidateResponse, ConsolidationMode, ConsolidationProgress,
+    ConsolidationState, DreamRequest, DreamResponse, ExperienceRequest, ExperienceResponse,
+    FlowStatus, ForgetMode, ForgetRequest, ForgetResponse, HealthStatus, Insight,
+    IntrospectRequest, IntrospectResponse, MemoryFlowRequest, MemoryFlowResponse, MemoryStatistics,
+    RecallMetadata, RecallRequest, RecallResponse, RecognizeRequest, RecognizeResponse,
+    RememberRequest, RememberResponse, ReminisceRequest, ReminisceResponse, ReplaySequence,
+    StreamEventType, StreamRequest, StreamResponse, dream_response, flow_control, flow_status,
+    memory_flow_request, memory_flow_response, remember_request,
+};
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -24,15 +34,15 @@ pub struct MemoryService {
 
 impl MemoryService {
     /// Create a new memory service with the given graph.
-    pub fn new(graph: Arc<RwLock<MemoryGraph>>) -> Self {
+    pub const fn new(graph: Arc<RwLock<MemoryGraph>>) -> Self {
         Self { graph }
     }
 
     /// Start the gRPC server on the specified port.
     pub async fn serve(self, port: u16) -> Result<(), Box<dyn std::error::Error>> {
-        let addr = format!("0.0.0.0:{}", port).parse()?;
+        let addr = format!("0.0.0.0:{port}").parse()?;
 
-        println!("🧠 Engram gRPC service listening on {}", addr);
+        println!("🧠 Engram gRPC service listening on {addr}");
         println!("   Ready for memory operations (Remember, Recall, Recognize)");
 
         Server::builder()
@@ -60,7 +70,7 @@ impl EngramService for MemoryService {
         let (memory_id, confidence_value) = match req.memory_type {
             Some(remember_request::MemoryType::Memory(memory)) => {
                 // Store generic memory
-                let graph = self.graph.write().await;
+                let _graph = self.graph.write().await;
                 let id = memory.id.clone();
 
                 // For now, just acknowledge storage with high confidence
@@ -69,7 +79,7 @@ impl EngramService for MemoryService {
             }
             Some(remember_request::MemoryType::Episode(episode)) => {
                 // Store episodic memory with rich context
-                let graph = self.graph.write().await;
+                let _graph = self.graph.write().await;
                 let id = episode.id.clone();
 
                 // Episodes get slightly lower initial confidence
@@ -88,7 +98,7 @@ impl EngramService for MemoryService {
         // Create confidence-based response
         let response =
             RememberResponse {
-                memory_id: memory_id.clone(),
+                memory_id,
                 storage_confidence: Some(Confidence::new(confidence_value).with_reasoning(
                     "Successfully encoded in working memory, awaiting consolidation",
                 )),
@@ -110,7 +120,7 @@ impl EngramService for MemoryService {
         let req = request.into_inner();
 
         // Validate cue presence
-        let cue = req.cue.ok_or_else(|| {
+        let _cue = req.cue.ok_or_else(|| {
             Status::invalid_argument(
                 "Recall requires a cue - a trigger for memory retrieval. \
                 Like trying to remember without knowing what you're looking for. \
@@ -272,7 +282,7 @@ impl EngramService for MemoryService {
     ) -> Result<Response<ConsolidateResponse>, Status> {
         let req = request.into_inner();
 
-        let mode = ConsolidationMode::try_from(req.mode).unwrap_or(ConsolidationMode::Unspecified);
+        let _mode = ConsolidationMode::try_from(req.mode).unwrap_or(ConsolidationMode::Unspecified);
 
         let response = ConsolidateResponse {
             memories_consolidated: 0,
@@ -329,8 +339,8 @@ impl EngramService for MemoryService {
                     // Send progress
                     DreamResponse {
                         content: Some(dream_response::Content::Progress(ConsolidationProgress {
-                            memories_replayed: cycle as i32 * 10,
-                            new_connections: cycle as i32 * 2,
+                            memories_replayed: cycle * 10,
+                            new_connections: cycle * 2,
                             consolidation_strength: 0.7,
                         })),
                     }
@@ -358,7 +368,7 @@ impl EngramService for MemoryService {
     ) -> Result<Response<CompleteResponse>, Status> {
         let req = request.into_inner();
 
-        let partial = req.partial_pattern.ok_or_else(|| {
+        let _partial = req.partial_pattern.ok_or_else(|| {
             Status::invalid_argument(
                 "Pattern completion needs a partial pattern - fragments to \
                 complete. Like trying to finish a sentence without the beginning. \
@@ -445,14 +455,14 @@ impl EngramService for MemoryService {
         &self,
         request: Request<StreamRequest>,
     ) -> Result<Response<Self::StreamStream>, Status> {
-        let req = request.into_inner();
+        let _req = request.into_inner();
 
         // Create channel for streaming responses
         let (tx, rx) = tokio::sync::mpsc::channel(32);
 
         // Spawn task to generate activity events
         tokio::spawn(async move {
-            let events = vec![
+            let events = [
                 StreamEventType::Activation,
                 StreamEventType::Storage,
                 StreamEventType::Recall,
@@ -461,11 +471,11 @@ impl EngramService for MemoryService {
                 StreamEventType::Decay,
             ];
 
-            for (i, event_type) in events.iter().cycle().enumerate().take(10) {
+            for (_i, event_type) in events.iter().cycle().enumerate().take(10) {
                 let response = StreamResponse {
                     event_type: *event_type as i32,
                     timestamp: Some(engram_proto::datetime_to_timestamp(chrono::Utc::now())),
-                    description: format!("Memory event: {:?}", event_type),
+                    description: format!("Memory event: {event_type:?}"),
                     metadata: Default::default(),
                     importance: 0.5,
                 };
@@ -495,7 +505,7 @@ impl EngramService for MemoryService {
     ) -> Result<Response<Self::StreamingRememberStream>, Status> {
         let mut stream = request.into_inner();
         let (tx, rx) = tokio::sync::mpsc::channel(32);
-        let graph = Arc::clone(&self.graph);
+        let _graph = Arc::clone(&self.graph);
 
         tokio::spawn(async move {
             let mut sequence = 0u64;
@@ -510,7 +520,7 @@ impl EngramService for MemoryService {
                                 RememberResponse {
                                     memory_id: memory.id,
                                     storage_confidence: Some(Confidence::new(0.9).with_reasoning(
-                                        &format!("Streaming memory {} processed", sequence),
+                                        format!("Streaming memory {sequence} processed"),
                                     )),
                                     linked_memories: vec![],
                                     initial_state: ConsolidationState::Recent as i32,
@@ -520,7 +530,7 @@ impl EngramService for MemoryService {
                                 RememberResponse {
                                     memory_id: episode.id,
                                     storage_confidence: Some(Confidence::new(0.85).with_reasoning(
-                                        &format!("Streaming episode {} processed", sequence),
+                                        format!("Streaming episode {sequence} processed"),
                                     )),
                                     linked_memories: vec![],
                                     initial_state: ConsolidationState::Recent as i32,
@@ -562,7 +572,7 @@ impl EngramService for MemoryService {
     ) -> Result<Response<Self::StreamingRecallStream>, Status> {
         let mut stream = request.into_inner();
         let (tx, rx) = tokio::sync::mpsc::channel(32);
-        let graph = Arc::clone(&self.graph);
+        let _graph = Arc::clone(&self.graph);
 
         tokio::spawn(async move {
             let mut query_count = 0u64;
@@ -584,9 +594,8 @@ impl EngramService for MemoryService {
                         // Process recall request
                         let response = RecallResponse {
                             memories: vec![], // Would search graph
-                            recall_confidence: Some(Confidence::new(0.6).with_reasoning(&format!(
-                                "Streaming query {} processed",
-                                query_count
+                            recall_confidence: Some(Confidence::new(0.6).with_reasoning(format!(
+                                "Streaming query {query_count} processed"
                             ))),
                             metadata: Some(RecallMetadata {
                                 total_activated: 0,
@@ -626,7 +635,7 @@ impl EngramService for MemoryService {
     ) -> Result<Response<Self::MemoryFlowStream>, Status> {
         let mut stream = request.into_inner();
         let (tx, rx) = tokio::sync::mpsc::channel(64); // Higher buffer for bidirectional flow
-        let graph = Arc::clone(&self.graph);
+        let _graph = Arc::clone(&self.graph);
 
         tokio::spawn(async move {
             let mut session_state = std::collections::HashMap::new();
@@ -639,10 +648,10 @@ impl EngramService for MemoryService {
                         let session_id = req.session_id.clone();
 
                         let response = match req.request {
-                            Some(memory_flow_request::Request::Remember(remember_req)) => {
+                            Some(memory_flow_request::Request::Remember(_remember_req)) => {
                                 // Process remember request
                                 let remember_result = RememberResponse {
-                                    memory_id: format!("flow_{}", global_sequence),
+                                    memory_id: format!("flow_{global_sequence}"),
                                     storage_confidence: Some(
                                         Confidence::new(0.9).with_reasoning("Flow memory stored"),
                                     ),
@@ -661,7 +670,7 @@ impl EngramService for MemoryService {
                                     )),
                                 }
                             }
-                            Some(memory_flow_request::Request::Recall(recall_req)) => {
+                            Some(memory_flow_request::Request::Recall(_recall_req)) => {
                                 // Process recall request
                                 let recall_result = RecallResponse {
                                     memories: vec![],
@@ -723,7 +732,7 @@ impl EngramService for MemoryService {
                                         flow_control::Action::Resume => flow_status::State::Active,
                                         _ => flow_status::State::Active,
                                     } as i32,
-                                    message: format!("Flow control: {:?}", action),
+                                    message: format!("Flow control: {action:?}"),
                                     metrics: std::collections::HashMap::new(),
                                     last_activity: Some(engram_proto::datetime_to_timestamp(
                                         chrono::Utc::now(),

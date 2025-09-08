@@ -4,16 +4,16 @@
 //! and deep insights into cognitive performance through atomic operations and
 //! wait-free data structures.
 
+use crossbeam_utils::CachePadded;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
-use crossbeam_utils::CachePadded;
 
-pub mod lockfree;
 pub mod cognitive;
 pub mod hardware;
-pub mod streaming;
 pub mod health;
+pub mod lockfree;
+pub mod streaming;
 
 #[cfg(feature = "monitoring")]
 pub mod numa_aware;
@@ -21,32 +21,31 @@ pub mod numa_aware;
 #[cfg(feature = "monitoring")]
 pub mod prometheus;
 
-pub use lockfree::{LockFreeCounter, LockFreeHistogram, LockFreeGauge};
-pub use cognitive::{CognitiveMetrics, ConsolidationState, CognitiveInsight};
-pub use hardware::{HardwareMetrics, CacheLevel, SimdOperation};
-pub use streaming::{StreamingAggregator, MetricUpdate};
-pub use health::{SystemHealth, HealthCheck, HealthStatus};
+pub use cognitive::{CognitiveInsight, CognitiveMetrics, ConsolidationState};
+pub use hardware::{CacheLevel, HardwareMetrics, SimdOperation};
+pub use health::{HealthCheck, HealthStatus, SystemHealth};
+pub use lockfree::{LockFreeCounter, LockFreeGauge, LockFreeHistogram};
+pub use streaming::{MetricUpdate, StreamingAggregator};
 
 /// Global metrics registry for the Engram system
 pub struct MetricsRegistry {
     /// Lock-free counters for operation counts
     counters: Arc<LockFreeCounters>,
-    
+
     /// Lock-free histograms for latency distributions
     histograms: Arc<LockFreeHistograms>,
-    
+
     /// Cognitive architecture specific metrics
     cognitive: Arc<CognitiveMetrics>,
-    
+
     /// Hardware performance metrics
     hardware: Arc<HardwareMetrics>,
-    
+
     /// Streaming aggregation for real-time export
     streaming: Arc<StreamingAggregator>,
-    
+
     /// System health monitoring
     health: Arc<SystemHealth>,
-    
     // NUMA collectors temporarily disabled due to hwloc Send/Sync issues
     // TODO: Wrap hwloc types properly for thread safety
     // #[cfg(feature = "monitoring")]
@@ -55,6 +54,7 @@ pub struct MetricsRegistry {
 
 impl MetricsRegistry {
     /// Create a new metrics registry with default configuration
+    #[must_use]
     pub fn new() -> Self {
         Self {
             counters: Arc::new(LockFreeCounters::new()),
@@ -68,12 +68,12 @@ impl MetricsRegistry {
             // numa_collectors: numa_aware::NumaCollectors::new().map(Arc::new),
         }
     }
-    
+
     /// Record a counter increment with <50ns overhead
     #[inline(always)]
     pub fn increment_counter(&self, name: &'static str, value: u64) {
         self.counters.increment(name, value);
-        
+
         // Queue for streaming export
         self.streaming.queue_update(MetricUpdate::Counter {
             name,
@@ -81,12 +81,12 @@ impl MetricsRegistry {
             timestamp: Instant::now(),
         });
     }
-    
+
     /// Record a histogram observation with <100ns overhead
     #[inline(always)]
     pub fn observe_histogram(&self, name: &'static str, value: f64) {
         self.histograms.observe(name, value);
-        
+
         // Queue for streaming export
         self.streaming.queue_update(MetricUpdate::Histogram {
             name,
@@ -94,26 +94,28 @@ impl MetricsRegistry {
             timestamp: Instant::now(),
         });
     }
-    
+
     /// Record cognitive architecture metrics
     #[inline(always)]
     pub fn record_cognitive(&self, metric: cognitive::CognitiveMetric) {
         self.cognitive.record(metric);
     }
-    
+
     /// Record hardware performance metrics
     #[inline(always)]
     pub fn record_hardware(&self, metric: hardware::HardwareMetric) {
         self.hardware.record(metric);
     }
-    
+
     /// Get current system health status
+    #[must_use]
     pub fn health_status(&self) -> HealthStatus {
         self.health.check_all()
     }
-    
+
     /// Export metrics in Prometheus format
     #[cfg(feature = "monitoring")]
+    #[must_use]
     pub fn export_prometheus(&self) -> String {
         prometheus::export_all(self)
     }
@@ -126,12 +128,15 @@ pub struct LockFreeCounters {
 }
 
 impl LockFreeCounters {
+    /// Create new lock-free counter collection
+    #[must_use]
     pub fn new() -> Self {
         Self {
             counters: dashmap::DashMap::new(),
         }
     }
-    
+
+    /// Increment a named counter by the given value
     #[inline(always)]
     pub fn increment(&self, name: &'static str, value: u64) {
         self.counters
@@ -139,12 +144,13 @@ impl LockFreeCounters {
             .or_insert_with(|| CachePadded::new(AtomicU64::new(0)))
             .fetch_add(value, Ordering::Relaxed);
     }
-    
+
+    /// Get the current value of a named counter
+    #[must_use]
     pub fn get(&self, name: &'static str) -> u64 {
         self.counters
             .get(name)
-            .map(|c| c.load(Ordering::Acquire))
-            .unwrap_or(0)
+            .map_or(0, |c| c.load(Ordering::Acquire))
     }
 }
 
@@ -155,12 +161,15 @@ pub struct LockFreeHistograms {
 }
 
 impl LockFreeHistograms {
+    /// Create new lock-free histogram collection
+    #[must_use]
     pub fn new() -> Self {
         Self {
             histograms: dashmap::DashMap::new(),
         }
     }
-    
+
+    /// Record an observation in the named histogram
     #[inline(always)]
     pub fn observe(&self, name: &'static str, value: f64) {
         self.histograms
@@ -168,12 +177,13 @@ impl LockFreeHistograms {
             .or_insert_with(|| Arc::new(lockfree::LockFreeHistogram::new()))
             .record(value);
     }
-    
+
+    /// Get quantile values from the named histogram
+    #[must_use]
     pub fn quantiles(&self, name: &'static str, quantiles: &[f64]) -> Vec<f64> {
         self.histograms
             .get(name)
-            .map(|h| h.quantiles(quantiles))
-            .unwrap_or_else(|| vec![0.0; quantiles.len()])
+            .map_or_else(|| vec![0.0; quantiles.len()], |h| h.quantiles(quantiles))
     }
 }
 
@@ -273,13 +283,13 @@ impl Default for LockFreeHistograms {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_metrics_registry_creation() {
         let registry = MetricsRegistry::new();
         assert_eq!(registry.counters.get("test"), 0);
     }
-    
+
     #[test]
     fn test_counter_increment() {
         let registry = MetricsRegistry::new();
@@ -287,18 +297,20 @@ mod tests {
         registry.increment_counter("test_counter", 2);
         assert_eq!(registry.counters.get("test_counter"), 3);
     }
-    
+
     #[test]
     fn test_histogram_observation() {
         let registry = MetricsRegistry::new();
         registry.observe_histogram("test_histogram", 10.0);
         registry.observe_histogram("test_histogram", 20.0);
         registry.observe_histogram("test_histogram", 30.0);
-        
-        let quantiles = registry.histograms.quantiles("test_histogram", &[0.5, 0.9, 0.99]);
+
+        let quantiles = registry
+            .histograms
+            .quantiles("test_histogram", &[0.5, 0.9, 0.99]);
         assert_eq!(quantiles.len(), 3);
     }
-    
+
     #[test]
     fn test_global_metrics_initialization() {
         let metrics1 = init();

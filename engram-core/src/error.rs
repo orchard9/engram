@@ -2,18 +2,24 @@
 //!
 //! Every error provides context, suggestions, and examples to support
 //! developers even when System 2 reasoning is degraded (e.g., debugging at 3am).
+//!
+//! Includes recovery strategies for graceful degradation and automated error handling.
 
-use crate::Confidence;
+use crate::{Confidence, Memory};
 use std::fmt;
+use thiserror::Error;
 
 /// Context information for an error: what was expected vs what actually happened
 #[derive(Debug, Clone)]
 pub struct ErrorContext {
+    /// Expected value or state
     pub expected: String,
+    /// Actual value or state encountered
     pub actual: String,
 }
 
 impl ErrorContext {
+    /// Create new error context with expected and actual values
     pub fn new(expected: impl Into<String>, actual: impl Into<String>) -> Self {
         Self {
             expected: expected.into(),
@@ -21,6 +27,194 @@ impl ErrorContext {
         }
     }
 }
+
+/// Recovery strategies for different types of errors
+///
+/// These strategies define how the system should attempt to recover from errors
+/// to provide graceful degradation rather than catastrophic failure.
+#[derive(Debug, Clone)]
+pub enum RecoveryStrategy {
+    /// Retry the operation with exponential backoff
+    Retry { max_attempts: u32, backoff_ms: u64 },
+    /// Use a fallback implementation or default value
+    Fallback { description: String },
+    /// Return partial results with reduced confidence
+    PartialResult { description: String },
+    /// Continue operation without the failed feature
+    ContinueWithoutFeature,
+    /// Requires manual intervention to resolve
+    RequiresIntervention { action: String },
+}
+
+/// Production-ready error types with recovery strategies
+///
+/// Combines the cognitive principles of CognitiveError with practical
+/// recovery strategies for production systems.
+#[derive(Error, Debug)]
+pub enum EngramError {
+    #[error("Memory operation failed: {context}")]
+    Memory {
+        context: String,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+        recovery: RecoveryStrategy,
+    },
+    
+    #[error("Storage error: {operation}")]
+    Storage {
+        operation: String,
+        #[source]
+        source: std::io::Error,
+        recovery: RecoveryStrategy,
+    },
+    
+    #[error("Query failed: {reason}")]
+    Query {
+        reason: String,
+        partial_results: Option<Vec<Memory>>,
+        recovery: RecoveryStrategy,
+    },
+    
+    #[error("WAL operation failed: {operation}")]
+    WriteAheadLog {
+        operation: String,
+        #[source]
+        source: std::io::Error,
+        recovery: RecoveryStrategy,
+        can_continue: bool,
+    },
+    
+    #[error("Index corrupted or unavailable")]
+    Index {
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+        fallback_available: bool,
+        recovery: RecoveryStrategy,
+    },
+    
+    #[error("Evidence type mismatch: expected {expected}, got {actual}")]
+    EvidenceTypeMismatch {
+        expected: String,
+        actual: String,
+        recovery: RecoveryStrategy,
+    },
+    
+    #[error("Cue type mismatch: expected {expected}, got {actual}")]
+    CueTypeMismatch {
+        expected: String,
+        actual: String,
+        recovery: RecoveryStrategy,
+    },
+    
+    #[error("Pattern matching failed: {pattern}")]
+    PatternMatch {
+        pattern: String,
+        recovery: RecoveryStrategy,
+    },
+}
+
+impl EngramError {
+    /// Get the recovery strategy for this error
+    pub fn recovery_strategy(&self) -> &RecoveryStrategy {
+        match self {
+            Self::Memory { recovery, .. } => recovery,
+            Self::Storage { recovery, .. } => recovery,
+            Self::Query { recovery, .. } => recovery,
+            Self::WriteAheadLog { recovery, .. } => recovery,
+            Self::Index { recovery, .. } => recovery,
+            Self::EvidenceTypeMismatch { recovery, .. } => recovery,
+            Self::CueTypeMismatch { recovery, .. } => recovery,
+            Self::PatternMatch { recovery, .. } => recovery,
+        }
+    }
+    
+    /// Check if this error is recoverable
+    pub fn is_recoverable(&self) -> bool {
+        !matches!(
+            self.recovery_strategy(),
+            RecoveryStrategy::RequiresIntervention { .. }
+        )
+    }
+    
+    /// Create a memory error with context
+    pub fn memory_error(
+        context: impl Into<String>,
+        source: impl std::error::Error + Send + Sync + 'static,
+        recovery: RecoveryStrategy,
+    ) -> Self {
+        Self::Memory {
+            context: context.into(),
+            source: Box::new(source),
+            recovery,
+        }
+    }
+    
+    /// Create a storage error
+    pub fn storage_error(
+        operation: impl Into<String>,
+        source: std::io::Error,
+        recovery: RecoveryStrategy,
+    ) -> Self {
+        Self::Storage {
+            operation: operation.into(),
+            source,
+            recovery,
+        }
+    }
+    
+    /// Create a query error with optional partial results
+    pub fn query_error(
+        reason: impl Into<String>,
+        partial_results: Option<Vec<Memory>>,
+        recovery: RecoveryStrategy,
+    ) -> Self {
+        Self::Query {
+            reason: reason.into(),
+            partial_results,
+            recovery,
+        }
+    }
+    
+    /// Create an evidence type mismatch error
+    pub fn evidence_type_mismatch(
+        expected: impl Into<String>,
+        actual: impl Into<String>,
+        recovery: RecoveryStrategy,
+    ) -> Self {
+        Self::EvidenceTypeMismatch {
+            expected: expected.into(),
+            actual: actual.into(),
+            recovery,
+        }
+    }
+    
+    /// Create a cue type mismatch error  
+    pub fn cue_type_mismatch(
+        expected: impl Into<String>,
+        actual: impl Into<String>,
+        recovery: RecoveryStrategy,
+    ) -> Self {
+        Self::CueTypeMismatch {
+            expected: expected.into(),
+            actual: actual.into(),
+            recovery,
+        }
+    }
+    
+    /// Create a pattern matching error
+    pub fn pattern_match_error(
+        pattern: impl Into<String>,
+        recovery: RecoveryStrategy,
+    ) -> Self {
+        Self::PatternMatch {
+            pattern: pattern.into(),
+            recovery,
+        }
+    }
+}
+
+/// Result type alias for convenience
+pub type Result<T> = std::result::Result<T, EngramError>;
 
 /// Comprehensive error type following cognitive principles
 ///
@@ -251,6 +445,7 @@ pub struct CognitiveErrorBuilder {
 }
 
 impl CognitiveErrorBuilder {
+    /// Create a new cognitive error builder
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -266,54 +461,63 @@ impl CognitiveErrorBuilder {
         }
     }
 
+    /// Set the error summary message
     #[must_use]
     pub fn summary(mut self, summary: impl Into<String>) -> Self {
         self.summary = Some(summary.into());
         self
     }
 
+    /// Set error context with expected vs actual values
     #[must_use]
     pub fn context(mut self, expected: impl Into<String>, actual: impl Into<String>) -> Self {
         self.context = Some(ErrorContext::new(expected, actual));
         self
     }
 
+    /// Set a suggestion for resolving the error
     #[must_use]
     pub fn suggestion(mut self, suggestion: impl Into<String>) -> Self {
         self.suggestion = Some(suggestion.into());
         self
     }
 
+    /// Set an example of correct usage
     #[must_use]
     pub fn example(mut self, example: impl Into<String>) -> Self {
         self.example = Some(example.into());
         self
     }
 
+    /// Set the confidence level for this error
     #[must_use]
     pub const fn confidence(mut self, confidence: Confidence) -> Self {
         self.confidence = Some(confidence);
         self
     }
 
+    /// Set additional details about the error
     #[must_use]
     pub fn details(mut self, details: impl Into<String>) -> Self {
         self.details = Some(details.into());
         self
     }
 
+    /// Set documentation link for this error
     #[must_use]
     pub fn documentation(mut self, docs: impl Into<String>) -> Self {
         self.documentation = Some(docs.into());
         self
     }
 
+    /// Set list of similar errors for context
     #[must_use]
     pub fn similar(mut self, similar: Vec<String>) -> Self {
         self.similar = similar;
         self
     }
 
+    /// Set the underlying source error
     #[must_use]
     pub fn source(mut self, source: Box<dyn std::error::Error + Send + Sync>) -> Self {
         self.source = Some(source);
@@ -407,6 +611,7 @@ pub struct PartialResult<T> {
 }
 
 impl<T> PartialResult<T> {
+    /// Create a new partial result with value and confidence
     pub const fn new(value: T, confidence: Confidence) -> Self {
         Self {
             value,
@@ -415,6 +620,7 @@ impl<T> PartialResult<T> {
         }
     }
 
+    /// Add a warning to this partial result
     #[must_use]
     pub fn with_warning(mut self, warning: CognitiveError) -> Self {
         self.warnings.push(warning);

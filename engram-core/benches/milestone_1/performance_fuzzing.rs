@@ -43,23 +43,31 @@ pub struct WorstCaseScenario {
 #[derive(Debug, Clone)]
 pub struct ContextFreeTestGrammar;
 impl ContextFreeTestGrammar {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct AFLStyleCoverageEngine;
 impl AFLStyleCoverageEngine {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct StatisticalPerformanceCliffDetector;
 impl StatisticalPerformanceCliffDetector {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct WorstCaseDatabase;
 impl WorstCaseDatabase {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 }

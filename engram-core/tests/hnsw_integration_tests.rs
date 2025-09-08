@@ -3,9 +3,7 @@
 #![cfg(feature = "hnsw_index")]
 
 use chrono::Utc;
-use engram_core::{
-    Confidence, Cue, CueBuilder, Episode, EpisodeBuilder, MemoryBuilder, MemoryStore,
-};
+use engram_core::{Confidence, Cue, EpisodeBuilder, MemoryStore};
 use std::sync::Arc;
 use std::thread;
 
@@ -320,9 +318,9 @@ fn test_hnsw_graph_integrity() {
             .build();
 
         let memory = Arc::new(engram_core::Memory::new(
-            episode.id.clone(), 
-            episode.embedding, 
-            episode.encoding_confidence
+            episode.id.clone(),
+            episode.embedding,
+            episode.encoding_confidence,
         ));
 
         index.insert_memory(memory).unwrap();

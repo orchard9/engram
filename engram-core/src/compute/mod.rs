@@ -30,7 +30,9 @@ pub enum CpuCapability {
     #[cfg(target_arch = "x86_64")]
     Sse42,
     #[cfg(target_arch = "aarch64")]
+    /// ARM NEON SIMD instruction set
     Neon,
+    /// Fallback scalar operations without SIMD
     Scalar,
 }
 
@@ -94,6 +96,7 @@ pub fn detect_cpu_features() -> CpuCapability {
 }
 
 /// Create vector operations implementation based on CPU capabilities
+#[must_use]
 pub fn create_vector_ops() -> Box<dyn VectorOps> {
     #[cfg(feature = "force_scalar_compute")]
     {
@@ -121,12 +124,14 @@ pub fn get_vector_ops() -> &'static dyn VectorOps {
 
 /// Convenience function for cosine similarity
 #[inline]
+#[must_use]
 pub fn cosine_similarity_768(a: &[f32; 768], b: &[f32; 768]) -> f32 {
     get_vector_ops().cosine_similarity_768(a, b)
 }
 
 /// Convenience function for batch cosine similarity
 #[inline]
+#[must_use]
 pub fn cosine_similarity_batch_768(query: &[f32; 768], vectors: &[[f32; 768]]) -> Vec<f32> {
     get_vector_ops().cosine_similarity_batch_768(query, vectors)
 }
@@ -151,12 +156,20 @@ pub fn validate_implementation() -> bool {
 /// Error types for compute operations
 #[derive(Debug, thiserror::Error)]
 pub enum ComputeError {
+    /// Batch operation buffer has reached maximum capacity
     #[error("Batch capacity exceeded")]
     BatchFull,
+    /// Vector has incorrect number of dimensions
     #[error("Invalid vector dimensions: expected 768, got {0}")]
     InvalidDimensions(usize),
+    /// Number of weights doesn't match number of vectors in weighted operation
     #[error("Weight and vector count mismatch: {weights} weights for {vectors} vectors")]
-    WeightMismatch { weights: usize, vectors: usize },
+    WeightMismatch {
+        /// Number of weight values provided
+        weights: usize,
+        /// Number of vectors provided
+        vectors: usize,
+    },
 }
 
 #[cfg(test)]

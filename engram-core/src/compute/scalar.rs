@@ -10,9 +10,16 @@ use super::VectorOps;
 /// Scalar implementation of vector operations
 pub struct ScalarVectorOps;
 
+impl Default for ScalarVectorOps {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ScalarVectorOps {
     /// Create new scalar vector operations instance
-    pub fn new() -> Self {
+    #[must_use]
+    pub const fn new() -> Self {
         Self
     }
 }
@@ -161,7 +168,7 @@ mod tests {
         let a = [2.0f32; 768];
         let b = [3.0f32; 768];
         let dot = ops.dot_product_768(&a, &b);
-        assert!((dot - 768.0 * 6.0).abs() < 1e-4);
+        assert!((768.0f32.mul_add(-6.0, dot)).abs() < 1e-4);
     }
 
     #[test]

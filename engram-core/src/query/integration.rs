@@ -1,33 +1,31 @@
-//! MemoryStore integration for probabilistic queries
+//! `MemoryStore` integration for probabilistic queries
 //!
-//! This module extends the existing MemoryStore with probabilistic query capabilities,
+//! This module extends the existing `MemoryStore` with probabilistic query capabilities,
 //! seamlessly integrating uncertainty propagation into the recall process while
 //! maintaining backward compatibility.
 
-use crate::{Confidence, Episode, Memory, Activation, MemoryStore, Cue, CueType};
 use super::{
-    ProbabilisticQueryResult, ProbabilisticRecall, ConfidenceInterval,
-    evidence::{EvidenceAggregator, CombinedEvidence},
-    Evidence, EvidenceSource, MatchType, UncertaintySource,
+    ConfidenceInterval, Evidence, EvidenceSource, MatchType, ProbabilisticQueryResult,
+    ProbabilisticRecall, UncertaintySource, evidence::EvidenceAggregator,
 };
-use std::sync::Arc;
-use std::time::{SystemTime, Duration};
+use crate::{Activation, Confidence, Cue, CueType, Episode, MemoryStore};
+use std::time::{Duration, SystemTime};
 
 impl ProbabilisticRecall for MemoryStore {
     /// Enhanced recall with probabilistic uncertainty propagation
     fn recall_probabilistic(&self, cue: Cue) -> ProbabilisticQueryResult {
         // Start with standard recall
         let standard_results = self.recall(cue.clone());
-        
+
         if standard_results.is_empty() {
             return ProbabilisticQueryResult::from_episodes(Vec::new());
         }
-        
+
         // Build evidence chain from recall process
         let mut evidence_aggregator = EvidenceAggregator::new();
         let mut evidence_ids = Vec::new();
         let mut uncertainty_sources = Vec::new();
-        
+
         // Add evidence for each recalled episode
         for (episode, confidence) in &standard_results {
             let evidence_id = self.create_evidence_for_episode(
@@ -38,10 +36,10 @@ impl ProbabilisticRecall for MemoryStore {
             );
             evidence_ids.push(evidence_id);
         }
-        
+
         // Add system-level uncertainty sources
         self.add_system_uncertainty_sources(&mut uncertainty_sources);
-        
+
         // Combine all evidence
         let combined_evidence = match evidence_aggregator.combine_evidence(evidence_ids) {
             Ok(combined) => combined,
@@ -50,7 +48,7 @@ impl ProbabilisticRecall for MemoryStore {
                 return ProbabilisticQueryResult::from_episodes(standard_results);
             }
         };
-        
+
         // Create enhanced confidence interval
         let confidence_interval = ConfidenceInterval {
             lower: combined_evidence.lower_bound,
@@ -58,11 +56,12 @@ impl ProbabilisticRecall for MemoryStore {
             point: combined_evidence.confidence,
             width: combined_evidence.upper_bound.raw() - combined_evidence.lower_bound.raw(),
         };
-        
+
         ProbabilisticQueryResult {
             episodes: standard_results,
             confidence_interval,
-            evidence_chain: combined_evidence.contributing_sources
+            evidence_chain: combined_evidence
+                .contributing_sources
                 .into_iter()
                 .filter_map(|id| evidence_aggregator.get_evidence(id).cloned())
                 .collect(),
@@ -81,9 +80,12 @@ impl MemoryStore {
         aggregator: &mut EvidenceAggregator,
     ) -> u64 {
         let evidence = match &cue.cue_type {
-            CueType::Embedding { vector, threshold } => {
+            CueType::Embedding {
+                vector,
+                threshold: _,
+            } => {
                 // Vector similarity evidence
-                let similarity = self.compute_embedding_similarity(&episode.embedding, &vector);
+                let similarity = self.compute_embedding_similarity(&episode.embedding, vector);
                 Evidence {
                     source: EvidenceSource::VectorSimilarity {
                         query_vector: *vector,
@@ -108,13 +110,14 @@ impl MemoryStore {
                     dependencies: Vec::new(),
                 }
             }
-            CueType::Context { time_range, .. } => {
+            CueType::Context { .. } => {
                 // Temporal match evidence with decay
                 let time_since_episode = SystemTime::now()
                     .duration_since(SystemTime::UNIX_EPOCH)
                     .unwrap_or_default()
-                    .as_secs() as i64 - episode.when.timestamp();
-                
+                    .as_secs() as i64
+                    - episode.when.timestamp();
+
                 let decay_evidence = if time_since_episode > 0 {
                     EvidenceAggregator::evidence_from_decay(
                         *confidence,
@@ -133,14 +136,14 @@ impl MemoryStore {
                         dependencies: Vec::new(),
                     }
                 };
-                
+
                 return aggregator.add_evidence(decay_evidence);
             }
-            CueType::Temporal { pattern, .. } => {
+            CueType::Temporal { pattern: _, .. } => {
                 // Contextual match evidence
                 Evidence {
                     source: EvidenceSource::DirectMatch {
-                        cue_id: format!("context_temporal"),
+                        cue_id: "context_temporal".to_string(),
                         similarity_score: confidence.raw(),
                         match_type: MatchType::Context,
                     },
@@ -150,10 +153,10 @@ impl MemoryStore {
                 }
             }
         };
-        
+
         aggregator.add_evidence(evidence)
     }
-    
+
     /// Compute cosine similarity between embeddings
     fn compute_embedding_similarity(&self, a: &[f32; 768], b: &[f32; 768]) -> f32 {
         #[cfg(feature = "hnsw_index")]
@@ -167,7 +170,7 @@ impl MemoryStore {
             let dot_product: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
             let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
             let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
-            
+
             if norm_a == 0.0 || norm_b == 0.0 {
                 0.0
             } else {
@@ -175,7 +178,7 @@ impl MemoryStore {
             }
         }
     }
-    
+
     /// Add system-level uncertainty sources
     fn add_system_uncertainty_sources(&self, uncertainty_sources: &mut Vec<UncertaintySource>) {
         // Memory pressure uncertainty
@@ -187,87 +190,87 @@ impl MemoryStore {
         } else {
             0.05 // Low pressure
         };
-        
+
         if pressure_level > 0.05 {
             uncertainty_sources.push(UncertaintySource::SystemPressure {
                 pressure_level,
                 effect_on_confidence: pressure_level * 0.2,
             });
         }
-        
+
         // Spreading activation noise (estimated)
         uncertainty_sources.push(UncertaintySource::SpreadingActivationNoise {
             activation_variance: 0.05, // Estimated from typical activation patterns
-            path_diversity: 0.1, // Estimated path diversity effect
+            path_diversity: 0.1,       // Estimated path diversity effect
         });
-        
+
         // Add temporal decay uncertainty for older memories
         uncertainty_sources.push(UncertaintySource::TemporalDecayUnknown {
             time_since_encoding: Duration::from_secs(3600), // Assume 1 hour average age
-            decay_model_uncertainty: 0.15, // Model uncertainty estimate
+            decay_model_uncertainty: 0.15,                  // Model uncertainty estimate
         });
     }
-    
+
     /// Enhanced recall with activation spreading uncertainty tracking
     pub fn recall_with_activation_spreading(&self, cue: Cue) -> ProbabilisticQueryResult {
         // Start with basic probabilistic recall
         let mut result = self.recall_probabilistic(cue.clone());
-        
+
         // Add spreading activation evidence
         let spreading_evidence = self.simulate_spreading_activation(&cue);
         result.evidence_chain.extend(spreading_evidence);
-        
+
         // Update confidence interval based on spreading activation
-        result.confidence_interval = self.adjust_confidence_for_spreading(&result.confidence_interval);
-        
+        result.confidence_interval =
+            self.adjust_confidence_for_spreading(&result.confidence_interval);
+
         result
     }
-    
+
     /// Simulate spreading activation for evidence generation
     fn simulate_spreading_activation(&self, _cue: &Cue) -> Vec<Evidence> {
         let mut evidence = Vec::new();
-        
+
         // Simulate activation spreading from initial cue matches
         // In a full implementation, this would traverse the actual memory graph
         for activation_level in [0.8, 0.6, 0.4, 0.2] {
             let spreading_evidence = EvidenceAggregator::evidence_from_activation(
-                format!("spreading_activation_{}", activation_level),
+                format!("spreading_activation_{activation_level}"),
                 Activation::new(activation_level),
                 ((1.0 - activation_level) * 10.0) as u16, // Higher path length for lower activation
             );
             evidence.push(spreading_evidence);
         }
-        
+
         evidence
     }
-    
+
     /// Adjust confidence interval based on spreading activation patterns
     fn adjust_confidence_for_spreading(&self, original: &ConfidenceInterval) -> ConfidenceInterval {
         // Spreading activation typically increases uncertainty due to path diversity
         let spreading_uncertainty = 0.1; // Conservative estimate
-        
+
         ConfidenceInterval::from_confidence_with_uncertainty(
             original.point,
             original.width.max(spreading_uncertainty),
         )
     }
-    
+
     /// Probabilistic recall with HNSW index integration
     #[cfg(feature = "hnsw_index")]
     pub fn recall_with_hnsw_probabilistic(&self, cue: Cue) -> ProbabilisticQueryResult {
-        use super::evidence::EvidenceAggregator;
-        
+        // use super::evidence::EvidenceAggregator; // TODO: implement evidence aggregation
+
         // Try HNSW-accelerated recall first
-        let hnsw_results = if let Some(ref hnsw_index) = self.hnsw_index() {
-            self.recall_with_hnsw_evidence(cue.clone(), hnsw_index)
+
+        if let Some(hnsw_index) = self.hnsw_index() {
+            self.recall_with_hnsw_evidence(cue, hnsw_index)
         } else {
             // Fallback to standard probabilistic recall
-            return self.recall_probabilistic(cue);
-        };
-        
-        hnsw_results
+            self.recall_probabilistic(cue)
+        }
     }
-    
+
     #[cfg(feature = "hnsw_index")]
     fn recall_with_hnsw_evidence(
         &self,
@@ -275,29 +278,37 @@ impl MemoryStore {
         _hnsw_index: &crate::index::CognitiveHnswIndex,
     ) -> ProbabilisticQueryResult {
         // Enhanced recall using HNSW index with uncertainty tracking
-        let mut base_result = self.recall_probabilistic(cue.clone());
-        
+        let mut base_result = self.recall_probabilistic(cue);
+
         // Add HNSW-specific uncertainty sources
-        base_result.uncertainty_sources.push(UncertaintySource::MeasurementError {
-            error_magnitude: 0.05, // HNSW approximation error
-            confidence_degradation: 0.02,
-        });
-        
+        base_result
+            .uncertainty_sources
+            .push(UncertaintySource::MeasurementError {
+                error_magnitude: 0.05, // HNSW approximation error
+                confidence_degradation: 0.02,
+            });
+
         // Adjust confidence based on HNSW approximation quality
         let hnsw_confidence_factor = 0.95; // HNSW is approximate
         base_result.confidence_interval = ConfidenceInterval {
-            lower: Confidence::exact(base_result.confidence_interval.lower.raw() * hnsw_confidence_factor),
-            upper: Confidence::exact(base_result.confidence_interval.upper.raw() * hnsw_confidence_factor),
-            point: Confidence::exact(base_result.confidence_interval.point.raw() * hnsw_confidence_factor),
+            lower: Confidence::exact(
+                base_result.confidence_interval.lower.raw() * hnsw_confidence_factor,
+            ),
+            upper: Confidence::exact(
+                base_result.confidence_interval.upper.raw() * hnsw_confidence_factor,
+            ),
+            point: Confidence::exact(
+                base_result.confidence_interval.point.raw() * hnsw_confidence_factor,
+            ),
             width: base_result.confidence_interval.width * 1.1, // Slightly increased uncertainty
         };
-        
+
         base_result
     }
-    
+
     /// Get HNSW index reference (if available)
     #[cfg(feature = "hnsw_index")]
-    fn hnsw_index(&self) -> Option<&crate::index::CognitiveHnswIndex> {
+    const fn hnsw_index(&self) -> Option<&crate::index::CognitiveHnswIndex> {
         // This would access the actual HNSW index from MemoryStore
         // Implementation depends on how HNSW is integrated in store.rs
         None // Placeholder - would be implemented based on actual HNSW integration
@@ -307,64 +318,76 @@ impl MemoryStore {
 /// Extension methods for enhanced probabilistic operations
 impl ProbabilisticQueryResult {
     /// Filter results by confidence threshold with proper uncertainty handling
+    #[must_use]
     pub fn filter_by_confidence_threshold(&self, threshold: Confidence) -> Self {
-        let filtered_episodes: Vec<_> = self.episodes
+        let filtered_episodes: Vec<_> = self
+            .episodes
             .iter()
             .filter(|(_, confidence)| confidence.raw() >= threshold.raw())
             .cloned()
             .collect();
-        
+
         if filtered_episodes.is_empty() {
-            return ProbabilisticQueryResult::from_episodes(Vec::new());
+            return Self::from_episodes(Vec::new());
         }
-        
+
         // Recalculate confidence interval for filtered results
-        let mut filtered_result = ProbabilisticQueryResult::from_episodes(filtered_episodes);
-        
+        let mut filtered_result = Self::from_episodes(filtered_episodes);
+
         // Adjust for selection bias (filtering increases uncertainty)
         let selection_bias_uncertainty = 0.05;
         filtered_result.confidence_interval = ConfidenceInterval::from_confidence_with_uncertainty(
             filtered_result.confidence_interval.point,
-            filtered_result.confidence_interval.width.max(selection_bias_uncertainty),
+            filtered_result
+                .confidence_interval
+                .width
+                .max(selection_bias_uncertainty),
         );
-        
+
         // Inherit evidence chain and uncertainty sources
         filtered_result.evidence_chain = self.evidence_chain.clone();
         filtered_result.uncertainty_sources = self.uncertainty_sources.clone();
-        
+
         filtered_result
     }
-    
+
     /// Combine with another probabilistic query result
-    pub fn combine_with(&self, other: &ProbabilisticQueryResult) -> ProbabilisticQueryResult {
+    #[must_use]
+    pub fn combine_with(&self, other: &Self) -> Self {
         let mut combined_episodes = self.episodes.clone();
         combined_episodes.extend(other.episodes.clone());
-        
+
         // Remove duplicates by episode ID
         combined_episodes.sort_by(|a, b| a.0.id.cmp(&b.0.id));
         combined_episodes.dedup_by(|a, b| a.0.id == b.0.id);
-        
-        let mut combined_result = ProbabilisticQueryResult::from_episodes(combined_episodes);
-        
+
+        let mut combined_result = Self::from_episodes(combined_episodes);
+
         // Combine confidence intervals
-        combined_result.confidence_interval = self.confidence_interval.or(&other.confidence_interval);
-        
+        combined_result.confidence_interval =
+            self.confidence_interval.or(&other.confidence_interval);
+
         // Combine evidence chains
         combined_result.evidence_chain = self.evidence_chain.clone();
-        combined_result.evidence_chain.extend(other.evidence_chain.clone());
-        
+        combined_result
+            .evidence_chain
+            .extend(other.evidence_chain.clone());
+
         // Combine uncertainty sources
         combined_result.uncertainty_sources = self.uncertainty_sources.clone();
-        combined_result.uncertainty_sources.extend(other.uncertainty_sources.clone());
-        
+        combined_result
+            .uncertainty_sources
+            .extend(other.uncertainty_sources.clone());
+
         combined_result
     }
-    
+
     /// Get confidence level categorization with uncertainty bounds
+    #[must_use]
     pub fn confidence_category(&self) -> ConfidenceCategory {
         let point = self.confidence_interval.point.raw();
         let width = self.confidence_interval.width;
-        
+
         // Consider uncertainty in categorization
         if point >= 0.8 && width < 0.1 {
             ConfidenceCategory::High
@@ -390,13 +413,13 @@ pub enum ConfidenceCategory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{CueBuilder, MemoryBuilder, MemoryStore};
+    use crate::{CueBuilder, MemoryStore};
     use chrono::Utc;
-    
+
     #[test]
     fn test_probabilistic_recall_integration() {
         let memory_store = MemoryStore::new(1000);
-        
+
         // Create test episode directly
         let episode = Episode {
             id: "test_episode".to_string(),
@@ -412,24 +435,24 @@ mod tests {
             recall_count: 0,
             decay_rate: 0.1,
         };
-        
+
         memory_store.store(episode);
-        
+
         // Create test cue
         let cue = CueBuilder::new()
             .id("test_cue".to_string())
             .semantic_search("Test content".to_string(), Confidence::MEDIUM)
             .build();
-        
+
         // Test probabilistic recall
         let result = memory_store.recall_probabilistic(cue);
-        
+
         assert!(!result.is_empty());
         assert!(!result.evidence_chain.is_empty());
         assert!(!result.uncertainty_sources.is_empty());
         assert!(result.confidence_interval.width >= 0.0);
     }
-    
+
     #[test]
     fn test_confidence_threshold_filtering() {
         let episodes = vec![
@@ -437,33 +460,35 @@ mod tests {
             (create_test_episode("medium"), Confidence::MEDIUM),
             (create_test_episode("low"), Confidence::LOW),
         ];
-        
+
         let result = ProbabilisticQueryResult::from_episodes(episodes);
         let filtered = result.filter_by_confidence_threshold(Confidence::exact(0.6));
-        
+
         // Should only keep high and medium confidence episodes
         assert!(filtered.episodes.len() <= 2);
         for (_, confidence) in &filtered.episodes {
             assert!(confidence.raw() >= 0.6);
         }
     }
-    
+
     #[test]
     fn test_result_combination() {
-        let result1 = ProbabilisticQueryResult::from_episodes(vec![
-            (create_test_episode("r1_e1"), Confidence::HIGH),
-        ]);
-        
-        let result2 = ProbabilisticQueryResult::from_episodes(vec![
-            (create_test_episode("r2_e1"), Confidence::MEDIUM),
-        ]);
-        
+        let result1 = ProbabilisticQueryResult::from_episodes(vec![(
+            create_test_episode("r1_e1"),
+            Confidence::HIGH,
+        )]);
+
+        let result2 = ProbabilisticQueryResult::from_episodes(vec![(
+            create_test_episode("r2_e1"),
+            Confidence::MEDIUM,
+        )]);
+
         let combined = result1.combine_with(&result2);
-        
+
         assert_eq!(combined.episodes.len(), 2);
         assert!(combined.evidence_chain.len() >= result1.evidence_chain.len());
     }
-    
+
     fn create_test_episode(id: &str) -> Episode {
         Episode {
             id: id.to_string(),

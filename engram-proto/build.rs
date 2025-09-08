@@ -19,6 +19,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Add attributes for better ergonomics - exclude Google types
         .type_attribute("engram", "#[derive(serde::Serialize, serde::Deserialize)]")
         .type_attribute("engram", "#[serde(rename_all = \"camelCase\")]")
+        // Suppress specific clippy warnings for generated code
+        .type_attribute(
+            ".",
+            "#[allow(clippy::all, clippy::pedantic, clippy::nursery)]",
+        )
+        .server_attribute(
+            ".",
+            "#[allow(clippy::all, clippy::pedantic, clippy::nursery)]",
+        )
+        .client_attribute(
+            ".",
+            "#[allow(clippy::all, clippy::pedantic, clippy::nursery)]",
+        )
         // Compile the proto files
         .compile(
             &[

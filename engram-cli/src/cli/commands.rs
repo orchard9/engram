@@ -10,10 +10,12 @@ pub struct Cli {
     #[arg(short, long, default_value = "info")]
     pub log_level: String,
 
+    /// Main command to execute
     #[command(subcommand)]
     pub command: Commands,
 }
 
+/// Available CLI commands
 #[derive(Subcommand)]
 pub enum Commands {
     /// Start the Engram server with automatic configuration
@@ -47,12 +49,14 @@ pub enum Commands {
 
     /// Memory operations
     Memory {
+        /// Memory operation to perform
         #[command(subcommand)]
         action: MemoryAction,
     },
 
     /// Configuration management
     Config {
+        /// Configuration action to perform
         #[command(subcommand)]
         action: ConfigAction,
     },
@@ -95,6 +99,7 @@ pub enum Commands {
     },
 }
 
+/// Memory-specific operations
 #[derive(Subcommand)]
 pub enum MemoryAction {
     /// Create a new memory
@@ -141,6 +146,7 @@ pub enum MemoryAction {
     },
 }
 
+/// Configuration management operations
 #[derive(Subcommand)]
 pub enum ConfigAction {
     /// Get a configuration value

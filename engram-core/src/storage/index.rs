@@ -2,7 +2,7 @@
 //!
 //! This module provides lock-free indexing for high-performance concurrent access.
 
-use super::{StorageError, StorageResult};
+use super::StorageResult;
 
 /// Lock-free hash index
 pub struct LockFreeHashIndex {

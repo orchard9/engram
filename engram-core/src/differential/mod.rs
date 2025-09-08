@@ -157,46 +157,72 @@ pub struct Divergence {
 /// A test operation that can be executed across different implementations
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum DifferentialOperation {
-    /// Test confidence operations
+    /// Test confidence AND operations
     ConfidenceAnd {
+        /// First confidence value
         conf_a: f32,
+        /// Second confidence value
         conf_b: f32,
     },
+    /// Test confidence OR operations
     ConfidenceOr {
+        /// First confidence value
         conf_a: f32,
+        /// Second confidence value
         conf_b: f32,
     },
+    /// Test confidence NOT operations
     ConfidenceNot {
+        /// Confidence value to negate
         conf: f32,
     },
+    /// Test weighted confidence combination
     ConfidenceCombineWeighted {
+        /// First confidence value
         conf_a: f32,
+        /// Second confidence value
         conf_b: f32,
+        /// Weight for first confidence
         weight_a: f32,
+        /// Weight for second confidence
         weight_b: f32,
     },
+    /// Test confidence calibration
     ConfidenceCalibration {
+        /// Confidence value to calibrate
         conf: f32,
     },
+    /// Test confidence from success rate
     ConfidenceFromSuccesses {
+        /// Number of successes
         successes: u32,
+        /// Total number of trials
         total: u32,
     },
+    /// Test confidence from percentage
     ConfidenceFromPercent {
+        /// Percentage value (0-100)
         percent: u8,
     },
     /// Future: memory operations
     MemoryStore {
+        /// Memory identifier
         id: String,
+        /// Memory content data
         content: Vec<u8>,
+        /// Storage confidence level
         confidence: f32,
     },
+    /// Test memory recall operations
     MemoryRecall {
+        /// Memory identifier to recall
         id: String,
     },
     /// Future: graph operations
     GraphSpreadingActivation {
+        /// Starting node for activation spread
         start_node: String,
+        /// Initial activation energy
         activation_energy: f64,
     },
 }

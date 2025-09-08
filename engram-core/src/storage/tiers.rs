@@ -5,16 +5,15 @@
 
 use super::{
     CognitiveEvictionPolicy, StorageError, StorageMetrics, StorageResult, StorageTier,
-    TierStatistics, cache::CognitiveIndex, mapped::MappedWarmStorage,
+    TierStatistics, mapped::MappedWarmStorage,
 };
 use crate::{Confidence, Cue, Episode, Memory};
 use crossbeam_queue::SegQueue;
 use dashmap::DashMap;
-use parking_lot::RwLock;
 use std::path::Path;
 use std::sync::{
     Arc,
-    atomic::{AtomicU64, AtomicUsize, Ordering},
+    atomic::{AtomicUsize, Ordering},
 };
 use std::time::{Duration, SystemTime};
 use tokio::sync::RwLock as AsyncRwLock;
@@ -301,7 +300,7 @@ impl CognitiveTierArchitecture {
         for entry in self.hot_tier.iter() {
             let memory = entry.value();
             let age = current_time
-                .duration_since(memory.created_at)
+                .duration_since(memory.created_at.into())
                 .unwrap_or_default();
 
             if memory.activation() < self.eviction_policy.hot_activation_threshold
@@ -353,21 +352,21 @@ impl CognitiveTierArchitecture {
     /// Check if memory matches the given cue
     fn memory_matches_cue(&self, memory: &Memory, cue: &Cue) -> bool {
         // Simple implementation - in practice would use sophisticated matching
-        match cue {
-            Cue::Semantic {
-                content,
-                confidence,
-                ..
-            } => {
-                memory.confidence.raw() >= confidence.raw() && memory.id.contains(content) // Simplified matching
+        match &cue.cue_type {
+            crate::CueType::Semantic { content, .. } => {
+                memory.confidence.raw() >= cue.result_threshold.raw() && memory.id.contains(content) // Simplified matching
             }
-            Cue::Embedding {
-                embedding,
-                confidence,
-                ..
-            } => {
-                memory.confidence.raw() >= confidence.raw()
-                    && self.cosine_similarity(&memory.embedding, embedding) > 0.8
+            crate::CueType::Embedding { vector, .. } => {
+                memory.confidence.raw() >= cue.result_threshold.raw()
+                    && self.cosine_similarity(&memory.embedding, vector) > 0.8
+            }
+            crate::CueType::Context { .. } => {
+                // TODO: Implement context-based matching
+                memory.confidence.raw() >= cue.result_threshold.raw()
+            }
+            crate::CueType::Temporal { .. } => {
+                // TODO: Implement temporal matching
+                memory.confidence.raw() >= cue.result_threshold.raw()
             }
         }
     }
@@ -382,8 +381,7 @@ impl CognitiveTierArchitecture {
         crate::EpisodeBuilder::new()
             .id(memory.id.clone())
             .when(chrono::DateTime::from_timestamp_nanos(
-                memory
-                    .created_at
+                SystemTime::from(memory.created_at)
                     .duration_since(SystemTime::UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_nanos() as i64,
@@ -415,20 +413,20 @@ impl TierArchitectureStats {
 
 /// Tier coordinator for managing migrations
 pub struct TierCoordinator {
-    migration_queue: SegQueue<MigrationTask>,
+    migration_queue: Arc<SegQueue<MigrationTask>>,
     policy: CognitiveEvictionPolicy,
     metrics: Arc<StorageMetrics>,
-    active_migrations: AtomicUsize,
+    active_migrations: Arc<AtomicUsize>,
     worker_handle: AsyncRwLock<Option<tokio::task::JoinHandle<()>>>,
 }
 
 impl TierCoordinator {
     pub fn new(policy: CognitiveEvictionPolicy, metrics: Arc<StorageMetrics>) -> Self {
         Self {
-            migration_queue: SegQueue::new(),
+            migration_queue: Arc::new(SegQueue::new()),
             policy,
             metrics,
-            active_migrations: AtomicUsize::new(0),
+            active_migrations: Arc::new(AtomicUsize::new(0)),
             worker_handle: AsyncRwLock::new(None),
         }
     }
@@ -453,9 +451,9 @@ impl TierCoordinator {
 
     /// Background migration worker
     async fn migration_worker(
-        queue: SegQueue<MigrationTask>,
+        queue: Arc<SegQueue<MigrationTask>>,
         _metrics: Arc<StorageMetrics>,
-        active_migrations: AtomicUsize,
+        active_migrations: Arc<AtomicUsize>,
     ) {
         while let Some(task) = queue.pop() {
             active_migrations.fetch_add(1, Ordering::Relaxed);
@@ -515,12 +513,11 @@ impl StorageTier for DummyColdStorage {
 
         for entry in self.memories.iter() {
             let memory = entry.value();
-            if memory.confidence.raw() >= cue.confidence.raw() {
+            if memory.confidence.raw() >= cue.result_threshold.raw() {
                 let episode = crate::EpisodeBuilder::new()
                     .id(memory.id.clone())
                     .when(chrono::DateTime::from_timestamp_nanos(
-                        memory
-                            .created_at
+                        SystemTime::from(memory.created_at)
                             .duration_since(SystemTime::UNIX_EPOCH)
                             .unwrap_or_default()
                             .as_nanos() as i64,

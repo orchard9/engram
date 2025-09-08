@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 8c83695fdafd94d90e689d6f5c8a86f80611829b47ea20b024425117e3a3ca53 # shrinks to a = ConfidenceInterval { lower: Confidence(0.0), upper: Confidence(0.0), point: Confidence(0.0), width: 0.0 }, b = ConfidenceInterval { lower: Confidence(0.84872234), upper: Confidence(1.0), point: Confidence(0.92436117), width: 0.15127766 }

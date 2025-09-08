@@ -16,12 +16,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
 #[cfg(feature = "monitoring")]
-use crate::metrics::{MetricsRegistry, cognitive::CognitiveMetric};
+use crate::metrics::cognitive::CognitiveMetric;
 
 #[cfg(feature = "pattern_completion")]
 use crate::completion::{
-    PatternReconstructor, CompletionConfig, PartialEpisode,
-    PatternCompleter, CompletedEpisode,
+    CompletedEpisode, CompletionConfig, PartialEpisode, PatternCompleter, PatternReconstructor,
 };
 
 #[cfg(feature = "hnsw_index")]
@@ -30,9 +29,7 @@ use crate::index::{CognitiveHnswIndex, IndexUpdate, UpdatePriority};
 use crossbeam_queue::SegQueue;
 
 #[cfg(feature = "memory_mapped_persistence")]
-use crate::storage::{
-    CognitiveTierArchitecture, FsyncMode, StorageConfig, StorageMetrics, wal::WalWriter,
-};
+use crate::storage::{CognitiveTierArchitecture, FsyncMode, StorageMetrics, wal::WalWriter};
 
 /// Activation level returned by store operations
 ///
@@ -113,7 +110,7 @@ pub struct MemoryStore {
     /// Storage metrics
     #[cfg(feature = "memory_mapped_persistence")]
     storage_metrics: Arc<StorageMetrics>,
-    
+
     /// Pattern completion engine
     #[cfg(feature = "pattern_completion")]
     pattern_reconstructor: Option<Arc<RwLock<PatternReconstructor>>>,
@@ -240,7 +237,7 @@ impl MemoryStore {
     pub fn store(&self, episode: Episode) -> Activation {
         #[cfg(feature = "monitoring")]
         let start = Instant::now();
-        
+
         // Calculate system pressure
         let current_count = self.memory_count.load(Ordering::Relaxed);
         let pressure = (current_count as f32 / self.max_memories as f32).min(1.0);
@@ -316,7 +313,7 @@ impl MemoryStore {
         {
             if let Some(ref queue) = self.index_update_queue {
                 queue.push(IndexUpdate::Insert {
-                    memory_id: memory_id.clone(),
+                    memory_id,
                     memory: memory_arc.clone(),
                     generation: 0,
                     priority: UpdatePriority::Normal,
@@ -325,21 +322,21 @@ impl MemoryStore {
 
             // Try to insert immediately if index is available
             if let Some(ref hnsw) = self.hnsw_index {
-                let _ = hnsw.insert_memory(memory_arc.clone());
+                let _ = hnsw.insert_memory(memory_arc);
             }
         }
 
         // Increment count
         self.memory_count.fetch_add(1, Ordering::Relaxed);
-        
+
         #[cfg(feature = "monitoring")]
         {
             use crate::metrics;
             // Record store operation metrics
             metrics::increment_counter("memories_created_total", 1);
-            metrics::observe_histogram("store_activation", base_activation as f64);
+            metrics::observe_histogram("store_activation", f64::from(base_activation));
             metrics::observe_histogram("store_duration_seconds", start.elapsed().as_secs_f64());
-            
+
             // Record cognitive metrics
             metrics::record_cognitive(CognitiveMetric::CLSContribution {
                 hippocampal: 1.0 - pressure, // More hippocampal when less pressure
@@ -420,7 +417,7 @@ impl MemoryStore {
     pub fn count(&self) -> usize {
         self.memory_count.load(Ordering::Relaxed)
     }
-    
+
     /// Get the number of memories (alias for count)
     pub fn len(&self) -> usize {
         self.count()
@@ -447,27 +444,28 @@ impl MemoryStore {
     pub fn recall(&self, cue: Cue) -> Vec<(Episode, Confidence)> {
         #[cfg(feature = "monitoring")]
         let start = Instant::now();
-        
+
         // Try persistent backend first if available
         #[cfg(feature = "memory_mapped_persistence")]
         {
             if let Some(ref backend) = self.persistent_backend {
                 let results = self.recall_with_persistence(cue, backend);
-                
+
+                // TODO: Add metrics when monitoring feature is properly integrated
                 #[cfg(feature = "monitoring")]
-                if let Some(ref metrics) = self.metrics {
-                    metrics.increment_counter("queries_executed_total", 1);
-                    metrics.observe_histogram("query_duration_seconds", start.elapsed().as_secs_f64());
-                    metrics.observe_histogram("query_result_count", results.len() as f64);
+                {
+                    // metrics.increment_counter("queries_executed_total", 1);
+                    // metrics.observe_histogram("query_duration_seconds", start.elapsed().as_secs_f64());
+                    // metrics.observe_histogram("query_result_count", results.len() as f64);
                 }
-                
+
                 return results;
             }
         }
 
         // Fallback to in-memory recall
         let results = self.recall_in_memory(cue);
-        
+
         #[cfg(feature = "monitoring")]
         {
             use crate::metrics;
@@ -475,7 +473,7 @@ impl MemoryStore {
             metrics::observe_histogram("query_duration_seconds", start.elapsed().as_secs_f64());
             metrics::observe_histogram("query_result_count", results.len() as f64);
         }
-        
+
         results
     }
 
@@ -495,13 +493,13 @@ impl MemoryStore {
         // If persistent backend returned insufficient results, supplement with in-memory
         if results.len() < cue.max_results {
             let mut combined = results;
-            let mut in_memory = self.recall_in_memory(cue);
+            let mut in_memory = self.recall_in_memory(cue.clone());
 
             // Remove duplicates and merge
             in_memory.retain(|(episode, _)| {
                 !combined
                     .iter()
-                    .any(|(existing, _)| existing.id == episode.id)
+                    .any(|(existing, _): &(Episode, Confidence)| existing.id == episode.id)
             });
 
             combined.extend(in_memory);
@@ -668,17 +666,19 @@ impl MemoryStore {
     pub fn complete_pattern(&self, partial: PartialEpisode) -> CompletedEpisode {
         #[cfg(feature = "monitoring")]
         let start = Instant::now();
-        
+
         if let Some(ref reconstructor) = self.pattern_reconstructor {
             // Get episodes for context
-            let episodes: Vec<Episode> = self.wal_buffer.iter()
+            let episodes: Vec<Episode> = self
+                .wal_buffer
+                .iter()
                 .map(|entry| entry.value().clone())
                 .collect();
-            
+
             // Update reconstructor with current episodes
             let mut reconstructor = reconstructor.write();
             reconstructor.update(&episodes);
-            
+
             // Perform completion
             match reconstructor.complete(&partial) {
                 Ok(completed) => {
@@ -686,16 +686,19 @@ impl MemoryStore {
                     {
                         use crate::metrics;
                         metrics::increment_counter("pattern_completions_total", 1);
-                        metrics::observe_histogram("pattern_completion_duration_seconds", start.elapsed().as_secs_f64());
+                        metrics::observe_histogram(
+                            "pattern_completion_duration_seconds",
+                            start.elapsed().as_secs_f64(),
+                        );
                         // Note: completed doesn't have confidence field directly
-                        
+
                         // Record cognitive metrics
                         metrics::record_cognitive(CognitiveMetric::PatternCompletion {
                             plausibility: 0.8, // Default plausibility
                             is_false_memory: false,
                         });
                     }
-                    
+
                     completed
                 }
                 Err(e) => {
@@ -737,7 +740,7 @@ impl MemoryStore {
             }
         }
     }
-    
+
     /// Enable pattern completion with default configuration
     #[cfg(feature = "pattern_completion")]
     pub fn enable_pattern_completion(&mut self) {
@@ -745,14 +748,14 @@ impl MemoryStore {
         let reconstructor = PatternReconstructor::new(config);
         self.pattern_reconstructor = Some(Arc::new(RwLock::new(reconstructor)));
     }
-    
+
     /// Enable pattern completion with custom configuration
     #[cfg(feature = "pattern_completion")]
     pub fn enable_pattern_completion_with_config(&mut self, config: CompletionConfig) {
         let reconstructor = PatternReconstructor::new(config);
         self.pattern_reconstructor = Some(Arc::new(RwLock::new(reconstructor)));
     }
-    
+
     /// Apply spreading activation to enhance recall results
     fn apply_spreading_activation(
         &self,
@@ -1318,9 +1321,9 @@ mod tests {
         store.store(new_episode);
 
         // Low confidence memory should be evicted
-        assert!(store.get("mem_low").is_none());
-        assert!(store.get("mem_med").is_some());
-        assert!(store.get("mem_high").is_some());
-        assert!(store.get("mem_new").is_some());
+        assert!(store.get("low").is_none());
+        assert!(store.get("med").is_some());
+        assert!(store.get("high").is_some());
+        assert!(store.get("new").is_some());
     }
 }

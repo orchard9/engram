@@ -165,8 +165,8 @@ impl NumaTopology {
 
     /// Get the socket for the current thread
     pub fn current_socket(&self) -> usize {
-        // Try to get current CPU and map to socket
-        #[cfg(unix)]
+        // Try to get current CPU and map to socket (Linux only)
+        #[cfg(target_os = "linux")]
         {
             let cpu = unsafe { libc::sched_getcpu() };
             if cpu >= 0 {

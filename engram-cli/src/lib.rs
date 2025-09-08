@@ -13,9 +13,7 @@ use tokio::net::TcpListener;
 
 /// Check if a port is available
 pub async fn is_port_available(port: u16) -> bool {
-    TcpListener::bind(format!("127.0.0.1:{}", port))
-        .await
-        .is_ok()
+    TcpListener::bind(format!("127.0.0.1:{port}")).await.is_ok()
 }
 
 /// Find an available port starting from the preferred port
@@ -68,7 +66,7 @@ pub async fn start_test_server(port: u16) -> Result<()> {
     // Run server in background with timeout
     tokio::select! {
         _ = axum::serve(listener, app) => {},
-        _ = tokio::time::sleep(Duration::from_secs(1)) => {
+        () = tokio::time::sleep(Duration::from_secs(1)) => {
             // Server started successfully, timeout to prevent hanging
         }
     }

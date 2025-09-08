@@ -46,5 +46,7 @@ pub struct ArchitectureDiscrepancy {
 #[derive(Debug, Clone)]
 pub struct CpuCapabilityMatrix;
 impl CpuCapabilityMatrix {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 }

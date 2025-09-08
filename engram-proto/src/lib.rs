@@ -3,9 +3,24 @@
 //! This module provides type-safe gRPC communication with cognitive-friendly
 //! message names and rich vocabulary that builds mental models.
 
-// Suppress documentation warnings for generated protobuf code
-#[allow(missing_docs)]
+// Include generated protobuf code with all warnings suppressed
+#[rustfmt::skip]
+#[allow(
+    missing_docs,
+    clippy::all,
+    clippy::pedantic,
+    clippy::nursery,
+    clippy::cargo,
+    warnings,
+    dead_code,
+    unused_imports,
+    unused_variables,
+    non_camel_case_types,
+    non_snake_case,
+    non_upper_case_globals
+)]
 pub mod engram_v1 {
+    #![allow(clippy::all)]
     tonic::include_proto!("engram.v1");
 }
 
@@ -15,25 +30,27 @@ pub use engram_v1::*;
 use chrono::{DateTime, Utc};
 use prost_types::Timestamp;
 
-/// Convert chrono DateTime to protobuf Timestamp
+/// Convert chrono `DateTime` to protobuf Timestamp
+#[must_use]
 pub fn datetime_to_timestamp(dt: DateTime<Utc>) -> Timestamp {
     Timestamp {
         seconds: dt.timestamp(),
-        nanos: dt.timestamp_subsec_nanos() as i32,
+        nanos: i32::try_from(dt.timestamp_subsec_nanos()).unwrap_or(i32::MAX),
     }
 }
 
-/// Convert protobuf Timestamp to chrono DateTime
+/// Convert protobuf Timestamp to chrono `DateTime`
 pub fn timestamp_to_datetime(ts: &Timestamp) -> DateTime<Utc> {
-    DateTime::from_timestamp(ts.seconds, ts.nanos as u32).unwrap_or_else(Utc::now)
+    DateTime::from_timestamp(ts.seconds, u32::try_from(ts.nanos).unwrap_or(0)).unwrap_or_else(Utc::now)
 }
 
 impl Confidence {
     /// Create a new confidence with automatic category assignment
+    #[must_use]
     pub fn new(value: f32) -> Self {
         let value = value.clamp(0.0, 1.0);
         let category = match value {
-            v if v == 0.0 => ConfidenceCategory::None as i32,
+            0.0 => ConfidenceCategory::None as i32,
             v if v <= 0.2 => ConfidenceCategory::Low as i32,
             v if v <= 0.7 => ConfidenceCategory::Medium as i32,
             v if v <= 0.95 => ConfidenceCategory::High as i32,
@@ -48,17 +65,20 @@ impl Confidence {
     }
 
     /// Create confidence with reasoning explanation
+    #[must_use]
     pub fn with_reasoning(mut self, reasoning: impl Into<String>) -> Self {
         self.reasoning = reasoning.into();
         self
     }
 
     /// Check if confidence is above a threshold
+    #[must_use]
     pub fn is_above(&self, threshold: f32) -> bool {
         self.value >= threshold
     }
 
     /// Get semantic category as enum
+    #[must_use]
     pub fn semantic_category(&self) -> ConfidenceCategory {
         ConfidenceCategory::try_from(self.category).unwrap_or(ConfidenceCategory::Unspecified)
     }
@@ -76,32 +96,36 @@ impl Memory {
             created_at: Some(datetime_to_timestamp(Utc::now())),
             decay_rate: 0.1,
             content: String::new(),
-            metadata: Default::default(),
+            metadata: std::collections::HashMap::default(),
             tags: Vec::new(),
             memory_type: MemoryType::Unspecified as i32,
         }
     }
 
     /// Set the confidence for this memory
+    #[must_use]
     pub fn with_confidence(mut self, confidence: Confidence) -> Self {
         self.confidence = Some(confidence);
         self
     }
 
     /// Set human-readable content
+    #[must_use]
     pub fn with_content(mut self, content: impl Into<String>) -> Self {
         self.content = content.into();
         self
     }
 
     /// Add a tag to this memory
+    #[must_use]
     pub fn add_tag(mut self, tag: impl Into<String>) -> Self {
         self.tags.push(tag.into());
         self
     }
 
     /// Set memory type
-    pub fn with_type(mut self, memory_type: MemoryType) -> Self {
+    #[must_use]
+    pub const fn with_type(mut self, memory_type: MemoryType) -> Self {
         self.memory_type = memory_type as i32;
         self
     }
@@ -134,25 +158,29 @@ impl Episode {
     }
 
     /// Set location context
+    #[must_use]
     pub fn at_location(mut self, location: impl Into<String>) -> Self {
         self.where_location = location.into();
         self
     }
 
     /// Set participants
+    #[must_use]
     pub fn with_people(mut self, people: Vec<String>) -> Self {
         self.who = people;
         self
     }
 
     /// Set emotional valence (-1 to 1)
-    pub fn with_emotion(mut self, valence: f32) -> Self {
+    #[must_use]
+    pub const fn with_emotion(mut self, valence: f32) -> Self {
         self.emotional_valence = valence.clamp(-1.0, 1.0);
         self
     }
 
     /// Set importance (0 to 1)
-    pub fn with_importance(mut self, importance: f32) -> Self {
+    #[must_use]
+    pub const fn with_importance(mut self, importance: f32) -> Self {
         self.importance = importance.clamp(0.0, 1.0);
         self
     }
@@ -160,6 +188,7 @@ impl Episode {
 
 impl Cue {
     /// Create an embedding-based cue
+    #[must_use]
     pub fn from_embedding(vector: Vec<f32>, threshold: f32) -> Self {
         Self {
             id: uuid::Uuid::new_v4().to_string(),
@@ -214,7 +243,6 @@ impl Cue {
 }
 
 // Add uuid for generating IDs
-use uuid;
 
 #[cfg(test)]
 mod tests {
@@ -270,7 +298,7 @@ mod tests {
         .with_importance(0.9);
 
         assert_eq!(episode.where_location, "Home");
-        assert_eq!(episode.emotional_valence, 0.7);
-        assert_eq!(episode.importance, 0.9);
+        assert!((episode.emotional_valence - 0.7).abs() < f32::EPSILON);
+        assert!((episode.importance - 0.9).abs() < f32::EPSILON);
     }
 }

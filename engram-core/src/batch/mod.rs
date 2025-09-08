@@ -5,14 +5,14 @@
 
 use crate::{Activation, Confidence, Cue, Episode};
 
+pub mod buffers;
 pub mod engine;
 pub mod operations;
-pub mod buffers;
 // pub mod streaming; // Requires tokio, commented out for now
 pub mod collector;
 
-pub use engine::BatchEngine;
 pub use buffers::BatchBuffer;
+pub use engine::BatchEngine;
 // Streaming functionality requires additional dependencies - disabled for now
 // #[cfg(feature = "streaming")]
 // pub use streaming::StreamingBatchProcessor;
@@ -22,22 +22,14 @@ pub use collector::AtomicResultCollector;
 pub trait BatchOperations: Send + Sync {
     /// Batch store multiple episodes with graceful degradation under memory pressure
     /// Returns individual activation levels for each episode (maintains cognitive semantics)
-    fn batch_store(
-        &self, 
-        episodes: Vec<Episode>,
-        config: BatchConfig,
-    ) -> BatchStoreResult;
-    
+    fn batch_store(&self, episodes: Vec<Episode>, config: BatchConfig) -> BatchStoreResult;
+
     /// Batch recall with parallel processing
     /// Leverages existing SIMD compute module and maintains confidence scoring
-    fn batch_recall(
-        &self, 
-        cues: Vec<Cue>,
-        config: BatchConfig,
-    ) -> BatchRecallResult;
-    
-    /// Batch similarity search using existing compute::cosine_similarity_batch_768
-    /// Integrates with existing MemoryStore hot_memories for cache efficiency
+    fn batch_recall(&self, cues: Vec<Cue>, config: BatchConfig) -> BatchRecallResult;
+
+    /// Batch similarity search using existing `compute::cosine_similarity_batch_768`
+    /// Integrates with existing `MemoryStore` `hot_memories` for cache efficiency
     fn batch_similarity_search(
         &self,
         query_embeddings: &[[f32; 768]],
@@ -73,7 +65,7 @@ impl Default for BatchConfig {
     }
 }
 
-/// Batch operation types that mirror existing MemoryStore operations
+/// Batch operation types that mirror existing `MemoryStore` operations
 #[derive(Debug, Clone)]
 pub enum BatchOperation {
     /// Store an episode in memory
@@ -81,13 +73,13 @@ pub enum BatchOperation {
     /// Recall memories using a cue
     Recall(Cue),
     /// Search for similar embeddings
-    SimilaritySearch { 
+    SimilaritySearch {
         /// 768-dimensional embedding vector to search with
-        embedding: [f32; 768], 
+        embedding: [f32; 768],
         /// Number of top results to return
-        k: usize, 
+        k: usize,
         /// Minimum confidence threshold for results
-        threshold: Confidence 
+        threshold: Confidence,
     },
 }
 
@@ -106,11 +98,11 @@ pub struct BatchResult {
 #[derive(Debug, Clone)]
 pub enum BatchOperationResult {
     /// Store result with activation level (cognitive semantics preserved)
-    Store { 
+    Store {
         /// Activation level achieved during storage
-        activation: Activation, 
+        activation: Activation,
         /// Unique identifier for the stored memory
-        memory_id: String 
+        memory_id: String,
     },
     /// Recall results with confidence scores
     Recall(Vec<(Episode, Confidence)>),
@@ -179,7 +171,6 @@ pub enum BackpressureStrategy {
     FallbackMode,
 }
 
-
 /// Batch processing errors
 #[derive(Debug, thiserror::Error)]
 pub enum BatchError {
@@ -188,11 +179,11 @@ pub enum BatchError {
     CapacityExceeded,
     /// Memory limit was exceeded during batch processing
     #[error("Memory limit exceeded: {current_mb}MB > {limit_mb}MB")]
-    MemoryLimitExceeded { 
+    MemoryLimitExceeded {
         /// Current memory usage in MB
-        current_mb: usize, 
+        current_mb: usize,
         /// Memory limit in MB
-        limit_mb: usize 
+        limit_mb: usize,
     },
     /// Invalid batch configuration provided
     #[error("Invalid batch configuration: {0}")]

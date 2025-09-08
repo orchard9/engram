@@ -1,14 +1,11 @@
-//! OpenAPI specification for Engram HTTP API
+//! `OpenAPI` specification for Engram HTTP API
 //!
-//! This module provides complete OpenAPI 3.0 documentation with cognitive-friendly
+//! This module provides complete `OpenAPI` 3.0 documentation with cognitive-friendly
 //! organization and educational examples that follow progressive complexity patterns.
 
 use utoipa::{
     Modify, OpenApi, ToSchema,
-    openapi::{
-        ContactBuilder, InfoBuilder, LicenseBuilder, ServerBuilder,
-        security::{ApiKey, ApiKeyValue, SecurityScheme},
-    },
+    openapi::security::{ApiKey, ApiKeyValue, SecurityScheme},
 };
 use utoipa_swagger_ui::SwaggerUi;
 
@@ -20,7 +17,7 @@ use crate::api::{
     StreamMemoryQuery,
 };
 
-/// Main OpenAPI specification with cognitive-friendly organization
+/// Main `OpenAPI` specification with cognitive-friendly organization
 #[derive(OpenApi)]
 #[openapi(
     info(
@@ -321,6 +318,7 @@ pub struct PerformanceMetrics {
 }
 
 /// Create Swagger UI router with cognitive-friendly customization
+#[must_use]
 pub fn create_swagger_ui() -> SwaggerUi {
     SwaggerUi::new("/docs")
         .url("/api-docs/openapi.json", ApiDoc::openapi())
@@ -339,12 +337,14 @@ pub fn create_swagger_ui() -> SwaggerUi {
         )
 }
 
-/// Generate OpenAPI JSON specification
+/// Generate `OpenAPI` JSON specification
+#[must_use]
 pub fn generate_openapi_json() -> String {
     ApiDoc::openapi().to_pretty_json().unwrap()
 }
 
-/// Generate OpenAPI YAML specification
+/// Generate `OpenAPI` YAML specification
+#[must_use]
 pub fn generate_openapi_yaml() -> String {
     serde_yaml::to_string(&ApiDoc::openapi()).unwrap()
 }
@@ -369,7 +369,7 @@ mod tests {
 
     #[test]
     fn test_swagger_ui_creation() {
-        let swagger_ui = create_swagger_ui();
+        let _swagger_ui = create_swagger_ui();
         // SwaggerUi doesn't expose fields for testing, but creation should succeed
         // The actual testing would be done via integration tests
     }

@@ -5,7 +5,6 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use std::time::{Duration, Instant};
-use tracing::{error, info};
 
 /// Show comprehensive server status
 pub async fn show_status() -> Result<()> {
@@ -24,14 +23,14 @@ pub async fn show_status() -> Result<()> {
         Ok(info) => info,
         Err(e) => {
             println!("⚠️  Status: Server info corrupted");
-            println!("🔧 Error: {}", e);
+            println!("🔧 Error: {e}");
             println!("💡 Try: engram stop && engram start");
             return Ok(());
         }
     };
 
-    println!("📋 Process ID: {}", pid);
-    println!("🌐 HTTP Port: {}", port);
+    println!("📋 Process ID: {pid}");
+    println!("🌐 HTTP Port: {port}");
 
     // Check if process exists
     if !is_process_running(pid) {
@@ -47,7 +46,7 @@ pub async fn show_status() -> Result<()> {
         .timeout(Duration::from_secs(5))
         .build()?;
 
-    let health_url = format!("http://127.0.0.1:{}/health/alive", port);
+    let health_url = format!("http://127.0.0.1:{port}/health/alive");
     let start_time = Instant::now();
 
     match client.get(&health_url).send().await {
@@ -55,10 +54,10 @@ pub async fn show_status() -> Result<()> {
             let response_time = start_time.elapsed();
 
             if response.status().is_success() {
-                println!("✅ HTTP Health: Responding ({:?})", response_time);
+                println!("✅ HTTP Health: Responding ({response_time:?})");
 
                 // Try to get detailed health info
-                let detailed_health_url = format!("http://127.0.0.1:{}/health", port);
+                let detailed_health_url = format!("http://127.0.0.1:{port}/health");
                 if let Ok(health_response) = client.get(&detailed_health_url).send().await {
                     if let Ok(health_data) = health_response.json::<Value>().await {
                         print_health_details(&health_data);
@@ -70,7 +69,7 @@ pub async fn show_status() -> Result<()> {
         }
         Err(e) => {
             println!("❌ HTTP Health: Unreachable");
-            println!("🔍 Error: {}", e);
+            println!("🔍 Error: {e}");
         }
     }
 
@@ -78,13 +77,13 @@ pub async fn show_status() -> Result<()> {
     println!("\n🔌 API Endpoints:");
     check_endpoint(
         &client,
-        format!("http://127.0.0.1:{}/api/v1/memories", port),
+        format!("http://127.0.0.1:{port}/api/v1/memories"),
         "Memories API",
     )
     .await;
     check_endpoint(
         &client,
-        format!("http://127.0.0.1:{}/metrics", port),
+        format!("http://127.0.0.1:{port}/metrics"),
         "Metrics",
     )
     .await;
@@ -108,27 +107,33 @@ fn print_health_details(health_data: &Value) {
             "unhealthy" => "❌",
             _ => "❓",
         };
-        println!("  {} Overall: {}", status_emoji, status);
+        println!("  {status_emoji} Overall: {status}");
     }
 
-    if let Some(uptime) = health_data.get("uptime_seconds").and_then(|u| u.as_f64()) {
+    if let Some(uptime) = health_data
+        .get("uptime_seconds")
+        .and_then(serde_json::Value::as_f64)
+    {
         let hours = uptime / 3600.0;
         if hours < 1.0 {
             println!("  ⏱️  Uptime: {:.1} minutes", uptime / 60.0);
         } else {
-            println!("  ⏱️  Uptime: {:.1} hours", hours);
+            println!("  ⏱️  Uptime: {hours:.1} hours");
         }
     }
 
-    if let Some(memory_usage) = health_data.get("memory_usage_mb").and_then(|m| m.as_f64()) {
-        println!("  🧠 Memory Usage: {:.1} MB", memory_usage);
+    if let Some(memory_usage) = health_data
+        .get("memory_usage_mb")
+        .and_then(serde_json::Value::as_f64)
+    {
+        println!("  🧠 Memory Usage: {memory_usage:.1} MB");
     }
 
     if let Some(connections) = health_data
         .get("active_connections")
-        .and_then(|c| c.as_u64())
+        .and_then(serde_json::Value::as_u64)
     {
-        println!("  🔗 Active Connections: {}", connections);
+        println!("  🔗 Active Connections: {connections}");
     }
 
     if let Some(last_activity) = health_data.get("last_activity").and_then(|l| l.as_str()) {
@@ -147,7 +152,7 @@ fn print_health_details(health_data: &Value) {
     }
 
     if let Some(version) = health_data.get("version").and_then(|v| v.as_str()) {
-        println!("  📦 Version: {}", version);
+        println!("  📦 Version: {version}");
     }
 }
 
@@ -165,7 +170,7 @@ async fn check_endpoint(client: &reqwest::Client, url: String, name: &str) {
             println!("  {} {}: {}", status_emoji, name, response.status());
         }
         Err(_) => {
-            println!("  ❌ {}: Unreachable", name);
+            println!("  ❌ {name}: Unreachable");
         }
     }
 }

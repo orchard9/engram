@@ -19,8 +19,14 @@ impl Default for InterferenceModeler {
 }
 
 impl InterferenceModeler {
-    pub fn new() -> Self { Self::default() }
-    
+    /// Create new interference modeler with default settings
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Compute interference factor based on memory similarity
+    #[must_use]
     pub fn compute_interference(&self, similarity: f32) -> f32 {
         similarity * (self.proactive_strength + self.retroactive_strength) / 2.0
     }

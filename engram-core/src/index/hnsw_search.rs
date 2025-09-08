@@ -13,7 +13,13 @@ pub struct SearchResult {
 
 impl SearchResult {
     /// Create a new search result
-    pub fn new(node_id: u32, distance: f32, confidence: Confidence, memory_id: String) -> Self {
+    #[must_use]
+    pub const fn new(
+        node_id: u32,
+        distance: f32,
+        confidence: Confidence,
+        memory_id: String,
+    ) -> Self {
         Self {
             node_id,
             distance,
@@ -23,6 +29,7 @@ impl SearchResult {
     }
 
     /// Get confidence-weighted distance for ranking
+    #[must_use]
     pub fn weighted_distance(&self) -> f32 {
         self.distance * (1.0 - self.confidence.raw())
     }

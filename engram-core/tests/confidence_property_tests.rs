@@ -79,7 +79,7 @@ proptest! {
     #[test]
     fn percentage_construction_is_intuitive(percent in percentage_strategy()) {
         let confidence = Confidence::from_percent(percent);
-        let expected = (percent.min(100) as f32) / 100.0;
+        let expected = f32::from(percent.min(100)) / 100.0;
 
         // Cognitive expectation: "Percentages should convert naturally to decimals"
         prop_assert_eq!(confidence.raw(), expected);
@@ -133,7 +133,7 @@ proptest! {
         );
 
         // Mathematical expectation: P(A ∨ B) = P(A) + P(B) - P(A ∧ B)
-        let expected = conf_a.raw() + conf_b.raw() - (conf_a.raw() * conf_b.raw());
+        let expected = conf_a.raw().mul_add(-conf_b.raw(), conf_a.raw() + conf_b.raw());
         prop_assert!(
             (or_result.raw() - expected).abs() < f32::EPSILON,
             "OR should follow inclusion-exclusion: expected {}, got {}",
@@ -374,7 +374,7 @@ proptest! {
         // OR with self should follow P(A ∨ A) = P(A) + P(A) - P(A ∧ A) = P(A) + P(A) - P(A)^2 = P(A)(2 - P(A))
         // For binary logic it would be idempotent, but for probabilistic OR it's not
         let self_or = conf.or(conf);
-        let expected_or = conf.raw() + conf.raw() - (conf.raw() * conf.raw());
+        let expected_or = conf.raw().mul_add(-conf.raw(), conf.raw() + conf.raw());
         prop_assert!(
             (self_or.raw() - expected_or).abs() < f32::EPSILON,
             "OR with self should follow probability rules: {} -> {} (expected {})",

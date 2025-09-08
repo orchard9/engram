@@ -25,8 +25,15 @@ pub struct HnswGraph {
     node_count: AtomicUsize,
 }
 
+impl Default for HnswGraph {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HnswGraph {
     /// Create a new empty graph
+    #[must_use]
     pub fn new() -> Self {
         let mut layers = Vec::with_capacity(16);
         let mut entry_points = Vec::with_capacity(16);
@@ -66,7 +73,9 @@ impl HnswGraph {
 
             // Search for nearest neighbors in this layer
             let ef_construction = params.ef_construction.load(Ordering::Relaxed);
-            let candidates = if entry_point != u32::MAX {
+            let candidates = if entry_point == u32::MAX {
+                Vec::new()
+            } else {
                 self.search_layer(
                     node_arc.get_embedding(),
                     entry_point,
@@ -75,8 +84,6 @@ impl HnswGraph {
                     vector_ops,
                     &guard,
                 )?
-            } else {
-                Vec::new()
             };
 
             // Select M neighbors with diversity
@@ -206,7 +213,7 @@ impl HnswGraph {
 
         // Search expansion
         while let Some(current) = candidates.pop() {
-            if current.distance > w.peek().map(|r| r.0.distance).unwrap_or(f32::MAX) {
+            if current.distance > w.peek().map_or(f32::MAX, |r| r.0.distance) {
                 break;
             }
 
@@ -225,9 +232,7 @@ impl HnswGraph {
                             confidence: neighbor.confidence,
                         };
 
-                        if distance < w.peek().map(|r| r.0.distance).unwrap_or(f32::MAX)
-                            || w.len() < ef
-                        {
+                        if distance < w.peek().map_or(f32::MAX, |r| r.0.distance) || w.len() < ef {
                             candidates.push(neighbor_candidate.clone());
                             w.push(std::cmp::Reverse(neighbor_candidate));
 
@@ -256,7 +261,7 @@ impl HnswGraph {
         node: &Arc<HnswNode>,
         mut candidates: Vec<SearchCandidate>,
         m: usize,
-        layer: usize,
+        _layer: usize,
         vector_ops: &dyn VectorOps,
     ) -> Vec<u32> {
         if candidates.is_empty() {
@@ -323,8 +328,7 @@ impl HnswGraph {
         }
 
         Err(super::HnswError::MemoryNotFound(format!(
-            "Node {} not found",
-            node_id
+            "Node {node_id} not found"
         )))
     }
 
@@ -388,7 +392,7 @@ impl HnswGraph {
     pub fn validate_structure(&self) -> bool {
         // Check that all nodes in higher layers also exist in lower layers
         for layer_idx in 1..16 {
-            for entry in self.layers[layer_idx].iter() {
+            for entry in &self.layers[layer_idx] {
                 let node_id = *entry.key();
 
                 // Check that this node exists in all lower layers
@@ -408,7 +412,7 @@ impl HnswGraph {
         let guard = epoch::pin();
 
         for layer_idx in 0..16 {
-            for entry in self.layers[layer_idx].iter() {
+            for entry in &self.layers[layer_idx] {
                 let node = entry.value();
 
                 if let Some(connections) = node.get_connections(layer_idx) {
@@ -436,7 +440,7 @@ impl HnswGraph {
     /// Check memory consistency
     pub fn check_memory_consistency(&self) -> bool {
         // Verify that node_map is consistent with actual nodes
-        for entry in self.node_map.iter() {
+        for entry in &self.node_map {
             let memory_id = entry.key();
             let node_id = *entry.value();
 

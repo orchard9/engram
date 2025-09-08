@@ -2,7 +2,7 @@
 //!
 //! This module handles recovery from crashes and validates data integrity.
 
-use super::{IntegrityReport, RecoveryReport, StorageError, StorageResult};
+use super::{IntegrityReport, RecoveryReport, StorageResult};
 
 /// Recovery coordinator for crash consistency
 pub struct CrashRecoveryCoordinator {

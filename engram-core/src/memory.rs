@@ -300,14 +300,15 @@ impl Episode {
         self.vividness_confidence = vividness_decay;
         self.reliability_confidence = reliability_decay;
     }
-    
+
     /// Create a partial episode from available fields for pattern completion
     #[cfg(feature = "pattern_completion")]
+    #[must_use]
     pub fn to_partial(&self, mask_percentage: f32) -> crate::completion::PartialEpisode {
         use std::collections::HashMap;
-        
+
         let mut known_fields = HashMap::new();
-        
+
         // Randomly mask some fields (simplified for now)
         if mask_percentage < 0.25 {
             known_fields.insert("what".to_string(), self.what.clone());
@@ -322,7 +323,7 @@ impl Episode {
                 known_fields.insert("who".to_string(), who.join(", "));
             }
         }
-        
+
         // Mask embedding dimensions
         let mut partial_embedding = Vec::with_capacity(768);
         for i in 0..768 {
@@ -332,7 +333,7 @@ impl Episode {
                 partial_embedding.push(None);
             }
         }
-        
+
         crate::completion::PartialEpisode {
             known_fields,
             partial_embedding,
@@ -340,42 +341,42 @@ impl Episode {
             temporal_context: Vec::new(),
         }
     }
-    
+
     /// Check if this episode is complete (has all major fields)
-    pub fn is_complete(&self) -> bool {
-        !self.what.is_empty() && 
-        self.where_location.is_some() && 
-        self.who.is_some()
+    #[must_use]
+    pub const fn is_complete(&self) -> bool {
+        !self.what.is_empty() && self.where_location.is_some() && self.who.is_some()
     }
-    
+
     /// Calculate completeness percentage
+    #[must_use]
     pub fn completeness(&self) -> f32 {
         let mut score = 0.0;
         let mut total = 0.0;
-        
+
         // Check what field
         if !self.what.is_empty() {
             score += 1.0;
         }
         total += 1.0;
-        
+
         // Check where field
         if self.where_location.is_some() {
             score += 1.0;
         }
         total += 1.0;
-        
+
         // Check who field
         if self.who.is_some() {
             score += 1.0;
         }
         total += 1.0;
-        
+
         // Check embedding quality (non-zero values)
         let non_zero_count = self.embedding.iter().filter(|&&x| x != 0.0).count();
         score += non_zero_count as f32 / 768.0;
         total += 1.0;
-        
+
         score / total
     }
 }
@@ -442,7 +443,7 @@ pub struct Cue {
 impl Cue {
     /// Creates a new embedding-based cue
     #[must_use]
-    pub const fn embedding(id: String, vector: [f32; 768], threshold: Confidence) -> Self {
+    pub fn embedding(id: String, vector: [f32; 768], threshold: Confidence) -> Self {
         Self {
             id,
             cue_type: CueType::Embedding { vector, threshold },
@@ -454,7 +455,7 @@ impl Cue {
 
     /// Creates a context-based cue
     #[must_use]
-    pub const fn context(
+    pub fn context(
         id: String,
         time_range: Option<(DateTime<Utc>, DateTime<Utc>)>,
         location: Option<String>,
@@ -475,7 +476,7 @@ impl Cue {
 
     /// Creates a semantic content cue
     #[must_use]
-    pub const fn semantic(id: String, content: String, fuzzy_threshold: Confidence) -> Self {
+    pub fn semantic(id: String, content: String, fuzzy_threshold: Confidence) -> Self {
         Self {
             id,
             cue_type: CueType::Semantic {

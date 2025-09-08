@@ -7,24 +7,23 @@
 //! - Lock-free writer with bounded ring buffer
 //! - Automatic recovery with corruption detection
 
+// Allow unsafe code for performance-critical WAL operations
+#![allow(unsafe_code)]
+
 use super::{FsyncMode, StorageError, StorageMetrics, StorageResult};
-use crate::{Confidence, Cue, Episode, Memory};
+use crate::{Episode, Memory};
 use crossbeam_queue::SegQueue;
-use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
 use std::fs::{File, OpenOptions};
-use std::io::{BufWriter, Seek, SeekFrom, Write};
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{
     Arc,
-    atomic::{AtomicU32, AtomicU64, Ordering},
+    atomic::{AtomicU64, Ordering},
 };
 use std::time::{Instant, SystemTime};
 
 #[cfg(feature = "memory_mapped_persistence")]
 use crc32c::crc32c;
-#[cfg(feature = "memory_mapped_persistence")]
-use libc;
 
 /// Write-ahead log entry header (exactly 64 bytes = 1 cache line)
 #[repr(C, align(64))]
@@ -291,7 +290,7 @@ pub struct WalWriter {
     sequence_counter: AtomicU64,
 
     /// Entry queue for batching
-    entry_queue: SegQueue<WalEntry>,
+    entry_queue: Arc<SegQueue<WalEntry>>,
 
     /// Batch commit settings
     fsync_mode: FsyncMode,
@@ -351,7 +350,7 @@ impl WalWriter {
             current_file,
             wal_dir,
             sequence_counter: AtomicU64::new(0),
-            entry_queue: SegQueue::new(),
+            entry_queue: Arc::new(SegQueue::new()),
             fsync_mode,
             max_batch_size: 1000,
             max_batch_delay: std::time::Duration::from_millis(10),
@@ -431,7 +430,7 @@ impl WalWriter {
 
     /// Background writer loop
     fn writer_loop(
-        entry_queue: SegQueue<WalEntry>,
+        entry_queue: Arc<SegQueue<WalEntry>>,
         file: Arc<parking_lot::Mutex<BufWriter<File>>>,
         metrics: Arc<StorageMetrics>,
         shutdown: Arc<std::sync::atomic::AtomicBool>,
@@ -662,6 +661,7 @@ impl WalReader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Confidence;
     use tempfile::TempDir;
 
     fn create_test_episode() -> Episode {

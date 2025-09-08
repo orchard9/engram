@@ -2,22 +2,21 @@
 
 use anyhow::Result;
 use serde_json::{Value, json};
-use std::collections::{HashMap, VecDeque};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tracing::{error, info};
 
 /// Print formatted memory result
 pub fn print_memory_result(memory: &Value) {
     if let Some(obj) = memory.as_object() {
         if let Some(id) = obj.get("id").and_then(|v| v.as_str()) {
-            println!("🧠 Memory ID: {}", id);
+            println!("🧠 Memory ID: {id}");
         }
 
         if let Some(content) = obj.get("content").and_then(|v| v.as_str()) {
-            println!("📝 Content: {}", content);
+            println!("📝 Content: {content}");
         }
 
-        if let Some(confidence) = obj.get("confidence").and_then(|v| v.as_f64()) {
+        if let Some(confidence) = obj.get("confidence").and_then(serde_json::Value::as_f64) {
             let confidence_bar = "█".repeat((confidence * 10.0) as usize);
             println!(
                 "🎯 Confidence: {:.1}% {}",
@@ -27,7 +26,7 @@ pub fn print_memory_result(memory: &Value) {
         }
 
         if let Some(timestamp) = obj.get("timestamp").and_then(|v| v.as_str()) {
-            println!("⏰ Created: {}", timestamp);
+            println!("⏰ Created: {timestamp}");
         }
 
         if let Some(associations) = obj.get("associations").and_then(|v| v.as_array()) {
@@ -63,7 +62,7 @@ pub fn print_memory_result(memory: &Value) {
 /// Create a memory through HTTP API
 pub async fn create_memory(port: u16, content: String, confidence: Option<f64>) -> Result<()> {
     let client = reqwest::Client::new();
-    let url = format!("http://127.0.0.1:{}/api/v1/memories", port);
+    let url = format!("http://127.0.0.1:{port}/api/v1/memories");
 
     let mut payload = json!({
         "content": content
@@ -82,7 +81,7 @@ pub async fn create_memory(port: u16, content: String, confidence: Option<f64>) 
 
     if response.status().is_success() {
         let memory: Value = response.json().await?;
-        println!("✅ Memory created successfully in {:?}", elapsed);
+        println!("✅ Memory created successfully in {elapsed:?}");
         print_memory_result(&memory);
     } else {
         let error_text = response
@@ -99,7 +98,7 @@ pub async fn create_memory(port: u16, content: String, confidence: Option<f64>) 
 /// Retrieve a memory by ID
 pub async fn get_memory(port: u16, id: String) -> Result<()> {
     let client = reqwest::Client::new();
-    let url = format!("http://127.0.0.1:{}/api/v1/memories/{}", port, id);
+    let url = format!("http://127.0.0.1:{port}/api/v1/memories/{id}");
 
     info!("🔍 Retrieving memory...");
     let start_time = Instant::now();
@@ -109,10 +108,10 @@ pub async fn get_memory(port: u16, id: String) -> Result<()> {
 
     if response.status().is_success() {
         let memory: Value = response.json().await?;
-        println!("✅ Memory retrieved in {:?}", elapsed);
+        println!("✅ Memory retrieved in {elapsed:?}");
         print_memory_result(&memory);
     } else if response.status() == 404 {
-        println!("❌ Memory not found with ID: {}", id);
+        println!("❌ Memory not found with ID: {id}");
     } else {
         let error_text = response
             .text()
@@ -135,7 +134,7 @@ pub async fn search_memories(port: u16, query: String, limit: Option<usize>) -> 
     );
 
     if let Some(lim) = limit {
-        url.push_str(&format!("&limit={}", lim));
+        url.push_str(&format!("&limit={lim}"));
     }
 
     info!("🔍 Searching memories...");
@@ -151,7 +150,7 @@ pub async fn search_memories(port: u16, query: String, limit: Option<usize>) -> 
             println!("✅ Found {} memories in {:?}", memories.len(), elapsed);
 
             if memories.is_empty() {
-                println!("🔍 No memories found matching: '{}'", query);
+                println!("🔍 No memories found matching: '{query}'");
                 println!("💡 Try a different search term or create some memories first");
             } else {
                 for (i, memory) in memories.iter().enumerate() {
@@ -177,14 +176,14 @@ pub async fn search_memories(port: u16, query: String, limit: Option<usize>) -> 
 /// List all memories
 pub async fn list_memories(port: u16, limit: Option<usize>, offset: Option<usize>) -> Result<()> {
     let client = reqwest::Client::new();
-    let mut url = format!("http://127.0.0.1:{}/api/v1/memories", port);
+    let mut url = format!("http://127.0.0.1:{port}/api/v1/memories");
 
     let mut params = Vec::new();
     if let Some(lim) = limit {
-        params.push(format!("limit={}", lim));
+        params.push(format!("limit={lim}"));
     }
     if let Some(off) = offset {
-        params.push(format!("offset={}", off));
+        params.push(format!("offset={off}"));
     }
 
     if !params.is_empty() {
@@ -217,7 +216,7 @@ pub async fn list_memories(port: u16, limit: Option<usize>, offset: Option<usize
             }
 
             // Show pagination info if applicable
-            if let Some(total) = results.get("total").and_then(|v| v.as_u64()) {
+            if let Some(total) = results.get("total").and_then(serde_json::Value::as_u64) {
                 let offset = offset.unwrap_or(0);
                 let limit = limit.unwrap_or(10);
                 if total > (offset + memories.len()) as u64 {
@@ -245,7 +244,7 @@ pub async fn list_memories(port: u16, limit: Option<usize>, offset: Option<usize
 /// Delete a memory by ID
 pub async fn delete_memory(port: u16, id: String) -> Result<()> {
     let client = reqwest::Client::new();
-    let url = format!("http://127.0.0.1:{}/api/v1/memories/{}", port, id);
+    let url = format!("http://127.0.0.1:{port}/api/v1/memories/{id}");
 
     info!("🗑️  Deleting memory...");
 
@@ -254,7 +253,7 @@ pub async fn delete_memory(port: u16, id: String) -> Result<()> {
     if response.status().is_success() {
         println!("✅ Memory deleted successfully");
     } else if response.status() == 404 {
-        println!("❌ Memory not found with ID: {}", id);
+        println!("❌ Memory not found with ID: {id}");
     } else {
         let error_text = response
             .text()

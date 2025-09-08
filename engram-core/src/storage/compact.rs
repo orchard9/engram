@@ -3,7 +3,7 @@
 //! This module handles background compaction of storage files to maintain
 //! optimal performance and space utilization.
 
-use super::{StorageError, StorageResult};
+use super::StorageResult;
 
 /// Background compaction coordinator
 pub struct BackgroundCompactor {

@@ -199,7 +199,7 @@ impl ErrorReviewer {
 
     /// Validate all found errors
     fn validate_all_errors(&mut self) {
-        for (_id, error_def) in &self.error_catalog {
+        for error_def in self.error_catalog.values() {
             let result = self.validate_error(error_def);
             self.results.push(result);
         }

@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use crate::milestone_1::ComprehensiveBenchmarkResults;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct RegressionDetector;
@@ -9,7 +9,10 @@ impl RegressionDetector {
         Self
     }
 
-    pub fn analyze_performance_trends(&self, _results: &ComprehensiveBenchmarkResults) -> RegressionAnalysisResults {
+    pub fn analyze_performance_trends(
+        &self,
+        _results: &ComprehensiveBenchmarkResults,
+    ) -> RegressionAnalysisResults {
         RegressionAnalysisResults {
             regressions: HashMap::new(),
         }

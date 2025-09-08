@@ -7,39 +7,38 @@ use axum::response::sse::{Event, KeepAlive};
 use axum::{
     Router,
     extract::{Query, State},
-    http::{
-        StatusCode,
-        header::{CACHE_CONTROL, CONTENT_TYPE},
-    },
+    http::StatusCode,
     response::{IntoResponse, Json, Sse},
     routing::{get, post},
 };
 use chrono::{DateTime, Utc};
 use engram_proto::{
     Confidence, ConfidenceCategory, ConsolidationState, Cue, Episode, Memory, MemoryType,
-    datetime_to_timestamp, timestamp_to_datetime,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio_stream::{Stream, wrappers::ReceiverStream};
-use tracing::{error, info, warn};
+use tracing::info;
 use utoipa::{IntoParams, ToSchema};
 
 use crate::grpc::MemoryService;
-use crate::openapi::{ErrorResponse, create_swagger_ui};
+use crate::openapi::create_swagger_ui;
 use engram_core::graph::MemoryGraph;
 
 /// Shared application state
 #[derive(Clone)]
 pub struct ApiState {
+    /// In-memory graph for cognitive operations
     pub graph: Arc<RwLock<MemoryGraph>>,
+    /// gRPC memory service for complex operations
     pub memory_service: Arc<MemoryService>,
 }
 
 impl ApiState {
+    /// Create new API state with shared graph
     pub fn new(graph: Arc<RwLock<MemoryGraph>>) -> Self {
         let memory_service = Arc::new(MemoryService::new(graph.clone()));
         Self {
@@ -276,14 +275,23 @@ pub struct RecallResults {
 /// Individual memory result with cognitive context
 #[derive(Debug, Serialize, ToSchema)]
 pub struct MemoryResult {
+    /// Unique memory identifier
     pub id: String,
+    /// Memory content text
     pub content: String,
+    /// Confidence information with reasoning
     pub confidence: ConfidenceInfo,
+    /// Current activation strength (0.0-1.0)
     pub activation_level: f32,
+    /// Similarity to query (0.0-1.0)
     pub similarity_score: f32,
-    pub retrieval_path: Option<String>, // How we found this memory
+    /// How we found this memory
+    pub retrieval_path: Option<String>,
+    /// When memory was last accessed
     pub last_access: Option<DateTime<Utc>>,
+    /// Associated tags
     pub tags: Vec<String>,
+    /// Type classification (episodic/semantic)
     pub memory_type: String,
     /// Context for how this memory relates to the query
     pub relevance_explanation: String,
@@ -292,34 +300,48 @@ pub struct MemoryResult {
 /// Auto-linking information
 #[derive(Debug, Serialize, ToSchema)]
 pub struct AutoLink {
+    /// ID of the target memory to link
     pub target_memory_id: String,
+    /// Similarity score for the link (0.0-1.0)
     pub similarity_score: f32,
+    /// Explanation for why link was suggested
     pub link_reason: String,
 }
 
 /// Confidence information with educational context
 #[derive(Debug, Serialize, ToSchema)]
 pub struct ConfidenceInfo {
+    /// Confidence value (0.0-1.0)
     pub value: f32,
+    /// Human-readable category (Low/Medium/High)
     pub category: String,
+    /// Reasoning for confidence level
     pub reasoning: String,
 }
 
 /// Query analysis for educational feedback
 #[derive(Debug, Serialize, ToSchema)]
 pub struct QueryAnalysis {
+    /// What we understood from the query
     pub understood_intent: String,
+    /// Search approach being used
     pub search_strategy: String,
-    pub cognitive_load: String, // Low, Medium, High
+    /// Cognitive load assessment (Low/Medium/High)
+    pub cognitive_load: String,
+    /// Suggestions for improving queries
     pub suggestions: Vec<String>,
 }
 
 /// Recall operation metadata
 #[derive(Debug, Serialize, ToSchema)]
 pub struct RecallMetadata {
+    /// Total number of memories examined
     pub total_memories_searched: usize,
+    /// Depth of activation spreading
     pub activation_spread_hops: usize,
+    /// Processing duration in milliseconds
     pub processing_time_ms: u64,
+    /// Current memory system load status
     pub memory_system_load: String,
 }
 
@@ -350,9 +372,13 @@ pub struct RecognizeResponse {
 /// Similar pattern information
 #[derive(Debug, Serialize, ToSchema)]
 pub struct SimilarPattern {
+    /// ID of similar memory
     pub memory_id: String,
+    /// Similarity score (0.0-1.0)
     pub similarity_score: f32,
+    /// Type of pattern match
     pub pattern_type: String,
+    /// Explanation of pattern similarity
     pub explanation: String,
 }
 
@@ -397,7 +423,7 @@ pub async fn remember_memory(
     // Generate ID if not provided
     let memory_id = request
         .id
-        .unwrap_or_else(|| format!("mem_{}", uuid::Uuid::new_v4().to_string()[..8].to_string()));
+        .unwrap_or_else(|| format!("mem_{}", &uuid::Uuid::new_v4().to_string()[..8]));
 
     // Create embedding if not provided (placeholder - would use actual embedding service)
     let embedding = request.embedding.unwrap_or_else(|| {
@@ -428,8 +454,8 @@ pub async fn remember_memory(
         .with_type(memory_type);
 
     // Add tags if provided
-    let memory = if let Some(tags) = request.tags {
-        tags.into_iter().fold(memory, |mem, tag| mem.add_tag(tag))
+    let _memory = if let Some(tags) = request.tags {
+        tags.into_iter().fold(memory, engram_proto::Memory::add_tag)
     } else {
         memory
     };
@@ -440,7 +466,7 @@ pub async fn remember_memory(
         request.content.clone().into_bytes(),
     )
     .validate()
-    .map_err(|e| ApiError::ValidationError(format!("Memory validation failed: {}", e)))?
+    .map_err(|e| ApiError::ValidationError(format!("Memory validation failed: {e}")))?
     .activate();
 
     {
@@ -518,13 +544,13 @@ pub async fn remember_episode(
     // Generate ID if not provided
     let episode_id = request
         .id
-        .unwrap_or_else(|| format!("ep_{}", uuid::Uuid::new_v4().to_string()[..8].to_string()));
+        .unwrap_or_else(|| format!("ep_{}", &uuid::Uuid::new_v4().to_string()[..8]));
 
     // Create embedding if not provided
     let embedding = request.embedding.unwrap_or_else(|| vec![0.6; 768]);
 
     // Create episode
-    let episode = Episode::new(episode_id.clone(), request.when, &request.what, embedding)
+    let _episode = Episode::new(episode_id.clone(), request.when, &request.what, embedding)
         .at_location(request.where_location.unwrap_or_default())
         .with_people(request.who.unwrap_or_default())
         .with_emotion(request.emotional_valence.unwrap_or(0.0))
@@ -536,7 +562,7 @@ pub async fn remember_episode(
         request.what.clone().into_bytes(),
     )
     .validate()
-    .map_err(|e| ApiError::ValidationError(format!("Episode validation failed: {}", e)))?
+    .map_err(|e| ApiError::ValidationError(format!("Episode validation failed: {e}")))?
     .activate();
 
     {
@@ -555,8 +581,7 @@ pub async fn remember_episode(
         consolidation_state: format!("{:?}", ConsolidationState::Recent),
         auto_links: vec![],
         system_message: format!(
-            "Episode '{}' successfully encoded with contextual details. Rich episodes consolidate better over time.",
-            episode_id
+            "Episode '{episode_id}' successfully encoded with contextual details. Rich episodes consolidate better over time."
         ),
     };
 
@@ -691,8 +716,7 @@ pub async fn recall_memories(
             None
         },
         system_message: format!(
-            "Recall completed in {}ms. Found memories through direct matching and spreading activation.",
-            processing_time
+            "Recall completed in {processing_time}ms. Found memories through direct matching and spreading activation."
         ),
     };
 
@@ -887,36 +911,41 @@ pub async fn replay_episodes(
 // Error Handling with Educational Messages
 // ================================================================================================
 
+/// Error types for HTTP API operations
 #[derive(Debug)]
 pub enum ApiError {
+    /// Invalid input parameters or data
     InvalidInput(String),
+    /// Requested memory not found
     MemoryNotFound(String),
+    /// Internal system error occurred
     SystemError(String),
+    /// Data validation failed
     ValidationError(String),
 }
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> axum::response::Response {
         let (status, error_code, message, educational_context) = match self {
-            ApiError::InvalidInput(msg) => (
+            Self::InvalidInput(msg) => (
                 StatusCode::BAD_REQUEST,
                 "INVALID_MEMORY_INPUT",
                 msg,
                 "Memory operations require well-formed inputs. Check the API documentation for proper request structure.".to_string()
             ),
-            ApiError::MemoryNotFound(id) => (
+            Self::MemoryNotFound(id) => (
                 StatusCode::NOT_FOUND,
                 "MEMORY_NOT_FOUND", 
-                format!("Memory '{}' not found in the cognitive graph", id),
+                format!("Memory '{id}' not found in the cognitive graph"),
                 "Memory retrieval failed - the requested memory may have been forgotten or never encoded. Try a broader search query.".to_string()
             ),
-            ApiError::SystemError(msg) => (
+            Self::SystemError(msg) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "MEMORY_SYSTEM_ERROR",
                 msg,
                 "The memory system encountered an internal error. Cognitive processes may be temporarily disrupted.".to_string()
             ),
-            ApiError::ValidationError(msg) => (
+            Self::ValidationError(msg) => (
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "MEMORY_VALIDATION_ERROR", 
                 msg,
@@ -969,7 +998,7 @@ use uuid;
     )
 )]
 pub async fn stream_activities(
-    State(state): State<ApiState>,
+    State(_state): State<ApiState>,
     Query(params): Query<StreamActivityQuery>,
 ) -> impl IntoResponse {
     let session_id = params
@@ -1019,7 +1048,7 @@ pub async fn stream_activities(
     )
 )]
 pub async fn stream_memories(
-    State(state): State<ApiState>,
+    State(_state): State<ApiState>,
     Query(params): Query<StreamMemoryQuery>,
 ) -> impl IntoResponse {
     let session_id = params
@@ -1075,7 +1104,7 @@ pub async fn stream_memories(
     )
 )]
 pub async fn stream_consolidation(
-    State(state): State<ApiState>,
+    State(_state): State<ApiState>,
     Query(params): Query<StreamConsolidationQuery>,
 ) -> impl IntoResponse {
     let session_id = params
@@ -1130,12 +1159,12 @@ fn create_activity_stream(
 
         loop {
             for (event_type, description) in &events {
-                if !event_types.contains(&event_type.to_string()) {
+                if !event_types.contains(&(*event_type).to_string()) {
                     continue;
                 }
 
                 event_id += 1;
-                let importance = 0.3 + (rand::random::<f32>() * 0.7); // Random importance 0.3-1.0
+                let importance = rand::random::<f32>().mul_add(0.7, 0.3); // Random importance 0.3-1.0
 
                 if importance < min_importance {
                     continue;
@@ -1163,7 +1192,7 @@ fn create_activity_stream(
                 }
 
                 // Cognitive-friendly pacing: 200ms to 2s intervals based on importance
-                let delay_ms = (2000.0 - (importance * 1800.0)) as u64;
+                let delay_ms = importance.mul_add(-1800.0, 2000.0) as u64;
                 tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
             }
         }
@@ -1210,7 +1239,7 @@ fn create_memory_stream(
                 }
 
                 event_id += 1;
-                let confidence = 0.2 + (rand::random::<f32>() * 0.8); // Random confidence 0.2-1.0
+                let confidence = rand::random::<f32>().mul_add(0.8, 0.2); // Random confidence 0.2-1.0
 
                 if confidence < min_confidence {
                     continue;
@@ -1297,7 +1326,7 @@ fn create_consolidation_stream(
                     "session_id": session_id,
                     "sequence_id": format!("seq_{}", event_id),
                     "connections_formed": rand::random::<u32>() % 10,
-                    "replay_strength": 0.5 + (novelty * 0.5)
+                    "replay_strength": novelty.mul_add(0.5, 0.5)
                 });
 
                 let sse_event = Event::default()
@@ -1506,12 +1535,12 @@ fn create_monitoring_stream(
 
         loop {
             for (event_type, description) in &events {
-                if !event_types.contains(&event_type.to_string()) {
+                if !event_types.contains(&(*event_type).to_string()) {
                     continue;
                 }
 
                 event_id += 1;
-                let activation_level = 0.1 + (rand::random::<f32>() * 0.9);
+                let activation_level = rand::random::<f32>().mul_add(0.9, 0.1);
                 if activation_level < min_activation {
                     continue;
                 }
@@ -1648,7 +1677,7 @@ fn create_causality_monitoring_stream(
                 continue;
             }
 
-            let operation_id = format!("{}_{}", operation, event_id);
+            let operation_id = format!("{operation}_{event_id}");
             let chain_length = std::cmp::min(max_chain_length, (confidence * 8.0) as usize + 1);
             let causal_chain = (0..chain_length).map(|i| json!({
                 "operation_id": format!("cause_{}_{}", operation, event_id.saturating_sub(i as u64 + 1)),

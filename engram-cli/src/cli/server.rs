@@ -5,9 +5,10 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::time::sleep;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 /// Get the path to the PID file
+#[must_use]
 pub fn pid_file_path() -> PathBuf {
     if let Ok(path) = std::env::var("ENGRAM_PID_PATH") {
         PathBuf::from(path)
@@ -17,7 +18,8 @@ pub fn pid_file_path() -> PathBuf {
 }
 
 /// Get the path to the state file  
-pub fn state_file_path() -> PathBuf {
+#[must_use]
+pub fn _state_file_path() -> PathBuf {
     std::env::temp_dir().join("engram.state")
 }
 
@@ -43,7 +45,7 @@ pub async fn get_server_connection() -> Result<(u16, u16)> {
         .timeout(Duration::from_secs(2))
         .build()?;
 
-    let health_url = format!("http://127.0.0.1:{}/health/alive", port);
+    let health_url = format!("http://127.0.0.1:{port}/health/alive");
 
     match client.get(&health_url).send().await {
         Ok(response) if response.status().is_success() => {
@@ -71,7 +73,7 @@ pub fn write_pid_file(port: u16) -> Result<()> {
     let pid_path = pid_file_path();
     let content = format!("{}:{}", std::process::id(), port);
     fs::write(&pid_path, content)
-        .with_context(|| format!("Failed to write PID file: {:?}", pid_path))?;
+        .with_context(|| format!("Failed to write PID file: {pid_path:?}"))?;
     info!("📝 Server info written to {:?}", pid_path);
     Ok(())
 }
@@ -80,7 +82,7 @@ pub fn write_pid_file(port: u16) -> Result<()> {
 pub fn read_pid_file() -> Result<(u32, u16)> {
     let pid_path = pid_file_path();
     let content = fs::read_to_string(&pid_path)
-        .with_context(|| format!("Failed to read PID file: {:?}", pid_path))?;
+        .with_context(|| format!("Failed to read PID file: {pid_path:?}"))?;
 
     let parts: Vec<&str> = content.trim().split(':').collect();
     if parts.len() != 2 {
@@ -98,17 +100,17 @@ pub fn remove_pid_file() -> Result<()> {
     let pid_path = pid_file_path();
     if pid_path.exists() {
         fs::remove_file(&pid_path)
-            .with_context(|| format!("Failed to remove PID file: {:?}", pid_path))?;
+            .with_context(|| format!("Failed to remove PID file: {pid_path:?}"))?;
         info!("🗑️  Removed server info file");
     }
     Ok(())
 }
 
 /// Check if a process is running
+#[must_use]
 pub fn is_process_running(pid: u32) -> bool {
     #[cfg(unix)]
     {
-        use std::os::unix::process::ExitStatusExt;
         std::process::Command::new("kill")
             .args(["-0", &pid.to_string()])
             .output()
@@ -153,7 +155,7 @@ pub async fn stop_server() -> Result<()> {
         .timeout(Duration::from_secs(5))
         .build()?;
 
-    let shutdown_url = format!("http://127.0.0.1:{}/shutdown", port);
+    let shutdown_url = format!("http://127.0.0.1:{port}/shutdown");
     match client.post(&shutdown_url).send().await {
         Ok(_) => {
             info!("📨 Sent graceful shutdown signal");

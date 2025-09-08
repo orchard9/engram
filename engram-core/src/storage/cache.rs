@@ -6,18 +6,19 @@
 //! - Lock-free concurrent access with minimal contention
 //! - NUMA-aware allocation and access patterns
 
+// Allow unsafe code for performance-critical cache operations
+#![allow(unsafe_code)]
+
 use super::{StorageError, StorageMetrics, StorageResult};
-use crate::{Confidence, Memory};
+use crate::Memory;
 use atomic_float::AtomicF32;
-use std::collections::HashMap;
-use std::ptr::NonNull;
 use std::sync::{
     Arc,
     atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering},
 };
 
 #[cfg(all(feature = "memory_mapped_persistence", unix))]
-use super::numa::{NumaAllocator, NumaMemoryMap, NumaTopology};
+use super::numa::{NumaAllocator, NumaMemoryMap};
 
 /// Cache-optimized memory node with hot/warm/cold data separation
 #[repr(C, align(64))]
@@ -73,8 +74,7 @@ impl CacheOptimalMemoryNode {
             embedding: memory.embedding,
 
             decay_rate: 0.2, // Default decay rate
-            creation_time: memory
-                .created_at
+            creation_time: std::time::SystemTime::from(memory.created_at)
                 .duration_since(std::time::SystemTime::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_nanos() as u64,
@@ -453,18 +453,12 @@ impl CognitiveIndex {
 
         #[cfg(all(feature = "memory_mapped_persistence", unix))]
         {
-            unsafe {
-                self.nodes.as_ptr().add(offset as usize * node_size)
-                    as *const CacheOptimalMemoryNode
-            }
+            self.nodes.as_ptr().add(offset as usize * node_size) as *const CacheOptimalMemoryNode
         }
 
         #[cfg(not(all(feature = "memory_mapped_persistence", unix)))]
         {
-            unsafe {
-                self.nodes.as_ptr().add(offset as usize * node_size)
-                    as *const CacheOptimalMemoryNode
-            }
+            self.nodes.as_ptr().add(offset as usize * node_size) as *const CacheOptimalMemoryNode
         }
     }
 
@@ -474,16 +468,12 @@ impl CognitiveIndex {
 
         #[cfg(all(feature = "memory_mapped_persistence", unix))]
         {
-            unsafe {
-                self.nodes.as_ptr().add(offset as usize * node_size) as *mut CacheOptimalMemoryNode
-            }
+            self.nodes.as_ptr().add(offset as usize * node_size) as *mut CacheOptimalMemoryNode
         }
 
         #[cfg(not(all(feature = "memory_mapped_persistence", unix)))]
         {
-            unsafe {
-                self.nodes.as_ptr().add(offset as usize * node_size) as *mut CacheOptimalMemoryNode
-            }
+            self.nodes.as_ptr().add(offset as usize * node_size) as *mut CacheOptimalMemoryNode
         }
     }
 }
@@ -559,7 +549,7 @@ impl CognitivePreloader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{EpisodeBuilder, MemoryBuilder};
+    use crate::{Confidence, EpisodeBuilder, MemoryBuilder};
     use chrono::Utc;
 
     fn create_test_memory(id: &str) -> Arc<Memory> {

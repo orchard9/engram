@@ -37,9 +37,9 @@ pub mod numa;
 #[cfg(feature = "memory_mapped_persistence")]
 pub use cache::{CacheOptimalMemoryNode, CognitiveIndex};
 #[cfg(feature = "memory_mapped_persistence")]
-pub use mapped::{MappedStorage, NumaMemoryMap};
+pub use mapped::MappedWarmStorage;
 #[cfg(feature = "memory_mapped_persistence")]
-pub use tiers::{CognitiveTierArchitecture, TierCoordinator};
+pub use tiers::{CognitiveTierArchitecture, TierArchitectureStats, TierCoordinator};
 #[cfg(feature = "memory_mapped_persistence")]
 pub use wal::{WalEntry, WalWriter};
 

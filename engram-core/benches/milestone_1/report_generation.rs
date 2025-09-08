@@ -8,7 +8,10 @@ impl BenchmarkReportGenerator {
         Self
     }
 
-    pub fn generate_comprehensive_report(&self, _results: &ComprehensiveBenchmarkResults) -> String {
+    pub fn generate_comprehensive_report(
+        &self,
+        _results: &ComprehensiveBenchmarkResults,
+    ) -> String {
         "Comprehensive Benchmark Report\n=========================\n".to_string()
     }
 }

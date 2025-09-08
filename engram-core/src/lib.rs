@@ -15,6 +15,7 @@ pub mod differential;
 pub mod error;
 pub mod error_review;
 pub mod error_testing;
+pub mod features;
 pub mod graph;
 #[cfg(feature = "hnsw_index")]
 pub mod index;
@@ -96,16 +97,16 @@ impl Confidence {
     pub const fn raw(self) -> f32 {
         self.0
     }
-    
+
     /// Create from raw value (will be clamped to [0,1])
     #[must_use]
-    pub fn from_raw(value: f32) -> Self {
+    pub const fn from_raw(value: f32) -> Self {
         Self(value.clamp(0.0, 1.0))
     }
-    
-    /// Create from a probability value (alias for from_raw)
+
+    /// Create from a probability value (alias for `from_raw`)
     #[must_use]
-    pub fn from_probability(value: f32) -> Self {
+    pub const fn from_probability(value: f32) -> Self {
         Self::from_raw(value)
     }
 
@@ -228,34 +229,32 @@ where
 }
 
 // Public exports
+pub use batch::{
+    BackpressureStrategy, BatchConfig, BatchEngine, BatchError, BatchOperation,
+    BatchOperationResult, BatchOperations, BatchRecallResult, BatchResult, BatchSimilarityResult,
+    BatchStoreResult,
+};
 pub use memory::{
     Cue, CueBuilder, CueType, Episode, EpisodeBuilder, Memory, MemoryBuilder, TemporalPattern,
 };
-pub use store::{Activation, MemoryStore};
 pub use query::{
-    ConfidenceInterval, Evidence, EvidenceSource, MatchType, UncertaintySource,
-    ProbabilisticError, ProbabilisticQueryResult, ProbabilisticRecall, ProbabilisticResult,
+    ConfidenceInterval, Evidence, EvidenceSource, MatchType, ProbabilisticError,
+    ProbabilisticQueryResult, ProbabilisticRecall, ProbabilisticResult, UncertaintySource,
 };
-pub use batch::{
-    BatchOperations, BatchConfig, BatchOperation, BatchResult, BatchOperationResult,
-    BatchStoreResult, BatchRecallResult, BatchSimilarityResult,
-    BackpressureStrategy, BatchError, BatchEngine,
-};
+pub use store::{Activation, MemoryStore};
 
 #[cfg(feature = "psychological_decay")]
 pub use decay::{
-    BiologicalDecaySystem, DecayIntegration, DecayError, DecayResult,
-    HippocampalDecayFunction, NeocorticalDecayFunction, TwoComponentModel,
-    IndividualDifferenceProfile, RemergeProcessor,
+    BiologicalDecaySystem, DecayError, DecayIntegration, DecayResult, HippocampalDecayFunction,
+    IndividualDifferenceProfile, NeocorticalDecayFunction, RemergeProcessor, TwoComponentModel,
 };
 
 #[cfg(feature = "pattern_completion")]
 pub use completion::{
-    CompletedEpisode, CompletionConfig, CompletionError, CompletionResult,
-    HippocampalCompletion, PatternCompleter, PatternReconstructor,
-    PartialEpisode, SourceMap, MemorySource, ActivationTrace, ActivationPathway,
-    EntorhinalContext, GridModule, System2Reasoner, Hypothesis,
-    ConsolidationEngine, MetacognitiveConfidence,
+    ActivationPathway, ActivationTrace, CompletedEpisode, CompletionConfig, CompletionError,
+    CompletionResult, ConsolidationEngine, EntorhinalContext, GridModule, HippocampalCompletion,
+    Hypothesis, MemorySource, MetacognitiveConfidence, PartialEpisode, PatternCompleter,
+    PatternReconstructor, SourceMap, System2Reasoner,
 };
 
 // Type-state pattern: Memory node states

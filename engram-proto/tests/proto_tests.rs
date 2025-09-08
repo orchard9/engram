@@ -7,13 +7,13 @@ use engram_proto::*;
 fn test_confidence_creation() {
     // Test basic confidence creation
     let conf = Confidence::new(0.75);
-    assert_eq!(conf.value, 0.75);
+    assert!((conf.value - 0.75).abs() < f32::EPSILON);
     assert_eq!(conf.category, ConfidenceCategory::High as i32);
     assert_eq!(conf.reasoning, "");
 
     // Test confidence with reasoning
     let conf_with_reason = Confidence::new(0.5).with_reasoning("Based on similarity metrics");
-    assert_eq!(conf_with_reason.value, 0.5);
+    assert!((conf_with_reason.value - 0.5).abs() < f32::EPSILON);
     assert_eq!(conf_with_reason.category, ConfidenceCategory::Medium as i32);
     assert_eq!(conf_with_reason.reasoning, "Based on similarity metrics");
 
@@ -36,8 +36,8 @@ fn test_confidence_creation() {
     );
 
     // Test clamping
-    assert_eq!(Confidence::new(-0.5).value, 0.0);
-    assert_eq!(Confidence::new(1.5).value, 1.0);
+    assert!(Confidence::new(-0.5).value.abs() < f32::EPSILON);
+    assert!((Confidence::new(1.5).value - 1.0).abs() < f32::EPSILON);
 }
 
 #[test]
@@ -68,9 +68,9 @@ fn test_memory_builder() {
     assert_eq!(memory.content, "This is a test memory");
     assert_eq!(memory.tags, vec!["test", "example"]);
     assert_eq!(memory.memory_type, MemoryType::Semantic as i32);
-    assert_eq!(memory.confidence.as_ref().unwrap().value, 0.9);
-    assert_eq!(memory.activation, 0.0);
-    assert_eq!(memory.decay_rate, 0.1);
+    assert!((memory.confidence.as_ref().unwrap().value - 0.9).abs() < f32::EPSILON);
+    assert!(memory.activation.abs() < f32::EPSILON);
+    assert!((memory.decay_rate - 0.1).abs() < f32::EPSILON);
 }
 
 #[test]
@@ -92,8 +92,8 @@ fn test_episode_builder() {
     assert_eq!(episode.what, "Attended conference presentation");
     assert_eq!(episode.where_location, "Convention Center Room A");
     assert_eq!(episode.who, vec!["Alice", "Bob"]);
-    assert_eq!(episode.emotional_valence, 0.7);
-    assert_eq!(episode.importance, 0.9);
+    assert!((episode.emotional_valence - 0.7).abs() < f32::EPSILON);
+    assert!((episode.importance - 0.9).abs() < f32::EPSILON);
     assert_eq!(episode.embedding, embedding);
     assert_eq!(
         episode.consolidation_state,
@@ -112,8 +112,8 @@ fn test_episode_emotional_clamping() {
         .with_emotion(2.0) // Should be clamped to 1.0
         .with_importance(-0.5); // Should be clamped to 0.0
 
-    assert_eq!(episode.emotional_valence, 1.0);
-    assert_eq!(episode.importance, 0.0);
+    assert!((episode.emotional_valence - 1.0).abs() < f32::EPSILON);
+    assert!(episode.importance.abs() < f32::EPSILON);
 }
 
 #[test]
@@ -124,14 +124,14 @@ fn test_cue_embedding() {
     assert!(!cue.id.is_empty()); // Should have generated UUID
     assert_eq!(cue.max_results, 10);
     assert!(cue.spread_activation);
-    assert_eq!(cue.activation_decay, 0.8);
-    assert_eq!(cue.threshold.as_ref().unwrap().value, 0.8);
+    assert!((cue.activation_decay - 0.8).abs() < f32::EPSILON);
+    assert!((cue.threshold.as_ref().unwrap().value - 0.8).abs() < f32::EPSILON);
 
     // Check the cue type
     match cue.cue_type {
         Some(cue::CueType::Embedding(ref emb_cue)) => {
             assert_eq!(emb_cue.vector, embedding);
-            assert_eq!(emb_cue.similarity_threshold, 0.8);
+            assert!((emb_cue.similarity_threshold - 0.8).abs() < f32::EPSILON);
         }
         _ => panic!("Expected embedding cue"),
     }
@@ -144,12 +144,12 @@ fn test_cue_semantic() {
     assert!(!cue.id.is_empty());
     assert_eq!(cue.max_results, 10);
     assert!(cue.spread_activation);
-    assert_eq!(cue.threshold.as_ref().unwrap().value, 0.5);
+    assert!((cue.threshold.as_ref().unwrap().value - 0.5).abs() < f32::EPSILON);
 
     match cue.cue_type {
         Some(cue::CueType::Semantic(ref sem_cue)) => {
             assert_eq!(sem_cue.query, "Find memories about rust programming");
-            assert_eq!(sem_cue.fuzzy_threshold, 0.7);
+            assert!((sem_cue.fuzzy_threshold - 0.7).abs() < f32::EPSILON);
             assert!(sem_cue.required_tags.is_empty());
             assert!(sem_cue.excluded_tags.is_empty());
         }
@@ -191,8 +191,8 @@ fn test_memory_defaults() {
     let memory = Memory::new("test", vec![0.0; 768]);
 
     // Check default values
-    assert_eq!(memory.activation, 0.0);
-    assert_eq!(memory.decay_rate, 0.1);
+    assert!(memory.activation.abs() < f32::EPSILON);
+    assert!((memory.decay_rate - 0.1).abs() < f32::EPSILON);
     assert_eq!(memory.content, "");
     assert!(memory.metadata.is_empty());
     assert!(memory.tags.is_empty());
@@ -211,9 +211,9 @@ fn test_episode_defaults() {
     assert!(episode.who.is_empty());
     assert_eq!(episode.why, "");
     assert_eq!(episode.how, "");
-    assert_eq!(episode.decay_rate, 0.1);
-    assert_eq!(episode.emotional_valence, 0.0);
-    assert_eq!(episode.importance, 0.5);
+    assert!((episode.decay_rate - 0.1).abs() < f32::EPSILON);
+    assert!(episode.emotional_valence.abs() < f32::EPSILON);
+    assert!((episode.importance - 0.5).abs() < f32::EPSILON);
     assert_eq!(
         episode.consolidation_state,
         ConsolidationState::Recent as i32

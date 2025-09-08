@@ -14,9 +14,16 @@ pub struct NeonVectorOps {
     scalar_ops: ScalarVectorOps,
 }
 
+impl Default for NeonVectorOps {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NeonVectorOps {
     /// Create new NEON vector operations instance
-    pub fn new() -> Self {
+    #[must_use]
+    pub const fn new() -> Self {
         Self {
             scalar_ops: ScalarVectorOps::new(),
         }

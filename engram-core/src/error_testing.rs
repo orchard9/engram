@@ -82,6 +82,7 @@ pub struct ProceduralLearningSimulator {
 }
 
 impl ProceduralLearningSimulator {
+    /// Create a new procedural learning simulator
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -222,6 +223,7 @@ pub struct CognitiveLoadTester {
 }
 
 impl CognitiveLoadTester {
+    /// Create a new cognitive load tester
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -320,10 +322,15 @@ impl CognitiveLoadTester {
 /// Results of cognitive load testing
 #[derive(Debug)]
 pub struct CognitiveLoadResult {
+    /// Number of cognitive chunks identified
     pub chunk_count: usize,
+    /// Whether content fits within cognitive limits
     pub fits_cognitive_limits: bool,
+    /// Whether recognizable by System 1 (fast thinking)
     pub system1_recognizable: bool,
+    /// Whether information has clear hierarchical structure
     pub has_clear_hierarchy: bool,
+    /// Whether understandable without additional context
     pub context_independent: bool,
 }
 
@@ -353,6 +360,7 @@ impl CognitiveLoadResult {
 pub struct ErrorPerformanceMonitor;
 
 impl ErrorPerformanceMonitor {
+    /// Create a new error performance monitor
     #[must_use]
     pub const fn new() -> Self {
         Self
@@ -398,6 +406,7 @@ pub struct CognitiveErrorTesting {
 }
 
 impl CognitiveErrorTesting {
+    /// Create a new cognitive error testing system
     #[must_use]
     pub fn new() -> Self {
         let mut pattern_registry = HashMap::new();
@@ -593,9 +602,13 @@ impl CognitiveErrorTesting {
 /// Results of pattern consistency testing
 #[derive(Debug)]
 pub struct PatternConsistencyResult {
+    /// Whether error summary matches expected pattern
     pub summary_matches: bool,
+    /// Whether context structure is valid
     pub context_structure_valid: bool,
+    /// Whether suggestion format is valid
     pub suggestion_format_valid: bool,
+    /// Whether example characteristics are valid
     pub example_characteristics_valid: bool,
 }
 
@@ -609,6 +622,7 @@ impl PatternConsistencyResult {
         }
     }
 
+    /// Check if all pattern consistency tests pass
     #[must_use]
     pub const fn passes_pattern_consistency(&self) -> bool {
         self.summary_matches
@@ -621,10 +635,15 @@ impl PatternConsistencyResult {
 /// Comprehensive test results for an error
 #[derive(Debug)]
 pub struct ErrorTestResult {
+    /// Pattern consistency test results
     pub pattern_consistency: PatternConsistencyResult,
+    /// Cognitive load test results
     pub cognitive_load: CognitiveLoadResult,
+    /// Time taken to format the error
     pub formatting_time: Duration,
+    /// Estimated time to comprehend the error
     pub estimated_comprehension_time: Duration,
+    /// Estimated time to resolve the error
     pub resolution_time: Duration,
 }
 

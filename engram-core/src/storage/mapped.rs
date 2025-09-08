@@ -6,18 +6,18 @@
 //! - Zero-copy reads with hardware prefetching
 //! - Columnar storage for batch operations
 
+// Allow unsafe code for performance-critical memory-mapped operations
+#![allow(unsafe_code)]
+
 use super::{StorageError, StorageMetrics, StorageResult, StorageTier, TierStatistics};
 use crate::{Confidence, Cue, Episode, Memory};
-use crossbeam_skiplist::SkipMap;
 use dashmap::DashMap;
-use parking_lot::RwLock;
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{
     Arc,
-    atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering},
+    atomic::{AtomicU64, AtomicUsize, Ordering},
 };
-use std::time::{Instant, SystemTime};
+use std::time::SystemTime;
 
 #[cfg(feature = "memory_mapped_persistence")]
 use crc32c::crc32c;
@@ -25,7 +25,7 @@ use crc32c::crc32c;
 use memmap2::{Mmap, MmapMut, MmapOptions};
 
 #[cfg(all(feature = "memory_mapped_persistence", unix))]
-use super::numa::{NumaMemoryMap, NumaPolicy, NumaTopology};
+use super::numa::NumaTopology;
 
 /// Cache-line aligned embedding block for optimal SIMD performance  
 #[repr(C, align(64))]
@@ -60,8 +60,7 @@ impl EmbeddingBlock {
             decay_rate: 0.2, // Default decay
             node_flags: 0,
             content_hash: Self::compute_content_hash(&memory.id),
-            creation_time: memory
-                .created_at
+            creation_time: SystemTime::from(memory.created_at)
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_nanos() as u64,
@@ -404,7 +403,11 @@ impl MappedWarmStorage {
             let block_bytes =
                 unsafe { std::slice::from_raw_parts(block as *const _ as *const u8, block_size) };
 
-            mmap_mut[offset..offset + block_size].copy_from_slice(block_bytes);
+            // SAFETY: We've validated the offset bounds above
+            unsafe {
+                let dst = mmap_mut.as_ptr().add(offset) as *mut u8;
+                std::ptr::copy_nonoverlapping(block_bytes.as_ptr(), dst, block_size);
+            }
             self.metrics.record_write(block_size as u64);
 
             Ok(())
@@ -421,21 +424,24 @@ impl MappedWarmStorage {
     /// Read embedding block from offset
     #[cfg(feature = "memory_mapped_persistence")]
     fn read_embedding_block(&self, offset: usize) -> StorageResult<EmbeddingBlock> {
-        let mmap = self
-            .mmap
-            .as_ref()
-            .or_else(|| self.mmap_mut.as_ref().map(|m| m as &[u8]))
-            .ok_or(StorageError::NotInitialized)?;
+        let mmap_slice: &[u8] = if let Some(mmap) = &self.mmap {
+            mmap.as_ref()
+        } else if let Some(mmap_mut) = &self.mmap_mut {
+            mmap_mut.as_ref()
+        } else {
+            return Err(StorageError::NotInitialized);
+        };
 
         let block_size = std::mem::size_of::<EmbeddingBlock>();
 
-        if offset + block_size > mmap.len() {
+        if offset + block_size > mmap_slice.len() {
             return Err(StorageError::CorruptionDetected(
                 "Offset exceeds file size".to_string(),
             ));
         }
 
-        let block = unsafe { std::ptr::read(mmap[offset..].as_ptr() as *const EmbeddingBlock) };
+        let block =
+            unsafe { std::ptr::read(mmap_slice[offset..].as_ptr() as *const EmbeddingBlock) };
 
         self.metrics.record_read(block_size as u64);
         Ok(block)
@@ -496,7 +502,7 @@ impl StorageTier for MappedWarmStorage {
 
             // Simple confidence-based filtering for now
             let confidence = Confidence::exact(block.confidence);
-            if confidence.raw() >= cue.confidence.raw() {
+            if confidence.raw() >= cue.result_threshold.raw() {
                 // Convert back to Episode (simplified)
                 let episode = crate::EpisodeBuilder::new()
                     .id(memory_id.clone())

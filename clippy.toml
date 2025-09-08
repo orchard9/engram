@@ -1,0 +1,13 @@
+# Clippy configuration for Engram project
+# Reduces warnings for generated protobuf code
+
+# Avoid excessive warnings in generated code
+max-trait-bounds = 5
+
+# Allow similar names in generated protobuf code
+too-many-arguments-threshold = 10
+type-complexity-threshold = 500
+
+# Reduce pedantic warnings for generated code patterns
+avoid-breaking-exported-api = false
+enum-variant-name-threshold = 5

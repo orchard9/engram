@@ -11,14 +11,22 @@ pub struct ConfidenceCalibrator {
 
 impl Default for ConfidenceCalibrator {
     fn default() -> Self {
-        Self { calibration_strength: 0.85 }
+        Self {
+            calibration_strength: 0.85,
+        }
     }
 }
 
 impl ConfidenceCalibrator {
-    pub fn new() -> Self { Self::default() }
-    
-    pub fn calibrate_overconfidence(&self, confidence: Confidence) -> Confidence {
+    /// Create new confidence calibrator with default settings
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Calibrate confidence to reduce overconfidence bias
+    #[must_use]
+    pub const fn calibrate_overconfidence(&self, confidence: Confidence) -> Confidence {
         confidence.calibrate_overconfidence()
     }
 }

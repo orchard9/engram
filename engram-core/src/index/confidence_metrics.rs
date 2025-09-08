@@ -3,6 +3,7 @@
 use crate::Confidence;
 
 /// Compute confidence-weighted distance between vectors
+#[must_use]
 pub fn confidence_weighted_distance(
     distance: f32,
     confidence_a: Confidence,
@@ -16,6 +17,7 @@ pub fn confidence_weighted_distance(
 }
 
 /// Apply temporal boost to confidence based on recency
+#[must_use]
 pub fn apply_temporal_boost(
     base_confidence: Confidence,
     age_seconds: f64,
@@ -23,12 +25,13 @@ pub fn apply_temporal_boost(
 ) -> Confidence {
     // Exponential decay with configurable boost
     let decay = (-age_seconds / 3600.0).exp() as f32; // Decay over hours
-    let boosted = base_confidence.raw() * (1.0 + boost_factor * decay);
+    let boosted = base_confidence.raw() * boost_factor.mul_add(decay, 1.0);
 
     Confidence::exact(boosted)
 }
 
 /// Combine multiple confidence scores with diversity weighting
+#[must_use]
 pub fn combine_diverse_confidences(
     confidences: &[Confidence],
     diversity_scores: &[f32],

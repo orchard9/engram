@@ -24,7 +24,8 @@ pub trait MemorySystemBaseline: Send + Sync {
 pub trait AcademicReferenceImplementation: Send + Sync {
     fn paper_citation(&self) -> &'static str;
     fn implementation_url(&self) -> &'static str;
-    fn validate_cognitive_accuracy(&self, scenario: &CognitiveScenario) -> CognitiveAccuracyMetrics;
+    fn validate_cognitive_accuracy(&self, scenario: &CognitiveScenario)
+    -> CognitiveAccuracyMetrics;
 }
 
 #[derive(Debug, Clone)]
@@ -64,16 +65,11 @@ impl DifferentialTestingHarness {
     }
 
     fn initialize_graph_baselines() -> Vec<Box<dyn GraphDatabaseBaseline>> {
-        vec![
-            Box::new(MockNeo4jBaseline),
-            Box::new(MockNetworkXBaseline),
-        ]
+        vec![Box::new(MockNeo4jBaseline), Box::new(MockNetworkXBaseline)]
     }
 
     fn initialize_memory_baselines() -> Vec<Box<dyn MemorySystemBaseline>> {
-        vec![
-            Box::new(MockHippocampalBaseline),
-        ]
+        vec![Box::new(MockHippocampalBaseline)]
     }
 
     fn initialize_academic_references() -> Vec<Box<dyn AcademicReferenceImplementation>> {
@@ -85,34 +81,38 @@ impl DifferentialTestingHarness {
 
     pub fn run_comprehensive_tests(&self) -> DifferentialTestResults {
         let mut results = DifferentialTestResults::new();
-        
+
         // Generate diverse test cases
         let test_cases = self.test_generators.generate_comprehensive_suite();
-        
+
         for test_case in test_cases {
             // Test against all vector baselines
             for baseline in &self.vector_baselines {
                 let baseline_result = self.execute_vector_test(baseline.as_ref(), &test_case);
                 let engram_result = self.execute_engram_vector_test(&test_case);
-                
+
                 let comparison = self.compare_results(&baseline_result, &engram_result);
                 results.add_comparison(baseline.name(), comparison);
             }
-            
+
             // Test against graph baselines with different scenarios
             for baseline in &self.graph_baselines {
                 let baseline_result = self.execute_graph_test(baseline.as_ref(), &test_case);
                 let engram_result = self.execute_engram_graph_test(&test_case);
-                
+
                 let comparison = self.compare_graph_results(&baseline_result, &engram_result);
                 results.add_graph_comparison(baseline.name(), comparison);
             }
         }
-        
+
         results
     }
 
-    fn execute_vector_test(&self, baseline: &dyn VectorDatabaseBaseline, test_case: &TestCase) -> VectorTestResult {
+    fn execute_vector_test(
+        &self,
+        baseline: &dyn VectorDatabaseBaseline,
+        test_case: &TestCase,
+    ) -> VectorTestResult {
         match &test_case.test_type {
             TestType::CosineSimilarity { query, vectors } => {
                 let similarities = baseline.cosine_similarity_batch(query, vectors);
@@ -141,9 +141,16 @@ impl DifferentialTestingHarness {
         }
     }
 
-    fn execute_graph_test(&self, baseline: &dyn GraphDatabaseBaseline, test_case: &TestCase) -> GraphTestResult {
+    fn execute_graph_test(
+        &self,
+        baseline: &dyn GraphDatabaseBaseline,
+        test_case: &TestCase,
+    ) -> GraphTestResult {
         match &test_case.test_type {
-            TestType::SpreadingActivation { start_node, iterations } => {
+            TestType::SpreadingActivation {
+                start_node,
+                iterations,
+            } => {
                 let activations = baseline.spreading_activation(*start_node, *iterations);
                 GraphTestResult::Activations(activations)
             }
@@ -158,7 +165,10 @@ impl DifferentialTestingHarness {
     fn execute_engram_graph_test(&self, test_case: &TestCase) -> GraphTestResult {
         // This would call actual Engram implementation
         match &test_case.test_type {
-            TestType::SpreadingActivation { start_node, iterations } => {
+            TestType::SpreadingActivation {
+                start_node,
+                iterations,
+            } => {
                 let activations = self.compute_engram_spreading(*start_node, *iterations);
                 GraphTestResult::Activations(activations)
             }
@@ -170,13 +180,19 @@ impl DifferentialTestingHarness {
         }
     }
 
-    fn compare_results(&self, baseline: &VectorTestResult, engram: &VectorTestResult) -> ComparisonResult {
+    fn compare_results(
+        &self,
+        baseline: &VectorTestResult,
+        engram: &VectorTestResult,
+    ) -> ComparisonResult {
         match (baseline, engram) {
             (VectorTestResult::Similarities(b), VectorTestResult::Similarities(e)) => {
-                let max_diff = b.iter().zip(e.iter())
+                let max_diff = b
+                    .iter()
+                    .zip(e.iter())
                     .map(|(b_val, e_val)| (b_val - e_val).abs())
                     .fold(0.0f32, f32::max);
-                
+
                 ComparisonResult {
                     matches: max_diff < 1e-6,
                     max_difference: max_diff as f64,
@@ -184,11 +200,13 @@ impl DifferentialTestingHarness {
                 }
             }
             (VectorTestResult::Neighbors(b), VectorTestResult::Neighbors(e)) => {
-                let matches = b.iter().zip(e.iter())
+                let matches = b
+                    .iter()
+                    .zip(e.iter())
                     .all(|((b_idx, b_score), (e_idx, e_score))| {
                         b_idx == e_idx && (b_score - e_score).abs() < 1e-6
                     });
-                
+
                 ComparisonResult {
                     matches,
                     max_difference: 0.0,
@@ -199,19 +217,22 @@ impl DifferentialTestingHarness {
                 matches: false,
                 max_difference: f64::INFINITY,
                 semantic_equivalent: false,
-            }
+            },
         }
     }
 
-    fn compare_graph_results(&self, baseline: &GraphTestResult, engram: &GraphTestResult) -> ComparisonResult {
+    fn compare_graph_results(
+        &self,
+        baseline: &GraphTestResult,
+        engram: &GraphTestResult,
+    ) -> ComparisonResult {
         match (baseline, engram) {
             (GraphTestResult::Activations(b), GraphTestResult::Activations(e)) => {
-                let max_diff = b.iter()
-                    .filter_map(|(node, b_val)| {
-                        e.get(node).map(|e_val| (b_val - e_val).abs())
-                    })
+                let max_diff = b
+                    .iter()
+                    .filter_map(|(node, b_val)| e.get(node).map(|e_val| (b_val - e_val).abs()))
                     .fold(0.0f32, f32::max);
-                
+
                 ComparisonResult {
                     matches: max_diff < 1e-6,
                     max_difference: max_diff as f64,
@@ -222,7 +243,7 @@ impl DifferentialTestingHarness {
                 matches: false,
                 max_difference: f64::INFINITY,
                 semantic_equivalent: false,
-            }
+            },
         }
     }
 
@@ -263,7 +284,11 @@ impl DifferentialTestingHarness {
         vec![]
     }
 
-    fn compute_engram_spreading(&self, _start_node: usize, _iterations: usize) -> HashMap<usize, f32> {
+    fn compute_engram_spreading(
+        &self,
+        _start_node: usize,
+        _iterations: usize,
+    ) -> HashMap<usize, f32> {
         // Placeholder for actual Engram implementation
         HashMap::new()
     }
@@ -276,7 +301,7 @@ impl DifferentialTestingHarness {
     fn random_unit_vector(&self, dimensions: usize) -> Vec<f32> {
         use rand::prelude::*;
         let mut rng = thread_rng();
-        let mut vec: Vec<f32> = (0..dimensions).map(|_| rng.gen::<f32>() - 0.5).collect();
+        let mut vec: Vec<f32> = (0..dimensions).map(|_| rng.r#gen::<f32>() - 0.5).collect();
         let norm: f32 = vec.iter().map(|x| x * x).sum::<f32>().sqrt();
         vec.iter_mut().for_each(|x| *x /= norm);
         vec
@@ -286,59 +311,117 @@ impl DifferentialTestingHarness {
 // Mock baseline implementations
 struct MockPineconeBaseline;
 impl VectorDatabaseBaseline for MockPineconeBaseline {
-    fn name(&self) -> &'static str { "Pinecone" }
-    fn cosine_similarity_batch(&self, _query: &[f32], _vectors: &[Vec<f32>]) -> Vec<f32> { vec![] }
-    fn nearest_neighbors(&self, _query: &[f32], _k: usize) -> Vec<(usize, f32)> { vec![] }
-    fn index_construction_time(&self, _vectors: &[Vec<f32>]) -> Duration { Duration::from_secs(0) }
-    fn query_latency_distribution(&self, _queries: &[Vec<f32>]) -> Vec<Duration> { vec![] }
+    fn name(&self) -> &'static str {
+        "Pinecone"
+    }
+    fn cosine_similarity_batch(&self, _query: &[f32], _vectors: &[Vec<f32>]) -> Vec<f32> {
+        vec![]
+    }
+    fn nearest_neighbors(&self, _query: &[f32], _k: usize) -> Vec<(usize, f32)> {
+        vec![]
+    }
+    fn index_construction_time(&self, _vectors: &[Vec<f32>]) -> Duration {
+        Duration::from_secs(0)
+    }
+    fn query_latency_distribution(&self, _queries: &[Vec<f32>]) -> Vec<Duration> {
+        vec![]
+    }
 }
 
 struct MockWeaviateBaseline;
 impl VectorDatabaseBaseline for MockWeaviateBaseline {
-    fn name(&self) -> &'static str { "Weaviate" }
-    fn cosine_similarity_batch(&self, _query: &[f32], _vectors: &[Vec<f32>]) -> Vec<f32> { vec![] }
-    fn nearest_neighbors(&self, _query: &[f32], _k: usize) -> Vec<(usize, f32)> { vec![] }
-    fn index_construction_time(&self, _vectors: &[Vec<f32>]) -> Duration { Duration::from_secs(0) }
-    fn query_latency_distribution(&self, _queries: &[Vec<f32>]) -> Vec<Duration> { vec![] }
+    fn name(&self) -> &'static str {
+        "Weaviate"
+    }
+    fn cosine_similarity_batch(&self, _query: &[f32], _vectors: &[Vec<f32>]) -> Vec<f32> {
+        vec![]
+    }
+    fn nearest_neighbors(&self, _query: &[f32], _k: usize) -> Vec<(usize, f32)> {
+        vec![]
+    }
+    fn index_construction_time(&self, _vectors: &[Vec<f32>]) -> Duration {
+        Duration::from_secs(0)
+    }
+    fn query_latency_distribution(&self, _queries: &[Vec<f32>]) -> Vec<Duration> {
+        vec![]
+    }
 }
 
 struct MockFaissBaseline;
 impl VectorDatabaseBaseline for MockFaissBaseline {
-    fn name(&self) -> &'static str { "FAISS" }
-    fn cosine_similarity_batch(&self, _query: &[f32], _vectors: &[Vec<f32>]) -> Vec<f32> { vec![] }
-    fn nearest_neighbors(&self, _query: &[f32], _k: usize) -> Vec<(usize, f32)> { vec![] }
-    fn index_construction_time(&self, _vectors: &[Vec<f32>]) -> Duration { Duration::from_secs(0) }
-    fn query_latency_distribution(&self, _queries: &[Vec<f32>]) -> Vec<Duration> { vec![] }
+    fn name(&self) -> &'static str {
+        "FAISS"
+    }
+    fn cosine_similarity_batch(&self, _query: &[f32], _vectors: &[Vec<f32>]) -> Vec<f32> {
+        vec![]
+    }
+    fn nearest_neighbors(&self, _query: &[f32], _k: usize) -> Vec<(usize, f32)> {
+        vec![]
+    }
+    fn index_construction_time(&self, _vectors: &[Vec<f32>]) -> Duration {
+        Duration::from_secs(0)
+    }
+    fn query_latency_distribution(&self, _queries: &[Vec<f32>]) -> Vec<Duration> {
+        vec![]
+    }
 }
 
 struct MockScannBaseline;
 impl VectorDatabaseBaseline for MockScannBaseline {
-    fn name(&self) -> &'static str { "ScaNN" }
-    fn cosine_similarity_batch(&self, _query: &[f32], _vectors: &[Vec<f32>]) -> Vec<f32> { vec![] }
-    fn nearest_neighbors(&self, _query: &[f32], _k: usize) -> Vec<(usize, f32)> { vec![] }
-    fn index_construction_time(&self, _vectors: &[Vec<f32>]) -> Duration { Duration::from_secs(0) }
-    fn query_latency_distribution(&self, _queries: &[Vec<f32>]) -> Vec<Duration> { vec![] }
+    fn name(&self) -> &'static str {
+        "ScaNN"
+    }
+    fn cosine_similarity_batch(&self, _query: &[f32], _vectors: &[Vec<f32>]) -> Vec<f32> {
+        vec![]
+    }
+    fn nearest_neighbors(&self, _query: &[f32], _k: usize) -> Vec<(usize, f32)> {
+        vec![]
+    }
+    fn index_construction_time(&self, _vectors: &[Vec<f32>]) -> Duration {
+        Duration::from_secs(0)
+    }
+    fn query_latency_distribution(&self, _queries: &[Vec<f32>]) -> Vec<Duration> {
+        vec![]
+    }
 }
 
 struct MockNeo4jBaseline;
 impl GraphDatabaseBaseline for MockNeo4jBaseline {
-    fn name(&self) -> &'static str { "Neo4j" }
-    fn spreading_activation(&self, _start_node: usize, _iterations: usize) -> HashMap<usize, f32> { HashMap::new() }
-    fn pattern_completion(&self, _partial_pattern: &[f32]) -> Vec<f32> { vec![] }
+    fn name(&self) -> &'static str {
+        "Neo4j"
+    }
+    fn spreading_activation(&self, _start_node: usize, _iterations: usize) -> HashMap<usize, f32> {
+        HashMap::new()
+    }
+    fn pattern_completion(&self, _partial_pattern: &[f32]) -> Vec<f32> {
+        vec![]
+    }
 }
 
 struct MockNetworkXBaseline;
 impl GraphDatabaseBaseline for MockNetworkXBaseline {
-    fn name(&self) -> &'static str { "NetworkX" }
-    fn spreading_activation(&self, _start_node: usize, _iterations: usize) -> HashMap<usize, f32> { HashMap::new() }
-    fn pattern_completion(&self, _partial_pattern: &[f32]) -> Vec<f32> { vec![] }
+    fn name(&self) -> &'static str {
+        "NetworkX"
+    }
+    fn spreading_activation(&self, _start_node: usize, _iterations: usize) -> HashMap<usize, f32> {
+        HashMap::new()
+    }
+    fn pattern_completion(&self, _partial_pattern: &[f32]) -> Vec<f32> {
+        vec![]
+    }
 }
 
 struct MockHippocampalBaseline;
 impl MemorySystemBaseline for MockHippocampalBaseline {
-    fn name(&self) -> &'static str { "Hippocampal Model" }
-    fn memory_consolidation(&self, _episode: &[f32], _time_elapsed: Duration) -> Vec<f32> { vec![] }
-    fn forgetting_curve(&self, _initial_strength: f32, _time_elapsed: Duration) -> f32 { 0.0 }
+    fn name(&self) -> &'static str {
+        "Hippocampal Model"
+    }
+    fn memory_consolidation(&self, _episode: &[f32], _time_elapsed: Duration) -> Vec<f32> {
+        vec![]
+    }
+    fn forgetting_curve(&self, _initial_strength: f32, _time_elapsed: Duration) -> f32 {
+        0.0
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -360,12 +443,15 @@ impl AcademicReferenceImplementation for DRMReferenceImplementation {
     fn paper_citation(&self) -> &'static str {
         "Roediger, H. L., & McDermott, K. B. (1995). Creating false memories: Remembering words not presented in lists. Journal of Experimental Psychology, 21(4), 803-814."
     }
-    
+
     fn implementation_url(&self) -> &'static str {
         "https://github.com/engram-design/drm-reference"
     }
-    
-    fn validate_cognitive_accuracy(&self, _scenario: &CognitiveScenario) -> CognitiveAccuracyMetrics {
+
+    fn validate_cognitive_accuracy(
+        &self,
+        _scenario: &CognitiveScenario,
+    ) -> CognitiveAccuracyMetrics {
         CognitiveAccuracyMetrics {
             false_memory_rate: 0.47,
             expected_range: (0.40, 0.60),
@@ -387,12 +473,15 @@ impl AcademicReferenceImplementation for BoundaryExtensionReferenceImplementatio
     fn paper_citation(&self) -> &'static str {
         "Intraub, H., & Richardson, M. (1989). Wide-angle memories of close-up scenes. Journal of Experimental Psychology: Learning, Memory, and Cognition, 15(2), 179-187."
     }
-    
+
     fn implementation_url(&self) -> &'static str {
         "https://github.com/engram-design/boundary-extension-reference"
     }
-    
-    fn validate_cognitive_accuracy(&self, _scenario: &CognitiveScenario) -> CognitiveAccuracyMetrics {
+
+    fn validate_cognitive_accuracy(
+        &self,
+        _scenario: &CognitiveScenario,
+    ) -> CognitiveAccuracyMetrics {
         CognitiveAccuracyMetrics {
             false_memory_rate: 0.225,
             expected_range: (0.15, 0.30),
@@ -445,7 +534,11 @@ impl SemanticEquivalenceChecker {
         true
     }
 
-    pub fn check_activation_equivalence(&self, _a: &HashMap<usize, f32>, _b: &HashMap<usize, f32>) -> bool {
+    pub fn check_activation_equivalence(
+        &self,
+        _a: &HashMap<usize, f32>,
+        _b: &HashMap<usize, f32>,
+    ) -> bool {
         true
     }
 }
@@ -463,7 +556,8 @@ impl DifferentialTestResults {
     }
 
     pub fn add_comparison(&mut self, baseline_name: &str, result: ComparisonResult) {
-        self.comparisons.entry(baseline_name.to_string())
+        self.comparisons
+            .entry(baseline_name.to_string())
             .or_insert_with(Vec::new)
             .push(result);
     }
