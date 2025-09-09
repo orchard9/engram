@@ -36,23 +36,32 @@
 //!
 //! ## Usage Pattern
 //!
-//! ```rust
+//! ```rust,no_run
 //! use engram_core::features::{FeatureRegistry, IndexProvider};
+//! use engram_core::Episode;
 //!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! // Get registry with all available providers
 //! let registry = FeatureRegistry::new();
 //!
 //! // Get best available index provider (HNSW if available, linear search otherwise)
 //! let index_provider = registry.get_best("index");
-//! let index = index_provider
+//! let mut index = index_provider
 //!     .as_any()
 //!     .downcast_ref::<Box<dyn IndexProvider>>()
 //!     .unwrap()
 //!     .create_index();
 //!
+//! // Example data for indexing
+//! let episodes = vec![]; // Vector of Episode instances
+//! let query = [0.0f32; 768]; // Query embedding
+//! let k = 5; // Number of nearest neighbors
+//!
 //! // Index operations work the same regardless of implementation
 //! index.build(&episodes)?;
 //! let results = index.search(&query, k)?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! ## Graceful Degradation
