@@ -3,8 +3,8 @@
 //! Follows cognitive guidance principles: every error includes context, suggestion, and example
 //! to help developers resolve issues quickly, even when tired or under stress.
 
-use crate::error::CognitiveError;
-use crate::{Confidence, cognitive_error};
+use crate::{cognitive_error, error::CognitiveError};
+use crate::Confidence;
 use thiserror::Error;
 
 /// Core error types for the engram system (legacy compatibility)
@@ -16,7 +16,9 @@ pub enum CoreError {
     #[error(
         "Memory node '{id}' not found in graph\n  Expected: Valid node ID from current graph\n  Suggestion: Use graph.nodes() to list available nodes{similar}\n  Example: let node = graph.get_node(\"node_id\").or_insert_default();"
     )]
+    /// Memory node not found in graph
     NodeNotFound {
+        /// Node ID that was not found
         id: String,
         /// "Did you mean?" suggestions, formatted as ", or did you mean 'x', 'y'?"
         similar: String,
@@ -25,46 +27,78 @@ pub enum CoreError {
     #[error(
         "Invalid activation level: {value} (must be in range [0.0, 1.0])\n  Expected: Activation between 0.0 (inactive) and 1.0 (fully active)\n  Suggestion: Use activation.clamp(0.0, 1.0) to ensure valid range\n  Example: node.activate(energy.clamp(0.0, 1.0));"
     )]
-    InvalidActivation { value: f64 },
+    /// Invalid activation level (must be in range [0.0, 1.0])
+    InvalidActivation {
+        /// The invalid activation value
+        value: f64
+    },
 
     #[error(
         "Reconstruction failed: activation level {level:.3} below threshold {threshold:.3}\n  Expected: Sufficient activation for pattern completion\n  Suggestion: Increase activation through more recall attempts or lower threshold\n  Example: graph.activate_neighbors(node_id, boost=0.3).reconstruct_with_threshold(0.5)"
     )]
-    InsufficientActivation { level: f64, threshold: f64 },
+    /// Insufficient activation for reconstruction
+    InsufficientActivation {
+        /// Current activation level
+        level: f64,
+        /// Required activation threshold
+        threshold: f64
+    },
 
     #[error(
         "Invalid confidence interval: mean={mean:.3} not in range [{lower:.3}, {upper:.3}]\n  Expected: mean ∈ [lower, upper] and all values ∈ [0, 1]\n  Suggestion: Use Confidence::new_clamped() to automatically fix bounds\n  Example: let conf = Confidence::new_clamped(mean, lower, upper);"
     )]
-    InvalidConfidence { mean: f64, lower: f64, upper: f64 },
+    /// Invalid confidence interval
+    InvalidConfidence {
+        /// Mean confidence value
+        mean: f64,
+        /// Lower bound of confidence interval
+        lower: f64,
+        /// Upper bound of confidence interval
+        upper: f64
+    },
 
     #[error(
         "Serialization failed: {context}\n  Expected: Valid JSON-serializable memory structure\n  Suggestion: Check for NaN/Infinity values in embeddings or confidence scores\n  Example: node.validate_serializable()?.to_json()"
     )]
+    /// Serialization failed
     SerializationError {
+        /// Context where serialization failed
         context: String,
         #[source]
+        /// The underlying serialization error
         source: serde_json::Error,
     },
 
     #[error(
         "Validation failed: {reason}\n  Expected: {expected}\n  Suggestion: {suggestion}\n  Example: {example}"
     )]
+    /// Validation failed
     ValidationError {
+        /// Reason for validation failure
         reason: String,
+        /// What was expected
         expected: String,
+        /// Suggested fix
         suggestion: String,
+        /// Example usage
         example: String,
     },
 
     #[error(
         "IO operation failed: {context}\n  Expected: {expected}\n  Suggestion: {suggestion}\n  Example: {example}"
     )]
+    /// IO operation failed
     IoError {
+        /// Context of the IO operation
         context: String,
+        /// What was expected to happen
         expected: String,
+        /// Suggested fix
         suggestion: String,
+        /// Example usage
         example: String,
         #[source]
+        /// The underlying IO error
         source: std::io::Error,
     },
 }

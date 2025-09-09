@@ -3,7 +3,7 @@
 //! Tests the feature provider pattern and graceful degradation
 
 use engram_core::features::{FeatureRegistry, FeatureProvider};
-use engram_core::{Episode, Confidence, Memory};
+use engram_core::{Episode, Confidence};
 use std::path::PathBuf;
 use std::time::Duration;
 use chrono::Utc;
@@ -41,7 +41,7 @@ fn test_null_index_provider() {
     assert!(!provider.is_enabled());
     assert_eq!(provider.name(), "index_null");
     
-    let index = provider.create_index();
+    let _index = provider.create_index();
     
     // Create test episodes
     let episodes = vec![

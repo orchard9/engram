@@ -68,10 +68,10 @@ impl MemoryBackend for DashMapBackend {
             self.activation_cache.remove(id);
             self.edges.remove(id);
             
-            // Remove as target from other nodes (parallel operation)
-            self.edges.par_iter_mut().for_each(|mut entry| {
+            // Remove as target from other nodes (sequential operation - DashMap handles concurrency)
+            for mut entry in self.edges.iter_mut() {
                 entry.value_mut().retain(|(target, _)| target != id);
-            });
+            }
         }
         
         Ok(memory)
@@ -82,15 +82,15 @@ impl MemoryBackend for DashMapBackend {
             return Err(MemoryError::InvalidEmbeddingDimension(embedding.len()));
         }
         
-        // Parallel similarity computation
+        // Similarity computation (DashMap is already thread-safe)
         let mut scores: Vec<(Uuid, f32)> = self.memories
-            .par_iter()
+            .iter()
             .filter_map(|entry| {
                 let (id, memory) = entry.pair();
-                memory.embedding.as_ref().map(|mem_emb| {
-                    let similarity = cosine_similarity(embedding, mem_emb);
-                    (*id, similarity)
-                })
+                {
+                    let similarity = cosine_similarity(embedding, &memory.embedding);
+                    Some((*id, similarity))
+                }
             })
             .collect();
         
@@ -193,8 +193,8 @@ impl GraphBackend for DashMapBackend {
                 .map(|a| a.load(Ordering::Relaxed))
                 .unwrap_or(0.5);
             
-            // Spread to neighbors in parallel
-            neighbors.value().par_iter().for_each(|(neighbor_id, weight)| {
+            // Spread to neighbors (DashMap handles concurrency)
+            for (neighbor_id, weight) in neighbors.value().iter() {
                 if let Some(activation) = self.activation_cache.get(neighbor_id) {
                     // Atomic update with compare-and-swap loop
                     loop {
@@ -209,7 +209,7 @@ impl GraphBackend for DashMapBackend {
                             Ordering::Relaxed,
                         ) {
                             Ok(_) => break,
-                            Err(_) => continue, // Retry on contention
+                            Err(_) => {} // Retry on contention
                         }
                     }
                 } else if self.memories.contains_key(neighbor_id) {
@@ -220,7 +220,7 @@ impl GraphBackend for DashMapBackend {
                         AtomicF32::new(contribution.min(1.0))
                     );
                 }
-            });
+            }
         }
         
         Ok(())
@@ -237,15 +237,14 @@ impl GraphBackend for DashMapBackend {
     }
     
     fn all_edges(&self) -> Result<Vec<(Uuid, Uuid, f32)>, MemoryError> {
-        let result: Vec<(Uuid, Uuid, f32)> = self.edges
-            .par_iter()
-            .flat_map(|entry| {
-                let from = *entry.key();
-                entry.value().iter().map(move |(to, weight)| {
-                    (from, *to, *weight)
-                })
-            })
-            .collect();
+        let mut result = Vec::new();
+        
+        for entry in self.edges.iter() {
+            let from = *entry.key();
+            for (to, weight) in entry.value().iter() {
+                result.push((from, *to, *weight));
+            }
+        }
         
         Ok(result)
     }

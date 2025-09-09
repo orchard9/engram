@@ -117,7 +117,7 @@ pub trait FeatureProvider: Send + Sync + Any {
     fn description(&self) -> &'static str;
     
     /// Check compatibility with other features
-    fn is_compatible_with(&self, other: &str) -> bool {
+    fn is_compatible_with(&self, _other: &str) -> bool {
         // By default, all features are compatible
         true
     }

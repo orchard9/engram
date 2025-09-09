@@ -21,6 +21,7 @@ pub struct SystemHealth {
 }
 
 impl SystemHealth {
+    /// Create a new health monitor with default thresholds
     #[must_use]
     pub fn new() -> Self {
         Self::with_thresholds(
@@ -30,6 +31,7 @@ impl SystemHealth {
         )
     }
 
+    /// Create a new health monitor with custom thresholds
     #[must_use]
     pub fn with_thresholds(
         memory_threshold_bytes: u64,
@@ -312,21 +314,32 @@ impl SystemHealth {
 /// Individual health check
 #[derive(Debug, Clone)]
 pub struct HealthCheck {
+    /// Name of the health check
     pub name: &'static str,
+    /// Type of health check being performed
     pub check_type: HealthCheckType,
+    /// Current status of the check
     pub status: HealthStatus,
+    /// Last time this check succeeded
     pub last_success: Instant,
+    /// Number of consecutive failures
     pub consecutive_failures: u32,
+    /// Human-readable status message
     pub message: String,
 }
 
 /// Types of health checks
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HealthCheckType {
+    /// Memory usage check
     Memory,
+    /// Network/operation latency check
     Latency,
+    /// Error rate monitoring
     ErrorRate,
+    /// Network connectivity check
     Connectivity,
+    /// Cognitive system health check
     Cognitive,
 }
 

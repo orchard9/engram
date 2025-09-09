@@ -7,7 +7,7 @@ use super::{
 };
 use crate::{Confidence, Episode, Memory};
 use chrono::Utc;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 /// Pattern reconstruction engine combining multiple strategies
 pub struct PatternReconstructor {
@@ -88,17 +88,44 @@ impl PatternReconstructor {
             let mut score = 0.0;
             let mut count = 0;
 
-            // Score based on known fields matching
+            // Score based on known fields matching (bidirectional and case-insensitive)
             if let Some(what) = partial.known_fields.get("what") {
-                if episode.what.contains(what) {
+                let what_lower = what.to_lowercase();
+                let episode_what_lower = episode.what.to_lowercase();
+                
+                // Check both directions for partial matches
+                if episode_what_lower.contains(&what_lower) || what_lower.contains(&episode_what_lower) {
                     score += 1.0;
+                } else {
+                    // Check for word-level matches
+                    let what_words: Vec<&str> = what_lower.split_whitespace().collect();
+                    let episode_words: Vec<&str> = episode_what_lower.split_whitespace().collect();
+                    
+                    let mut word_matches = 0;
+                    for what_word in &what_words {
+                        for episode_word in &episode_words {
+                            if what_word == episode_word || 
+                               what_word.contains(episode_word) || 
+                               episode_word.contains(what_word) {
+                                word_matches += 1;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if word_matches > 0 {
+                        score += word_matches as f32 / what_words.len().max(episode_words.len()) as f32;
+                    }
                 }
                 count += 1;
             }
 
             if let Some(where_loc) = partial.known_fields.get("where") {
                 if let Some(ref ep_where) = episode.where_location {
-                    if ep_where.contains(where_loc) {
+                    let where_lower = where_loc.to_lowercase();
+                    let ep_where_lower = ep_where.to_lowercase();
+                    
+                    if ep_where_lower.contains(&where_lower) || where_lower.contains(&ep_where_lower) {
                         score += 1.0;
                     }
                 }
@@ -112,22 +139,28 @@ impl PatternReconstructor {
                 }
             }
 
-            if count > 0 {
-                scored_episodes.push((episode, score / count as f32));
+            // Always include episodes with non-zero scores
+            if score > 0.0 {
+                let normalized_score = if count > 0 { score / count as f32 } else { score };
+                scored_episodes.push((episode, normalized_score));
             }
         }
 
-        // Sort by score and take top-k
+        // Sort by score and take top-k, but lower the threshold
         scored_episodes.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
         scored_episodes
             .into_iter()
-            .take(5)
+            .take(10) // Increased from 5 to 10 to get more candidates
             .map(|(ep, _)| ep)
             .collect()
     }
 
     /// Aggregate a field from similar episodes
     fn aggregate_field(&self, episodes: &[&Episode], field: &str) -> Option<String> {
+        if episodes.is_empty() {
+            return None;
+        }
+
         match field {
             "what" => {
                 // Take most common 'what' field
@@ -141,30 +174,49 @@ impl PatternReconstructor {
                     .map(|(what, _)| what)
             }
             "where" => {
-                // Take most common location
+                // Take most common location - prioritize exact matches
                 let mut counts = HashMap::new();
                 for ep in episodes {
                     if let Some(ref loc) = ep.where_location {
                         *counts.entry(loc.clone()).or_insert(0) += 1;
                     }
                 }
-                counts
-                    .into_iter()
-                    .max_by_key(|(_, count)| *count)
-                    .map(|(loc, _)| loc)
-            }
-            "who" => {
-                // Aggregate all participants
-                let mut participants = HashSet::new();
-                for ep in episodes {
-                    if let Some(ref who) = ep.who {
-                        participants.extend(who.clone());
-                    }
-                }
-                if participants.is_empty() {
+                
+                if counts.is_empty() {
                     None
                 } else {
-                    Some(participants.into_iter().collect::<Vec<_>>().join(", "))
+                    // Return the most frequent location
+                    counts
+                        .into_iter()
+                        .max_by_key(|(_, count)| *count)
+                        .map(|(loc, _)| loc)
+                }
+            }
+            "who" => {
+                // Aggregate all participants, taking most common ones first
+                let mut participant_counts = HashMap::new();
+                for ep in episodes {
+                    if let Some(ref who_list) = ep.who {
+                        for person in who_list {
+                            *participant_counts.entry(person.clone()).or_insert(0) += 1;
+                        }
+                    }
+                }
+                
+                if participant_counts.is_empty() {
+                    None
+                } else {
+                    // Sort by frequency and take top participants
+                    let mut sorted_participants: Vec<_> = participant_counts.into_iter().collect();
+                    sorted_participants.sort_by(|a, b| b.1.cmp(&a.1));
+                    
+                    let participants: Vec<String> = sorted_participants
+                        .into_iter()
+                        .take(3) // Limit to top 3 most frequent participants
+                        .map(|(name, _)| name)
+                        .collect();
+                        
+                    Some(participants.join(", "))
                 }
             }
             _ => None,

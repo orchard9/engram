@@ -21,28 +21,40 @@ use tokio::sync::RwLock as AsyncRwLock;
 /// Migration task for moving memories between tiers
 #[derive(Debug, Clone)]
 pub struct MigrationTask {
+    /// Unique identifier of the memory to migrate
     pub memory_id: String,
+    /// Current tier where the memory is stored
     pub from_tier: TierType,
+    /// Destination tier for the memory
     pub to_tier: TierType,
+    /// Priority level for this migration task
     pub priority: MigrationPriority,
+    /// When this migration task was created
     pub created_at: SystemTime,
 }
 
 /// Types of storage tiers
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TierType {
+    /// In-memory DashMap for active memories
     Hot,  // In-memory DashMap for active memories
+    /// Memory-mapped files for recent memories
     Warm, // Memory-mapped files for recent memories
+    /// Columnar storage for archived memories
     Cold, // Columnar storage for archived memories
 }
 
 /// Priority levels for migration tasks
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum MigrationPriority {
+    /// Memory pressure - move now
     Immediate = 0, // Memory pressure - move now
+    /// Activation threshold crossed
     High = 1,      // Activation threshold crossed
+    /// Regular maintenance
     Normal = 2,    // Regular maintenance
-    Low = 3,       // Background optimization
+    /// Background optimization
+    Low = 3,
 }
 
 /// Cognitive tier architecture with automatic migration
@@ -396,16 +408,21 @@ impl CognitiveTierArchitecture {
 /// Statistics for all tiers
 #[derive(Debug, Clone)]
 pub struct TierArchitectureStats {
+    /// Statistics for the hot tier (in-memory)
     pub hot: TierStatistics,
+    /// Statistics for the warm tier (memory-mapped)
     pub warm: TierStatistics,
+    /// Statistics for the cold tier (archived)
     pub cold: TierStatistics,
 }
 
 impl TierArchitectureStats {
+    /// Calculate total number of memories across all tiers
     pub fn total_memories(&self) -> usize {
         self.hot.memory_count + self.warm.memory_count + self.cold.memory_count
     }
 
+    /// Calculate total size in bytes across all tiers
     pub fn total_size_bytes(&self) -> u64 {
         self.hot.total_size_bytes + self.warm.total_size_bytes + self.cold.total_size_bytes
     }
@@ -421,6 +438,7 @@ pub struct TierCoordinator {
 }
 
 impl TierCoordinator {
+    /// Create a new tier coordinator with the given policy and metrics
     pub fn new(policy: CognitiveEvictionPolicy, metrics: Arc<StorageMetrics>) -> Self {
         Self {
             migration_queue: Arc::new(SegQueue::new()),
@@ -493,6 +511,7 @@ pub struct DummyColdStorage {
 }
 
 impl DummyColdStorage {
+    /// Create a new dummy cold storage implementation
     pub fn new() -> Self {
         Self {
             memories: DashMap::new(),
@@ -567,7 +586,7 @@ impl StorageTier for DummyColdStorage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{EpisodeBuilder, MemoryBuilder};
+    use crate::EpisodeBuilder;
     use chrono::Utc;
     use tempfile::TempDir;
 

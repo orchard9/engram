@@ -3,8 +3,10 @@
 //! This module provides a trait-based abstraction over pattern completion,
 //! allowing graceful fallback from neural completion to simple retrieval.
 
+#![allow(clippy::unused_self)]
+
 use super::FeatureProvider;
-use crate::{Confidence, Episode, Memory};
+use crate::{Confidence, Memory};
 use std::any::Any;
 use std::sync::Arc;
 use thiserror::Error;
@@ -228,7 +230,7 @@ impl Completion for PatternCompletionImpl {
     fn fill_gaps(
         &self,
         pattern: &Memory,
-        mask: &[bool],
+        _mask: &[bool],
     ) -> CompletionResult<Memory> {
         // Simple implementation: return the pattern as-is
         // A real implementation would use neural networks to fill gaps

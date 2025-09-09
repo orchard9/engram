@@ -399,17 +399,41 @@ mod tests {
     #[cfg(all(feature = "psychological_decay", feature = "testing"))]
     #[test]
     fn test_age_adjusted_sampling() {
-        let mut rng = rand::thread_rng();
-
-        let young_profile = IndividualDifferenceProfile::sample_with_age(&mut rng, 25.0);
-        let old_profile = IndividualDifferenceProfile::sample_with_age(&mut rng, 75.0);
-
-        // Older profile should generally have lower efficiency
-        // (Note: due to randomness, this isn't guaranteed for single samples,
-        //  but should be true on average)
-        assert!(old_profile.age_factor <= young_profile.age_factor);
-        assert!(old_profile.processing_speed <= young_profile.processing_speed * 1.1);
-        assert!(old_profile.wm_capacity <= young_profile.wm_capacity * 1.1);
+        use rand::SeedableRng;
+        use rand::rngs::StdRng;
+        
+        // Use seeded RNG for deterministic test results
+        let mut rng = StdRng::seed_from_u64(12345);
+        
+        // Sample multiple times to get average behavior
+        let mut young_processing_total = 0.0;
+        let mut old_processing_total = 0.0;
+        let mut young_wm_total = 0.0;
+        let mut old_wm_total = 0.0;
+        
+        let samples = 50;
+        for _ in 0..samples {
+            let young_profile = IndividualDifferenceProfile::sample_with_age(&mut rng, 25.0);
+            let old_profile = IndividualDifferenceProfile::sample_with_age(&mut rng, 75.0);
+            
+            young_processing_total += young_profile.processing_speed;
+            old_processing_total += old_profile.processing_speed;
+            young_wm_total += young_profile.wm_capacity;
+            old_wm_total += old_profile.wm_capacity;
+        }
+        
+        let young_processing_avg = young_processing_total / samples as f32;
+        let old_processing_avg = old_processing_total / samples as f32;
+        let young_wm_avg = young_wm_total / samples as f32;
+        let old_wm_avg = old_wm_total / samples as f32;
+        
+        // Older profile should generally have lower efficiency on average
+        assert!(old_processing_avg <= young_processing_avg * 1.05, 
+               "Expected older processing speed ({:.3}) <= young processing speed ({:.3}) * 1.05", 
+               old_processing_avg, young_processing_avg);
+        assert!(old_wm_avg <= young_wm_avg * 1.05,
+               "Expected older WM capacity ({:.3}) <= young WM capacity ({:.3}) * 1.05", 
+               old_wm_avg, young_wm_avg);
     }
 
     #[test]

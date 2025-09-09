@@ -78,20 +78,23 @@ impl BreadthFirstTraversal {
                 }
 
                 // Get neighbors and add to next level
-                if let Some(neighbors) = graph.get_neighbors(&node_id) {
+                use uuid::Uuid;
+                let node_uuid = Uuid::new_v5(&Uuid::NAMESPACE_OID, node_id.as_bytes());
+                if let Ok(neighbors) = graph.get_neighbors(&node_uuid) {
                     let decay_factor = decay_function.apply(depth + 1);
 
-                    for edge in neighbors {
+                    for (neighbor_id, weight) in neighbors {
+                        let neighbor_node_id = neighbor_id.to_string();
                         let new_activation = Self::calculate_activation(
                             activation,
-                            edge.weight,
+                            weight,
                             decay_factor,
-                            edge.edge_type,
+                            EdgeType::Excitatory, // Default edge type
                         );
 
                         if new_activation > 0.01 {
                             // Threshold check
-                            next_level.push_back((edge.target, new_activation, depth + 1));
+                            next_level.push_back((neighbor_node_id, new_activation, depth + 1));
                         }
                     }
                 }
@@ -133,7 +136,9 @@ impl BreadthFirstTraversal {
             }
 
             // This would use CPU prefetch instructions in optimized version
-            let _ = graph.get_neighbors(node_id);
+            use uuid::Uuid;
+            let node_uuid = Uuid::new_v5(&Uuid::NAMESPACE_OID, node_id.as_bytes());
+            let _ = graph.get_neighbors(&node_uuid);
         }
     }
 
@@ -210,19 +215,22 @@ impl DepthFirstTraversal {
             }
 
             // Add neighbors to stack (in reverse order for proper DFS ordering)
-            if let Some(neighbors) = graph.get_neighbors(&node_id) {
+            use uuid::Uuid;
+            let node_uuid = Uuid::new_v5(&Uuid::NAMESPACE_OID, node_id.as_bytes());
+            if let Ok(neighbors) = graph.get_neighbors(&node_uuid) {
                 let decay_factor = decay_function.apply(depth + 1);
 
-                for edge in neighbors.iter().rev() {
+                for (neighbor_id, weight) in neighbors.iter().rev() {
+                    let neighbor_node_id = neighbor_id.to_string();
                     let new_activation = BreadthFirstTraversal::calculate_activation(
                         activation,
-                        edge.weight,
+                        *weight,
                         decay_factor,
-                        edge.edge_type,
+                        EdgeType::Excitatory, // Default edge type
                     );
 
                     if new_activation > 0.01 {
-                        stack.push((edge.target.clone(), new_activation, depth + 1));
+                        stack.push((neighbor_node_id, new_activation, depth + 1));
                     }
                 }
             }
@@ -313,7 +321,9 @@ impl AdaptiveTraversal {
         let mut sampled_nodes = 0;
 
         for (node_id, _) in seed_nodes.iter().take(sample_size) {
-            if let Some(neighbors) = graph.get_neighbors(node_id) {
+            use uuid::Uuid;
+            let node_uuid = Uuid::new_v5(&Uuid::NAMESPACE_OID, node_id.as_bytes());
+            if let Ok(neighbors) = graph.get_neighbors(&node_uuid) {
                 total_neighbors += neighbors.len();
                 sampled_nodes += 1;
             }
@@ -380,19 +390,22 @@ impl ParallelBreadthFirstTraversal {
             while let Some((node_id, activation, depth)) = current_level.pop_front() {
                 results.push((node_id.clone(), activation, depth));
 
-                if let Some(neighbors) = graph.get_neighbors(&node_id) {
+                use uuid::Uuid;
+                let node_uuid = Uuid::new_v5(&Uuid::NAMESPACE_OID, node_id.as_bytes());
+                if let Ok(neighbors) = graph.get_neighbors(&node_uuid) {
                     let decay_factor = decay_function.apply(depth + 1);
 
-                    for edge in neighbors {
+                    for (neighbor_id, weight) in neighbors {
+                        let neighbor_node_id = neighbor_id.to_string();
                         let new_activation = BreadthFirstTraversal::calculate_activation(
                             activation,
-                            edge.weight,
+                            weight,
                             decay_factor,
-                            edge.edge_type,
+                            EdgeType::Excitatory, // Default edge type
                         );
 
                         if new_activation > 0.01 {
-                            next_level.push_back((edge.target, new_activation, depth + 1));
+                            next_level.push_back((neighbor_node_id, new_activation, depth + 1));
                         }
                     }
                 }
@@ -408,17 +421,17 @@ impl ParallelBreadthFirstTraversal {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::activation::EdgeType;
+    use crate::activation::{EdgeType, ActivationGraphExt};
 
     fn create_test_graph() -> MemoryGraph {
-        let graph = MemoryGraph::new();
+        let graph = crate::activation::create_activation_graph();
 
         // Create test graph: A -> B -> C, A -> D, B -> D
-        graph.add_edge("A".to_string(), "B".to_string(), 0.8, EdgeType::Excitatory);
-        graph.add_edge("B".to_string(), "C".to_string(), 0.6, EdgeType::Excitatory);
-        graph.add_edge("A".to_string(), "D".to_string(), 0.4, EdgeType::Excitatory);
-        graph.add_edge("B".to_string(), "D".to_string(), 0.5, EdgeType::Excitatory);
-        graph.add_edge("D".to_string(), "E".to_string(), 0.3, EdgeType::Inhibitory);
+        ActivationGraphExt::add_edge(&graph, "A".to_string(), "B".to_string(), 0.8, EdgeType::Excitatory);
+        ActivationGraphExt::add_edge(&graph, "B".to_string(), "C".to_string(), 0.6, EdgeType::Excitatory);
+        ActivationGraphExt::add_edge(&graph, "A".to_string(), "D".to_string(), 0.4, EdgeType::Excitatory);
+        ActivationGraphExt::add_edge(&graph, "B".to_string(), "D".to_string(), 0.5, EdgeType::Excitatory);
+        ActivationGraphExt::add_edge(&graph, "D".to_string(), "E".to_string(), 0.3, EdgeType::Inhibitory);
 
         graph
     }
@@ -545,11 +558,14 @@ mod tests {
 
     #[test]
     fn test_cycle_detection() {
-        let graph = MemoryGraph::new();
+        use crate::graph::create_concurrent_graph;
+        use crate::activation::ActivationGraphExt;
+        let graph = create_concurrent_graph();
 
         // Create cycle: A -> B -> A
-        graph.add_edge("A".to_string(), "B".to_string(), 0.8, EdgeType::Excitatory);
-        graph.add_edge("B".to_string(), "A".to_string(), 0.8, EdgeType::Excitatory);
+        // Use the ActivationGraphExt trait for String-based node IDs
+        ActivationGraphExt::add_edge(&graph, "A".to_string(), "B".to_string(), 0.8, EdgeType::Excitatory);
+        ActivationGraphExt::add_edge(&graph, "B".to_string(), "A".to_string(), 0.8, EdgeType::Excitatory);
 
         let bfs = BreadthFirstTraversal::new(2, 1); // Max 2 visits
         let decay_fn = DecayFunction::Exponential { rate: 0.3 };

@@ -338,32 +338,42 @@ impl System2Reasoner {
         None
     }
 
-    /// Check if partial matches a pattern
+    /// Check if partial matches a pattern (relaxed matching - ANY keyword can match)
     fn matches_pattern(&self, partial: &PartialEpisode, pattern: &[String]) -> bool {
+        // Return true if ANY requirement is found (instead of ALL)
         for requirement in pattern {
             let found = partial
                 .known_fields
                 .values()
-                .any(|v| v.contains(requirement));
-            if !found {
-                return false;
+                .any(|v| v.to_lowercase().contains(&requirement.to_lowercase()));
+            if found {
+                return true;
+            }
+            // Also check temporal context for matches
+            if partial.temporal_context.iter().any(|ctx| ctx.to_lowercase().contains(&requirement.to_lowercase())) {
+                return true;
             }
         }
-        true
+        false
     }
 
-    /// Check if partial satisfies rule antecedents
+    /// Check if partial satisfies rule antecedents (relaxed matching)
     fn satisfies_antecedents(&self, partial: &PartialEpisode, antecedents: &[String]) -> bool {
+        // Need at least half the antecedents to match (instead of all)
+        let mut matches = 0;
         for antecedent in antecedents {
             let found = partial
                 .known_fields
                 .values()
-                .any(|v| v.contains(antecedent));
-            if !found {
-                return false;
+                .any(|v| v.to_lowercase().contains(&antecedent.to_lowercase()))
+                || partial.temporal_context.iter()
+                    .any(|ctx| ctx.to_lowercase().contains(&antecedent.to_lowercase()));
+            if found {
+                matches += 1;
             }
         }
-        true
+        // At least half the antecedents must match, or at least one if list is small
+        matches >= (antecedents.len() + 1) / 2 || matches > 0 && antecedents.len() <= 2
     }
 
     /// Calculate similarity between partial and episode
@@ -408,9 +418,34 @@ impl System2Reasoner {
                 confidence: 0.9,
             },
             InferenceRule {
+                antecedents: vec!["meeting".to_string(), "office".to_string()],
+                consequent: "business meeting".to_string(),
+                confidence: 0.85,
+            },
+            InferenceRule {
+                antecedents: vec!["meeting".to_string()],
+                consequent: "collaborative work session".to_string(),
+                confidence: 0.7,
+            },
+            InferenceRule {
+                antecedents: vec!["office".to_string()],
+                consequent: "workplace activity".to_string(),
+                confidence: 0.6,
+            },
+            InferenceRule {
+                antecedents: vec!["calendar".to_string()],
+                consequent: "scheduled event".to_string(),
+                confidence: 0.65,
+            },
+            InferenceRule {
                 antecedents: vec!["evening".to_string(), "home".to_string()],
                 consequent: "relaxation time".to_string(),
                 confidence: 0.7,
+            },
+            InferenceRule {
+                antecedents: vec!["breakfast".to_string()],
+                consequent: "morning meal".to_string(),
+                confidence: 0.9,
             },
         ]
     }
@@ -421,6 +456,26 @@ impl System2Reasoner {
             PatternTemplate {
                 pattern: vec!["wake".to_string(), "alarm".to_string()],
                 prediction: "morning routine beginning".to_string(),
+                confidence: 0.85,
+            },
+            PatternTemplate {
+                pattern: vec!["meeting".to_string()],
+                prediction: "collaborative work session".to_string(),
+                confidence: 0.8,
+            },
+            PatternTemplate {
+                pattern: vec!["office".to_string()],
+                prediction: "workplace activity".to_string(),
+                confidence: 0.75,
+            },
+            PatternTemplate {
+                pattern: vec!["calendar".to_string()],
+                prediction: "scheduled event".to_string(),
+                confidence: 0.7,
+            },
+            PatternTemplate {
+                pattern: vec!["breakfast".to_string()],
+                prediction: "morning meal preparation".to_string(),
                 confidence: 0.85,
             },
             PatternTemplate {

@@ -159,14 +159,14 @@ impl PrometheusMonitoringImpl {
 
 #[cfg(feature = "monitoring")]
 impl Monitoring for PrometheusMonitoringImpl {
-    fn record_counter(&self, name: &str, value: u64, labels: &[(String, String)]) {
+    fn record_counter(&self, _name: &str, value: u64, _labels: &[(String, String)]) {
         // Map to MetricsRegistry counter
         // Note: MetricsRegistry uses static str, so we can't directly use dynamic names
         // This is a limitation we'll need to address in future refactoring
         self.metrics.increment_counter("custom_counter", value);
     }
     
-    fn record_gauge(&self, name: &str, value: f64, labels: &[(String, String)]) {
+    fn record_gauge(&self, _name: &str, _value: f64, _labels: &[(String, String)]) {
         // MetricsRegistry doesn't have direct gauge support, use cognitive metrics
         use crate::metrics::cognitive::{CognitiveMetric, CalibrationCorrection};
         self.metrics.record_cognitive(CognitiveMetric::ConfidenceCalibration {
@@ -174,7 +174,7 @@ impl Monitoring for PrometheusMonitoringImpl {
         });
     }
     
-    fn record_histogram(&self, name: &str, value: f64, labels: &[(String, String)]) {
+    fn record_histogram(&self, _name: &str, value: f64, _labels: &[(String, String)]) {
         self.metrics.observe_histogram("custom_histogram", value);
     }
     
@@ -186,7 +186,7 @@ impl Monitoring for PrometheusMonitoringImpl {
         })
     }
     
-    fn get_metric(&self, name: &str) -> MonitoringResult<MetricValue> {
+    fn get_metric(&self, _name: &str) -> MonitoringResult<MetricValue> {
         // MetricsRegistry doesn't expose query methods yet
         Ok(MetricValue::Counter(0))
     }

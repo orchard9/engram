@@ -10,6 +10,7 @@ pub struct LockFreeHashIndex {
 }
 
 impl LockFreeHashIndex {
+    /// Create a new lock-free hash index
     pub fn new() -> Self {
         Self { _placeholder: true }
     }

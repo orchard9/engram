@@ -1,6 +1,6 @@
 //! Core traits for memory backend implementations
 
-use crate::{Confidence, Cue};
+use crate::Cue;
 use crate::memory::Memory;
 use std::sync::Arc;
 use thiserror::Error;
@@ -62,8 +62,8 @@ pub trait MemoryBackend: Send + Sync {
     /// Recall memories based on a cue
     fn recall(&self, cue: &Cue) -> Result<Vec<Arc<Memory>>, MemoryError> {
         match &cue.cue_type {
-            crate::CueType::Embedding { vec, .. } => {
-                let results = self.search(vec, cue.max_results)?;
+            crate::CueType::Embedding { vector, .. } => {
+                let results = self.search(vector, cue.max_results)?;
                 let mut memories = Vec::new();
                 for (id, score) in results {
                     if score >= cue.result_threshold.raw() {

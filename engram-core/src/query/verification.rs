@@ -36,7 +36,7 @@ impl QueryVerifier {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Confidence, CueType, Episode, Memory};
+    use crate::{Confidence, Episode};
     use chrono::Utc;
 
     #[test]

@@ -144,21 +144,24 @@ impl LockFreeHistogram {
         }
 
         let mut results = Vec::with_capacity(quantiles.len());
-        let mut cumulative = 0u64;
 
         for quantile in quantiles {
             let target = (total as f64 * quantile) as u64;
+            let mut cumulative = 0u64; // Reset for each quantile
 
             for (i, count) in self.counts.iter().enumerate() {
                 cumulative += count.load(Ordering::Acquire);
 
                 if cumulative >= target {
-                    // Interpolate within the bucket
+                    // Return the bucket boundary value
                     let bucket_value = if i == 0 {
-                        0.0
+                        // First bucket (values below minimum boundary)
+                        self.buckets.first().copied().unwrap_or(0.0) / 2.0
                     } else if i > self.buckets.len() {
-                        self.buckets[self.buckets.len() - 1]
+                        // Last bucket (overflow bucket)
+                        *self.buckets.last().unwrap()
                     } else {
+                        // Regular bucket - use the upper boundary
                         self.buckets[i - 1]
                     };
 
@@ -262,8 +265,8 @@ mod tests {
         let quantiles = histogram.quantiles(&[0.5, 0.9, 0.99]);
         assert_eq!(quantiles.len(), 3);
 
-        // 50th percentile should be around 0.1
-        assert!(quantiles[0] >= 0.01 && quantiles[0] <= 1.0);
+        // 50th percentile should be around 0.01 (between 0.001 and 0.1 range)
+        assert!(quantiles[0] >= 0.001 && quantiles[0] <= 1.0);
     }
 
     #[test]

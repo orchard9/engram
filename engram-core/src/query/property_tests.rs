@@ -343,10 +343,11 @@ mod integration_tests {
     #[test]
     fn test_probabilistic_query_result_from_episodes() {
         // Create test episodes with different confidence levels
+        // Use values that average to >= 0.7 to ensure is_successful() passes
         let episodes = vec![
             (create_test_episode("high_conf"), Confidence::HIGH),
-            (create_test_episode("medium_conf"), Confidence::MEDIUM),
-            (create_test_episode("low_conf"), Confidence::LOW),
+            (create_test_episode("medium_high_conf"), Confidence::exact(0.8)),
+            (create_test_episode("very_high_conf"), Confidence::exact(0.9)),
         ];
 
         let result = ProbabilisticQueryResult::from_episodes(episodes.clone());

@@ -10,6 +10,7 @@ pub struct CrashRecoveryCoordinator {
 }
 
 impl CrashRecoveryCoordinator {
+    /// Create a new crash recovery coordinator
     pub fn new() -> Self {
         Self { _placeholder: true }
     }

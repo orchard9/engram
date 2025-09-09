@@ -378,7 +378,7 @@ async fn test_cli_config_path() {
 async fn test_health_endpoint_during_startup() {
     use rand::Rng;
     use std::process::Stdio;
-    use tokio::io::AsyncBufReadExt;
+    // use tokio::io::AsyncBufReadExt; // Currently unused
     use tokio::process::Command as TokioCommand;
 
     // Find an available port

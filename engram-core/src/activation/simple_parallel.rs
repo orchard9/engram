@@ -5,7 +5,7 @@
 
 use crate::activation::{
     ActivationError, ActivationRecord, ActivationResult, ActivationTask, MemoryGraph, NodeId,
-    ParallelSpreadingConfig, SpreadingMetrics, ActivationGraphExt,
+    ParallelSpreadingConfig, SpreadingMetrics,
 };
 use crossbeam_queue::SegQueue;
 use dashmap::DashMap;
@@ -77,14 +77,18 @@ impl SimpleParallelEngine {
             self.activation_records.insert(node_id.clone(), record);
 
             // Create tasks for neighbors
-            if let Some(neighbors) = self.memory_graph.get_neighbors(node_id) {
+            use uuid::Uuid;
+            let node_uuid = Uuid::new_v5(&Uuid::NAMESPACE_OID, node_id.as_bytes());
+            if let Ok(neighbors) = self.memory_graph.get_neighbors(&node_uuid) {
                 let decay_factor = self.config.decay_function.apply(1);
 
-                for edge in neighbors {
+                for (neighbor_id, weight) in neighbors {
+                    // Convert UUID back to String for NodeId
+                    let neighbor_node_id = neighbor_id.to_string();
                     let task = ActivationTask::new(
-                        edge.target,
+                        neighbor_node_id,
                         *initial_activation,
-                        edge.weight,
+                        weight,
                         decay_factor,
                         1,
                         self.config.max_depth,
@@ -166,14 +170,17 @@ impl SimpleParallelEngine {
 
         // Continue spreading if appropriate
         if task.should_continue() {
-            if let Some(neighbors) = memory_graph.get_neighbors(&task.target_node) {
+            use uuid::Uuid;
+            let node_uuid = Uuid::new_v5(&Uuid::NAMESPACE_OID, task.target_node.as_bytes());
+            if let Ok(neighbors) = memory_graph.get_neighbors(&node_uuid) {
                 let decay_factor = config.decay_function.apply(task.depth + 1);
 
-                for edge in neighbors {
+                for (neighbor_id, weight) in neighbors {
+                    let neighbor_node_id = neighbor_id.to_string();
                     let new_task = ActivationTask::new(
-                        edge.target.clone(),
+                        neighbor_node_id,
                         record.get_activation(),
-                        edge.weight,
+                        weight,
                         decay_factor,
                         task.depth + 1,
                         task.max_depth,
@@ -247,13 +254,13 @@ impl SimpleParallelEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::activation::EdgeType;
+    use crate::activation::{EdgeType, ActivationGraphExt};
 
     fn create_test_graph() -> Arc<MemoryGraph> {
-        let graph = Arc::new(MemoryGraph::new());
-        graph.add_edge("A".to_string(), "B".to_string(), 0.8, EdgeType::Excitatory);
-        graph.add_edge("B".to_string(), "C".to_string(), 0.6, EdgeType::Excitatory);
-        graph.add_edge("A".to_string(), "C".to_string(), 0.4, EdgeType::Excitatory);
+        let graph = Arc::new(crate::activation::create_activation_graph());
+        ActivationGraphExt::add_edge(&*graph, "A".to_string(), "B".to_string(), 0.8, EdgeType::Excitatory);
+        ActivationGraphExt::add_edge(&*graph, "B".to_string(), "C".to_string(), 0.6, EdgeType::Excitatory);
+        ActivationGraphExt::add_edge(&*graph, "A".to_string(), "C".to_string(), 0.4, EdgeType::Excitatory);
         graph
     }
 

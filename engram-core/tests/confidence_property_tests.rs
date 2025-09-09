@@ -15,13 +15,13 @@ fn confidence_strategy() -> impl Strategy<Value = Confidence> {
 /// Generator for arbitrary f32 values (including invalid ones for robustness testing)
 /// Tests that the type handles invalid inputs gracefully by clamping to [0,1]
 fn arbitrary_f32_strategy() -> impl Strategy<Value = f32> {
-    (-1000.0f32..1000.0f32)
+    -1000.0f32..1000.0f32
 }
 
 /// Generator for weighted combination parameters
 /// Tests realistic weighting scenarios developers would encounter
 fn weight_strategy() -> impl Strategy<Value = f32> {
-    (0.0f32..10.0f32)
+    0.0f32..10.0f32
 }
 
 /// Generator for frequency-based confidence construction (successes, total)
@@ -32,7 +32,7 @@ fn frequency_strategy() -> impl Strategy<Value = (u32, u32)> {
 
 /// Generator for percentage values that developers commonly use
 fn percentage_strategy() -> impl Strategy<Value = u8> {
-    (0u8..=150u8) // Include invalid percentages to test robustness
+    0u8..=150u8 // Include invalid percentages to test robustness
 }
 
 proptest! {

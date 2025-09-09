@@ -228,11 +228,9 @@ impl MemoryBackend for InfallibleBackend {
         // Search hot memories first (higher quality)
         for entry in self.hot_memories.iter() {
             let (id, memory) = entry.pair();
-            if let Some(mem_emb) = &memory.embedding {
-                if mem_emb.len() == embedding.len() {
-                    let similarity = cosine_similarity(embedding, mem_emb);
-                    results.push((*id, similarity));
-                }
+            if memory.embedding.len() == embedding.len() {
+                let similarity = cosine_similarity(embedding, &memory.embedding);
+                results.push((*id, similarity));
             }
         }
         
@@ -240,11 +238,9 @@ impl MemoryBackend for InfallibleBackend {
         if results.len() < k {
             let cold = self.cold_memories.read();
             for ((_, id), memory) in cold.iter().take(k * 2) { // Sample cold storage
-                if let Some(mem_emb) = &memory.embedding {
-                    if mem_emb.len() == embedding.len() {
-                        let similarity = cosine_similarity(embedding, mem_emb);
-                        results.push((*id, similarity));
-                    }
+                if memory.embedding.len() == embedding.len() {
+                    let similarity = cosine_similarity(embedding, &memory.embedding);
+                    results.push((*id, similarity));
                 }
             }
         }
@@ -371,14 +367,14 @@ impl GraphBackend for InfallibleBackend {
     }
     
     fn all_edges(&self) -> Result<Vec<(Uuid, Uuid, f32)>, MemoryError> {
-        let edges: Vec<_> = self.edges.iter()
-            .flat_map(|entry| {
-                let from = *entry.key();
-                entry.value().iter().map(move |(to, weight)| {
-                    (from, *to, *weight)
-                })
-            })
-            .collect();
+        let mut edges = Vec::new();
+        
+        for entry in self.edges.iter() {
+            let from = *entry.key();
+            for (to, weight) in entry.value().iter() {
+                edges.push((from, *to, *weight));
+            }
+        }
         
         self.record_quality(1.0);
         Ok(edges)

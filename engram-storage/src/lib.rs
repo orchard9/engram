@@ -13,51 +13,75 @@ pub enum StorageError {
     #[error(
         "Storage operation failed: {reason}\n  Context: {context}\n  Suggestion: {suggestion}\n  Example: {example}"
     )]
+    /// Storage operation failed with detailed context
     OperationFailed {
+        /// Reason for the operation failure
         reason: String,
+        /// Context where the operation failed
         context: String,
+        /// Suggested fix for the issue
         suggestion: String,
+        /// Example of correct usage
         example: String,
     },
 
     #[error(
         "Node '{id}' not found in {tier} tier\n  Expected: Node stored in current or accessible tier\n  Suggestion: Check if node was migrated to {suggested_tier} tier or use storage.find_node_any_tier()\n  Example: let node = storage.get_node_or_migrate(\"{id}\").await?;"
     )]
+    /// Node not found in the specified storage tier
     NodeNotFound {
+        /// ID of the node that was not found
         id: String,
+        /// Tier where the node was searched
         tier: String,
+        /// Suggested tier where the node might be found
         suggested_tier: String,
     },
 
     #[error(
         "Migration from {from_tier} to {to_tier} tier failed: {reason}\n  Expected: Successful data transfer between tiers\n  Suggestion: {suggestion}\n  Example: storage.check_tier_capacity().await?; storage.migrate_with_retry(node).await?;"
     )]
+    /// Migration between storage tiers failed
     MigrationFailed {
+        /// Source tier for the migration
         from_tier: String,
+        /// Destination tier for the migration
         to_tier: String,
+        /// Reason for migration failure
         reason: String,
+        /// Suggested fix for the migration issue
         suggestion: String,
     },
 
     #[error(
         "Serialization failed for {data_type}: {context}\n  Expected: Valid serializable data structure\n  Suggestion: Check for NaN/Infinity in embeddings or use validate_serializable()\n  Example: node.validate_serializable()?.serialize()"
     )]
+    /// Serialization of data failed
     SerializationError {
+        /// Type of data being serialized
         data_type: String,
+        /// Context where serialization failed
         context: String,
         #[source]
+        /// The underlying serialization error
         source: bincode::Error,
     },
 
     #[error(
         "IO operation failed: {operation}\n  Expected: {expected}\n  Suggestion: {suggestion}\n  Example: {example}"
     )]
+    /// IO operation failed
     IoError {
+        /// The IO operation that failed
         operation: String,
+        /// What was expected to happen
         expected: String,
+        /// Suggested fix for the issue
         suggestion: String,
+        /// Example of correct usage
         example: String,
         #[source]
+        /// The underlying IO error
         source: std::io::Error,
     },
 }

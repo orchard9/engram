@@ -34,13 +34,21 @@ pub struct EmbeddingBlock {
     pub embedding: [f32; 768],
 
     /// Metadata co-located for cache efficiency (1 cache line)
+    /// Confidence score of the memory (0.0 to 1.0)
     pub confidence: f32,
+    /// Current activation level (0.0 to 1.0)
     pub activation: f32,
+    /// Timestamp of last access for LRU eviction
     pub last_access: u64,
+    /// Decay rate for memory strength over time
     pub decay_rate: f32,
+    /// Node-specific flags for graph operations
     pub node_flags: u32,
+    /// Hash of memory content for integrity verification
     pub content_hash: u64,
+    /// Creation timestamp in nanoseconds since UNIX epoch
     pub creation_time: u64,
+    /// Number of times this memory has been recalled
     pub recall_count: u32,
 
     /// Padding to complete cache line
@@ -48,6 +56,7 @@ pub struct EmbeddingBlock {
 }
 
 impl EmbeddingBlock {
+    /// Create a new embedding block from a Memory instance
     pub fn new(memory: &Memory) -> Self {
         Self {
             embedding: memory.embedding,
@@ -106,11 +115,13 @@ impl EmbeddingBlock {
         }
     }
 
+    /// Prefetch only hot cache line for activation spreading (no-op on non-x86_64)
     #[cfg(not(all(feature = "memory_mapped_persistence", target_arch = "x86_64")))]
     pub fn prefetch_for_activation(&self) {
         // No-op on non-x86_64 platforms
     }
 
+    /// Prefetch embedding cache lines for SIMD operations (no-op on non-x86_64)
     #[cfg(not(all(feature = "memory_mapped_persistence", target_arch = "x86_64")))]
     pub fn prefetch_for_similarity(&self) {
         // No-op on non-x86_64 platforms
@@ -120,22 +131,33 @@ impl EmbeddingBlock {
 /// Memory-mapped file header for metadata
 #[repr(C)]
 pub struct MappedFileHeader {
+    /// Magic number for file format identification
     pub magic: u64,
+    /// File format version number
     pub version: u32,
+    /// Number of entries stored in the file
     pub entry_count: u32,
+    /// Size of each entry in bytes
     pub entry_size: u32,
+    /// Size of this header structure in bytes
     pub header_size: u32,
+    /// Timestamp when the file was created (nanoseconds since UNIX epoch)
     pub created_at: u64,
+    /// Timestamp when the file was last modified (nanoseconds since UNIX epoch)
     pub last_modified: u64,
+    /// Checksum of file contents for integrity verification
     pub checksum: u32,
+    /// File-specific flags and options
     pub flags: u32,
+    /// Reserved space for future extensions
     pub reserved: [u64; 6],
 }
 
-const MAPPED_FILE_MAGIC: u64 = 0x454E4752414D4D41; // "ENGRAMMA"
+const MAPPED_FILE_MAGIC: u64 = 0x454E_4752_414D_4D41; // "ENGRAMMA"
 const CURRENT_VERSION: u32 = 1;
 
 impl MappedFileHeader {
+    /// Create a new mapped file header with the specified parameters
     pub fn new(entry_count: u32, entry_size: u32) -> Self {
         let now = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -156,6 +178,7 @@ impl MappedFileHeader {
         }
     }
 
+    /// Validate the header for corruption and version compatibility
     pub fn validate(&self) -> StorageResult<()> {
         if self.magic != MAPPED_FILE_MAGIC {
             return Err(StorageError::CorruptionDetected(format!(
@@ -175,6 +198,7 @@ impl MappedFileHeader {
     }
 
     #[cfg(feature = "memory_mapped_persistence")]
+    /// Compute CRC32 checksum of the provided data
     pub fn compute_checksum(&self, data: &[u8]) -> u32 {
         let mut combined = Vec::new();
 
@@ -241,7 +265,15 @@ impl MappedWarmStorage {
         #[cfg(all(feature = "memory_mapped_persistence", unix))]
         let numa_topology = Arc::new(
             super::numa::NumaTopology::detect()
-                .unwrap_or_else(|_| super::numa::NumaTopology::detect().unwrap()),
+                .unwrap_or_else(|e| {
+                    tracing::warn!("Failed to detect NUMA topology: {}, using default", e);
+                    super::numa::NumaTopology::detect()
+                        .unwrap_or_else(|_| {
+                            // Fallback to single NUMA node if detection fails completely
+                            tracing::info!("NUMA detection failed completely, assuming single node");
+                            super::numa::NumaTopology::single_node()
+                        })
+                }),
         );
 
         let mut storage = Self {
@@ -371,7 +403,15 @@ impl MappedWarmStorage {
         #[cfg(all(feature = "memory_mapped_persistence", unix))]
         let numa_topology = Arc::new(
             super::numa::NumaTopology::detect()
-                .unwrap_or_else(|_| super::numa::NumaTopology::detect().unwrap()),
+                .unwrap_or_else(|e| {
+                    tracing::warn!("Failed to detect NUMA topology: {}, using default", e);
+                    super::numa::NumaTopology::detect()
+                        .unwrap_or_else(|_| {
+                            // Fallback to single NUMA node if detection fails completely
+                            tracing::info!("NUMA detection failed completely, assuming single node");
+                            super::numa::NumaTopology::single_node()
+                        })
+                }),
         );
 
         Ok(Self {
@@ -602,13 +642,16 @@ impl StorageTier for MappedWarmStorage {
     }
 }
 
+// Note: MappedWarmStorage uses async interface which doesn't work well with
+// the synchronous Storage trait. The feature system falls back to NullStorage.
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::TempDir;
 
     fn create_test_memory() -> Arc<Memory> {
-        use crate::{EpisodeBuilder, MemoryBuilder};
+        use crate::EpisodeBuilder;
         use chrono::Utc;
 
         let episode = EpisodeBuilder::new()

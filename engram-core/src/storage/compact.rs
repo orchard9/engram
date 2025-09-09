@@ -11,6 +11,7 @@ pub struct BackgroundCompactor {
 }
 
 impl BackgroundCompactor {
+    /// Create a new background compactor instance
     pub fn new() -> Self {
         Self { _placeholder: true }
     }

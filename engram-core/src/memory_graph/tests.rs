@@ -10,12 +10,27 @@ mod migration_tests {
         UnifiedMemoryGraph, HashMapBackend, DashMapBackend, InfallibleBackend,
         GraphConfig, MemoryBackend, GraphBackend,
     };
-    use crate::memory::{Memory, Episode};
+    use crate::memory::{Memory, MemoryBuilder};
     use crate::{Confidence, Cue, CueType};
     use uuid::Uuid;
     use std::sync::Arc;
     use std::thread;
-    use std::time::Duration;
+    
+    /// Helper function to create a memory with a uniform embedding
+    fn create_memory(id: &str, value: f32, confidence: Confidence) -> Memory {
+        let mut embedding = [0.0; 768];
+        embedding.iter_mut().for_each(|v| *v = value);
+        Memory::new(id.to_string(), embedding, confidence)
+    }
+    
+    /// Helper function to create a memory with a specific embedding pattern
+    fn create_memory_with_embedding(id: &str, embedding: Vec<f32>, confidence: Confidence) -> Memory {
+        let mut arr = [0.0; 768];
+        for (i, &v) in embedding.iter().enumerate().take(768) {
+            arr[i] = v;
+        }
+        Memory::new(id.to_string(), arr, confidence)
+    }
 
     /// Test that the deprecated MemoryGraph still works during migration
     #[test]
@@ -26,12 +41,16 @@ mod migration_tests {
         
         let mut old_graph = MemoryGraph::new();
         
+        use std::time::SystemTime;
         let node = MemoryNode {
             id: "test_node".to_string(),
-            content: "test content".to_string(),
-            embedding: vec![0.1; 768],
+            content: "test content".as_bytes().to_vec(),
+            embedding: Some(vec![0.1; 768]),
             activation: 0.8,
-            timestamp: chrono::Utc::now(),
+            created_at: SystemTime::now(),
+            last_accessed: SystemTime::now(),
+            confidence: Confidence::HIGH,
+            _state: std::marker::PhantomData,
         };
         
         old_graph.store(node.clone());
@@ -39,13 +58,15 @@ mod migration_tests {
         
         let retrieved = old_graph.get("test_node");
         assert!(retrieved.is_some());
-        assert_eq!(retrieved.unwrap().content, "test content");
+        assert_eq!(retrieved.unwrap().content, "test content".as_bytes().to_vec());
     }
     
     /// Test that all backends produce equivalent results for basic operations
     #[test]
     fn test_backend_equivalence() {
-        let memory = Memory::episodic("test memory", vec![0.1; 768], Confidence::HIGH);
+        let mut embedding = [0.0; 768];
+        embedding.iter_mut().for_each(|v| *v = 0.1);
+        let memory = Memory::new("test_memory".to_string(), embedding, Confidence::HIGH);
         
         // Create graphs with different backends
         let hashmap_graph = UnifiedMemoryGraph::new(
@@ -91,7 +112,7 @@ mod migration_tests {
         for i in 0..10 {
             let graph_clone = graph.clone();
             let handle = thread::spawn(move || {
-                let memory = Memory::episodic(
+                let memory = create_memory_with_embedding(
                     &format!("memory_{}", i),
                     vec![i as f32; 768],
                     Confidence::MEDIUM
@@ -124,8 +145,13 @@ mod migration_tests {
         );
         
         // Store two memories
-        let memory1 = Memory::episodic("memory1", vec![0.1; 768], Confidence::HIGH);
-        let memory2 = Memory::episodic("memory2", vec![0.2; 768], Confidence::HIGH);
+        let mut embedding1 = [0.0; 768];
+        embedding1.iter_mut().for_each(|v| *v = 0.1);
+        let memory1 = Memory::new("memory1".to_string(), embedding1, Confidence::HIGH);
+        
+        let mut embedding2 = [0.0; 768];
+        embedding2.iter_mut().for_each(|v| *v = 0.2);
+        let memory2 = Memory::new("memory2".to_string(), embedding2, Confidence::HIGH);
         
         let id1 = graph.store_memory(memory1).unwrap();
         let id2 = graph.store_memory(memory2).unwrap();
@@ -152,9 +178,9 @@ mod migration_tests {
         let embedding2 = vec![0.9, 0.1, 0.0];
         let embedding3 = vec![0.0, 0.0, 1.0];
         
-        let memory1 = Memory::episodic("similar1", embedding1.clone(), Confidence::HIGH);
-        let memory2 = Memory::episodic("similar2", embedding2.clone(), Confidence::HIGH);
-        let memory3 = Memory::episodic("different", embedding3.clone(), Confidence::HIGH);
+        let memory1 = create_memory_with_embedding("similar1", embedding1.clone(), Confidence::HIGH);
+        let memory2 = create_memory_with_embedding("similar2", embedding2.clone(), Confidence::HIGH);
+        let memory3 = create_memory_with_embedding("different", embedding3.clone(), Confidence::HIGH);
         
         // Test with HashMap backend
         let graph = UnifiedMemoryGraph::new(
@@ -167,7 +193,12 @@ mod migration_tests {
         graph.store_memory(memory3.clone()).unwrap();
         
         // Search for similar memories
-        let results = graph.similarity_search(&embedding1, 2, Confidence::LOW).unwrap();
+        // Need to create a 768-dimensional array for the query
+        let mut query_embedding = [0.0; 768];
+        for (i, &v) in embedding1.iter().enumerate().take(768) {
+            query_embedding[i] = v;
+        }
+        let results = graph.similarity_search(&query_embedding, 2, Confidence::LOW).unwrap();
         
         // Should find the two similar memories
         assert_eq!(results.len(), 2);
@@ -184,7 +215,7 @@ mod migration_tests {
         
         // Store more memories than capacity
         for i in 0..10 {
-            let memory = Memory::episodic(
+            let memory = create_memory_with_embedding(
                 &format!("memory_{}", i),
                 vec![i as f32; 768],
                 Confidence::MEDIUM
@@ -209,23 +240,35 @@ mod migration_tests {
         for i in 0..5 {
             let mut embedding = vec![0.0; 768];
             embedding[i] = 1.0;
-            let memory = Memory::episodic(
-                &format!("memory_{}", i),
-                embedding,
-                Confidence::HIGH
-            );
+            let id = format!("memory_{}", i);
+            let memory = MemoryBuilder::new()
+                .id(id.clone())
+                .embedding({
+                    let mut arr = [0.0; 768];
+                    for (idx, &v) in embedding.iter().enumerate().take(768) {
+                        arr[idx] = v;
+                    }
+                    arr
+                })
+                .confidence(Confidence::HIGH)
+                .content(id.clone())  // Set content to match the ID
+                .build();
             graph.store_memory(memory).unwrap();
         }
         
         // Create cue for recall
-        let mut target_embedding = vec![0.0; 768];
+        let mut target_embedding = [0.0; 768];
         target_embedding[2] = 1.0;
         
         let cue = Cue {
-            cue_type: CueType::Embedding(target_embedding),
+            id: "test_cue".to_string(),
+            cue_type: CueType::Embedding {
+                vector: target_embedding,
+                threshold: Confidence::LOW,
+            },
+            cue_confidence: Confidence::HIGH,
             result_threshold: Confidence::LOW,
             max_results: 3,
-            spread_activation: false,
         };
         
         let recalled = graph.recall(&cue).unwrap();
@@ -234,7 +277,7 @@ mod migration_tests {
         assert!(!recalled.is_empty());
         
         // The best match should be memory_2
-        assert!(recalled[0].content.contains("memory_2"));
+        assert!(recalled[0].content.as_ref().map_or(false, |c| c.contains("memory_2")));
     }
     
     /// Test that the new architecture doesn't break existing functionality
@@ -247,7 +290,7 @@ mod migration_tests {
         let concurrent = create_concurrent_graph();
         
         // Both should work correctly
-        let memory = Memory::episodic("test", vec![0.5; 768], Confidence::MEDIUM);
+        let memory = create_memory_with_embedding("test", vec![0.5; 768], Confidence::MEDIUM);
         
         let id1 = simple.store_memory(memory.clone()).unwrap();
         let id2 = concurrent.store_memory(memory).unwrap();
@@ -264,7 +307,7 @@ mod migration_tests {
         
         let memory_count = 1000;
         let memories: Vec<Memory> = (0..memory_count)
-            .map(|i| Memory::episodic(
+            .map(|i| create_memory_with_embedding(
                 &format!("memory_{}", i),
                 vec![i as f32 / memory_count as f32; 768],
                 Confidence::MEDIUM

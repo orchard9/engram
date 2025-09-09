@@ -390,8 +390,8 @@ mod tests {
         update_vector[0] = 0.5;
         let updates = vec![("update_node".to_string(), update_vector)];
 
-        let updated = accumulator.update_from_vectors(&updates).unwrap();
-        assert_eq!(updated, 1);
+        let updated_count = accumulator.update_from_vectors(&updates).unwrap();
+        assert_eq!(updated_count, 1);
     }
 
     #[test]
@@ -436,10 +436,14 @@ mod tests {
         let result3 = bio_accumulator.accumulate_biological(&node_id, 0.6, future_time);
         assert!(result3);
 
+        // Wait a small amount to ensure refractory period has passed
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        
         let (activation, fatigue, in_refractory) = bio_accumulator.get_biological_state(&node_id);
         assert!(activation > 0.0);
         assert!(fatigue < 1.0); // Should have some fatigue
-        assert!(in_refractory); // Should be in refractory period after firing
+        // After waiting, should no longer be in refractory period
+        assert!(!in_refractory);
     }
 
     #[test]

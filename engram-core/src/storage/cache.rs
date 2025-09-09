@@ -25,12 +25,19 @@ use super::numa::{NumaAllocator, NumaMemoryMap};
 pub struct CacheOptimalMemoryNode {
     /// Hot data: accessed on every activation (exactly 64 bytes = 1 cache line)
     pub id_hash: u64, // Fast comparison hash, 8 bytes
+    /// Current activation level (0.0 to 1.0)
     pub activation: AtomicF32,  // Current activation level, 4 bytes
+    /// Memory confidence score (0.0 to 1.0)
     pub confidence: f32,        // Memory confidence, 4 bytes
+    /// Timestamp of last access for LRU eviction
     pub last_access: AtomicU64, // Timestamp for LRU, 8 bytes
+    /// Bitfield containing node state and type information
     pub node_flags: AtomicU32,  // State and type flags, 4 bytes
+    /// Number of outgoing edges from this memory node
     pub edges_count: AtomicU32, // Number of outgoing edges, 4 bytes
+    /// Pointer to the full Memory object in storage
     pub memory_ptr: AtomicU64,  // Pointer to full Memory object, 8 bytes
+    /// Padding to align hot data to exactly 64 bytes
     pub _hot_padding: [u8; 24], // Pad to exactly 64 bytes
 
     /// Warm data: accessed during recall operations (768*4 = 3072 bytes = 48 cache lines)
@@ -38,12 +45,19 @@ pub struct CacheOptimalMemoryNode {
 
     /// Cold data: accessed during maintenance (exactly 64 bytes = 1 cache line)
     pub decay_rate: f32, // Forgetting curve parameter, 4 bytes
+    /// Timestamp when this memory was originally created
     pub creation_time: u64,      // Original encoding time, 8 bytes
+    /// Counter tracking how many times this memory was recalled
     pub recall_count: AtomicU32, // Access frequency counter, 4 bytes
+    /// Hash of memory content for deduplication
     pub content_hash: u64,       // For deduplication, 8 bytes
+    /// Offset to the list of outgoing edges
     pub edges_offset: AtomicU64, // Offset to edge list, 8 bytes
+    /// Pointer to backup storage location
     pub backup_ptr: AtomicU64,   // Backup storage pointer, 8 bytes
+    /// Schema identifier for memory type information
     pub schema_id: u32,          // Memory schema type, 4 bytes
+    /// Padding to align cold data to exactly 64 bytes
     pub _cold_padding: [u8; 12], // Pad to exactly 64 bytes
 }
 
@@ -136,14 +150,17 @@ impl CacheOptimalMemoryNode {
 
     #[cfg(not(all(feature = "memory_mapped_persistence", target_arch = "x86_64")))]
     #[inline]
+    /// Prefetch hot data (no-op on non-x86_64 platforms)
     pub fn prefetch_hot(&self) {}
 
     #[cfg(not(all(feature = "memory_mapped_persistence", target_arch = "x86_64")))]
     #[inline]
+    /// Prefetch warm data (no-op on non-x86_64 platforms)
     pub fn prefetch_warm(&self) {}
 
     #[cfg(not(all(feature = "memory_mapped_persistence", target_arch = "x86_64")))]
     #[inline]
+    /// Prefetch cold data (no-op on non-x86_64 platforms)
     pub fn prefetch_cold(&self) {}
 
     /// Update activation level atomically
@@ -171,7 +188,7 @@ impl CacheOptimalMemoryNode {
 
         // Check age and activation level
         let age_ms = (current_time - last_access) / 1_000_000; // Convert to milliseconds
-        age_ms > 3600_000 || activation < threshold // 1 hour or below threshold
+        age_ms > 3_600_000 || activation < threshold // 1 hour or below threshold
     }
 }
 
@@ -288,7 +305,7 @@ impl CognitiveIndex {
             } else {
                 // Check if this is the same memory (update case)
                 let (existing_hash, existing_offset) = self.unpack_hash_offset(current);
-                if existing_hash == id_hash {
+                if existing_hash == (id_hash >> 32) {
                     // Found existing entry - update in place
                     unsafe {
                         let node_ptr = self.node_ptr_mut(existing_offset);
@@ -322,7 +339,7 @@ impl CognitiveIndex {
             }
 
             let (hash, offset) = self.unpack_hash_offset(current);
-            if hash == id_hash {
+            if hash == (id_hash >> 32) {
                 // Found it
                 unsafe {
                     let node_ptr = self.node_ptr(offset);
@@ -355,7 +372,7 @@ impl CognitiveIndex {
             }
 
             let (hash, offset) = self.unpack_hash_offset(current);
-            if hash == id_hash {
+            if hash == (id_hash >> 32) {
                 // Found it - try to remove
                 match slot.compare_exchange_weak(current, 0, Ordering::AcqRel, Ordering::Acquire) {
                     Ok(_) => {
@@ -437,14 +454,15 @@ impl CognitiveIndex {
 
     /// Pack hash and offset into single u64
     fn pack_hash_offset(&self, hash: u64, offset: u64) -> u64 {
-        (hash << 32) | (offset & 0xFFFFFFFF)
+        let hash_upper = hash >> 32; // Use upper 32 bits of hash
+        (hash_upper << 32) | (offset & 0xFFFF_FFFF)
     }
 
     /// Unpack hash and offset from u64
     fn unpack_hash_offset(&self, packed: u64) -> (u64, u64) {
-        let hash = packed >> 32;
-        let offset = packed & 0xFFFFFFFF;
-        (hash, offset)
+        let hash_upper = packed >> 32;
+        let offset = packed & 0xFFFF_FFFF;
+        (hash_upper, offset)
     }
 
     /// Get pointer to node at offset
@@ -453,12 +471,12 @@ impl CognitiveIndex {
 
         #[cfg(all(feature = "memory_mapped_persistence", unix))]
         {
-            self.nodes.as_ptr().add(offset as usize * node_size) as *const CacheOptimalMemoryNode
+            (unsafe { self.nodes.as_ptr().add(offset as usize * node_size) }) as *const CacheOptimalMemoryNode
         }
 
         #[cfg(not(all(feature = "memory_mapped_persistence", unix)))]
         {
-            self.nodes.as_ptr().add(offset as usize * node_size) as *const CacheOptimalMemoryNode
+            (unsafe { self.nodes.as_ptr().add(offset as usize * node_size) }) as *const CacheOptimalMemoryNode
         }
     }
 
@@ -468,12 +486,12 @@ impl CognitiveIndex {
 
         #[cfg(all(feature = "memory_mapped_persistence", unix))]
         {
-            self.nodes.as_ptr().add(offset as usize * node_size) as *mut CacheOptimalMemoryNode
+            (unsafe { self.nodes.as_ptr().add(offset as usize * node_size) }) as *mut CacheOptimalMemoryNode
         }
 
         #[cfg(not(all(feature = "memory_mapped_persistence", unix)))]
         {
-            self.nodes.as_ptr().add(offset as usize * node_size) as *mut CacheOptimalMemoryNode
+            (unsafe { self.nodes.as_ptr().add(offset as usize * node_size) }) as *mut CacheOptimalMemoryNode
         }
     }
 }
@@ -481,9 +499,13 @@ impl CognitiveIndex {
 /// Statistics about the index performance
 #[derive(Debug, Clone)]
 pub struct IndexStatistics {
+    /// Current number of memory nodes in the index
     pub node_count: usize,
+    /// Maximum number of nodes that can fit in the index
     pub capacity: usize,
+    /// Current load factor (node_count / capacity)
     pub load_factor: f32,
+    /// Percentage of cache hits vs total accesses
     pub cache_hit_rate: f32,
 }
 
@@ -497,6 +519,7 @@ pub struct CognitivePreloader {
 }
 
 impl CognitivePreloader {
+    /// Create a new cognitive preloader with performance metrics tracking
     pub fn new(metrics: Arc<StorageMetrics>) -> Self {
         Self {
             access_history: parking_lot::RwLock::new(Vec::with_capacity(1000)),
@@ -537,8 +560,8 @@ impl CognitivePreloader {
     }
 
     /// Prefetch predicted nodes
-    pub fn prefetch_predicted(&self, index: &CognitiveIndex, predictions: &[u64]) {
-        for &hash in predictions {
+    pub fn prefetch_predicted(&self, _index: &CognitiveIndex, predictions: &[u64]) {
+        for &_hash in predictions {
             // This would trigger prefetch of the predicted node
             // For now, just record the prediction
             self.metrics.record_cache_hit(); // Optimistic
@@ -549,7 +572,7 @@ impl CognitivePreloader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Confidence, EpisodeBuilder, MemoryBuilder};
+    use crate::{Confidence, EpisodeBuilder};
     use chrono::Utc;
 
     fn create_test_memory(id: &str) -> Arc<Memory> {

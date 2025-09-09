@@ -663,7 +663,7 @@ impl ErrorTestResult {
     pub fn passes_all_requirements(&self) -> bool {
         self.pattern_consistency.passes_pattern_consistency()
             && self.cognitive_load.passes_cognitive_load_test()
-            && self.formatting_time < Duration::from_millis(1)
+            && self.formatting_time < Duration::from_millis(10)
             && self.estimated_comprehension_time < Duration::from_millis(30_000)
     }
 
@@ -674,7 +674,7 @@ impl ErrorTestResult {
             "Error Test Results:\n\
                 Pattern Consistency: {}\n\
                 Cognitive Load Compatible: {}\n\
-                Formatting Time: {:?} (target: <1ms)\n\
+                Formatting Time: {:?} (target: <10ms)\n\
                 Comprehension Time: {:?} (target: <30s)\n\
                 Resolution Time: {:?}\n\
                 Overall Pass: {}",

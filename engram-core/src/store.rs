@@ -82,6 +82,18 @@ pub struct MemoryStore {
 
     /// Write-ahead log for durability (non-blocking)
     pub(crate) wal_buffer: Arc<DashMap<String, Episode>>,
+    
+    /// Maximum number of memories before eviction
+    max_memories: usize,
+    
+    /// Current memory count
+    memory_count: AtomicUsize,
+    
+    /// System pressure indicator
+    pressure: RwLock<f32>,
+    
+    /// Eviction queue for least-recently-used memories
+    eviction_queue: RwLock<BTreeMap<(OrderedFloat, String), Arc<Memory>>>,
 
     /// HNSW index for fast similarity search
     #[cfg(feature = "hnsw_index")]
@@ -151,6 +163,10 @@ impl MemoryStore {
             graph,
             hot_memories: DashMap::new(),
             wal_buffer: Arc::new(DashMap::new()),
+            max_memories,
+            memory_count: AtomicUsize::new(0),
+            pressure: RwLock::new(0.0),
+            eviction_queue: RwLock::new(BTreeMap::new()),
             #[cfg(feature = "hnsw_index")]
             hnsw_index: None,
             #[cfg(feature = "hnsw_index")]
@@ -286,6 +302,12 @@ impl MemoryStore {
                         tracing::warn!("WAL write failed: {}, continuing with in-memory only", e);
                         // Graceful degradation: reduce activation to indicate storage issues
                         return Activation::new(base_activation * 0.9);
+                    } else {
+                        // Record successful write to storage metrics
+                        let episode_size = std::mem::size_of::<Episode>() as u64 + 
+                                           episode.id.len() as u64 + 
+                                           episode.what.len() as u64;
+                        self.storage_metrics.record_write(episode_size);
                     }
                 }
             }
@@ -294,7 +316,7 @@ impl MemoryStore {
                 // Try to store in persistent backend asynchronously
                 // Note: In production this would be async, simplified for now
                 if let Err(e) = std::thread::spawn({
-                    let backend_clone = Arc::clone(backend);
+                    let _backend_clone = Arc::clone(backend);
                     let memory_clone = Arc::clone(&memory_arc);
                     move || {
                         // Simplified synchronous persistence
@@ -396,8 +418,23 @@ impl MemoryStore {
     /// Perform maintenance on storage tiers
     #[cfg(feature = "memory_mapped_persistence")]
     pub fn maintenance(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Perform basic maintenance operations
         if let Some(ref _backend) = self.persistent_backend {
-            tracing::info!("Would perform maintenance on persistent backend");
+            // For now, just check memory pressure and potentially trigger eviction
+            let current_count = self.memory_count.load(Ordering::Relaxed);
+            let pressure = (current_count as f32 / self.max_memories as f32).min(1.0);
+            
+            // Update pressure measurement
+            {
+                let mut p = self.pressure.write();
+                *p = pressure;
+            }
+            
+            // If under high pressure, perform maintenance eviction
+            if pressure > 0.8 {
+                // Could trigger background tier migrations here
+                tracing::info!("High memory pressure detected ({}), maintenance recommended", pressure);
+            }
         }
         Ok(())
     }
@@ -451,6 +488,14 @@ impl MemoryStore {
             if let Some(ref backend) = self.persistent_backend {
                 let results = self.recall_with_persistence(cue, backend);
 
+                // Record read operation in storage metrics
+                let bytes_read = results.iter().map(|(ep, _)| {
+                    std::mem::size_of::<Episode>() as u64 + 
+                    ep.id.len() as u64 + 
+                    ep.what.len() as u64
+                }).sum::<u64>();
+                self.storage_metrics.record_read(bytes_read);
+
                 // TODO: Add metrics when monitoring feature is properly integrated
                 #[cfg(feature = "monitoring")]
                 {
@@ -482,13 +527,25 @@ impl MemoryStore {
     fn recall_with_persistence(
         &self,
         cue: Cue,
-        backend: &Arc<CognitiveTierArchitecture>,
+        _backend: &Arc<CognitiveTierArchitecture>,
     ) -> Vec<(Episode, Confidence)> {
-        // Simplified synchronous recall for now
-        let results = {
-            tracing::info!("Would recall from persistent backend");
-            Vec::new() // Placeholder
-        };
+        // For now, use the WAL buffer as a simple persistent store
+        // In a full implementation, this would query the actual persistent tiers
+        let mut results = Vec::new();
+
+        // Search in WAL buffer (which contains persisted episodes)
+        for entry in self.wal_buffer.iter() {
+            let episode = entry.value();
+            let confidence = self.calculate_episode_confidence(episode, &cue);
+            
+            if confidence.raw() > 0.1 {  // Basic threshold
+                results.push((episode.clone(), confidence));
+            }
+        }
+
+        // Sort by confidence (highest first) and limit results
+        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        results.truncate(50); // Reasonable limit
 
         // If persistent backend returned insufficient results, supplement with in-memory
         if results.len() < cue.max_results {
@@ -507,6 +564,39 @@ impl MemoryStore {
             combined
         } else {
             results
+        }
+    }
+
+    /// Calculate confidence score for an episode matching a cue
+    #[cfg(feature = "memory_mapped_persistence")]
+    fn calculate_episode_confidence(&self, episode: &Episode, cue: &Cue) -> Confidence {
+        match &cue.cue_type {
+            CueType::Embedding { vector, threshold: _ } => {
+                let similarity = cosine_similarity(&episode.embedding, vector);
+                Confidence::exact(similarity)
+            }
+            CueType::Context { confidence_threshold, .. } => {
+                // Simple context matching based on text similarity
+                *confidence_threshold
+            }
+            CueType::Semantic { 
+                content, 
+                fuzzy_threshold: threshold 
+            } => {
+                // Simple text matching
+                let content_similarity = if episode.what.contains(content) {
+                    0.9
+                } else if episode.what.to_lowercase().contains(&content.to_lowercase()) {
+                    0.7
+                } else {
+                    threshold.raw() / 2.0  // Below threshold but non-zero
+                };
+                Confidence::exact(content_similarity)
+            }
+            CueType::Temporal { confidence_threshold, .. } => {
+                // Basic temporal confidence
+                *confidence_threshold
+            }
         }
     }
 

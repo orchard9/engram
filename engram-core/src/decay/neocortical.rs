@@ -268,12 +268,12 @@ mod tests {
         let decay = NeocorticalDecayFunction::new();
 
         // Test power law curve properties
-        let retention_0d = decay.compute_retention(Duration::from_secs(0));
+        let retention_initial = decay.compute_retention(Duration::from_secs(0));
         let retention_30d = decay.compute_retention(Duration::from_secs(30 * 86400));
         let retention_365d = decay.compute_retention(Duration::from_secs(365 * 86400));
         let retention_1095d = decay.compute_retention(Duration::from_secs(1095 * 86400));
 
-        assert_eq!(retention_0d, 1.0); // Perfect retention at t=0
+        assert_eq!(retention_initial, 1.0); // Perfect retention at t=0
         assert!(retention_30d > retention_365d); // Monotonic decay
         assert!(retention_365d > retention_1095d); // Continues to decay
 

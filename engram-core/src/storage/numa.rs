@@ -3,6 +3,9 @@
 //! This module provides NUMA topology detection and socket-local allocation
 //! for optimal memory access patterns on multi-socket systems.
 
+// Allow unsafe code for low-level memory management operations
+#![allow(unsafe_code)]
+
 use super::{StorageError, StorageResult};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -13,10 +16,15 @@ use libc;
 /// NUMA topology information
 #[derive(Debug, Clone)]
 pub struct NumaTopology {
+    /// Number of CPU sockets in the system
     pub socket_count: usize,
+    /// Number of NUMA nodes in the system
     pub node_count: usize,
+    /// Mapping from socket ID to NUMA node IDs
     pub socket_to_nodes: HashMap<usize, Vec<usize>>,
+    /// Mapping from CPU core to socket ID
     pub cpu_to_socket: HashMap<usize, usize>,
+    /// Available memory per NUMA node in MB
     pub memory_per_node_mb: Vec<usize>,
 }
 
@@ -38,6 +46,17 @@ impl NumaTopology {
                 cpu_to_socket: [(0, 0)].iter().cloned().collect(),
                 memory_per_node_mb: vec![8192], // Assume 8GB
             })
+        }
+    }
+
+    /// Create a single-node topology for fallback scenarios
+    pub fn single_node() -> Self {
+        Self {
+            socket_count: 1,
+            node_count: 1,
+            socket_to_nodes: [(0, vec![0])].iter().cloned().collect(),
+            cpu_to_socket: [(0, 0)].iter().cloned().collect(),
+            memory_per_node_mb: vec![8192], // Assume 8GB
         }
     }
 
@@ -184,7 +203,7 @@ impl NumaTopology {
     /// Suggest NUMA placement for temporal clustering
     pub fn suggest_socket_for_timestamp(&self, timestamp_ns: u64) -> usize {
         // Hash timestamp to distribute across sockets
-        let hash = timestamp_ns.wrapping_mul(0x9e3779b9);
+        let hash = timestamp_ns.wrapping_mul(0x9e37_79b9);
         (hash as usize) % self.socket_count
     }
 }
@@ -276,10 +295,10 @@ impl NumaMemoryMap {
             NumaPolicy::Default => {
                 // No special policy
             }
-            NumaPolicy::Bind(node) => {
+            NumaPolicy::Bind(_node) => {
                 #[cfg(target_os = "linux")]
                 {
-                    let nodemask = 1u64 << node;
+                    let nodemask = 1u64 << _node;
                     unsafe {
                         libc::syscall(
                             libc::SYS_mbind,
@@ -310,10 +329,10 @@ impl NumaMemoryMap {
                     }
                 }
             }
-            NumaPolicy::Preferred(node) => {
+            NumaPolicy::Preferred(_node) => {
                 #[cfg(target_os = "linux")]
                 {
-                    let nodemask = 1u64 << node;
+                    let nodemask = 1u64 << _node;
                     unsafe {
                         libc::syscall(
                             libc::SYS_mbind,
@@ -395,6 +414,7 @@ impl NumaMemoryMap {
         }
     }
 
+    /// Advise the kernel that memory will be accessed randomly
     pub fn advise_random(&self) {
         #[cfg(unix)]
         unsafe {
@@ -451,6 +471,7 @@ pub struct NumaAllocator {
 }
 
 impl NumaAllocator {
+    /// Create a new NUMA-aware allocator with the given topology
     pub fn new(topology: Arc<NumaTopology>) -> Self {
         let socket_pools = (0..topology.socket_count)
             .map(|_| parking_lot::Mutex::new(Vec::new()))
@@ -486,7 +507,7 @@ impl NumaAllocator {
     fn allocate_mapping(
         size: usize,
         alignment: usize,
-        policy: NumaPolicy,
+        _policy: NumaPolicy,
     ) -> StorageResult<*mut u8> {
         // Align size to page boundary
         let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as usize;

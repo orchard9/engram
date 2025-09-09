@@ -26,7 +26,7 @@ use std::time::{Instant, SystemTime};
 use crc32c::crc32c;
 
 /// Write-ahead log entry header (exactly 64 bytes = 1 cache line)
-#[repr(C, align(64))]
+#[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct WalEntryHeader {
     /// Magic number for corruption detection
@@ -43,11 +43,11 @@ pub struct WalEntryHeader {
     pub header_crc: u32,
     /// CRC32C checksum of payload data
     pub payload_crc: u32,
-    /// Reserved for future extensions
-    pub reserved: [u32; 8],
+    /// Reserved for future extensions - pad to exactly 64 bytes  
+    pub reserved: [u8; 20], // Account for alignment padding
 }
 
-const WAL_MAGIC: u32 = 0xDEADBEEF;
+const WAL_MAGIC: u32 = 0xDEAD_BEEF;
 const HEADER_SIZE: usize = std::mem::size_of::<WalEntryHeader>();
 
 impl WalEntryHeader {
@@ -68,7 +68,7 @@ impl WalEntryHeader {
             payload_size,
             header_crc: 0,
             payload_crc: 0,
-            reserved: [0; 8],
+            reserved: [0; 20],
         };
 
         #[cfg(feature = "memory_mapped_persistence")]
@@ -91,9 +91,7 @@ impl WalEntryHeader {
         bytes.extend_from_slice(&self.entry_type.to_le_bytes());
         bytes.extend_from_slice(&self.payload_size.to_le_bytes());
         bytes.extend_from_slice(&self.payload_crc.to_le_bytes());
-        bytes.extend_from_slice(unsafe {
-            std::slice::from_raw_parts(self.reserved.as_ptr() as *const u8, self.reserved.len() * 4)
-        });
+        bytes.extend_from_slice(&self.reserved);
 
         crc32c(&bytes)
     }
@@ -150,17 +148,95 @@ impl WalEntryHeader {
     pub fn validate_payload(&self, _payload: &[u8]) -> StorageResult<()> {
         Ok(())
     }
+    
+    /// Serialize header to bytes in little-endian format
+    pub fn to_bytes(&self) -> [u8; HEADER_SIZE] {
+        let mut bytes = [0u8; HEADER_SIZE];
+        let mut offset = 0;
+        
+        // Write each field in little-endian format
+        bytes[offset..offset + 4].copy_from_slice(&self.magic.to_le_bytes());
+        offset += 4;
+        bytes[offset..offset + 8].copy_from_slice(&self.sequence.to_le_bytes());
+        offset += 8;
+        bytes[offset..offset + 8].copy_from_slice(&self.timestamp.to_le_bytes());
+        offset += 8;
+        bytes[offset..offset + 4].copy_from_slice(&self.entry_type.to_le_bytes());
+        offset += 4;
+        bytes[offset..offset + 4].copy_from_slice(&self.payload_size.to_le_bytes());
+        offset += 4;
+        bytes[offset..offset + 4].copy_from_slice(&self.payload_crc.to_le_bytes());
+        offset += 4;
+        bytes[offset..offset + 4].copy_from_slice(&self.header_crc.to_le_bytes());
+        offset += 4;
+        // Write reserved bytes
+        bytes[offset..offset + 20].copy_from_slice(&self.reserved);
+        
+        bytes
+    }
+    
+    /// Deserialize header from bytes in little-endian format
+    pub fn from_bytes(bytes: &[u8; HEADER_SIZE]) -> Self {
+        let mut offset = 0;
+        
+        let magic = u32::from_le_bytes([bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]]);
+        offset += 4;
+        
+        let sequence = u64::from_le_bytes([
+            bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3],
+            bytes[offset + 4], bytes[offset + 5], bytes[offset + 6], bytes[offset + 7],
+        ]);
+        offset += 8;
+        
+        let timestamp = u64::from_le_bytes([
+            bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3],
+            bytes[offset + 4], bytes[offset + 5], bytes[offset + 6], bytes[offset + 7],
+        ]);
+        offset += 8;
+        
+        let entry_type = u32::from_le_bytes([bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]]);
+        offset += 4;
+        
+        let payload_size = u32::from_le_bytes([bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]]);
+        offset += 4;
+        
+        let payload_crc = u32::from_le_bytes([bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]]);
+        offset += 4;
+        
+        let header_crc = u32::from_le_bytes([bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]]);
+        offset += 4;
+        
+        let mut reserved = [0u8; 20];
+        reserved.copy_from_slice(&bytes[offset..offset + 20]);
+        
+        Self {
+            magic,
+            sequence,
+            timestamp,
+            entry_type,
+            payload_size,
+            payload_crc,
+            header_crc,
+            reserved,
+        }
+    }
 }
 
 /// Types of WAL entries
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
 pub enum WalEntryType {
+    /// Episode storage operation
     EpisodeStore = 1,
+    /// Memory update operation
     MemoryUpdate = 2,
+    /// Memory deletion operation
     MemoryDelete = 3,
+    /// Memory consolidation operation
     Consolidation = 4,
+    /// Checkpoint marker
     Checkpoint = 5,
+    /// Log compaction marker
     CompactionMarker = 6,
 }
 
@@ -181,7 +257,9 @@ impl From<u32> for WalEntryType {
 /// WAL entry with variable-size payload
 #[derive(Debug, Clone)]
 pub struct WalEntry {
+    /// Entry header with metadata
     pub header: WalEntryHeader,
+    /// Variable-size payload data
     pub payload: Vec<u8>,
 }
 
@@ -246,12 +324,16 @@ impl WalEntry {
 /// Batch of entries for group commit
 #[derive(Debug)]
 pub struct WalBatch {
+    /// Batch of WAL entries
     pub entries: Vec<WalEntry>,
+    /// Total size of all entries in bytes
     pub total_size: usize,
+    /// When this batch was created
     pub created_at: Instant,
 }
 
 impl WalBatch {
+    /// Create a new empty WAL batch
     pub fn new() -> Self {
         Self {
             entries: Vec::new(),
@@ -260,16 +342,19 @@ impl WalBatch {
         }
     }
 
+    /// Add an entry to the batch
     pub fn add_entry(&mut self, mut entry: WalEntry) {
         entry.header.sequence = self.entries.len() as u64;
         self.total_size += entry.serialized_size();
         self.entries.push(entry);
     }
 
+    /// Check if the batch is empty
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
+    /// Get the number of entries in the batch
     pub fn len(&self) -> usize {
         self.entries.len()
     }
@@ -405,14 +490,18 @@ impl WalWriter {
     pub fn write_sync(&self, mut entry: WalEntry) -> StorageResult<u64> {
         let sequence = self.sequence_counter.fetch_add(1, Ordering::SeqCst);
         entry.header.sequence = sequence;
+        
+        // Recompute header CRC after updating sequence
+        #[cfg(feature = "memory_mapped_persistence")]
+        {
+            entry.header.header_crc = entry.header.compute_header_crc();
+        }
 
         let mut file = self.file.lock();
 
-        // Write header
-        let header_bytes = unsafe {
-            std::slice::from_raw_parts(&entry.header as *const _ as *const u8, HEADER_SIZE)
-        };
-        file.write_all(header_bytes)?;
+        // Write header using proper serialization
+        let header_bytes = entry.header.to_bytes();
+        file.write_all(&header_bytes)?;
 
         // Write payload
         file.write_all(&entry.payload)?;
@@ -494,11 +583,9 @@ impl WalWriter {
         let start = Instant::now();
 
         for entry in &batch.entries {
-            // Write header
-            let header_bytes = unsafe {
-                std::slice::from_raw_parts(&entry.header as *const _ as *const u8, HEADER_SIZE)
-            };
-            file.write_all(header_bytes)?;
+            // Write header using proper serialization
+            let header_bytes = entry.header.to_bytes();
+            file.write_all(&header_bytes)?;
 
             // Write payload
             file.write_all(&entry.payload)?;
@@ -558,6 +645,81 @@ impl WalWriter {
 
         Ok(())
     }
+
+    /// Enhanced WAL operations with proper error recovery
+    /// These methods replace unsafe unwrap() calls with recovery strategies
+    pub fn write_entry_with_recovery(&mut self, entry: WalEntry) -> crate::error::Result<u64> {
+        use crate::error::{EngramError, RecoveryStrategy};
+        
+        self.write_sync(entry).map_err(|e| EngramError::WriteAheadLog {
+            operation: "write_entry".to_string(),
+            source: match e {
+                StorageError::Io(io_err) => io_err,
+                _ => std::io::Error::new(std::io::ErrorKind::Other, e.to_string()),
+            },
+            recovery: RecoveryStrategy::Retry {
+                max_attempts: 3,
+                backoff_ms: 100,
+            },
+            can_continue: false,
+        })
+    }
+    
+    /// Write episode with proper error handling instead of unwrap()
+    pub fn write_episode_with_recovery(&mut self, episode: &Episode) -> crate::error::Result<u64> {
+        use crate::error::{EngramError, RecoveryStrategy};
+        
+        let entry = WalEntry::new_episode(episode).map_err(|e| {
+            EngramError::WriteAheadLog {
+                operation: "serialize_episode".to_string(),
+                source: std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()),
+                recovery: RecoveryStrategy::RequiresIntervention {
+                    action: "Check episode data validity".to_string(),
+                },
+                can_continue: true,
+            }
+        })?;
+        
+        self.write_entry_with_recovery(entry)
+    }
+    
+    /// Batch write with recovery handling
+    pub fn write_batch_with_recovery(&mut self, batch: WalBatch) -> crate::error::Result<Vec<u64>> {
+        use crate::error::{EngramError, RecoveryStrategy};
+        
+        let mut sequences = Vec::new();
+        
+        for entry in batch.entries {
+            match self.write_entry_with_recovery(entry) {
+                Ok(seq) => sequences.push(seq),
+                Err(e) if e.is_recoverable() => {
+                    tracing::warn!("WAL write failed but recoverable: {}", e);
+                    // For batch operations, we might want to continue with partial success
+                    match e.recovery_strategy() {
+                        RecoveryStrategy::PartialResult { .. } => {
+                            tracing::info!("Continuing batch with partial results");
+                            break;
+                        }
+                        _ => return Err(e),
+                    }
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        
+        if sequences.is_empty() {
+            Err(EngramError::WriteAheadLog {
+                operation: "write_batch".to_string(),
+                source: std::io::Error::new(std::io::ErrorKind::WriteZero, "No entries written"),
+                recovery: RecoveryStrategy::RequiresIntervention {
+                    action: "Check WAL writer state and disk space".to_string(),
+                },
+                can_continue: false,
+            })
+        } else {
+            Ok(sequences)
+        }
+    }
 }
 
 impl Drop for WalWriter {
@@ -573,6 +735,7 @@ pub struct WalReader {
 }
 
 impl WalReader {
+    /// Create a new WAL reader for the given directory
     pub fn new<P: AsRef<Path>>(wal_dir: P, metrics: Arc<StorageMetrics>) -> Self {
         Self {
             wal_dir: wal_dir.as_ref().to_path_buf(),
@@ -630,12 +793,13 @@ impl WalReader {
                 Err(e) => return Err(e.into()),
             }
 
-            // Parse header
-            let header = unsafe { std::ptr::read(header_bytes.as_ptr() as *const WalEntryHeader) };
+            // Parse header using proper deserialization
+            let header = WalEntryHeader::from_bytes(&header_bytes);
 
             // Validate header
             if let Err(e) = header.validate() {
                 tracing::warn!("Corrupted header in {}: {}", path.display(), e);
+                println!("Header validation failed: {}", e);
                 break; // Skip rest of file
             }
 
@@ -646,6 +810,7 @@ impl WalReader {
             // Validate payload
             if let Err(e) = header.validate_payload(&payload) {
                 tracing::warn!("Corrupted payload in {}: {}", path.display(), e);
+                println!("Payload validation failed: {}", e);
                 continue; // Skip this entry but continue reading
             }
 
@@ -680,7 +845,8 @@ mod tests {
     #[test]
     fn test_wal_header_size() {
         assert_eq!(std::mem::size_of::<WalEntryHeader>(), 64);
-        assert_eq!(std::mem::align_of::<WalEntryHeader>(), 64);
+        // Alignment should be natural (8 bytes for u64 fields)
+        assert!(std::mem::align_of::<WalEntryHeader>() >= 8);
     }
 
     #[test]
@@ -712,18 +878,37 @@ mod tests {
         let metrics = Arc::new(StorageMetrics::new());
 
         // Write some entries
-        let wal = WalWriter::new(temp_dir.path(), FsyncMode::PerWrite, metrics.clone()).unwrap();
+        let mut wal = WalWriter::new(temp_dir.path(), FsyncMode::PerWrite, metrics.clone()).unwrap();
 
-        for i in 0..5 {
+        for _i in 0..5 {
             let episode = create_test_episode();
             let entry = WalEntry::new_episode(&episode).unwrap();
             wal.write_sync(entry).unwrap();
         }
+        
+        // Explicitly drop to ensure all data is flushed
+        wal.shutdown().unwrap();
+        drop(wal);
 
         // Read them back
         let reader = WalReader::new(temp_dir.path(), metrics);
+        
+        // Debug: List files in the directory
+        println!("Files in WAL directory:");
+        if let Ok(dir_entries) = std::fs::read_dir(temp_dir.path()) {
+            for entry in dir_entries {
+                if let Ok(entry) = entry {
+                    let path = entry.path();
+                    println!("  - {}", path.display());
+                    if let Ok(metadata) = std::fs::metadata(&path) {
+                        println!("    Size: {} bytes", metadata.len());
+                    }
+                }
+            }
+        }
+        
         let entries = reader.scan_all().unwrap();
-
+        println!("Found {} entries, expected 5", entries.len());
         assert_eq!(entries.len(), 5);
         for (i, entry) in entries.iter().enumerate() {
             assert_eq!(entry.header.sequence, i as u64);

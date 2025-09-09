@@ -70,22 +70,13 @@ impl<B: MemoryBackend> UnifiedMemoryGraph<B> {
     /// Recall memories based on a cue
     pub fn recall(&self, cue: &Cue) -> Result<Vec<Arc<Memory>>, MemoryError> {
         let memories = match &cue.cue_type {
-            CueType::Embedding(vec) => {
+            CueType::Embedding { vector, .. } => {
                 // Search by embedding similarity
-                let results = self.backend.search(vec, cue.max_results)?;
+                let results = self.backend.search(vector, cue.max_results)?;
                 
                 // Apply spreading activation if enabled and backend supports it
-                if self.config.enable_spreading {
-                    if let Some(graph_backend) = (self.backend.as_ref() as &dyn std::any::Any)
-                        .downcast_ref::<B>()
-                        .and_then(|b| (b as &dyn std::any::Any).downcast_ref::<dyn GraphBackend>())
-                    {
-                        for (id, _score) in &results {
-                            // Safe to ignore error as this is optional enhancement
-                            let _ = graph_backend.spread_activation(id, self.config.decay_rate);
-                        }
-                    }
-                }
+                // Note: This requires the backend to implement GraphBackend trait
+                // We'll handle this in the GraphBackend-specific implementation below
                 
                 // Retrieve memories that meet threshold
                 let mut memories = Vec::new();
@@ -98,16 +89,18 @@ impl<B: MemoryBackend> UnifiedMemoryGraph<B> {
                 }
                 memories
             }
-            CueType::Semantic { content, fuzzy_threshold } => {
-                // For semantic cues, we need to search all memories
-                // In a real implementation, this would use a text index
+            CueType::Context { location, .. } => {
+                // For context cues, we search based on location if provided
                 let all_ids = self.backend.all_ids();
                 let mut matches = Vec::new();
                 
                 for id in all_ids {
                     if let Some(memory) = self.backend.retrieve(&id)? {
-                        // Simple content matching - could be enhanced with fuzzy matching
-                        if memory.content.contains(content) {
+                        // Simple location matching if location is specified
+                        let matches_location = location.as_ref().map_or(true, |loc| {
+                            memory.content.as_ref().map_or(false, |content| content.contains(loc))
+                        });
+                        if matches_location {
                             matches.push(memory);
                         }
                     }
@@ -118,21 +111,37 @@ impl<B: MemoryBackend> UnifiedMemoryGraph<B> {
                 }
                 matches
             }
-            CueType::Temporal { start, end } => {
-                // Search memories within time range
+            CueType::Temporal { .. } => {
+                // For temporal pattern matching
+                // This is a simplified implementation - real pattern matching would be more complex
                 let all_ids = self.backend.all_ids();
                 let mut matches = Vec::new();
                 
                 for id in all_ids {
                     if let Some(memory) = self.backend.retrieve(&id)? {
-                        let in_range = match (start, end) {
-                            (Some(s), Some(e)) => memory.timestamp >= *s && memory.timestamp <= *e,
-                            (Some(s), None) => memory.timestamp >= *s,
-                            (None, Some(e)) => memory.timestamp <= *e,
-                            (None, None) => true,
-                        };
-                        
-                        if in_range {
+                        // For now, just return all memories as pattern matching is not implemented
+                        matches.push(memory);
+                    }
+                    
+                    if matches.len() >= cue.max_results {
+                        break;
+                    }
+                }
+                matches
+            }
+            CueType::Semantic { content, .. } => {
+                // For semantic content search
+                // This is a simplified implementation - real semantic matching would be more complex
+                let all_ids = self.backend.all_ids();
+                let mut matches = Vec::new();
+                
+                for id in all_ids {
+                    if let Some(memory) = self.backend.retrieve(&id)? {
+                        // Simple content matching if content is specified
+                        let matches_content = memory.content.as_ref().map_or(false, |mem_content| {
+                            mem_content.contains(content)
+                        });
+                        if matches_content {
                             matches.push(memory);
                         }
                     }

@@ -144,19 +144,33 @@ impl CognitiveMetrics {
 #[derive(Debug, Clone)]
 pub enum CognitiveMetric {
     /// Complementary Learning Systems contribution
-    CLSContribution { hippocampal: f32, neocortical: f32 },
+    CLSContribution {
+        /// Hippocampal contribution strength
+        hippocampal: f32,
+        /// Neocortical contribution strength
+        neocortical: f32,
+    },
     /// Pattern completion event
     PatternCompletion {
+        /// Plausibility score of the completed pattern
         plausibility: f32,
+        /// Whether this is a false memory construction
         is_false_memory: bool,
     },
     /// Memory consolidation state transition
     ConsolidationTransition {
+        /// Source consolidation state
         from: ConsolidationState,
+        /// Target consolidation state
         to: ConsolidationState,
     },
     /// Spreading activation measurement
-    SpreadingActivation { depth: usize, branching_factor: f32 },
+    SpreadingActivation {
+        /// Depth of activation spread
+        depth: usize,
+        /// Average branching factor during spread
+        branching_factor: f32,
+    },
     /// Confidence calibration event
     ConfidenceCalibration {
         correction_type: CalibrationCorrection,

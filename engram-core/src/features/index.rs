@@ -161,7 +161,7 @@ impl Index for HnswIndexImpl {
     fn build(&mut self, episodes: &[Episode]) -> IndexResult<()> {
         use crate::index::CognitiveHnswIndex;
         
-        let mut index = CognitiveHnswIndex::new();
+        let index = CognitiveHnswIndex::new();
         
         for episode in episodes {
             let memory = crate::Memory::from_episode(episode.clone(), 1.0);
@@ -195,7 +195,7 @@ impl Index for HnswIndexImpl {
         Ok(())
     }
     
-    fn remove(&mut self, id: &str) -> IndexResult<()> {
+    fn remove(&mut self, _id: &str) -> IndexResult<()> {
         // HNSW doesn't support removal in our implementation
         // This is a known limitation
         Ok(())

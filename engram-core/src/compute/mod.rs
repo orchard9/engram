@@ -103,6 +103,7 @@ pub fn create_vector_ops() -> Box<dyn VectorOps> {
         return Box::new(scalar::ScalarVectorOps::new());
     }
 
+    #[cfg(not(feature = "force_scalar_compute"))]
     match detect_cpu_features() {
         #[cfg(target_arch = "x86_64")]
         CpuCapability::Avx512F => Box::new(avx512::Avx512VectorOps::new()),

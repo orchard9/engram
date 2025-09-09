@@ -141,18 +141,26 @@ pub enum FsyncMode {
 /// Recovery report after crash
 #[derive(Debug)]
 pub struct RecoveryReport {
+    /// Number of entries successfully recovered from WAL
     pub recovered_entries: usize,
+    /// Number of entries found to be corrupted
     pub corrupted_entries: usize,
+    /// Total time taken for recovery process
     pub recovery_duration: std::time::Duration,
+    /// Sequence number of last valid WAL entry
     pub last_valid_sequence: u64,
 }
 
 /// Data integrity validation report
 #[derive(Debug)]
 pub struct IntegrityReport {
+    /// Total number of entries validated during integrity check
     pub total_entries_checked: usize,
+    /// Number of entries that failed checksum validation
     pub checksum_failures: usize,
+    /// List of missing entry IDs that were expected but not found
     pub missing_entries: Vec<String>,
+    /// List of files that have been corrupted or are unreadable
     pub corrupted_files: Vec<std::path::PathBuf>,
 }
 
@@ -183,50 +191,72 @@ impl Default for CognitiveEvictionPolicy {
 /// Errors that can occur in storage operations
 #[derive(Error, Debug)]
 pub enum StorageError {
+    /// Underlying I/O operation failed
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
+    /// Memory allocation failed (out of memory or fragmentation)
     #[error("Memory allocation failed: {0}")]
     AllocationFailed(String),
 
+    /// Data corruption detected during read or validation
     #[error("Corruption detected: {0}")]
     CorruptionDetected(String),
 
+    /// Memory mapping operation failed (insufficient virtual memory)
     #[error("Memory mapping failed: {0}")]
     MmapFailed(String),
 
+    /// Write-ahead log operation failed
     #[error("WAL operation failed: {0}")]
     WalFailed(String),
 
+    /// Invalid configuration parameters provided
     #[error("Configuration error: {0}")]
     Configuration(String),
 
+    /// NUMA topology detection or allocation failed
     #[error("NUMA topology error: {0}")]
     NumaError(String),
 
+    /// Checksum verification failed during integrity check
     #[error("Checksum verification failed: expected {expected:x}, got {actual:x}")]
-    ChecksumMismatch { expected: u32, actual: u32 },
+    ChecksumMismatch {
+        /// Expected checksum value
+        expected: u32,
+        /// Actual checksum value found
+        actual: u32,
+    },
 
+    /// Storage backend has not been initialized
     #[error("Storage backend not initialized")]
     NotInitialized,
 
+    /// Operation exceeded the configured timeout
     #[error("Operation timeout after {duration:?}")]
-    Timeout { duration: std::time::Duration },
+    Timeout {
+        /// Duration after which the operation timed out
+        duration: std::time::Duration,
+    },
 }
 
 impl StorageError {
+    /// Create a memory mapping failure error
     pub fn mmap_failed(msg: &str) -> Self {
         Self::MmapFailed(msg.to_string())
     }
 
+    /// Create a memory allocation failure error
     pub fn allocation_failed(msg: &str) -> Self {
         Self::AllocationFailed(msg.to_string())
     }
 
+    /// Create a data corruption detection error
     pub fn corruption_detected(msg: &str) -> Self {
         Self::CorruptionDetected(msg.to_string())
     }
 
+    /// Create a WAL operation failure error
     pub fn wal_failed(msg: &str) -> Self {
         Self::WalFailed(msg.to_string())
     }
@@ -238,22 +268,33 @@ pub type StorageResult<T> = Result<T, StorageError>;
 /// Performance metrics for storage operations
 #[derive(Debug, Default)]
 pub struct StorageMetrics {
+    /// Total number of write operations performed
     pub writes_total: std::sync::atomic::AtomicU64,
+    /// Total number of read operations performed
     pub reads_total: std::sync::atomic::AtomicU64,
+    /// Total bytes written to storage
     pub bytes_written: std::sync::atomic::AtomicU64,
+    /// Total bytes read from storage
     pub bytes_read: std::sync::atomic::AtomicU64,
+    /// Number of fsync operations performed for durability
     pub fsync_count: std::sync::atomic::AtomicU64,
+    /// Number of cache hits (data found in memory)
     pub cache_hits: std::sync::atomic::AtomicU64,
+    /// Number of cache misses (data loaded from disk)
     pub cache_misses: std::sync::atomic::AtomicU64,
+    /// Number of page faults during memory-mapped operations
     pub page_faults: std::sync::atomic::AtomicU64,
+    /// Number of compaction operations performed
     pub compactions: std::sync::atomic::AtomicU64,
 }
 
 impl StorageMetrics {
+    /// Create a new StorageMetrics instance with zero counters
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Record a write operation with the number of bytes written
     pub fn record_write(&self, bytes: u64) {
         self.writes_total
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -261,6 +302,7 @@ impl StorageMetrics {
             .fetch_add(bytes, std::sync::atomic::Ordering::Relaxed);
     }
 
+    /// Record a read operation with the number of bytes read
     pub fn record_read(&self, bytes: u64) {
         self.reads_total
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -268,21 +310,25 @@ impl StorageMetrics {
             .fetch_add(bytes, std::sync::atomic::Ordering::Relaxed);
     }
 
+    /// Record an fsync operation for durability guarantees
     pub fn record_fsync(&self) {
         self.fsync_count
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 
+    /// Record a cache hit (data found in memory)
     pub fn record_cache_hit(&self) {
         self.cache_hits
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 
+    /// Record a cache miss (data loaded from disk)
     pub fn record_cache_miss(&self) {
         self.cache_misses
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 
+    /// Calculate the cache hit rate as a percentage
     pub fn cache_hit_rate(&self) -> f32 {
         let hits = self.cache_hits.load(std::sync::atomic::Ordering::Relaxed);
         let misses = self.cache_misses.load(std::sync::atomic::Ordering::Relaxed);
