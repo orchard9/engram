@@ -204,6 +204,102 @@ impl HippocampalCompletion {
             0.0
         }
     }
+
+    /// Reconstruct location field from stored patterns using semantic similarity
+    fn reconstruct_location_from_patterns(&self, partial: &PartialEpisode) -> Option<String> {
+        if let Some(what) = partial.known_fields.get("what") {
+            let mut location_counts = std::collections::HashMap::new();
+            
+            for episode in &self.stored_patterns {
+                // Check if this episode is semantically similar
+                let what_lower = what.to_lowercase();
+                let episode_what_lower = episode.what.to_lowercase();
+                
+                let is_similar = episode_what_lower.contains(&what_lower) || 
+                                what_lower.contains(&episode_what_lower) ||
+                                self.word_level_similarity(&what_lower, &episode_what_lower) > 0.0;
+                
+                if is_similar {
+                    if let Some(ref location) = episode.where_location {
+                        *location_counts.entry(location.clone()).or_insert(0) += 1;
+                    }
+                }
+            }
+            
+            // Return most common location
+            location_counts
+                .into_iter()
+                .max_by_key(|(_, count)| *count)
+                .map(|(location, _)| location)
+        } else {
+            None
+        }
+    }
+
+    /// Reconstruct participants field from stored patterns using semantic similarity
+    fn reconstruct_participants_from_patterns(&self, partial: &PartialEpisode) -> Option<Vec<String>> {
+        if let Some(what) = partial.known_fields.get("what") {
+            let mut participant_counts = std::collections::HashMap::new();
+            
+            for episode in &self.stored_patterns {
+                // Check if this episode is semantically similar
+                let what_lower = what.to_lowercase();
+                let episode_what_lower = episode.what.to_lowercase();
+                
+                let is_similar = episode_what_lower.contains(&what_lower) || 
+                                what_lower.contains(&episode_what_lower) ||
+                                self.word_level_similarity(&what_lower, &episode_what_lower) > 0.0;
+                
+                if is_similar {
+                    if let Some(ref participants) = episode.who {
+                        for participant in participants {
+                            *participant_counts.entry(participant.clone()).or_insert(0) += 1;
+                        }
+                    }
+                }
+            }
+            
+            if participant_counts.is_empty() {
+                None
+            } else {
+                // Sort by frequency and take top participants
+                let mut sorted_participants: Vec<_> = participant_counts.into_iter().collect();
+                sorted_participants.sort_by(|a, b| b.1.cmp(&a.1));
+                
+                let participants: Vec<String> = sorted_participants
+                    .into_iter()
+                    .take(3) // Limit to top 3 most frequent participants
+                    .map(|(name, _)| name)
+                    .collect();
+                    
+                if participants.is_empty() { None } else { Some(participants) }
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Calculate word-level similarity score
+    fn word_level_similarity(&self, what1: &str, what2: &str) -> f32 {
+        let words1: Vec<&str> = what1.split_whitespace().collect();
+        let words2: Vec<&str> = what2.split_whitespace().collect();
+        
+        let mut matches = 0;
+        for word1 in &words1 {
+            for word2 in &words2 {
+                if word1 == word2 || word1.contains(word2) || word2.contains(word1) {
+                    matches += 1;
+                    break;
+                }
+            }
+        }
+        
+        if !words1.is_empty() && !words2.is_empty() {
+            matches as f32 / words1.len().max(words2.len()) as f32
+        } else {
+            0.0
+        }
+    }
 }
 
 impl PatternCompleter for HippocampalCompletion {
@@ -251,7 +347,7 @@ impl PatternCompleter for HippocampalCompletion {
                 matched.clone()
             } else {
                 // Create new episode from completed pattern
-                Episode::new(
+                let mut episode = Episode::new(
                     format!("completed_{}", chrono::Utc::now().timestamp()),
                     Utc::now(),
                     partial
@@ -261,7 +357,19 @@ impl PatternCompleter for HippocampalCompletion {
                         .unwrap_or_else(|| "Reconstructed memory".to_string()),
                     completed_embedding,
                     partial.cue_strength,
-                )
+                );
+                
+                // Try to reconstruct location from stored patterns
+                if let Some(where_location) = self.reconstruct_location_from_patterns(partial) {
+                    episode.where_location = Some(where_location);
+                }
+                
+                // Try to reconstruct participants from stored patterns
+                if let Some(participants) = self.reconstruct_participants_from_patterns(partial) {
+                    episode.who = Some(participants);
+                }
+                
+                episode
             };
 
             // Calculate completion confidence
