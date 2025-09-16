@@ -302,13 +302,12 @@ impl MemoryStore {
                         tracing::warn!("WAL write failed: {}, continuing with in-memory only", e);
                         // Graceful degradation: reduce activation to indicate storage issues
                         return Activation::new(base_activation * 0.9);
-                    } else {
-                        // Record successful write to storage metrics
-                        let episode_size = std::mem::size_of::<Episode>() as u64 + 
-                                           episode.id.len() as u64 + 
-                                           episode.what.len() as u64;
-                        self.storage_metrics.record_write(episode_size);
                     }
+                    // Record successful write to storage metrics
+                    let episode_size = std::mem::size_of::<Episode>() as u64 + 
+                                       episode.id.len() as u64 + 
+                                       episode.what.len() as u64;
+                    self.storage_metrics.record_write(episode_size);
                 }
             }
 

@@ -362,9 +362,9 @@ mod tests {
             decay_rate: 0.1,
         };
 
-        let episodes = vec![(episode1, Confidence::HIGH), (episode2, Confidence::MEDIUM)];
+        let episode_list = vec![(episode1, Confidence::HIGH), (episode2, Confidence::MEDIUM)];
 
-        let result = ProbabilisticQueryResult::from_episodes(episodes.clone());
+        let result = ProbabilisticQueryResult::from_episodes(episode_list.clone());
 
         assert_eq!(result.episodes.len(), 2);
         assert!(result.is_successful());

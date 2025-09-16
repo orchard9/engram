@@ -8,7 +8,7 @@
 mod migration_tests {
     use crate::memory_graph::{
         UnifiedMemoryGraph, HashMapBackend, DashMapBackend, InfallibleBackend,
-        GraphConfig, MemoryBackend, GraphBackend,
+        GraphConfig,
     };
     use crate::memory::{Memory, MemoryBuilder};
     use crate::{Confidence, Cue, CueType};

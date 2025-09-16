@@ -436,13 +436,13 @@ mod tests {
         let result3 = bio_accumulator.accumulate_biological(&node_id, 0.6, future_time);
         assert!(result3);
 
-        // Wait a small amount to ensure refractory period has passed
-        std::thread::sleep(std::time::Duration::from_millis(2));
+        // Wait for the actual refractory period to pass
+        std::thread::sleep(std::time::Duration::from_millis(3));
         
         let (activation, fatigue, in_refractory) = bio_accumulator.get_biological_state(&node_id);
         assert!(activation > 0.0);
         assert!(fatigue < 1.0); // Should have some fatigue
-        // After waiting, should no longer be in refractory period
+        // After waiting longer, should no longer be in refractory period
         assert!(!in_refractory);
     }
 
