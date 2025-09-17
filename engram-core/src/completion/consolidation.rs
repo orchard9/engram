@@ -270,7 +270,7 @@ impl ConsolidationEngine {
     }
 
     /// Transform episodic to semantic memory
-    pub fn episodic_to_semantic(&mut self, episodes: Vec<Episode>) -> Vec<Memory> {
+    pub fn episodic_to_semantic(&mut self, episodes: &[Episode]) -> Vec<Memory> {
         let mut semantic_memories = Vec::new();
 
         // Perform consolidation

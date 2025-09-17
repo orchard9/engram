@@ -60,18 +60,25 @@ impl BreadthFirstTraversal {
             // Process current level
             while let Some((node_id, activation, depth)) = current_level.pop_front() {
                 // Check visit count for cycle detection
-                let visits_entry = self
-                    .visited
-                    .entry(node_id.clone())
-                    .or_insert_with(|| AtomicUsize::new(0));
+                let (_current_visits, should_continue) = {
+                    let visits_entry = self
+                        .visited
+                        .entry(node_id.clone())
+                        .or_insert_with(|| AtomicUsize::new(0));
+                    
+                    let current_visits = visits_entry.load(Ordering::Relaxed);
+                    if current_visits >= self.max_visits {
+                        (current_visits, true) // Skip nodes visited too many times
+                    } else {
+                        // Increment visit count since we're processing this node
+                        visits_entry.fetch_add(1, Ordering::Relaxed);
+                        (current_visits, false)
+                    }
+                };
                 
-                let current_visits = visits_entry.load(Ordering::Relaxed);
-                if current_visits >= self.max_visits {
-                    continue; // Skip nodes visited too many times
+                if should_continue {
+                    continue;
                 }
-
-                // Increment visit count since we're processing this node
-                visits_entry.fetch_add(1, Ordering::Relaxed);
 
                 // Process the node
                 if !process_node(&node_id, activation, depth) {

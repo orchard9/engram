@@ -100,6 +100,10 @@ Based on our codebase quality standards and recent fixes:
 
 7. **Add #[must_use] to getters and constructors** - Functions that return computed values, create new instances, or perform queries should have #[must_use] to prevent accidentally ignoring their results.
 
+8. **Pass large types by reference** - For types larger than 64 bytes (like `[f32; 768]` embeddings), use `&T` parameters instead of `T` to avoid expensive copies. Update all call sites to pass references.
+
+9. **Scope expensive temporaries early** - When using operations that create temporaries with significant Drop costs (like DashMap entries), wrap them in explicit scopes `{ let temp = ...; }` to ensure early cleanup and prevent performance issues.
+
 ## Adhere to the following documentation
 
 why.md: when understanding the problem space and target applications for Engram

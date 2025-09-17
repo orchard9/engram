@@ -1,0 +1,13 @@
+{
+  "name": "engram-docs",
+  "version": "1.0.0",
+  "description": "Documentation for Engram cognitive graph database",
+  "scripts": {
+    "dev": "vitepress dev",
+    "build": "vitepress build",
+    "preview": "vitepress preview"
+  },
+  "devDependencies": {
+    "vitepress": "^1.0.0"
+  }
+}

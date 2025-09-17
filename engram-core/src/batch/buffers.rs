@@ -146,13 +146,13 @@ impl AlignedVectorBuffer {
     /// # Errors
     ///
     /// Returns `BatchError::CapacityExceeded` if buffer is at capacity
-    pub fn push(&mut self, vector: [f32; 768]) -> Result<usize, BatchError> {
+    pub fn push(&mut self, vector: &[f32; 768]) -> Result<usize, BatchError> {
         let index = self.count.load(Ordering::Relaxed);
         if index >= self.capacity {
             return Err(BatchError::CapacityExceeded);
         }
 
-        self.data.push(vector);
+        self.data.push(*vector);
         self.count.fetch_add(1, Ordering::Relaxed);
         Ok(index)
     }
@@ -252,7 +252,7 @@ mod tests {
         for i in 0..5 {
             let mut vector = [0.0; 768];
             vector[0] = i as f32;
-            assert!(buffer.push(vector).is_ok());
+            assert!(buffer.push(&vector).is_ok());
         }
 
         assert_eq!(buffer.len(), 5);
@@ -267,7 +267,7 @@ mod tests {
         // Test capacity exceeded
         let vector = [0.0; 768];
         assert!(matches!(
-            buffer.push(vector),
+            buffer.push(&vector),
             Err(BatchError::CapacityExceeded)
         ));
     }

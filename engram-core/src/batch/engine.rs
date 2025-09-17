@@ -192,7 +192,7 @@ impl BatchOperations for BatchEngine {
 
         // Process embedding cues with SIMD if available
         if !embedding_cues.is_empty() && config.use_simd {
-            results.extend(self.batch_recall_embeddings(embedding_cues));
+            results.extend(self.batch_recall_embeddings(&embedding_cues));
             simd_accelerated_count = results.len();
         }
 
@@ -242,7 +242,7 @@ impl BatchOperations for BatchEngine {
 
 impl BatchEngine {
     /// SIMD-accelerated batch recall for embedding cues
-    fn batch_recall_embeddings(&self, cues: Vec<Cue>) -> Vec<Vec<(Episode, Confidence)>> {
+    fn batch_recall_embeddings(&self, cues: &[Cue]) -> Vec<Vec<(Episode, Confidence)>> {
         // Extract embeddings from cues
         let query_embeddings: Vec<[f32; 768]> = cues
             .iter()
