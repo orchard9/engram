@@ -161,7 +161,7 @@ impl SimdActivationAccumulator {
     /// # Errors
     ///
     /// Currently never returns an error but maintains Result for future extensibility
-    pub fn update_from_vectors(&self, updates: &[(NodeId, [f32; 768])]) -> ActivationResult<usize> {
+    pub fn update_from_vectors(&self, updates: &[(NodeId, [f32; 768])]) -> usize {
         let mut updated_count = 0;
 
         for (node_id, vector) in updates {
@@ -181,7 +181,7 @@ impl SimdActivationAccumulator {
 
         self.operations_count
             .fetch_add(updates.len() as u64, Ordering::Relaxed);
-        Ok(updated_count)
+        updated_count
     }
 
     /// Get all activation records
@@ -316,7 +316,7 @@ impl BiologicalAccumulator {
         let in_refractory = self.refractory_periods.get(node_id).is_some_and(|r| {
             let current_time = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .expect("System time before UNIX EPOCH")
                 .as_nanos() as u64;
             current_time < *r
         });
@@ -375,7 +375,7 @@ mod tests {
 
         let vector = accumulator
             .get_activation_vector(&"test_node".to_string())
-            .unwrap();
+            .expect("Should have activation vector for test_node");
         assert!((vector[0] - 0.8).abs() < 1e-6);
         assert!(vector[1] > 0.0 && vector[1] < 0.1); // Should have spreading pattern
 
@@ -384,7 +384,7 @@ mod tests {
         update_vector[0] = 0.5;
         let updates = vec![("update_node".to_string(), update_vector)];
 
-        let updated_count = accumulator.update_from_vectors(&updates).unwrap();
+        let updated_count = accumulator.update_from_vectors(&updates);
         assert_eq!(updated_count, 1);
     }
 
@@ -412,7 +412,7 @@ mod tests {
         let bio_accumulator = BiologicalAccumulator::new(8);
         let current_time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .expect("System time before UNIX EPOCH")
             .as_nanos() as u64;
 
         let node_id = "bio_node".to_string();
@@ -445,7 +445,7 @@ mod tests {
         let bio_accumulator = BiologicalAccumulator::new(8);
         let current_time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .expect("System time before UNIX EPOCH")
             .as_nanos() as u64;
 
         let node_id = "decay_node".to_string();

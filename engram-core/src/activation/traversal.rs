@@ -371,7 +371,7 @@ impl ParallelBreadthFirstTraversal {
         seed_nodes: &[(NodeId, f32)],
         max_depth: u16,
         decay_function: &DecayFunction,
-    ) -> ActivationResult<Vec<(NodeId, f32, u16)>> {
+    ) -> Vec<(NodeId, f32, u16)> {
         // For now, use single-threaded implementation
         // TODO: Implement proper parallel version with lifetime management
         let mut results = Vec::new();
@@ -414,7 +414,7 @@ impl ParallelBreadthFirstTraversal {
             current_level = next_level;
         }
 
-        Ok(results)
+        results
     }
 }
 

@@ -20,6 +20,7 @@ pub struct CycleDetector {
 
 impl CycleDetector {
     /// Create a new cycle detector
+    #[must_use]
     pub fn new(max_visits: usize) -> Self {
         Self {
             visited: Arc::new(DashSet::new()),
@@ -29,6 +30,7 @@ impl CycleDetector {
     }
 
     /// Check if we should visit a node (returns false if would create cycle)
+    #[must_use]
     pub fn should_visit(&self, node_id: &NodeId, visit_count: usize) -> bool {
         // If we've visited this node too many times, it's likely a cycle
         if visit_count >= self.max_visits {

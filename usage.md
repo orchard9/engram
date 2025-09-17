@@ -1,5 +1,23 @@
 # Usage
 
+## Quick Start
+
+```bash
+# Build and start Engram
+cargo build
+./target/debug/engram
+
+# Verify it's running (in another terminal)
+./target/debug/engram status
+
+# Run tests to verify everything works
+cargo test
+./watch-now --once  # Run full test suite
+
+# Stop the server
+./target/debug/engram stop
+```
+
 ## Interface Design
 
 Engram exposes two interfaces optimized for different integration patterns:
