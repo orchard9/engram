@@ -92,6 +92,10 @@ Based on our codebase quality standards and recent fixes:
 
 3. **Prefer static methods when self is unused** - If a method doesn't access instance state, make it a static/associated function to clarify it's a pure computation and improve testability.
 
+4. **Use iterator methods over index loops** - Replace `for i in 0..len { arr[i] }` with `for (i, item) in arr.iter_mut().enumerate()` or `for item in &arr`. This is more idiomatic, prevents bounds checking overhead, and reduces indexing errors.
+
+5. **Place use statements at module top** - All `use` statements should be at the beginning of the file or module, not mixed with code. This improves readability and follows Rust conventions.
+
 ## Adhere to the following documentation
 
 why.md: when understanding the problem space and target applications for Engram

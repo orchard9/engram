@@ -10,6 +10,7 @@ use dashmap::DashMap;
 use std::collections::{HashSet, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use uuid::Uuid;
 
 /// Cache-optimized breadth-first traversal for activation spreading
 pub struct BreadthFirstTraversal {
@@ -78,7 +79,6 @@ impl BreadthFirstTraversal {
                 }
 
                 // Get neighbors and add to next level
-                use uuid::Uuid;
                 let node_uuid = Uuid::new_v5(&Uuid::NAMESPACE_OID, node_id.as_bytes());
                 if let Ok(neighbors) = graph.get_neighbors(&node_uuid) {
                     let decay_factor = decay_function.apply(depth + 1);
@@ -136,7 +136,6 @@ impl BreadthFirstTraversal {
             }
 
             // This would use CPU prefetch instructions in optimized version
-            use uuid::Uuid;
             let node_uuid = Uuid::new_v5(&Uuid::NAMESPACE_OID, node_id.as_bytes());
             let _ = graph.get_neighbors(&node_uuid);
         }
@@ -215,7 +214,6 @@ impl DepthFirstTraversal {
             }
 
             // Add neighbors to stack (in reverse order for proper DFS ordering)
-            use uuid::Uuid;
             let node_uuid = Uuid::new_v5(&Uuid::NAMESPACE_OID, node_id.as_bytes());
             if let Ok(neighbors) = graph.get_neighbors(&node_uuid) {
                 let decay_factor = decay_function.apply(depth + 1);
@@ -321,7 +319,6 @@ impl AdaptiveTraversal {
         let mut sampled_nodes = 0;
 
         for (node_id, _) in seed_nodes.iter().take(sample_size) {
-            use uuid::Uuid;
             let node_uuid = Uuid::new_v5(&Uuid::NAMESPACE_OID, node_id.as_bytes());
             if let Ok(neighbors) = graph.get_neighbors(&node_uuid) {
                 total_neighbors += neighbors.len();
@@ -390,7 +387,6 @@ impl ParallelBreadthFirstTraversal {
             while let Some((node_id, activation, depth)) = current_level.pop_front() {
                 results.push((node_id.clone(), activation, depth));
 
-                use uuid::Uuid;
                 let node_uuid = Uuid::new_v5(&Uuid::NAMESPACE_OID, node_id.as_bytes());
                 if let Ok(neighbors) = graph.get_neighbors(&node_uuid) {
                     let decay_factor = decay_function.apply(depth + 1);

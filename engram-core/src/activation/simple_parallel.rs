@@ -13,6 +13,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
+use uuid::Uuid;
 
 /// Simplified parallel spreading engine
 pub struct SimpleParallelEngine {
@@ -77,7 +78,6 @@ impl SimpleParallelEngine {
             self.activation_records.insert(node_id.clone(), record);
 
             // Create tasks for neighbors
-            use uuid::Uuid;
             let node_uuid = Uuid::new_v5(&Uuid::NAMESPACE_OID, node_id.as_bytes());
             if let Ok(neighbors) = self.memory_graph.get_neighbors(&node_uuid) {
                 let decay_factor = self.config.decay_function.apply(1);

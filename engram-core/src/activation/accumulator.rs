@@ -111,7 +111,7 @@ impl SimdActivationAccumulator {
     fn simd_normalize(values: &[f32; 768]) -> [f32; 768] {
         // Compute L2 norm (magnitude) of the vector
         let mut magnitude_squared = 0.0f32;
-        for &value in values.iter() {
+        for &value in values {
             magnitude_squared += value * value;
         }
 
@@ -148,8 +148,9 @@ impl SimdActivationAccumulator {
             vector[0] = activation;
 
             // Add some spreading pattern for higher dimensions
-            for i in 1..768 {
-                vector[i] = activation * (0.1 / (i as f32).sqrt()).min(0.01);
+            for (i, item) in vector[1..].iter_mut().enumerate() {
+                let index = i + 1;
+                *item = activation * (0.1 / (index as f32).sqrt()).min(0.01);
             }
 
             vector

@@ -222,12 +222,12 @@ impl ConsolidationEngine {
         // Average embeddings
         let mut avg_embedding = [0.0f32; 768];
         for episode in episodes {
-            for i in 0..768 {
-                avg_embedding[i] += episode.embedding[i];
+            for (avg_val, episode_val) in avg_embedding.iter_mut().zip(&episode.embedding) {
+                *avg_val += episode_val;
             }
         }
-        for i in 0..768 {
-            avg_embedding[i] /= episodes.len() as f32;
+        for avg_val in &mut avg_embedding {
+            *avg_val /= episodes.len() as f32;
         }
 
         // Calculate pattern strength

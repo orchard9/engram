@@ -12,7 +12,6 @@ cargo build
 
 # Run tests to verify everything works
 cargo test
-./watch-now --once  # Run full test suite
 
 # Stop the server
 ./target/debug/engram stop
