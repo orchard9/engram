@@ -791,6 +791,27 @@ pub async fn recognize_pattern(
     Ok(Json(response))
 }
 
+/// GET /health - Simple health check
+#[utoipa::path(
+    get,
+    path = "/health",
+    tag = "system",
+    responses(
+        (status = 200, description = "Simple health status", body = serde_json::Value),
+        (status = 500, description = "Health check failed", body = ErrorResponse)
+    )
+)]
+pub async fn simple_health() -> Result<impl IntoResponse, ApiError> {
+    let health_data = json!({
+        "status": "healthy",
+        "service": "engram",
+        "version": env!("CARGO_PKG_VERSION"),
+        "timestamp": Utc::now().to_rfc3339()
+    });
+
+    Ok(Json(health_data))
+}
+
 /// GET /api/v1/system/health - Comprehensive system health
 #[utoipa::path(
     get,
@@ -1738,6 +1759,8 @@ fn create_causality_monitoring_stream(
 /// Create cognitive-friendly API router
 pub fn create_api_routes() -> Router<ApiState> {
     Router::new()
+        // Simple health endpoint for status checks
+        .route("/health", get(simple_health))
         // Memory operations with cognitive-friendly paths
         .route("/api/v1/memories/remember", post(remember_memory))
         .route("/api/v1/memories/recall", get(recall_memories))

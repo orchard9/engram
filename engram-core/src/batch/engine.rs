@@ -94,7 +94,7 @@ impl BatchEngine {
             })
             .collect();
 
-        let elapsed = start.elapsed().as_micros() as u64;
+        let elapsed = start.elapsed().as_micros().try_into().unwrap_or(u64::MAX);
         self.metrics
             .total_processing_time_us
             .fetch_add(elapsed, Ordering::Relaxed);
@@ -174,7 +174,7 @@ impl BatchOperations for BatchEngine {
             activations,
             successful_count,
             degraded_count,
-            processing_time_ms: start.elapsed().as_millis() as u64,
+            processing_time_ms: start.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
             peak_memory_pressure: peak_pressure,
         }
     }
@@ -206,7 +206,7 @@ impl BatchOperations for BatchEngine {
 
         BatchRecallResult {
             results,
-            processing_time_ms: start.elapsed().as_millis() as u64,
+            processing_time_ms: start.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
             simd_accelerated_count,
         }
     }
@@ -234,7 +234,7 @@ impl BatchOperations for BatchEngine {
 
         BatchSimilarityResult {
             results,
-            processing_time_ms: start.elapsed().as_millis() as u64,
+            processing_time_ms: start.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
             simd_efficiency,
         }
     }

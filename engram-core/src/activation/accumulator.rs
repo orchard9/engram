@@ -132,6 +132,7 @@ impl SimdActivationAccumulator {
     }
 
     /// Compute similarity-based activation weights using SIMD
+    #[must_use]
     pub fn compute_similarity_weights(
         query_activation: &[f32; 768],
         candidate_activations: &[[f32; 768]],
@@ -305,6 +306,10 @@ impl BiologicalAccumulator {
     }
 
     /// Get biological state information
+    ///
+    /// # Panics
+    ///
+    /// Panics if system time is before UNIX epoch
     pub fn get_biological_state(&self, node_id: &NodeId) -> (f32, f32, bool) {
         let activation = self
             .simd_accumulator
@@ -318,7 +323,9 @@ impl BiologicalAccumulator {
             let current_time = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .expect("System time before UNIX EPOCH")
-                .as_nanos() as u64;
+                .as_nanos()
+                .try_into()
+                .unwrap_or(u64::MAX);
             current_time < *r
         });
 

@@ -72,7 +72,7 @@ impl ActivationRecord {
             ) {
                 Ok(_) => {
                     // Update timestamp for cycle detection
-                    let now = Instant::now().elapsed().as_nanos() as u64;
+                    let now = Instant::now().elapsed().as_nanos().try_into().unwrap_or(u64::MAX);
                     self.timestamp.store(now, Ordering::Relaxed);
                     return true;
                 }

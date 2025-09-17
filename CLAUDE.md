@@ -96,6 +96,10 @@ Based on our codebase quality standards and recent fixes:
 
 5. **Place use statements at module top** - All `use` statements should be at the beginning of the file or module, not mixed with code. This improves readability and follows Rust conventions.
 
+6. **Use safe casting with try_into()** - Replace direct casting like `as_nanos() as u64` with `as_nanos().try_into().unwrap_or(u64::MAX)` to handle potential overflow gracefully and make truncation explicit.
+
+7. **Add #[must_use] to getters and constructors** - Functions that return computed values, create new instances, or perform queries should have #[must_use] to prevent accidentally ignoring their results.
+
 ## Adhere to the following documentation
 
 why.md: when understanding the problem space and target applications for Engram

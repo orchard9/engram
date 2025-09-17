@@ -362,6 +362,7 @@ impl ParallelBreadthFirstTraversal {
     /// # Errors
     ///
     /// Currently never returns an error but maintains Result for future extensibility
+    #[must_use]
     pub fn traverse_simple(
         &self,
         graph: &Arc<MemoryGraph>,

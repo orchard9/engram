@@ -46,7 +46,7 @@ pub async fn show_status() -> Result<()> {
         .timeout(Duration::from_secs(5))
         .build()?;
 
-    let health_url = format!("http://127.0.0.1:{port}/health/alive");
+    let health_url = format!("http://127.0.0.1:{port}/health");
     let start_time = Instant::now();
 
     match client.get(&health_url).send().await {
@@ -77,14 +77,14 @@ pub async fn show_status() -> Result<()> {
     println!("\n🔌 API Endpoints:");
     check_endpoint(
         &client,
-        format!("http://127.0.0.1:{port}/api/v1/memories"),
-        "Memories API",
+        format!("http://127.0.0.1:{port}/api/v1/system/health"),
+        "System Health API",
     )
     .await;
     check_endpoint(
         &client,
-        format!("http://127.0.0.1:{port}/metrics"),
-        "Metrics",
+        format!("http://127.0.0.1:{port}/api/v1/memories/recall?query=test"),
+        "Memory Recall API",
     )
     .await;
 

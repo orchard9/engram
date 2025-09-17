@@ -53,6 +53,7 @@ impl CycleDetector {
     }
 
     /// Get nodes that are part of cycles
+    #[must_use]
     pub fn get_cycle_nodes(&self) -> HashSet<NodeId> {
         self.cycle_nodes.iter().map(|n| n.clone()).collect()
     }
@@ -64,6 +65,7 @@ impl CycleDetector {
     }
 
     /// Check if any cycles were detected
+    #[must_use]
     pub fn has_cycles(&self) -> bool {
         !self.cycle_nodes.is_empty()
     }
