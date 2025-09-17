@@ -1181,6 +1181,17 @@ mod tests {
     use super::*;
     use crate::{Confidence, Cue, EpisodeBuilder};
     use chrono::Utc;
+    
+    // Helper to create unique embeddings for tests
+    fn create_test_embedding(seed: f32) -> [f32; 768] {
+        let mut embedding = [0.0f32; 768];
+        embedding[0] = seed;
+        // Add some variation to avoid exact duplicates
+        for i in 1..8 {
+            embedding[i] = (seed * (i as f32)).sin();
+        }
+        embedding
+    }
 
     #[test]
     fn test_store_returns_activation() {
@@ -1190,7 +1201,7 @@ mod tests {
             .id("ep1".to_string())
             .when(Utc::now())
             .what("test episode".to_string())
-            .embedding([0.1; 768])
+            .embedding(create_test_embedding(0.1))
             .confidence(Confidence::HIGH)
             .build();
 
@@ -1207,11 +1218,15 @@ mod tests {
 
         // Store many episodes to trigger eviction
         for i in 0..20 {
+            // Create unique embeddings to avoid deduplication
+            let mut embedding = [0.0f32; 768];
+            embedding[0] = i as f32 / 20.0; // Unique value for each
+            
             let episode = EpisodeBuilder::new()
                 .id(format!("ep{i}"))
                 .when(Utc::now())
                 .what("test episode".to_string())
-                .embedding([0.1; 768])
+                .embedding(embedding)
                 .confidence(Confidence::MEDIUM)
                 .build();
 
@@ -1242,7 +1257,7 @@ mod tests {
                     .id(format!("ep_thread_{i}"))
                     .when(Utc::now())
                     .what("concurrent episode".to_string())
-                    .embedding([0.1; 768])
+                    .embedding(create_test_embedding(0.1 + i as f32 * 0.01))
                     .confidence(Confidence::HIGH)
                     .build();
 
@@ -1271,7 +1286,7 @@ mod tests {
                 .id(format!("ep{i}"))
                 .when(Utc::now())
                 .what("test episode".to_string())
-                .embedding([0.1; 768])
+                .embedding(create_test_embedding(0.1 + i as f32 * 0.01))
                 .confidence(Confidence::MEDIUM)
                 .build();
 
@@ -1283,7 +1298,7 @@ mod tests {
             .id("ep_pressure".to_string())
             .when(Utc::now())
             .what("pressure test".to_string())
-            .embedding([0.1; 768])
+            .embedding(create_test_embedding(0.1))
             .confidence(Confidence::HIGH)
             .build();
 
@@ -1306,7 +1321,7 @@ mod tests {
             .id("ep1".to_string())
             .when(Utc::now())
             .what("test episode".to_string())
-            .embedding([0.1; 768])
+            .embedding(create_test_embedding(0.1))
             .confidence(Confidence::HIGH)
             .build();
 
@@ -1379,7 +1394,7 @@ mod tests {
             .id("ep1".to_string())
             .when(now)
             .what("today's memory".to_string())
-            .embedding([0.1; 768])
+            .embedding(create_test_embedding(0.1))
             .confidence(Confidence::HIGH)
             .where_location("office".to_string())
             .build();
@@ -1388,7 +1403,7 @@ mod tests {
             .id("ep2".to_string())
             .when(yesterday)
             .what("yesterday's memory".to_string())
-            .embedding([0.1; 768])
+            .embedding(create_test_embedding(0.1))
             .confidence(Confidence::HIGH)
             .where_location("home".to_string())
             .build();
@@ -1422,7 +1437,7 @@ mod tests {
             .id("ep1".to_string())
             .when(now)
             .what("meeting with team about project alpha".to_string())
-            .embedding([0.1; 768])
+            .embedding(create_test_embedding(0.1))
             .confidence(Confidence::HIGH)
             .build();
 
@@ -1430,7 +1445,7 @@ mod tests {
             .id("ep2".to_string())
             .when(now - chrono::Duration::hours(2)) // Outside spreading activation window
             .what("lunch at the cafeteria".to_string())
-            .embedding([0.2; 768])
+            .embedding(create_test_embedding(0.2))
             .confidence(Confidence::HIGH)
             .build();
 
@@ -1438,7 +1453,7 @@ mod tests {
             .id("ep3".to_string())
             .when(now)
             .what("project review meeting".to_string())
-            .embedding([0.3; 768])
+            .embedding(create_test_embedding(0.3))
             .confidence(Confidence::HIGH)
             .build();
 
@@ -1467,7 +1482,7 @@ mod tests {
             .id("ep1".to_string())
             .when(Utc::now())
             .what("test memory".to_string())
-            .embedding([0.5; 768])
+            .embedding(create_test_embedding(0.5))
             .confidence(Confidence::MEDIUM)
             .build();
 
@@ -1540,7 +1555,7 @@ mod tests {
             .id("ep1".to_string())
             .when(base_time)
             .what("meeting about project".to_string())
-            .embedding([0.5; 768])
+            .embedding(create_test_embedding(0.5))
             .confidence(Confidence::HIGH)
             .build();
 
@@ -1548,7 +1563,7 @@ mod tests {
             .id("ep2".to_string())
             .when(base_time + chrono::Duration::minutes(30))
             .what("discussion with John".to_string())
-            .embedding([0.3; 768])
+            .embedding(create_test_embedding(0.3))
             .confidence(Confidence::MEDIUM)
             .build();
 
@@ -1556,7 +1571,7 @@ mod tests {
             .id("ep3".to_string())
             .when(base_time + chrono::Duration::hours(2))
             .what("unrelated task".to_string())
-            .embedding([0.1; 768])
+            .embedding(create_test_embedding(0.1))
             .confidence(Confidence::LOW)
             .build();
 
@@ -1590,7 +1605,7 @@ mod tests {
             .id("low".to_string())
             .when(Utc::now())
             .what("low confidence episode".to_string())
-            .embedding([0.1; 768])
+            .embedding(create_test_embedding(0.11))
             .confidence(Confidence::LOW)
             .build();
 
@@ -1598,7 +1613,7 @@ mod tests {
             .id("med".to_string())
             .when(Utc::now())
             .what("medium confidence episode".to_string())
-            .embedding([0.1; 768])
+            .embedding(create_test_embedding(0.12))
             .confidence(Confidence::MEDIUM)
             .build();
 
@@ -1606,7 +1621,7 @@ mod tests {
             .id("high".to_string())
             .when(Utc::now())
             .what("high confidence episode".to_string())
-            .embedding([0.1; 768])
+            .embedding(create_test_embedding(0.13))
             .confidence(Confidence::HIGH)
             .build();
 
@@ -1619,7 +1634,7 @@ mod tests {
             .id("new".to_string())
             .when(Utc::now())
             .what("new episode".to_string())
-            .embedding([0.1; 768])
+            .embedding(create_test_embedding(0.14))
             .confidence(Confidence::HIGH)
             .build();
 
