@@ -300,124 +300,193 @@ impl HippocampalCompletion {
             0.0
         }
     }
+    
+    /// Prepare input vector from partial episode
+    fn prepare_input_vector(&self, partial: &PartialEpisode) -> CompletionResult<(DVector<f32>, usize)> {
+        let mut input = DVector::zeros(768);
+        let mut known_count = 0;
+
+        for (i, value) in partial.partial_embedding.iter().enumerate() {
+            if i >= 768 {
+                break;
+            }
+            if let Some(v) = value {
+                input[i] = *v;
+                known_count += 1;
+            }
+        }
+
+        // Validate we have sufficient information
+        if known_count < 100 {
+            return Err(CompletionError::InsufficientPattern);
+        }
+        
+        Ok((input, known_count))
+    }
+    
+    /// Apply the core pattern completion algorithm
+    fn apply_pattern_completion_algorithm(&self, input: DVector<f32>) -> CompletionResult<([f32; 768], usize)> {
+        // Clone self for mutable operations
+        let mut engine = Self::new(self.config.clone());
+        engine.ca3_weights = self.ca3_weights.clone();
+        engine.stored_patterns = self.stored_patterns.clone();
+
+        // Pattern separation
+        let separated = engine.pattern_separate(&input);
+
+        // CA3 attractor dynamics
+        let completed = engine.ca3_dynamics(separated);
+
+        // Convert back to array
+        let mut completed_embedding = [0.0f32; 768];
+        for i in 0..768 {
+            completed_embedding[i] = completed[i];
+        }
+        
+        Ok((completed_embedding, engine.iterations))
+    }
+    
+    /// Find existing episode or create new one from completed pattern
+    fn find_or_create_episode(
+        &self,
+        partial: &PartialEpisode,
+        completed_embedding: &[f32; 768],
+    ) -> Episode {
+        if let Some(matched) = self.find_best_match(completed_embedding) {
+            matched.clone()
+        } else {
+            self.create_new_episode_from_pattern(partial, *completed_embedding)
+        }
+    }
+    
+    /// Create a new episode from completed pattern
+    fn create_new_episode_from_pattern(
+        &self,
+        partial: &PartialEpisode,
+        completed_embedding: [f32; 768],
+    ) -> Episode {
+        let mut episode = Episode::new(
+            format!("completed_{}", chrono::Utc::now().timestamp()),
+            Utc::now(),
+            partial
+                .known_fields
+                .get("what")
+                .cloned()
+                .unwrap_or_else(|| "Reconstructed memory".to_string()),
+            completed_embedding,
+            partial.cue_strength,
+        );
+        
+        // Try to reconstruct location from stored patterns
+        if let Some(where_location) = self.reconstruct_location_from_patterns(partial) {
+            episode.where_location = Some(where_location);
+        }
+        
+        // Try to reconstruct participants from stored patterns
+        if let Some(participants) = self.reconstruct_participants_from_patterns(partial) {
+            episode.who = Some(participants);
+        }
+        
+        episode
+    }
+    
+    /// Build the final completed episode with metadata
+    fn build_completed_episode(
+        &self,
+        episode: Episode,
+        partial: &PartialEpisode,
+        known_count: usize,
+        iterations: usize,
+    ) -> CompletedEpisode {
+        // Calculate completion confidence based on iterations and known data
+        let completion_confidence = self.calculate_completion_confidence(known_count, iterations);
+        
+        // Build source attribution map
+        let source_map = self.build_source_attribution(partial, completion_confidence);
+        
+        // Create activation trace
+        let activation_trace = ActivationTrace {
+            source_memory: episode.id.clone(),
+            activation_strength: completion_confidence.raw(),
+            pathway: ActivationPathway::Direct,
+            decay_factor: 0.1,
+        };
+
+        CompletedEpisode {
+            episode,
+            completion_confidence,
+            source_attribution: source_map,
+            alternative_hypotheses: Vec::new(),
+            metacognitive_confidence: completion_confidence,
+            activation_evidence: vec![activation_trace],
+        }
+    }
+    
+    /// Calculate confidence based on completion quality
+    fn calculate_completion_confidence(&self, _known_count: usize, iterations: usize) -> Confidence {
+        // Higher confidence when fewer iterations needed (matches original logic)
+        let iteration_ratio = iterations as f32 / self.config.max_iterations as f32;
+        
+        Confidence::exact(0.9 * (1.0 - iteration_ratio))
+    }
+    
+    /// Build source attribution map for completed fields
+    fn build_source_attribution(
+        &self,
+        partial: &PartialEpisode,
+        completion_confidence: Confidence,
+    ) -> SourceMap {
+        let mut source_map = SourceMap {
+            field_sources: HashMap::new(),
+            source_confidence: HashMap::new(),
+        };
+
+        // Mark known fields as recalled with high confidence
+        for field in partial.known_fields.keys() {
+            source_map
+                .field_sources
+                .insert(field.clone(), MemorySource::Recalled);
+            source_map
+                .source_confidence
+                .insert(field.clone(), Confidence::exact(1.0));
+        }
+
+        // Add reconstructed fields with completion confidence
+        if !partial.known_fields.contains_key("what") {
+            source_map
+                .field_sources
+                .insert("what".to_string(), MemorySource::Reconstructed);
+            source_map
+                .source_confidence
+                .insert("what".to_string(), completion_confidence);
+        }
+        
+        source_map
+    }
 }
 
 impl PatternCompleter for HippocampalCompletion {
     fn complete(&self, partial: &PartialEpisode) -> CompletionResult<CompletedEpisode> {
-        // Convert partial embedding to full vector
         #[cfg(feature = "pattern_completion")]
         {
-            let mut input = DVector::zeros(768);
-            let mut known_count = 0;
-
-            for (i, value) in partial.partial_embedding.iter().enumerate() {
-                if i >= 768 {
-                    break;
-                }
-                if let Some(v) = value {
-                    input[i] = *v;
-                    known_count += 1;
-                }
-            }
-
-            // Check if we have enough information
-            if known_count < 100 {
-                return Err(CompletionError::InsufficientPattern);
-            }
-
-            // Clone self for mutable operations
-            let mut engine = Self::new(self.config.clone());
-            engine.ca3_weights = self.ca3_weights.clone();
-            engine.stored_patterns = self.stored_patterns.clone();
-
-            // Pattern separation
-            let separated = engine.pattern_separate(&input);
-
-            // CA3 attractor dynamics
-            let completed = engine.ca3_dynamics(separated);
-
-            // Convert back to array
-            let mut completed_embedding = [0.0f32; 768];
-            for i in 0..768 {
-                completed_embedding[i] = completed[i];
-            }
-
-            // Find best matching episode or create new one
-            let episode = if let Some(matched) = self.find_best_match(&completed_embedding) {
-                matched.clone()
-            } else {
-                // Create new episode from completed pattern
-                let mut episode = Episode::new(
-                    format!("completed_{}", chrono::Utc::now().timestamp()),
-                    Utc::now(),
-                    partial
-                        .known_fields
-                        .get("what")
-                        .cloned()
-                        .unwrap_or_else(|| "Reconstructed memory".to_string()),
-                    completed_embedding,
-                    partial.cue_strength,
-                );
-                
-                // Try to reconstruct location from stored patterns
-                if let Some(where_location) = self.reconstruct_location_from_patterns(partial) {
-                    episode.where_location = Some(where_location);
-                }
-                
-                // Try to reconstruct participants from stored patterns
-                if let Some(participants) = self.reconstruct_participants_from_patterns(partial) {
-                    episode.who = Some(participants);
-                }
-                
-                episode
-            };
-
-            // Calculate completion confidence
-            let completion_confidence = Confidence::exact(
-                0.9 * (1.0 - (engine.iterations as f32 / self.config.max_iterations as f32)),
-            );
-
-            // Build source map
-            let mut source_map = SourceMap {
-                field_sources: HashMap::new(),
-                source_confidence: HashMap::new(),
-            };
-
-            for field in partial.known_fields.keys() {
-                source_map
-                    .field_sources
-                    .insert(field.clone(), MemorySource::Recalled);
-                source_map
-                    .source_confidence
-                    .insert(field.clone(), Confidence::exact(1.0));
-            }
-
-            // Add reconstructed fields
-            if !partial.known_fields.contains_key("what") {
-                source_map
-                    .field_sources
-                    .insert("what".to_string(), MemorySource::Reconstructed);
-                source_map
-                    .source_confidence
-                    .insert("what".to_string(), completion_confidence);
-            }
-
-            // Create activation trace
-            let activation_trace = ActivationTrace {
-                source_memory: episode.id.clone(),
-                activation_strength: completion_confidence.raw(),
-                pathway: ActivationPathway::Direct,
-                decay_factor: 0.1,
-            };
-
-            Ok(CompletedEpisode {
+            // 1. Validate and prepare input
+            let (input, known_count) = self.prepare_input_vector(partial)?;
+            
+            // 2. Apply pattern completion algorithm
+            let (completed_embedding, iterations) = self.apply_pattern_completion_algorithm(input)?;
+            
+            // 3. Find or create episode from completed pattern
+            let episode = self.find_or_create_episode(partial, &completed_embedding);
+            
+            // 4. Build completion metadata
+            let completed_episode = self.build_completed_episode(
                 episode,
-                completion_confidence,
-                source_attribution: source_map,
-                alternative_hypotheses: Vec::new(),
-                metacognitive_confidence: completion_confidence,
-                activation_evidence: vec![activation_trace],
-            })
+                partial,
+                known_count,
+                iterations,
+            );
+            
+            Ok(completed_episode)
         }
 
         #[cfg(not(feature = "pattern_completion"))]

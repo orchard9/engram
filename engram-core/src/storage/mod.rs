@@ -19,6 +19,10 @@ use thiserror::Error;
 pub mod cache;
 #[cfg(feature = "memory_mapped_persistence")]
 pub mod compact;
+pub mod cold_tier;
+pub mod content_addressing;
+pub mod deduplication;
+pub mod hot_tier;
 #[cfg(feature = "memory_mapped_persistence")]
 pub mod index;
 #[cfg(feature = "memory_mapped_persistence")]
@@ -29,6 +33,7 @@ pub mod recovery;
 pub mod tiers;
 #[cfg(feature = "memory_mapped_persistence")]
 pub mod wal;
+pub mod warm_tier;
 
 #[cfg(all(feature = "memory_mapped_persistence", unix))]
 pub mod numa;
@@ -36,12 +41,20 @@ pub mod numa;
 // Re-exports for public API
 #[cfg(feature = "memory_mapped_persistence")]
 pub use cache::{CacheOptimalMemoryNode, CognitiveIndex};
+pub use cold_tier::{ColdTier, ColdTierConfig, CompactionResult};
+pub use content_addressing::{ContentAddress, ContentIndex, ContentIndexStats};
+pub use deduplication::{
+    DeduplicationAction, DeduplicationResult, DeduplicationStats,
+    MergeStrategy, SemanticDeduplicator,
+};
+pub use hot_tier::HotTier;
 #[cfg(feature = "memory_mapped_persistence")]
 pub use mapped::MappedWarmStorage;
 #[cfg(feature = "memory_mapped_persistence")]
 pub use tiers::{CognitiveTierArchitecture, TierArchitectureStats, TierCoordinator};
 #[cfg(feature = "memory_mapped_persistence")]
 pub use wal::{WalEntry, WalWriter};
+pub use warm_tier::{WarmTier, WarmTierConfig, CompactionStats, MemoryUsage};
 
 /// Core storage traits for pluggable backends
 pub trait StorageTier: Send + Sync {

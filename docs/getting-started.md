@@ -23,16 +23,16 @@ cargo build
 
 You should see:
 ```
-🏥 Engram Server Health Check
+Engram Server Health Check
 ═══════════════════════════════════════
-📋 Process ID: 12345
-🌐 HTTP Port: 7432
-✅ Process Status: Running
-✅ HTTP Health: Responding (1.2ms)
+Process ID: 12345
+HTTP Port: 7432
+Process Status: Running
+HTTP Health: Responding (1.2ms)
 
-🔌 API Endpoints:
-  ✅ System Health API: 200 OK
-  ✅ Memory Recall API: 200 OK
+API Endpoints:
+  System Health API: 200 OK
+  Memory Recall API: 200 OK
 ```
 
 ### 3. Run Tests

@@ -14,11 +14,11 @@ hero:
       link: https://github.com/orchard9/engram
 
 features:
-  - title: 🧠 Cognitive Memory
+  - title: Cognitive Memory
     details: Store and recall memories with biological plausibility, featuring spreading activation and memory consolidation
-  - title: ⚡ High Performance
+  - title: High Performance
     details: Built in Rust with SIMD optimizations, lock-free data structures, and NUMA-aware memory management
-  - title: 🔗 Graph Architecture
+  - title: Graph Architecture
     details: Hierarchical Navigable Small World (HNSW) index with probabilistic confidence scoring
 ---
 

@@ -6,6 +6,10 @@
 
 use crate::{Confidence, Cue, CueType, Episode, Memory, TemporalPattern};
 use crate::memory_graph::{UnifiedMemoryGraph, InfallibleBackend, GraphConfig};
+use crate::storage::{
+    ContentAddress, ContentIndex, 
+    DeduplicationAction, MergeStrategy, SemanticDeduplicator,
+};
 use chrono::Utc;
 use dashmap::DashMap;
 use parking_lot::RwLock;
@@ -118,6 +122,12 @@ pub struct MemoryStore {
     /// Pattern completion engine
     #[cfg(feature = "pattern_completion")]
     pattern_reconstructor: Option<Arc<RwLock<PatternReconstructor>>>,
+    
+    /// Content-addressable index for deduplication
+    content_index: Arc<ContentIndex>,
+    
+    /// Semantic deduplicator for preventing near-duplicates
+    deduplicator: Arc<RwLock<SemanticDeduplicator>>,
 }
 
 /// Wrapper for f32 that implements Ord for `BTreeMap`
@@ -179,6 +189,8 @@ impl MemoryStore {
             storage_metrics: Arc::new(StorageMetrics::new()),
             #[cfg(feature = "pattern_completion")]
             pattern_reconstructor: None,
+            content_index: Arc::new(ContentIndex::new()),
+            deduplicator: Arc::new(RwLock::new(SemanticDeduplicator::default())),
         }
     }
 
@@ -274,8 +286,53 @@ impl MemoryStore {
 
         // Convert episode to memory
         let memory = Memory::from_episode(episode.clone(), base_activation);
-        let memory_id = memory.id.clone();
+        
+        // Generate content address for deduplication
+        let content_address = ContentAddress::from_embedding(&memory.embedding);
+        
+        // Check for duplicates
+        let existing_memories: Vec<Arc<Memory>> = self.hot_memories.iter()
+            .map(|entry| entry.value().clone())
+            .collect();
+        
+        let dedup_result = {
+            let mut dedup = self.deduplicator.write();
+            dedup.check_duplicate(&memory, &existing_memories)
+        };
+        
+        // Handle deduplication based on result
+        let memory_id = match dedup_result.action {
+            DeduplicationAction::Skip => {
+                // Duplicate found, return existing activation
+                if let Some(existing_id) = dedup_result.existing_id {
+                    return Activation(base_activation * 0.9); // Slightly degraded for duplicate
+                }
+                memory.id.clone()
+            }
+            DeduplicationAction::Replace(existing_id) => {
+                // Replace existing memory
+                self.hot_memories.remove(&existing_id);
+                self.content_index.remove(&content_address);
+                memory.id.clone()
+            }
+            DeduplicationAction::Merge(existing_id) => {
+                // Merge with existing memory
+                if let Some(existing) = self.hot_memories.get(&existing_id) {
+                    let dedup = self.deduplicator.read();
+                    let merged = dedup.merge_memories(&memory, &existing);
+                    let merged_arc = Arc::new(merged);
+                    self.hot_memories.insert(existing_id.clone(), merged_arc.clone());
+                    return Activation(base_activation * 0.95);
+                }
+                memory.id.clone()
+            }
+            _ => memory.id.clone(),
+        };
+        
         let memory_arc = Arc::new(memory);
+        
+        // Store content address mapping
+        self.content_index.insert(content_address, memory_id.clone());
 
         // Store in hot tier (lock-free)
         self.hot_memories
@@ -601,142 +658,217 @@ impl MemoryStore {
 
     /// In-memory recall implementation
     fn recall_in_memory(&self, cue: Cue) -> Vec<(Episode, Confidence)> {
-        // Try to use HNSW index if available and appropriate
+        // Main orchestration method - delegates to focused methods
+        
+        // 1. Try HNSW index for embedding cues if available
         #[cfg(feature = "hnsw_index")]
         {
-            if let Some(ref hnsw) = self.hnsw_index {
-                if let CueType::Embedding { vector, threshold } = &cue.cue_type {
+            if let CueType::Embedding { vector, threshold } = &cue.cue_type {
+                if let Some(ref hnsw) = self.hnsw_index {
                     return self.recall_with_hnsw(cue.clone(), hnsw, vector, *threshold);
                 }
             }
         }
 
-        let mut results = Vec::new();
-
-        // Get all episodes from WAL buffer
-        let episodes: Vec<(String, Episode)> = self
-            .wal_buffer
+        // 2. Get episodes and apply cue-specific filtering
+        let episodes = self.get_episodes_from_buffer();
+        let mut results = self.apply_cue_filtering(episodes, &cue);
+        
+        // 3. Apply spreading activation
+        results = self.apply_spreading_activation(results, &cue);
+        
+        // 4. Sort and limit results
+        self.finalize_results(results, cue.max_results)
+    }
+    
+    /// Extract all episodes from the WAL buffer
+    fn get_episodes_from_buffer(&self) -> Vec<(String, Episode)> {
+        self.wal_buffer
             .iter()
             .map(|entry| (entry.key().clone(), entry.value().clone()))
-            .collect();
-
-        // Match based on cue type
+            .collect()
+    }
+    
+    /// Apply cue-specific filtering to episodes
+    fn apply_cue_filtering(&self, episodes: Vec<(String, Episode)>, cue: &Cue) -> Vec<(Episode, Confidence)> {
         match &cue.cue_type {
             CueType::Embedding { vector, threshold } => {
-                for (_id, episode) in episodes {
-                    let similarity = cosine_similarity(&episode.embedding, vector);
-                    let confidence = Confidence::exact(similarity);
-
-                    // Include if meets threshold
-                    if confidence.raw() >= threshold.raw() {
-                        results.push((episode, confidence));
-                    }
-                }
+                self.filter_by_embedding(episodes, vector, threshold)
             }
-            CueType::Context {
-                time_range,
-                location,
-                confidence_threshold,
-            } => {
-                for (_id, episode) in episodes {
-                    let mut match_score = 0.0;
-                    let mut max_score = 0.0;
-
-                    // Check time range if provided
-                    if let Some((start, end)) = time_range {
-                        max_score += 1.0;
-                        if episode.when >= *start && episode.when <= *end {
-                            match_score += 1.0;
-                        }
-                    }
-
-                    // Check location if provided
-                    if let Some(loc) = location {
-                        max_score += 1.0;
-                        if let Some(ep_loc) = &episode.where_location {
-                            if ep_loc.contains(loc) || loc.contains(ep_loc) {
-                                match_score += 1.0;
-                            }
-                        }
-                    }
-
-                    if max_score > 0.0 {
-                        let confidence_value = match_score / max_score;
-                        let confidence = Confidence::exact(confidence_value);
-
-                        if confidence.raw() >= confidence_threshold.raw() {
-                            results.push((episode, confidence));
-                        }
-                    }
-                }
+            CueType::Context { time_range, location, confidence_threshold } => {
+                self.filter_by_context(episodes, time_range, location, confidence_threshold)
             }
-            CueType::Semantic {
-                content,
-                fuzzy_threshold,
-            } => {
-                for (_id, episode) in episodes {
-                    // Simple substring matching for now
-                    let match_score = if episode
-                        .what
-                        .to_lowercase()
-                        .contains(&content.to_lowercase())
-                    {
-                        1.0
-                    } else if content
-                        .to_lowercase()
-                        .contains(&episode.what.to_lowercase())
-                    {
-                        0.7
-                    } else {
-                        // Calculate word overlap
-                        let cue_words: Vec<&str> = content.split_whitespace().collect();
-                        let ep_words: Vec<&str> = episode.what.split_whitespace().collect();
-                        let matches = cue_words.iter().filter(|w| ep_words.contains(w)).count();
-
-                        if matches > 0 {
-                            (matches as f32 / cue_words.len().max(1) as f32) * 0.5
-                        } else {
-                            0.0
-                        }
-                    };
-
-                    if match_score > 0.0 {
-                        let confidence = Confidence::exact(match_score);
-
-                        if confidence.raw() >= fuzzy_threshold.raw() {
-                            results.push((episode, confidence));
-                        }
-                    }
-                }
+            CueType::Semantic { content, fuzzy_threshold } => {
+                self.filter_by_semantic(episodes, content, fuzzy_threshold)
             }
-            CueType::Temporal {
-                pattern,
-                confidence_threshold,
-            } => {
-                for (_id, episode) in episodes {
-                    let is_match = match pattern {
-                        TemporalPattern::Before(time) => episode.when < *time,
-                        TemporalPattern::After(time) => episode.when > *time,
-                        TemporalPattern::Between(start, end) => {
-                            episode.when >= *start && episode.when <= *end
-                        }
-                        TemporalPattern::Recent(duration) => {
-                            let now = Utc::now();
-                            episode.when > now - *duration
-                        }
-                    };
+            CueType::Temporal { pattern, confidence_threshold } => {
+                self.filter_by_temporal(episodes, pattern, confidence_threshold)
+            }
+        }
+    }
+    
+    /// Filter episodes by embedding similarity
+    fn filter_by_embedding(
+        &self,
+        episodes: Vec<(String, Episode)>,
+        vector: &[f32; 768],
+        threshold: &Confidence,
+    ) -> Vec<(Episode, Confidence)> {
+        let mut results = Vec::new();
+        
+        for (_id, episode) in episodes {
+            let similarity = cosine_similarity(&episode.embedding, vector);
+            let confidence = Confidence::exact(similarity);
 
-                    if is_match {
-                        let confidence = *confidence_threshold;
-                        results.push((episode, confidence));
-                    }
+            if confidence.raw() >= threshold.raw() {
+                results.push((episode, confidence));
+            }
+        }
+        
+        results
+    }
+    
+    /// Filter episodes by context (time range and location)
+    fn filter_by_context(
+        &self,
+        episodes: Vec<(String, Episode)>,
+        time_range: &Option<(chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>)>,
+        location: &Option<String>,
+        confidence_threshold: &Confidence,
+    ) -> Vec<(Episode, Confidence)> {
+        let mut results = Vec::new();
+        
+        for (_id, episode) in episodes {
+            let (match_score, max_score) = self.calculate_context_score(&episode, time_range, location);
+            
+            if max_score > 0.0 {
+                let confidence_value = match_score / max_score;
+                let confidence = Confidence::exact(confidence_value);
+
+                if confidence.raw() >= confidence_threshold.raw() {
+                    results.push((episode, confidence));
                 }
             }
         }
+        
+        results
+    }
+    
+    /// Calculate context matching score for an episode
+    fn calculate_context_score(
+        &self,
+        episode: &Episode,
+        time_range: &Option<(chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>)>,
+        location: &Option<String>,
+    ) -> (f32, f32) {
+        let mut match_score = 0.0;
+        let mut max_score = 0.0;
 
-        // Apply spreading activation for associative recall
-        results = self.apply_spreading_activation(results, &cue);
+        // Check time range if provided
+        if let Some((start, end)) = time_range {
+            max_score += 1.0;
+            if episode.when >= *start && episode.when <= *end {
+                match_score += 1.0;
+            }
+        }
 
+        // Check location if provided
+        if let Some(loc) = location {
+            max_score += 1.0;
+            if let Some(ep_loc) = &episode.where_location {
+                if ep_loc.contains(loc) || loc.contains(ep_loc) {
+                    match_score += 1.0;
+                }
+            }
+        }
+        
+        (match_score, max_score)
+    }
+    
+    /// Filter episodes by semantic content
+    fn filter_by_semantic(
+        &self,
+        episodes: Vec<(String, Episode)>,
+        content: &str,
+        fuzzy_threshold: &Confidence,
+    ) -> Vec<(Episode, Confidence)> {
+        let mut results = Vec::new();
+        
+        for (_id, episode) in episodes {
+            let match_score = self.calculate_semantic_similarity(&episode.what, content);
+            
+            if match_score > 0.0 {
+                let confidence = Confidence::exact(match_score);
+
+                if confidence.raw() >= fuzzy_threshold.raw() {
+                    results.push((episode, confidence));
+                }
+            }
+        }
+        
+        results
+    }
+    
+    /// Calculate semantic similarity between episode content and query
+    fn calculate_semantic_similarity(&self, episode_content: &str, query: &str) -> f32 {
+        // Exact substring match
+        if episode_content.to_lowercase().contains(&query.to_lowercase()) {
+            return 1.0;
+        }
+        
+        // Reverse substring match
+        if query.to_lowercase().contains(&episode_content.to_lowercase()) {
+            return 0.7;
+        }
+        
+        // Word overlap calculation
+        let query_words: Vec<&str> = query.split_whitespace().collect();
+        let episode_words: Vec<&str> = episode_content.split_whitespace().collect();
+        let matches = query_words.iter().filter(|w| episode_words.contains(w)).count();
+
+        if matches > 0 {
+            (matches as f32 / query_words.len().max(1) as f32) * 0.5
+        } else {
+            0.0
+        }
+    }
+    
+    /// Filter episodes by temporal pattern
+    fn filter_by_temporal(
+        &self,
+        episodes: Vec<(String, Episode)>,
+        pattern: &TemporalPattern,
+        confidence_threshold: &Confidence,
+    ) -> Vec<(Episode, Confidence)> {
+        let mut results = Vec::new();
+        
+        for (_id, episode) in episodes {
+            if self.matches_temporal_pattern(&episode, pattern) {
+                let confidence = *confidence_threshold;
+                results.push((episode, confidence));
+            }
+        }
+        
+        results
+    }
+    
+    /// Check if episode matches temporal pattern
+    fn matches_temporal_pattern(&self, episode: &Episode, pattern: &TemporalPattern) -> bool {
+        match pattern {
+            TemporalPattern::Before(time) => episode.when < *time,
+            TemporalPattern::After(time) => episode.when > *time,
+            TemporalPattern::Between(start, end) => {
+                episode.when >= *start && episode.when <= *end
+            }
+            TemporalPattern::Recent(duration) => {
+                let now = Utc::now();
+                episode.when > now - *duration
+            }
+        }
+    }
+    
+    /// Sort and limit results to requested max
+    fn finalize_results(&self, mut results: Vec<(Episode, Confidence)>, max_results: usize) -> Vec<(Episode, Confidence)> {
         // Sort by confidence (highest first)
         results.sort_by(|a, b| {
             b.1.raw()
@@ -744,9 +876,9 @@ impl MemoryStore {
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
-        // Limit results to max_results from cue
-        results.truncate(cue.max_results);
-
+        // Limit results
+        results.truncate(max_results);
+        
         results
     }
 
@@ -934,6 +1066,90 @@ impl MemoryStore {
 
         results.truncate(cue.max_results);
         results
+    }
+    
+    /// Recall memory by content address
+    pub fn recall_by_content(&self, embedding: &[f32; 768]) -> Option<Episode> {
+        let content_address = ContentAddress::from_embedding(embedding);
+        
+        // Look up memory ID from content index
+        if let Some(memory_id) = self.content_index.get(&content_address) {
+            // Retrieve memory from hot tier
+            if let Some(memory) = self.hot_memories.get(&memory_id) {
+                // Convert Memory to Episode
+                let episode = Episode::new(
+                    memory.id.clone(),
+                    memory.created_at,
+                    memory.content.clone().unwrap_or_else(|| format!("Memory {}", memory.id)),
+                    memory.embedding,
+                    memory.confidence,
+                );
+                return Some(episode);
+            }
+        }
+        
+        None
+    }
+    
+    /// Find similar content using LSH buckets
+    pub fn find_similar_content(&self, embedding: &[f32; 768], max_results: usize) -> Vec<(Episode, Confidence)> {
+        let content_address = ContentAddress::from_embedding(embedding);
+        
+        // Find similar content addresses in same or nearby buckets
+        let similar_addresses = self.content_index.find_nearby(&content_address, 5);
+        
+        let mut results = Vec::new();
+        
+        for addr in similar_addresses {
+            if let Some(memory_id) = self.content_index.get(&addr) {
+                if let Some(memory) = self.hot_memories.get(&memory_id) {
+                    // Calculate actual similarity
+                    let similarity = crate::compute::cosine_similarity_768(embedding, &memory.embedding);
+                    
+                    if similarity > 0.8 {
+                        let episode = Episode::new(
+                            memory.id.clone(),
+                            memory.created_at,
+                            memory.content.clone().unwrap_or_else(|| format!("Memory {}", memory.id)),
+                            memory.embedding,
+                            memory.confidence,
+                        );
+                        
+                        results.push((episode, Confidence::exact(similarity)));
+                    }
+                }
+            }
+        }
+        
+        // Sort by confidence
+        results.sort_by(|a, b| {
+            b.1.raw()
+                .partial_cmp(&a.1.raw())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        
+        results.truncate(max_results);
+        results
+    }
+    
+    /// Get deduplication statistics
+    pub fn deduplication_stats(&self) -> crate::storage::DeduplicationStats {
+        self.deduplicator.read().stats()
+    }
+    
+    /// Get content index statistics
+    pub fn content_index_stats(&self) -> crate::storage::ContentIndexStats {
+        self.content_index.stats()
+    }
+    
+    /// Configure deduplication threshold
+    pub fn set_deduplication_threshold(&self, threshold: f32) {
+        self.deduplicator.write().set_threshold(threshold);
+    }
+    
+    /// Configure deduplication merge strategy
+    pub fn set_deduplication_strategy(&self, strategy: MergeStrategy) {
+        self.deduplicator.write().set_strategy(strategy);
     }
 }
 

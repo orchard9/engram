@@ -8,38 +8,38 @@ use std::time::{Duration, Instant};
 
 /// Show comprehensive server status
 pub async fn show_status() -> Result<()> {
-    println!("🏥 Engram Server Health Check");
+    println!("Engram Server Health Check");
     println!("═══════════════════════════════════════");
 
     let pid_path = pid_file_path();
 
     if !pid_path.exists() {
-        println!("❌ Status: No running server found");
-        println!("💡 Start with: engram start");
+        println!("Status: No running server found");
+        println!("Start with: engram start");
         return Ok(());
     }
 
     let (pid, port) = match read_pid_file() {
         Ok(info) => info,
         Err(e) => {
-            println!("⚠️  Status: Server info corrupted");
-            println!("🔧 Error: {e}");
-            println!("💡 Try: engram stop && engram start");
+            println!(" Status: Server info corrupted");
+            println!(" Error: {e}");
+            println!(" Try: engram stop && engram start");
             return Ok(());
         }
     };
 
-    println!("📋 Process ID: {pid}");
-    println!("🌐 HTTP Port: {port}");
+    println!("Process ID: {pid}");
+    println!("HTTP Port: {port}");
 
     // Check if process exists
     if !is_process_running(pid) {
-        println!("💀 Process Status: Not running (zombie PID file)");
-        println!("🧹 Cleanup needed: engram stop");
+        println!("Process Status: Not running (zombie PID file)");
+        println!("Cleanup needed: engram stop");
         return Ok(());
     }
 
-    println!("✅ Process Status: Running");
+    println!("Process Status: Running");
 
     // Check HTTP health
     let client = reqwest::Client::builder()
@@ -54,7 +54,7 @@ pub async fn show_status() -> Result<()> {
             let response_time = start_time.elapsed();
 
             if response.status().is_success() {
-                println!("✅ HTTP Health: Responding ({response_time:?})");
+                println!("HTTP Health: Responding ({response_time:?})");
 
                 // Try to get detailed health info
                 let detailed_health_url = format!("http://127.0.0.1:{port}/health");
@@ -64,17 +64,17 @@ pub async fn show_status() -> Result<()> {
                     }
                 }
             } else {
-                println!("⚠️  HTTP Health: Unhealthy (status: {})", response.status());
+                println!("HTTP Health: Unhealthy (status: {})", response.status());
             }
         }
         Err(e) => {
-            println!("❌ HTTP Health: Unreachable");
-            println!("🔍 Error: {e}");
+            println!("HTTP Health: Unreachable");
+            println!("Error: {e}");
         }
     }
 
     // Check API endpoints
-    println!("\n🔌 API Endpoints:");
+    println!("\nAPI Endpoints:");
     check_endpoint(
         &client,
         format!("http://127.0.0.1:{port}/api/v1/system/health"),
@@ -88,7 +88,7 @@ pub async fn show_status() -> Result<()> {
     )
     .await;
 
-    println!("\n💡 Useful commands:");
+    println!("\nUseful commands:");
     println!("  engram memory list          # List all memories");
     println!("  engram memory create \"text\" # Create a memory");
     println!("  engram stop                 # Stop the server");
@@ -98,16 +98,10 @@ pub async fn show_status() -> Result<()> {
 
 /// Print detailed health information
 fn print_health_details(health_data: &Value) {
-    println!("\n🩺 Detailed Health:");
+    println!("\n Detailed Health:");
 
     if let Some(status) = health_data.get("status").and_then(|s| s.as_str()) {
-        let status_emoji = match status {
-            "healthy" => "✅",
-            "degraded" => "⚠️ ",
-            "unhealthy" => "❌",
-            _ => "❓",
-        };
-        println!("  {status_emoji} Overall: {status}");
+        println!("  Overall: {status}");
     }
 
     if let Some(uptime) = health_data
@@ -116,9 +110,9 @@ fn print_health_details(health_data: &Value) {
     {
         let hours = uptime / 3600.0;
         if hours < 1.0 {
-            println!("  ⏱️  Uptime: {:.1} minutes", uptime / 60.0);
+            println!("   Uptime: {:.1} minutes", uptime / 60.0);
         } else {
-            println!("  ⏱️  Uptime: {hours:.1} hours");
+            println!("   Uptime: {hours:.1} hours");
         }
     }
 
@@ -126,14 +120,14 @@ fn print_health_details(health_data: &Value) {
         .get("memory_usage_mb")
         .and_then(serde_json::Value::as_f64)
     {
-        println!("  🧠 Memory Usage: {memory_usage:.1} MB");
+        println!("   Memory Usage: {memory_usage:.1} MB");
     }
 
     if let Some(connections) = health_data
         .get("active_connections")
         .and_then(serde_json::Value::as_u64)
     {
-        println!("  🔗 Active Connections: {connections}");
+        println!("   Active Connections: {connections}");
     }
 
     if let Some(last_activity) = health_data.get("last_activity").and_then(|l| l.as_str()) {
@@ -142,17 +136,17 @@ fn print_health_details(health_data: &Value) {
             let elapsed = now.signed_duration_since(datetime);
 
             if elapsed.num_seconds() < 60 {
-                println!("  🕐 Last Activity: {} seconds ago", elapsed.num_seconds());
+                println!("   Last Activity: {} seconds ago", elapsed.num_seconds());
             } else if elapsed.num_minutes() < 60 {
-                println!("  🕐 Last Activity: {} minutes ago", elapsed.num_minutes());
+                println!("   Last Activity: {} minutes ago", elapsed.num_minutes());
             } else {
-                println!("  🕐 Last Activity: {} hours ago", elapsed.num_hours());
+                println!("   Last Activity: {} hours ago", elapsed.num_hours());
             }
         }
     }
 
     if let Some(version) = health_data.get("version").and_then(|v| v.as_str()) {
-        println!("  📦 Version: {version}");
+        println!("   Version: {version}");
     }
 }
 
@@ -160,17 +154,10 @@ fn print_health_details(health_data: &Value) {
 async fn check_endpoint(client: &reqwest::Client, url: String, name: &str) {
     match client.get(&url).send().await {
         Ok(response) => {
-            let status_emoji = if response.status().is_success() {
-                "✅"
-            } else if response.status().is_client_error() {
-                "⚠️ " // Client error might be expected (like 401)
-            } else {
-                "❌"
-            };
-            println!("  {} {}: {}", status_emoji, name, response.status());
+            println!("  {}: {}", name, response.status());
         }
         Err(_) => {
-            println!("  ❌ {name}: Unreachable");
+            println!("   {name}: Unreachable");
         }
     }
 }

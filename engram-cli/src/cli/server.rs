@@ -29,7 +29,7 @@ pub async fn get_server_connection() -> Result<(u16, u16)> {
     if !pid_path.exists() {
         return Err(anyhow::anyhow!(
             "❌ No running Engram server found\n\
-             💡 Start a server first with: engram start\n\
+              Start a server first with: engram start\n\
              🎯 Then run your memory operations"
         ));
     }
@@ -54,7 +54,7 @@ pub async fn get_server_connection() -> Result<(u16, u16)> {
         }
         Ok(_) => Err(anyhow::anyhow!(
             "⚠️  Server found but not responding properly (PID: {})\n\
-             💡 Try: engram stop && engram start\n\
+              Try: engram stop && engram start\n\
              🔍 Check: engram status",
             pid
         )),
@@ -62,7 +62,7 @@ pub async fn get_server_connection() -> Result<(u16, u16)> {
             "💔 Server found but unreachable (PID: {})\n\
              🚫 The server process may have crashed or is not listening\n\
              🔧 Try: engram stop && engram start\n\
-             🩺 Or:  engram status # for detailed diagnostics",
+              Or:  engram status # for detailed diagnostics",
             pid
         )),
     }
@@ -74,7 +74,7 @@ pub fn write_pid_file(port: u16) -> Result<()> {
     let content = format!("{}:{}", std::process::id(), port);
     fs::write(&pid_path, content)
         .with_context(|| format!("Failed to write PID file: {pid_path:?}"))?;
-    info!("📝 Server info written to {:?}", pid_path);
+    info!(" Server info written to {:?}", pid_path);
     Ok(())
 }
 
@@ -101,7 +101,7 @@ pub fn remove_pid_file() -> Result<()> {
     if pid_path.exists() {
         fs::remove_file(&pid_path)
             .with_context(|| format!("Failed to remove PID file: {pid_path:?}"))?;
-        info!("🗑️  Removed server info file");
+        info!("  Removed server info file");
     }
     Ok(())
 }
@@ -148,7 +148,7 @@ pub async fn stop_server() -> Result<()> {
         return Ok(());
     }
 
-    info!("🛑 Stopping Engram server (PID: {}, Port: {})", pid, port);
+    info!(" Stopping Engram server (PID: {}, Port: {})", pid, port);
 
     // Try graceful shutdown first via HTTP API
     let client = reqwest::Client::builder()
@@ -163,7 +163,7 @@ pub async fn stop_server() -> Result<()> {
             // Wait for graceful shutdown
             for _ in 0..10 {
                 if !is_process_running(pid) {
-                    info!("✅ Server stopped gracefully");
+                    info!(" Server stopped gracefully");
                     remove_pid_file()?;
                     return Ok(());
                 }
@@ -188,7 +188,7 @@ pub async fn stop_server() -> Result<()> {
         // Wait a bit for TERM to work
         for _ in 0..10 {
             if !is_process_running(pid) {
-                info!("✅ Server stopped with TERM signal");
+                info!(" Server stopped with TERM signal");
                 remove_pid_file()?;
                 return Ok(());
             }
@@ -213,6 +213,6 @@ pub async fn stop_server() -> Result<()> {
 
     // Final cleanup
     remove_pid_file()?;
-    info!("✅ Server stopped");
+    info!(" Server stopped");
     Ok(())
 }

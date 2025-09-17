@@ -27,6 +27,7 @@ pub mod batch;
 #[cfg(feature = "pattern_completion")]
 pub mod completion;
 pub mod compute;
+pub mod cue;
 #[cfg(feature = "psychological_decay")]
 pub mod decay;
 pub mod differential;
@@ -252,6 +253,10 @@ pub use batch::{
     BackpressureStrategy, BatchConfig, BatchEngine, BatchError, BatchOperation,
     BatchOperationResult, BatchOperations, BatchRecallResult, BatchResult, BatchSimilarityResult,
     BatchStoreResult,
+};
+pub use cue::{
+    CueDispatcher, CueHandler, CueContext, EmbeddingCueHandler, ContextCueHandler,
+    SemanticCueHandler, TemporalCueHandler,
 };
 pub use memory::{
     Cue, CueBuilder, CueType, Episode, EpisodeBuilder, Memory, MemoryBuilder, TemporalPattern,

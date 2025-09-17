@@ -4,12 +4,11 @@
 //! based on cognitive memory patterns and access frequency.
 
 use super::{
-    CognitiveEvictionPolicy, StorageError, StorageMetrics, StorageResult, StorageTier,
-    TierStatistics, mapped::MappedWarmStorage,
+    CognitiveEvictionPolicy, StorageMetrics, StorageResult, StorageTier,
+    TierStatistics, HotTier, WarmTier, ColdTier,
 };
 use crate::{Confidence, Cue, Episode, Memory};
 use crossbeam_queue::SegQueue;
-use dashmap::DashMap;
 use std::path::Path;
 use std::sync::{
     Arc,
@@ -60,14 +59,13 @@ pub enum MigrationPriority {
 /// Cognitive tier architecture with automatic migration
 pub struct CognitiveTierArchitecture {
     /// Hot tier: DashMap for immediate access
-    hot_tier: Arc<DashMap<String, Arc<Memory>>>,
+    hot_tier: Arc<HotTier>,
 
     /// Warm tier: Memory-mapped storage
-    #[cfg(feature = "memory_mapped_persistence")]
-    warm_tier: Arc<MappedWarmStorage>,
+    warm_tier: Arc<WarmTier>,
 
-    /// Cold tier: Placeholder for columnar storage
-    cold_tier: Arc<DummyColdStorage>,
+    /// Cold tier: Columnar storage for archived memories
+    cold_tier: Arc<ColdTier>,
 
     /// Tier coordinator for migration
     coordinator: Arc<TierCoordinator>,
@@ -95,13 +93,16 @@ impl CognitiveTierArchitecture {
     ) -> StorageResult<Self> {
         let data_dir = data_dir.as_ref();
 
-        // Create warm tier storage
-        #[cfg(feature = "memory_mapped_persistence")]
-        let warm_tier = Arc::new(MappedWarmStorage::new(
+        // Create tier instances
+        let hot_tier = Arc::new(HotTier::new(hot_capacity));
+        
+        let warm_tier = Arc::new(WarmTier::new(
             data_dir.join("warm_tier.dat"),
             warm_capacity,
             metrics.clone(),
         )?);
+        
+        let cold_tier = Arc::new(ColdTier::new(cold_capacity));
 
         // Create tier coordinator
         let coordinator = Arc::new(TierCoordinator::new(
@@ -110,10 +111,9 @@ impl CognitiveTierArchitecture {
         ));
 
         Ok(Self {
-            hot_tier: Arc::new(DashMap::with_capacity(hot_capacity)),
-            #[cfg(feature = "memory_mapped_persistence")]
+            hot_tier,
             warm_tier,
-            cold_tier: Arc::new(DummyColdStorage::new()),
+            cold_tier,
             coordinator,
             metrics,
             eviction_policy: CognitiveEvictionPolicy::default(),
@@ -130,10 +130,10 @@ impl CognitiveTierArchitecture {
         // Determine initial tier based on activation level
         if activation >= self.eviction_policy.hot_activation_threshold {
             // Store in hot tier
-            self.hot_tier.insert(memory.id.clone(), memory.clone());
+            self.hot_tier.store(memory.clone()).await?;
 
             // Check if hot tier is approaching capacity
-            if self.hot_tier.len() > (self.hot_capacity as f32 * 0.8) as usize {
+            if self.hot_tier.is_near_capacity() {
                 self.coordinator
                     .schedule_migration(MigrationTask {
                         memory_id: memory.id.clone(),
@@ -146,7 +146,6 @@ impl CognitiveTierArchitecture {
             }
         } else {
             // Store directly in warm tier
-            #[cfg(feature = "memory_mapped_persistence")]
             self.warm_tier.store(memory.clone()).await?;
         }
 
@@ -160,24 +159,19 @@ impl CognitiveTierArchitecture {
         let mut results = Vec::new();
 
         // Search hot tier first (fastest)
-        for entry in self.hot_tier.iter() {
-            let memory = entry.value();
-            if self.memory_matches_cue(memory, cue) {
-                let episode = self.memory_to_episode(memory);
-                results.push((episode, memory.confidence));
-            }
-        }
+        let hot_results = self.hot_tier.recall(cue).await.unwrap_or_else(|e| {
+            tracing::warn!("Hot tier recall failed: {}", e);
+            Vec::new()
+        });
+        results.extend(hot_results);
 
         // If we need more results, search warm tier
         if results.len() < cue.max_results {
-            #[cfg(feature = "memory_mapped_persistence")]
-            {
-                let warm_results = self.warm_tier.recall(cue).await.unwrap_or_else(|e| {
-                    tracing::warn!("Warm tier recall failed: {}", e);
-                    Vec::new()
-                });
-                results.extend(warm_results);
-            }
+            let warm_results = self.warm_tier.recall(cue).await.unwrap_or_else(|e| {
+                tracing::warn!("Warm tier recall failed: {}", e);
+                Vec::new()
+            });
+            results.extend(warm_results);
         }
 
         // If still need more, search cold tier
@@ -205,28 +199,17 @@ impl CognitiveTierArchitecture {
     /// Update activation level across tiers
     pub async fn update_activation(&self, memory_id: &str, activation: f32) -> StorageResult<()> {
         // Try hot tier first
-        if let Some(mut memory_ref) = self.hot_tier.get_mut(memory_id) {
-            let memory = Arc::make_mut(memory_ref.value_mut());
-            memory.set_activation(activation);
+        if let Ok(()) = self.hot_tier.update_activation(memory_id, activation).await {
             return Ok(());
         }
 
         // Try warm tier
-        #[cfg(feature = "memory_mapped_persistence")]
-        {
-            if let Err(_) = self
-                .warm_tier
-                .update_activation(memory_id, activation)
-                .await
-            {
-                // Try cold tier
-                self.cold_tier
-                    .update_activation(memory_id, activation)
-                    .await?;
-            }
+        if let Ok(()) = self.warm_tier.update_activation(memory_id, activation).await {
+            return Ok(());
         }
 
-        Ok(())
+        // Try cold tier
+        self.cold_tier.update_activation(memory_id, activation).await
     }
 
     /// Remove memory from all tiers
@@ -234,16 +217,13 @@ impl CognitiveTierArchitecture {
         let mut found = false;
 
         // Remove from hot tier
-        if self.hot_tier.remove(memory_id).is_some() {
+        if self.hot_tier.remove(memory_id).await.is_ok() {
             found = true;
         }
 
         // Remove from warm tier
-        #[cfg(feature = "memory_mapped_persistence")]
-        {
-            if self.warm_tier.remove(memory_id).await.is_ok() {
-                found = true;
-            }
+        if self.warm_tier.remove(memory_id).await.is_ok() {
+            found = true;
         }
 
         // Remove from cold tier
@@ -256,26 +236,8 @@ impl CognitiveTierArchitecture {
 
     /// Get statistics for all tiers
     pub fn get_tier_statistics(&self) -> TierArchitectureStats {
-        let hot_stats = TierStatistics {
-            memory_count: self.hot_tier.len(),
-            total_size_bytes: self.hot_tier.len() as u64 * std::mem::size_of::<Memory>() as u64,
-            average_activation: self.calculate_hot_tier_avg_activation(),
-            last_access_time: SystemTime::now(),
-            cache_hit_rate: 1.0,   // Hot tier is always a hit
-            compaction_ratio: 1.0, // No compaction needed
-        };
-
-        #[cfg(feature = "memory_mapped_persistence")]
+        let hot_stats = self.hot_tier.statistics();
         let warm_stats = self.warm_tier.statistics();
-        #[cfg(not(feature = "memory_mapped_persistence"))]
-        let warm_stats = TierStatistics {
-            memory_count: 0,
-            total_size_bytes: 0,
-            average_activation: 0.0,
-            last_access_time: SystemTime::UNIX_EPOCH,
-            cache_hit_rate: 0.0,
-            compaction_ratio: 0.0,
-        };
 
         let cold_stats = self.cold_tier.statistics();
 
@@ -305,104 +267,41 @@ impl CognitiveTierArchitecture {
 
     /// Evict memories from hot tier based on cognitive policy
     async fn evict_from_hot_tier(&self) -> StorageResult<()> {
-        let current_time = SystemTime::now();
-        let mut candidates = Vec::new();
-
-        // Collect eviction candidates
-        for entry in self.hot_tier.iter() {
-            let memory = entry.value();
-            let age = current_time
-                .duration_since(memory.created_at.into())
-                .unwrap_or_default();
-
-            if memory.activation() < self.eviction_policy.hot_activation_threshold
-                || age > self.eviction_policy.warm_access_window
-            {
-                candidates.push((entry.key().clone(), memory.clone(), memory.activation()));
-            }
+        // Check if eviction is needed
+        if !self.hot_tier.is_near_capacity() {
+            return Ok(());
         }
 
-        // Sort by activation (evict lowest first)
-        candidates.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
-
-        // Evict until we're under capacity
+        // Get LRU candidates for eviction
         let target_count = (self.hot_capacity as f32 * 0.7) as usize; // Target 70% capacity
-        let evict_count = self.hot_tier.len().saturating_sub(target_count);
+        let current_count = self.hot_tier.len();
+        let evict_count = current_count.saturating_sub(target_count);
 
-        for (memory_id, memory, _) in candidates.into_iter().take(evict_count) {
-            // Move to warm tier
-            #[cfg(feature = "memory_mapped_persistence")]
-            {
+        if evict_count == 0 {
+            return Ok(());
+        }
+
+        let candidates = self.hot_tier.get_lru_candidates(evict_count);
+
+        for memory_id in candidates {
+            // Get memory for migration
+            if let Some(memory) = self.hot_tier.get_memory(&memory_id) {
+                // Move to warm tier
                 if let Err(e) = self.warm_tier.store(memory).await {
                     tracing::warn!("Failed to migrate {} to warm tier: {}", memory_id, e);
                     continue;
                 }
-            }
 
-            // Remove from hot tier
-            self.hot_tier.remove(&memory_id);
+                // Remove from hot tier
+                if let Err(e) = self.hot_tier.remove(&memory_id).await {
+                    tracing::warn!("Failed to remove {} from hot tier: {}", memory_id, e);
+                }
+            }
         }
 
         Ok(())
     }
 
-    /// Calculate average activation in hot tier
-    fn calculate_hot_tier_avg_activation(&self) -> f32 {
-        if self.hot_tier.is_empty() {
-            return 0.0;
-        }
-
-        let total: f32 = self
-            .hot_tier
-            .iter()
-            .map(|entry| entry.value().activation())
-            .sum();
-
-        total / self.hot_tier.len() as f32
-    }
-
-    /// Check if memory matches the given cue
-    fn memory_matches_cue(&self, memory: &Memory, cue: &Cue) -> bool {
-        // Simple implementation - in practice would use sophisticated matching
-        match &cue.cue_type {
-            crate::CueType::Semantic { content, .. } => {
-                memory.confidence.raw() >= cue.result_threshold.raw() && memory.id.contains(content) // Simplified matching
-            }
-            crate::CueType::Embedding { vector, .. } => {
-                memory.confidence.raw() >= cue.result_threshold.raw()
-                    && self.cosine_similarity(&memory.embedding, vector) > 0.8
-            }
-            crate::CueType::Context { .. } => {
-                // TODO: Implement context-based matching
-                memory.confidence.raw() >= cue.result_threshold.raw()
-            }
-            crate::CueType::Temporal { .. } => {
-                // TODO: Implement temporal matching
-                memory.confidence.raw() >= cue.result_threshold.raw()
-            }
-        }
-    }
-
-    /// Optimized cosine similarity using SIMD when available
-    fn cosine_similarity(&self, a: &[f32; 768], b: &[f32; 768]) -> f32 {
-        crate::compute::cosine_similarity_768(a, b)
-    }
-
-    /// Convert Memory to Episode
-    fn memory_to_episode(&self, memory: &Memory) -> Episode {
-        crate::EpisodeBuilder::new()
-            .id(memory.id.clone())
-            .when(chrono::DateTime::from_timestamp_nanos(
-                SystemTime::from(memory.created_at)
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_nanos() as i64,
-            ))
-            .what(format!("Memory: {}", memory.id))
-            .embedding(memory.embedding)
-            .confidence(memory.confidence)
-            .build()
-    }
 }
 
 /// Statistics for all tiers
@@ -505,83 +404,6 @@ impl TierCoordinator {
     }
 }
 
-/// Dummy cold storage implementation for testing
-pub struct DummyColdStorage {
-    memories: DashMap<String, Arc<Memory>>,
-}
-
-impl DummyColdStorage {
-    /// Create a new dummy cold storage implementation
-    pub fn new() -> Self {
-        Self {
-            memories: DashMap::new(),
-        }
-    }
-}
-
-impl StorageTier for DummyColdStorage {
-    type Error = StorageError;
-
-    async fn store(&self, memory: Arc<Memory>) -> Result<(), Self::Error> {
-        self.memories.insert(memory.id.clone(), memory);
-        Ok(())
-    }
-
-    async fn recall(&self, cue: &Cue) -> Result<Vec<(Episode, Confidence)>, Self::Error> {
-        let mut results = Vec::new();
-
-        for entry in self.memories.iter() {
-            let memory = entry.value();
-            if memory.confidence.raw() >= cue.result_threshold.raw() {
-                let episode = crate::EpisodeBuilder::new()
-                    .id(memory.id.clone())
-                    .when(chrono::DateTime::from_timestamp_nanos(
-                        SystemTime::from(memory.created_at)
-                            .duration_since(SystemTime::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_nanos() as i64,
-                    ))
-                    .what(format!("Cold memory: {}", memory.id))
-                    .embedding(memory.embedding)
-                    .confidence(memory.confidence)
-                    .build();
-
-                results.push((episode, memory.confidence));
-            }
-        }
-
-        Ok(results)
-    }
-
-    async fn update_activation(&self, memory_id: &str, activation: f32) -> Result<(), Self::Error> {
-        if let Some(mut memory_ref) = self.memories.get_mut(memory_id) {
-            let memory = Arc::make_mut(memory_ref.value_mut());
-            memory.set_activation(activation);
-        }
-        Ok(())
-    }
-
-    async fn remove(&self, memory_id: &str) -> Result<(), Self::Error> {
-        self.memories.remove(memory_id);
-        Ok(())
-    }
-
-    fn statistics(&self) -> TierStatistics {
-        TierStatistics {
-            memory_count: self.memories.len(),
-            total_size_bytes: self.memories.len() as u64 * std::mem::size_of::<Memory>() as u64,
-            average_activation: 0.3, // Cold memories have low activation
-            last_access_time: SystemTime::now(),
-            cache_hit_rate: 0.5,   // Medium hit rate for cold storage
-            compaction_ratio: 0.9, // Good compaction in cold storage
-        }
-    }
-
-    async fn maintenance(&self) -> Result<(), Self::Error> {
-        // Perform cold storage maintenance like compaction
-        Ok(())
-    }
-}
 
 #[cfg(test)]
 mod tests {

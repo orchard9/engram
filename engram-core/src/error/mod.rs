@@ -4,6 +4,7 @@
 
 pub mod cognitive;
 pub mod recovery;
+pub mod cue;
 
 // Re-export core error types from cognitive module
 pub use cognitive::{
@@ -15,3 +16,6 @@ pub use recovery::{ErrorRecovery, ResultExt, unreachable_pattern};
 
 // Re-export the enhanced error types
 pub use cognitive::{EngramError, RecoveryStrategy, Result};
+
+// Re-export cue error types
+pub use cue::CueError;

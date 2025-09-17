@@ -47,7 +47,7 @@ async fn main() -> Result<()> {
 
         Commands::Stop { force } => {
             if force {
-                println!("🔨 Force stopping server...");
+                println!(" Force stopping server...");
                 stop_server().await
             } else {
                 stop_server().await
@@ -56,7 +56,7 @@ async fn main() -> Result<()> {
 
         Commands::Status { json, watch } => {
             if watch {
-                println!("👁️  Watching status (press Ctrl+C to exit)...");
+                println!("  Watching status (press Ctrl+C to exit)...");
                 loop {
                     if json {
                         show_status_json().await?;
@@ -94,20 +94,20 @@ async fn main() -> Result<()> {
 }
 
 async fn start_server(port: u16, grpc_port: u16) -> Result<()> {
-    info!("🚀 Starting Engram server...");
+    info!(" Starting Engram server...");
 
     let actual_port = find_available_port(port).await?;
     let actual_grpc_port = find_available_port(grpc_port).await?;
 
     if actual_port != port {
         warn!(
-            "⚠️  Port {} occupied, using port {} instead",
+            "  Port {} occupied, using port {} instead",
             port, actual_port
         );
     }
     if actual_grpc_port != grpc_port {
         warn!(
-            "⚠️  gRPC port {} occupied, using port {} instead",
+            "  gRPC port {} occupied, using port {} instead",
             grpc_port, actual_grpc_port
         );
     }
@@ -131,25 +131,25 @@ async fn start_server(port: u16, grpc_port: u16) -> Result<()> {
     let listener = TcpListener::bind(addr).await?;
 
     info!(
-        "🌐 HTTP API server listening on http://127.0.0.1:{}",
+        " HTTP API server listening on http://127.0.0.1:{}",
         actual_port
     );
     info!(
-        "🔌 gRPC server would listen on 127.0.0.1:{}",
+        " gRPC server would listen on 127.0.0.1:{}",
         actual_grpc_port
     );
 
     // Write PID file for server management
     write_pid_file(actual_port)?;
 
-    println!("✅ Engram server started successfully!");
-    println!("🌐 HTTP API: http://127.0.0.1:{}", actual_port);
-    println!("🔌 gRPC: 127.0.0.1:{}", actual_grpc_port);
-    println!("🩺 Health: http://127.0.0.1:{}/health", actual_port);
-    println!("📖 API Docs: http://127.0.0.1:{}/docs", actual_port);
+    println!(" Engram server started successfully!");
+    println!(" HTTP API: http://127.0.0.1:{}", actual_port);
+    println!(" gRPC: 127.0.0.1:{}", actual_grpc_port);
+    println!(" Health: http://127.0.0.1:{}/health", actual_port);
+    println!(" API Docs: http://127.0.0.1:{}/docs", actual_port);
     println!("");
-    println!("💡 Use 'engram status' to check server health");
-    println!("🛑 Use 'engram stop' to shutdown the server");
+    println!(" Use 'engram status' to check server health");
+    println!(" Use 'engram stop' to shutdown the server");
 
     // Start server with graceful shutdown
     axum::serve(listener, app)
@@ -158,7 +158,7 @@ async fn start_server(port: u16, grpc_port: u16) -> Result<()> {
 
     // Cleanup on exit
     remove_pid_file()?;
-    info!("👋 Server stopped gracefully");
+    info!(" Server stopped gracefully");
 
     Ok(())
 }
@@ -190,7 +190,7 @@ async fn handle_config_command(action: ConfigAction) -> Result<()> {
         },
         ConfigAction::Set { key, value } => {
             println!("Setting {} = {}", key, value);
-            println!("⚠️  Configuration setting not yet implemented");
+            println!("  Configuration setting not yet implemented");
         }
         ConfigAction::List { section } => match section.as_deref() {
             Some("memory") => {
@@ -225,7 +225,7 @@ async fn handle_config_command(action: ConfigAction) -> Result<()> {
 }
 
 async fn start_interactive_shell() -> Result<()> {
-    println!("🐚 Engram Interactive Shell");
+    println!(" Engram Interactive Shell");
     println!("Type 'help' for commands, 'exit' to quit");
 
     let mut rl = rustyline::DefaultEditor::new()?;
@@ -247,7 +247,7 @@ async fn start_interactive_shell() -> Result<()> {
 
                 // Parse shell command and execute
                 if let Err(e) = execute_shell_command(trimmed).await {
-                    eprintln!("❌ {}", e);
+                    eprintln!(" {}", e);
                 }
             }
             Err(rustyline::error::ReadlineError::Interrupted) => {
@@ -257,18 +257,18 @@ async fn start_interactive_shell() -> Result<()> {
                 break;
             }
             Err(err) => {
-                eprintln!("❌ Error: {}", err);
+                eprintln!(" Error: {}", err);
                 break;
             }
         }
     }
 
-    println!("👋 Goodbye!");
+    println!(" Goodbye!");
     Ok(())
 }
 
 fn print_shell_help() {
-    println!("📋 Available Commands:");
+    println!(" Available Commands:");
     println!("  status              - Show server status");
     println!("  create <content>    - Create a memory");
     println!("  get <id>           - Get memory by ID");
@@ -317,8 +317,8 @@ async fn execute_shell_command(cmd: &str) -> Result<()> {
             list_memories(port, Some(10), None).await
         }
         _ => {
-            eprintln!("❌ Unknown command: {}", parts[0]);
-            eprintln!("💡 Type 'help' for available commands");
+            eprintln!(" Unknown command: {}", parts[0]);
+            eprintln!(" Type 'help' for available commands");
             Ok(())
         }
     }
@@ -331,23 +331,23 @@ async fn handle_benchmark_command(
     operation: String,
 ) -> Result<()> {
     println!(
-        "🚀 Starting benchmark with {} operations, {} concurrent connections",
+        " Starting benchmark with {} operations, {} concurrent connections",
         operations, concurrent
     );
 
     if hyperfine {
-        println!("⚠️  Hyperfine benchmarking not implemented for memory operations");
-        println!("💡 Use the built-in benchmark instead");
+        println!("  Hyperfine benchmarking not implemented for memory operations");
+        println!(" Use the built-in benchmark instead");
         return Ok(());
     }
 
     // For now, just validate that the server is running
     let (_port, _grpc_port) = get_server_connection().await?;
 
-    println!("✅ Server connection verified");
-    println!("⚠️  Full memory operation benchmarking not yet implemented");
+    println!(" Server connection verified");
+    println!("  Full memory operation benchmarking not yet implemented");
     println!(
-        "💡 This would benchmark {} operations of type '{}'",
+        " This would benchmark {} operations of type '{}'",
         operations, operation
     );
 
@@ -377,7 +377,7 @@ async fn shutdown_signal() {
         _ = terminate => {},
     }
 
-    info!("🛑 Shutdown signal received");
+    info!(" Shutdown signal received");
 }
 
 async fn handle_docs_command(
@@ -386,7 +386,7 @@ async fn handle_docs_command(
     export: Option<String>,
 ) -> Result<()> {
     if list {
-        println!("📚 Available Documentation Sections:");
+        println!(" Available Documentation Sections:");
         println!("═══════════════════════════════════════");
         for (name, section_type) in OperationalDocs::available_sections() {
             let description = match section_type {
@@ -397,7 +397,7 @@ async fn handle_docs_command(
                 DocSection::IncidentResponse => "Incident response playbooks",
                 DocSection::Reference => "Command and API reference",
             };
-            println!("📖 {:<15} - {}", name, description);
+            println!(" {:<15} - {}", name, description);
         }
         println!("\nUsage: engram docs <section>");
         return Ok(());
@@ -407,8 +407,8 @@ async fn handle_docs_command(
         match section_name.parse::<DocSection>() {
             Ok(section_type) => OperationalDocs::get_section(section_type),
             Err(e) => {
-                eprintln!("❌ {}", e);
-                eprintln!("💡 Use 'engram docs --list' to see available sections");
+                eprintln!(" {}", e);
+                eprintln!(" Use 'engram docs --list' to see available sections");
                 return Ok(());
             }
         }
@@ -418,7 +418,7 @@ async fn handle_docs_command(
 
     if let Some(export_path) = export {
         std::fs::write(&export_path, content)?;
-        println!("📝 Documentation exported to: {}", export_path);
+        println!(" Documentation exported to: {}", export_path);
     } else {
         println!("{}", content);
     }

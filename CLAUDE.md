@@ -130,4 +130,4 @@ graph-systems-acceptance-tester: Use for validating graph database functionality
 
 ### Rules
 
-Never use emojis.
+Never use emojis. Remove all emojis from any files.

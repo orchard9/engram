@@ -1,6 +1,7 @@
 {
   "name": "engram-docs",
   "version": "1.0.0",
+  "type": "module",
   "description": "Documentation for Engram cognitive graph database",
   "scripts": {
     "dev": "vitepress dev",
