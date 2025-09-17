@@ -224,7 +224,7 @@ fn test_sharp_wave_ripple_consolidation() {
     consolidator.ripple_replay(&episodes);
 
     // Check that patterns were extracted
-    let semantic_memories = consolidator.episodic_to_semantic(episodes.clone());
+    let semantic_memories = consolidator.episodic_to_semantic(&episodes);
     assert!(
         !semantic_memories.is_empty(),
         "Should create semantic memories"
