@@ -44,17 +44,15 @@ impl SimdActivationAccumulator {
     /// # Errors
     ///
     /// Currently never returns an error but maintains Result for future extensibility
-    pub fn accumulate_batch(&self, activations: &[(NodeId, f32)]) -> ActivationResult<usize> {
+    pub fn accumulate_batch(&self, activations: &[(NodeId, f32)]) -> usize {
         if activations.is_empty() {
-            return Ok(0);
+            return 0;
         }
 
         let mut updated_count = 0;
 
         // Process in SIMD-friendly chunks
         for chunk in activations.chunks(self.batch_size) {
-            // Prepare vectors for SIMD processing
-            let mut values = Vec::with_capacity(768);
             let mut node_refs = Vec::new();
 
             for (node_id, contribution) in chunk {
@@ -64,11 +62,6 @@ impl SimdActivationAccumulator {
                     .or_insert_with(|| Arc::new(ActivationRecord::new(node_id.clone(), 0.1)))
                     .clone();
 
-                // Pad to 768 dimensions for SIMD processing
-                let mut padded_contribution = [0.0f32; 768];
-                padded_contribution[0] = *contribution;
-
-                values.extend_from_slice(&padded_contribution);
                 node_refs.push((record, *contribution));
             }
 
@@ -82,13 +75,14 @@ impl SimdActivationAccumulator {
 
         self.operations_count
             .fetch_add(activations.len() as u64, Ordering::Relaxed);
-        Ok(updated_count)
+        updated_count
     }
 
     /// SIMD processing of activation chunks
-    fn simd_process_chunk(&self, values: &[f32]) -> ActivationResult<Vec<f32>> {
+    #[allow(dead_code)]
+    fn simd_process_chunk(&self, values: &[f32]) -> Vec<f32> {
         if values.len() < 768 {
-            return Ok(values.to_vec());
+            return values.to_vec();
         }
 
         let mut results = Vec::new();
@@ -101,7 +95,7 @@ impl SimdActivationAccumulator {
                 array_chunk.copy_from_slice(chunk);
 
                 // Apply SIMD transformation (example: normalization)
-                let normalized = self.simd_normalize(&array_chunk);
+                let normalized = Self::simd_normalize(&array_chunk);
                 results.extend_from_slice(&normalized);
             } else {
                 // Handle remaining elements
@@ -109,11 +103,12 @@ impl SimdActivationAccumulator {
             }
         }
 
-        Ok(results)
+        results
     }
 
     /// SIMD-based normalization using proper L2 norm computation
-    fn simd_normalize(&self, values: &[f32; 768]) -> [f32; 768] {
+    #[allow(dead_code)]
+    fn simd_normalize(values: &[f32; 768]) -> [f32; 768] {
         // Compute L2 norm (magnitude) of the vector
         let mut magnitude_squared = 0.0f32;
         for &value in values.iter() {
@@ -138,7 +133,6 @@ impl SimdActivationAccumulator {
 
     /// Compute similarity-based activation weights using SIMD
     pub fn compute_similarity_weights(
-        &self,
         query_activation: &[f32; 768],
         candidate_activations: &[[f32; 768]],
     ) -> Vec<f32> {
@@ -364,7 +358,7 @@ mod tests {
             ("node4".to_string(), 0.05), // Above 0.01 threshold
         ];
 
-        let updated_count = accumulator.accumulate_batch(&batch).unwrap();
+        let updated_count = accumulator.accumulate_batch(&batch);
         assert_eq!(updated_count, 4); // All 4 should be above 0.01 threshold
 
         let activations = accumulator.get_all_activations();
@@ -407,7 +401,7 @@ mod tests {
             [-0.5f32; 768],     // Opposite
         ];
 
-        let weights = accumulator.compute_similarity_weights(&query, &candidates);
+        let weights = SimdActivationAccumulator::compute_similarity_weights(&query, &candidates);
         assert_eq!(weights.len(), 3);
         assert!(weights[0] > weights[1]); // Identical should have higher weight
         assert!(weights[1] > weights[2]); // Different should be better than opposite
@@ -497,7 +491,7 @@ mod tests {
         test_vector[1] = 1.0;
         test_vector[2] = 3.0;
 
-        let normalized = accumulator.simd_normalize(&test_vector);
+        let normalized = SimdActivationAccumulator::simd_normalize(&test_vector);
 
         // Normalized values should be smaller
         assert!(normalized[0] < test_vector[0]);
