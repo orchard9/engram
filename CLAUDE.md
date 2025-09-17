@@ -82,6 +82,16 @@ Content writing process:
 6. Include specific citations from research in all content pieces
 7. Update the relevant task file with any new insights gained
 
+## Coding Guidelines
+
+Based on our codebase quality standards and recent fixes:
+
+1. **Avoid unnecessary Result wrapping** - If a function cannot fail, return the value directly instead of wrapping in Result<T>. This reduces API complexity and makes the code clearer about actual failure modes.
+
+2. **Test timing assumptions carefully** - When testing time-dependent behavior (like refractory periods), ensure test sleeps account for actual wall-clock time comparisons, not just logical time increments.
+
+3. **Prefer static methods when self is unused** - If a method doesn't access instance state, make it a static/associated function to clarify it's a pure computation and improve testability.
+
 ## Adhere to the following documentation
 
 why.md: when understanding the problem space and target applications for Engram
