@@ -3,7 +3,7 @@
 //! High-performance activation accumulation using SIMD vector operations
 //! from Task 001, with support for batch processing and cache optimization.
 
-use crate::activation::{ActivationRecord, ActivationResult, NodeId};
+use crate::activation::{ActivationRecord, NodeId};
 use crate::compute::cosine_similarity_batch_768;
 use dashmap::DashMap;
 use std::sync::Arc;
@@ -398,7 +398,7 @@ mod tests {
 
     #[test]
     fn test_similarity_weights() {
-        let accumulator = SimdActivationAccumulator::new(8);
+        let _accumulator = SimdActivationAccumulator::new(8);
 
         let query = [0.5f32; 768];
         let mut different_candidate = [0.3f32; 768];
@@ -492,7 +492,7 @@ mod tests {
 
     #[test]
     fn test_simd_normalization() {
-        let accumulator = SimdActivationAccumulator::new(8);
+        let _accumulator = SimdActivationAccumulator::new(8);
 
         let mut test_vector = [0.0f32; 768];
         test_vector[0] = 2.0; // Large value

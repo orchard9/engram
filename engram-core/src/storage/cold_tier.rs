@@ -370,7 +370,7 @@ pub struct ColdTierConfig {
 impl Default for ColdTierConfig {
     fn default() -> Self {
         Self {
-            capacity: 100000,
+            capacity: 100_000,
             enable_compression: true,
             compaction_threshold: 0.8,
             max_age_days: 365,
@@ -701,7 +701,7 @@ mod tests {
     #[test]
     fn test_cold_tier_config() {
         let config = ColdTierConfig::default();
-        assert_eq!(config.capacity, 100000);
+        assert_eq!(config.capacity, 100_000);
         assert!(config.enable_compression);
         assert_eq!(config.compaction_threshold, 0.8);
         assert_eq!(config.max_age_days, 365);
