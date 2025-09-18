@@ -243,14 +243,27 @@ mod tests {
     fn test_batch_store_maintains_semantics() {
         let store = MemoryStore::new(100);
 
-        // Create batch of episodes
+        // Create batch of episodes with unique embeddings
         let episodes: Vec<Episode> = (0..10)
             .map(|i| {
+                // Create unique embedding for each episode to avoid deduplication
+                let mut embedding = [0.0f32; 768];
+                for j in 0..768 {
+                    embedding[j] = ((i as f32 + 1.0) * (j as f32 + 1.0) * 0.01).sin();
+                }
+                // Normalize
+                let norm = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
+                if norm > 0.0 {
+                    for val in &mut embedding {
+                        *val /= norm;
+                    }
+                }
+                
                 EpisodeBuilder::new()
                     .id(format!("ep{}", i))
                     .when(Utc::now())
                     .what(format!("Episode {}", i))
-                    .embedding([i as f32 * 0.1; 768])
+                    .embedding(embedding)
                     .confidence(Confidence::HIGH)
                     .build()
             })
@@ -275,21 +288,43 @@ mod tests {
     fn test_batch_recall_with_mixed_cues() {
         let store = MemoryStore::new(100);
 
-        // Store some episodes
+        // Store some episodes with unique embeddings
         for i in 0..5 {
+            let mut embedding = [0.0f32; 768];
+            for j in 0..768 {
+                embedding[j] = ((i as f32 + 1.0) * (j as f32 + 1.0) * 0.01).sin();
+            }
+            let norm = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
+            if norm > 0.0 {
+                for val in &mut embedding {
+                    *val /= norm;
+                }
+            }
+            
             let episode = EpisodeBuilder::new()
                 .id(format!("ep{}", i))
                 .when(Utc::now())
                 .what(format!("Memory content {}", i))
-                .embedding([i as f32 * 0.2; 768])
+                .embedding(embedding)
                 .confidence(Confidence::HIGH)
                 .build();
             store.store(episode);
         }
 
-        // Create mixed cues
+        // Create mixed cues - use the same embedding generation for cue
+        let mut cue_embedding = [0.0f32; 768];
+        for j in 0..768 {
+            cue_embedding[j] = (1.0 * (j as f32 + 1.0) * 0.01).sin();
+        }
+        let norm = cue_embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
+        if norm > 0.0 {
+            for val in &mut cue_embedding {
+                *val /= norm;
+            }
+        }
+        
         let cues = vec![
-            Cue::embedding("cue1".to_string(), [0.2; 768], Confidence::LOW),  // Match first episode's embedding pattern
+            Cue::embedding("cue1".to_string(), cue_embedding, Confidence::LOW),  // Should find ep0
             Cue::semantic(
                 "cue2".to_string(),
                 "Memory content 2".to_string(),

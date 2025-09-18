@@ -11,29 +11,105 @@
 use super::{StorageError, StorageTier, TierStatistics};
 use crate::{
     compute,
-    Confidence, 
-    Cue, 
-    CueType, 
-    Episode, 
-    EpisodeBuilder, 
+    Confidence,
+    Cue,
+    CueType,
+    Episode,
+    EpisodeBuilder,
     Memory,
     TemporalPattern,
 };
 use dashmap::DashMap;
 use std::sync::{
-    Arc, 
+    Arc,
     RwLock,
     atomic::{AtomicU64, Ordering},
 };
 use std::time::{SystemTime, UNIX_EPOCH};
 use chrono::{DateTime, Utc};
+use std::alloc::{alloc_zeroed, dealloc, Layout};
+use std::ptr;
+
+/// 64-byte aligned column for SIMD operations
+#[repr(align(64))]
+pub struct AlignedColumn {
+    /// 64-byte aligned raw pointer for SIMD operations
+    data: *mut f32,
+    /// Allocated capacity
+    capacity: usize,
+    /// Current number of values
+    len: usize,
+    /// Memory layout for deallocation
+    layout: Layout,
+}
+
+// AlignedColumn is safe to send between threads as long as it's not accessed concurrently
+unsafe impl Send for AlignedColumn {}
+// AlignedColumn is safe to share between threads when protected by RwLock
+unsafe impl Sync for AlignedColumn {}
+
+impl std::fmt::Debug for AlignedColumn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AlignedColumn")
+            .field("capacity", &self.capacity)
+            .field("len", &self.len)
+            .field("data_ptr", &self.data)
+            .finish()
+    }
+}
+
+impl AlignedColumn {
+    /// Create new aligned column with specified capacity
+    fn new(capacity: usize) -> Self {
+        let layout = Layout::from_size_align(
+            capacity * std::mem::size_of::<f32>(),
+            64  // 64-byte alignment for AVX-512
+        ).expect("Failed to create layout");
+
+        let data = unsafe {
+            let ptr = alloc_zeroed(layout);
+            if ptr.is_null() {
+                std::alloc::handle_alloc_error(layout);
+            }
+            ptr as *mut f32
+        };
+
+        Self { data, capacity, len: 0, layout }
+    }
+
+    /// Push value to column (unsafe: no bounds checking)
+    unsafe fn push(&mut self, value: f32) {
+        if self.len < self.capacity {
+            ptr::write(self.data.add(self.len), value);
+            self.len += 1;
+        }
+    }
+
+    /// Get immutable slice of column data
+    unsafe fn get_slice(&self) -> &[f32] {
+        std::slice::from_raw_parts(self.data, self.len)
+    }
+
+    /// Get mutable slice of column data
+    unsafe fn get_slice_mut(&mut self) -> &mut [f32] {
+        std::slice::from_raw_parts_mut(self.data, self.len)
+    }
+}
+
+impl Drop for AlignedColumn {
+    fn drop(&mut self) {
+        unsafe {
+            dealloc(self.data as *mut u8, self.layout);
+        }
+    }
+}
 
 /// Columnar storage layout for efficient SIMD operations
 #[derive(Debug)]
 struct ColumnarData {
-    /// All embeddings stored in column-major format for SIMD efficiency
-    embeddings: Vec<f32>, // 768 * num_memories
-    /// Confidence scores for each memory
+    /// 768 aligned columns, one for each embedding dimension
+    embedding_columns: Vec<AlignedColumn>,
+    /// Metadata columns (not aligned, regular storage)
     confidences: Vec<f32>,
     /// Activation levels for each memory
     activations: Vec<f32>,
@@ -54,8 +130,13 @@ struct ColumnarData {
 impl ColumnarData {
     /// Create new columnar data structure with specified capacity
     fn new(capacity: usize) -> Self {
+        let mut embedding_columns = Vec::with_capacity(768);
+        for _ in 0..768 {
+            embedding_columns.push(AlignedColumn::new(capacity));
+        }
+
         Self {
-            embeddings: Vec::with_capacity(capacity * 768),
+            embedding_columns,
             confidences: Vec::with_capacity(capacity),
             activations: Vec::with_capacity(capacity),
             creation_times: Vec::with_capacity(capacity),
@@ -76,10 +157,14 @@ impl ColumnarData {
         }
 
         let index = self.count;
-        
-        // Store embedding in column-major format
-        self.embeddings.extend_from_slice(&memory.embedding);
-        
+
+        // Store embedding in true column-major format
+        unsafe {
+            for (dim, &value) in memory.embedding.iter().enumerate() {
+                self.embedding_columns[dim].push(value);
+            }
+        }
+
         // Store metadata
         self.confidences.push(memory.confidence.raw());
         self.activations.push(memory.activation());
@@ -99,7 +184,7 @@ impl ColumnarData {
             memory.content.clone().unwrap_or_else(|| format!("Memory: {}", memory.id))
         );
         self.memory_ids.push(memory.id.clone());
-        
+
         self.count += 1;
         Ok(index)
     }
@@ -110,45 +195,80 @@ impl ColumnarData {
             return None;
         }
 
-        let start = index * 768;
-        let end = start + 768;
-        
-        if end <= self.embeddings.len() {
-            let mut embedding = [0.0f32; 768];
-            embedding.copy_from_slice(&self.embeddings[start..end]);
-            Some(embedding)
-        } else {
-            None
+        let mut embedding = [0.0f32; 768];
+        unsafe {
+            for dim in 0..768 {
+                let column_slice = self.embedding_columns[dim].get_slice();
+                if index < column_slice.len() {
+                    embedding[dim] = column_slice[index];
+                }
+            }
         }
+        Some(embedding)
     }
 
-    /// Perform batch similarity search using SIMD
+    /// Perform batch similarity search using SIMD-optimized columnar operations
     fn batch_similarity_search(
         &self,
         query: &[f32; 768],
         threshold: f32,
     ) -> Vec<(usize, f32)> {
-        let mut results = Vec::new();
-        
-        // Process embeddings in batches for SIMD efficiency
-        const BATCH_SIZE: usize = 16; // Process 16 embeddings at once
-        
-        for batch_start in (0..self.count).step_by(BATCH_SIZE) {
-            let batch_end = (batch_start + BATCH_SIZE).min(self.count);
-            
-            for i in batch_start..batch_end {
-                if let Some(embedding) = self.get_embedding(i) {
-                    let similarity = compute::cosine_similarity_768(query, &embedding);
-                    if similarity >= threshold {
-                        results.push((i, similarity));
-                    }
+        if self.count == 0 {
+            return Vec::new();
+        }
+
+        // Allocate aligned buffer for similarity scores
+        let mut similarities = vec![0.0f32; self.count];
+        let vector_ops = compute::get_vector_ops();
+
+        // Compute dot products using SIMD FMA operations on columns
+        unsafe {
+            for dim in 0..768 {
+                let query_val = query[dim];
+                if query_val.abs() < 1e-8 {
+                    continue; // Skip zero dimensions
                 }
+
+                let column_data = self.embedding_columns[dim].get_slice();
+
+                // SIMD FMA: similarities += column * query_val
+                vector_ops.fma_accumulate(column_data, query_val, &mut similarities);
             }
         }
-        
+
+        // Normalize similarities to get cosine similarity
+        let query_norm = compute::get_vector_ops().l2_norm_768(query);
+        if query_norm == 0.0 {
+            return Vec::new();
+        }
+
+        // Filter by threshold and collect results
+        let mut results: Vec<(usize, f32)> = similarities
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, &dot_product)| {
+                // Get vector norm for normalization
+                let mut vector_norm_sq = 0.0f32;
+                unsafe {
+                    for dim in 0..768 {
+                        let val = self.embedding_columns[dim].get_slice()[idx];
+                        vector_norm_sq += val * val;
+                    }
+                }
+                let vector_norm = vector_norm_sq.sqrt();
+
+                if vector_norm > 0.0 {
+                    let similarity = dot_product / (query_norm * vector_norm);
+                    if similarity >= threshold {
+                        return Some((idx, similarity.clamp(-1.0, 1.0)));
+                    }
+                }
+                None
+            })
+            .collect();
+
         // Sort by similarity (highest first)
         results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        
         results
     }
 
@@ -156,17 +276,19 @@ impl ColumnarData {
     fn compact(&mut self, valid_indices: &[bool]) -> usize {
         let mut write_index = 0;
         let mut removed_count = 0;
-        
+
         for read_index in 0..self.count {
             if valid_indices[read_index] {
                 if write_index != read_index {
-                    // Move embedding data
-                    let src_start = read_index * 768;
-                    let dst_start = write_index * 768;
-                    for i in 0..768 {
-                        self.embeddings[dst_start + i] = self.embeddings[src_start + i];
+                    // Move embedding data in each column
+                    unsafe {
+                        for dim in 0..768 {
+                            let column = &mut self.embedding_columns[dim];
+                            let slice = column.get_slice_mut();
+                            slice[write_index] = slice[read_index];
+                        }
                     }
-                    
+
                     // Move metadata
                     self.confidences[write_index] = self.confidences[read_index];
                     self.activations[write_index] = self.activations[read_index];
@@ -180,17 +302,21 @@ impl ColumnarData {
                 removed_count += 1;
             }
         }
-        
-        // Update count and truncate vectors
+
+        // Update count and column lengths
         self.count = write_index;
-        self.embeddings.truncate(write_index * 768);
+        for column in &mut self.embedding_columns {
+            column.len = write_index;
+        }
+
+        // Truncate metadata vectors
         self.confidences.truncate(write_index);
         self.activations.truncate(write_index);
         self.creation_times.truncate(write_index);
         self.access_times.truncate(write_index);
         self.contents.truncate(write_index);
         self.memory_ids.truncate(write_index);
-        
+
         removed_count
     }
 }

@@ -58,6 +58,44 @@ pub trait VectorOps: Send + Sync {
 
     /// Weighted average of multiple vectors
     fn weighted_average_768(&self, vectors: &[&[f32; 768]], weights: &[f32]) -> [f32; 768];
+
+    /// Fused multiply-add for columnar operations
+    /// Computes: accumulator[i] += column[i] * scalar
+    fn fma_accumulate(&self, column: &[f32], scalar: f32, accumulator: &mut [f32]) {
+        // Default scalar implementation
+        for i in 0..column.len().min(accumulator.len()) {
+            accumulator[i] += column[i] * scalar;
+        }
+    }
+
+    /// SIMD gather for non-contiguous memory access
+    fn gather_f32(&self, base: &[f32], indices: &[usize]) -> Vec<f32> {
+        // Default scalar implementation
+        indices.iter().map(|&i| base.get(i).copied().unwrap_or(0.0)).collect()
+    }
+
+    /// Horizontal sum reduction across values
+    fn horizontal_sum(&self, values: &[f32]) -> f32 {
+        // Default scalar implementation
+        values.iter().sum()
+    }
+
+    /// Batch dot product optimized for columnar layout
+    fn batch_dot_product_columnar(
+        &self,
+        query: &[f32; 768],
+        columns: &[&[f32]],
+        results: &mut [f32],
+    ) {
+        // Default scalar implementation
+        results.fill(0.0);
+        for (dim, &column) in columns.iter().enumerate().take(768) {
+            let query_val = query[dim];
+            for (i, result) in results.iter_mut().enumerate().take(column.len()) {
+                *result += column[i] * query_val;
+            }
+        }
+    }
 }
 
 /// Runtime CPU feature detection

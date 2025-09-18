@@ -91,6 +91,18 @@ impl VectorOps for Avx2VectorOps {
         unsafe { weighted_average_768_avx2(vectors, weights, weight_sum, &mut result) };
         result
     }
+
+    fn fma_accumulate(&self, column: &[f32], scalar: f32, accumulator: &mut [f32]) {
+        unsafe { fma_accumulate_avx2(column, scalar, accumulator) };
+    }
+
+    fn gather_f32(&self, base: &[f32], indices: &[usize]) -> Vec<f32> {
+        unsafe { gather_f32_avx2(base, indices) }
+    }
+
+    fn horizontal_sum(&self, values: &[f32]) -> f32 {
+        unsafe { horizontal_sum_avx2(values) }
+    }
 }
 
 /// AVX2 cosine similarity with FMA
@@ -302,4 +314,81 @@ mod tests {
             scalar_result
         );
     }
+}
+
+/// AVX2 FMA accumulate for columnar operations
+#[target_feature(enable = "avx2,fma")]
+unsafe fn fma_accumulate_avx2(column: &[f32], scalar: f32, accumulator: &mut [f32]) {
+    use std::arch::x86_64::*;
+
+    let scalar_vec = _mm256_set1_ps(scalar);
+    let len = column.len().min(accumulator.len());
+    let chunks = len / 8;
+
+    for i in 0..chunks {
+        let offset = i * 8;
+        let col_vec = _mm256_loadu_ps(column.as_ptr().add(offset));
+        let acc_vec = _mm256_loadu_ps(accumulator.as_ptr().add(offset));
+        let result = _mm256_fmadd_ps(col_vec, scalar_vec, acc_vec);
+        _mm256_storeu_ps(accumulator.as_mut_ptr().add(offset), result);
+    }
+
+    // Handle remainder with scalar operations
+    for i in (chunks * 8)..len {
+        accumulator[i] += column[i] * scalar;
+    }
+}
+
+/// AVX2 gather for non-contiguous access
+#[target_feature(enable = "avx2")]
+unsafe fn gather_f32_avx2(base: &[f32], indices: &[usize]) -> Vec<f32> {
+    let mut result = Vec::with_capacity(indices.len());
+
+    // Note: AVX2 gather requires i32 indices, so we need to convert
+    // For now, use scalar fallback as gather with 64-bit indices needs special handling
+    for &idx in indices {
+        if idx < base.len() {
+            result.push(base[idx]);
+        } else {
+            result.push(0.0);
+        }
+    }
+
+    result
+}
+
+/// AVX2 horizontal sum reduction
+#[target_feature(enable = "avx2")]
+unsafe fn horizontal_sum_avx2(values: &[f32]) -> f32 {
+    use std::arch::x86_64::*;
+
+    let mut sum = _mm256_setzero_ps();
+    let chunks = values.len() / 8;
+
+    // Sum all chunks
+    for i in 0..chunks {
+        let offset = i * 8;
+        let vec = _mm256_loadu_ps(values.as_ptr().add(offset));
+        sum = _mm256_add_ps(sum, vec);
+    }
+
+    // Horizontal sum of the AVX register
+    // First, sum upper and lower 128-bit lanes
+    let sum_128 = _mm_add_ps(
+        _mm256_extractf128_ps(sum, 0),
+        _mm256_extractf128_ps(sum, 1)
+    );
+
+    // Now do horizontal adds within the 128-bit register
+    let sum_64 = _mm_hadd_ps(sum_128, sum_128);
+    let sum_32 = _mm_hadd_ps(sum_64, sum_64);
+
+    let mut result = _mm_cvtss_f32(sum_32);
+
+    // Add remainder
+    for i in (chunks * 8)..values.len() {
+        result += values[i];
+    }
+
+    result
 }

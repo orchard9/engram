@@ -160,11 +160,12 @@ impl SemanticDeduplicator {
         existing: &Memory,
         similarity: f32,
     ) -> DeduplicationAction {
-        // Exact duplicate (>0.99 similarity)
-        if similarity > 0.99 {
+        // For exact duplicates with same ID, always skip
+        if similarity > 0.999 && new_memory.id == existing.id {
             return DeduplicationAction::Skip;
         }
         
+        // For high similarity, apply merge strategy
         match self.merge_strategy {
             MergeStrategy::KeepHighestConfidence => {
                 if new_memory.confidence.raw() > existing.confidence.raw() {
