@@ -665,7 +665,7 @@ impl TierCoordinator {
 
     /// Evaluate warm tier for promotion or demotion
     async fn evaluate_warm_tier_migrations(&self) -> Result<Vec<MigrationCandidate>, StorageError> {
-        let mut candidates = Vec::new();
+        let candidates = Vec::new();
 
         // Note: Warm tier evaluation would require access to warm tier data
         // This is a placeholder implementation
@@ -676,7 +676,7 @@ impl TierCoordinator {
 
     /// Evaluate cold tier for promotion candidates
     async fn evaluate_cold_tier_migrations(&self) -> Result<Vec<MigrationCandidate>, StorageError> {
-        let mut candidates = Vec::new();
+        let candidates = Vec::new();
 
         // Note: Cold tier evaluation would check for recent access patterns
         // This is a placeholder implementation

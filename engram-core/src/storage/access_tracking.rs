@@ -44,7 +44,7 @@ impl AccessTracker {
 
     /// Create with custom EWMA alpha
     pub fn with_alpha(alpha: f32) -> Self {
-        let mut tracker = Self::new();
+        let tracker = Self::new();
         tracker.set_ewma_alpha(alpha);
         tracker
     }
