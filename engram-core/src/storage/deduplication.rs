@@ -347,7 +347,6 @@ impl DeduplicationStats {
 mod tests {
     use super::*;
     use crate::MemoryBuilder;
-    use chrono::Utc;
     
     fn create_test_memory(id: &str, embedding_val: f32, confidence: f32) -> Memory {
         let mut embedding = [0.0f32; 768];

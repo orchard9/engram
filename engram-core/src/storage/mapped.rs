@@ -452,7 +452,7 @@ impl MappedWarmStorage {
 
             Ok(())
         } else {
-            Err(StorageError::NotInitialized)
+            Err(StorageError::NotInitialized("MMAP not initialized".to_string()))
         }
     }
 
@@ -469,7 +469,7 @@ impl MappedWarmStorage {
         } else if let Some(mmap_mut) = &self.mmap_mut {
             mmap_mut.as_ref()
         } else {
-            return Err(StorageError::NotInitialized);
+            return Err(StorageError::NotInitialized("MMAP not initialized".to_string()));
         };
 
         let block_size = std::mem::size_of::<EmbeddingBlock>();

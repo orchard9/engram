@@ -28,9 +28,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// Hot tier storage using lock-free DashMap for maximum performance
 pub struct HotTier {
     /// Primary storage for active memories
-    data: DashMap<String, Arc<Memory>>,
+    pub data: DashMap<String, Arc<Memory>>,
     /// Access timestamps for LRU eviction
-    access_times: DashMap<String, u64>,
+    pub access_times: DashMap<String, u64>,
     /// Performance metrics
     cache_hits: AtomicU64,
     cache_misses: AtomicU64,

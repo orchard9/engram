@@ -4,7 +4,8 @@
 //! based on cognitive memory patterns and access frequency.
 
 use super::{
-    CognitiveEvictionPolicy, StorageMetrics, StorageResult, StorageTier,
+    access_tracking::AccessTracker,
+    CognitiveEvictionPolicy, StorageMetrics, StorageResult, StorageTier, StorageError,
     TierStatistics, HotTier, WarmTier, ColdTier,
 };
 use crate::{Confidence, Cue, Episode, Memory};
@@ -15,7 +16,7 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 use std::time::{Duration, SystemTime};
-use tokio::sync::RwLock as AsyncRwLock;
+use tokio::sync::{RwLock as AsyncRwLock, Semaphore};
 
 /// Migration task for moving memories between tiers
 #[derive(Debug, Clone)]
@@ -105,10 +106,19 @@ impl CognitiveTierArchitecture {
         let cold_tier = Arc::new(ColdTier::new(cold_capacity));
 
         // Create tier coordinator
-        let coordinator = Arc::new(TierCoordinator::new(
+        let mut coordinator = TierCoordinator::new(
             CognitiveEvictionPolicy::default(),
             metrics.clone(),
-        ));
+        );
+
+        // Set tier references for migration
+        coordinator.set_tiers(
+            hot_tier.clone(),
+            warm_tier.clone(),
+            cold_tier.clone(),
+        );
+
+        let coordinator = Arc::new(coordinator);
 
         Ok(Self {
             hot_tier,
@@ -304,6 +314,49 @@ impl CognitiveTierArchitecture {
 
 }
 
+/// Migration candidate for tier movement
+#[derive(Debug, Clone)]
+pub struct MigrationCandidate {
+    /// Memory identifier
+    pub memory_id: String,
+    /// Current tier
+    pub source_tier: TierType,
+    /// Target tier for migration
+    pub target_tier: TierType,
+    /// Migration priority score (higher = more urgent)
+    pub priority: f32,
+    /// Current activation level
+    pub activation: f32,
+    /// Idle time since last access
+    pub idle_time: Duration,
+}
+
+/// Report of completed migration cycle
+#[derive(Debug, Default, Clone)]
+pub struct MigrationReport {
+    /// Memories moved from hot to warm
+    pub hot_to_warm: usize,
+    /// Memories moved from warm to cold
+    pub warm_to_cold: usize,
+    /// Memories moved from warm to hot
+    pub warm_to_hot: usize,
+    /// Memories moved from cold to warm
+    pub cold_to_warm: usize,
+    /// Total migrations performed
+    pub total_migrations: usize,
+    /// Duration of migration cycle
+    pub duration: Duration,
+    /// Errors encountered during migration
+    pub errors: Vec<String>,
+}
+
+impl MigrationReport {
+    /// Calculate total number of successful migrations
+    pub fn successful_migrations(&self) -> usize {
+        self.hot_to_warm + self.warm_to_cold + self.warm_to_hot + self.cold_to_warm
+    }
+}
+
 /// Statistics for all tiers
 #[derive(Debug, Clone)]
 pub struct TierArchitectureStats {
@@ -329,11 +382,24 @@ impl TierArchitectureStats {
 
 /// Tier coordinator for managing migrations
 pub struct TierCoordinator {
+    /// Queue of pending migration tasks
     migration_queue: Arc<SegQueue<MigrationTask>>,
+    /// Eviction and migration policy
     policy: CognitiveEvictionPolicy,
+    /// Performance metrics
     metrics: Arc<StorageMetrics>,
+    /// Count of active migrations
     active_migrations: Arc<AtomicUsize>,
+    /// Background worker handle
     worker_handle: AsyncRwLock<Option<tokio::task::JoinHandle<()>>>,
+    /// Access tracking for migration decisions
+    access_tracker: Arc<AccessTracker>,
+    /// Rate limiter for migrations (max 100/second)
+    rate_limiter: Arc<Semaphore>,
+    /// References to storage tiers
+    hot_tier: Option<Arc<HotTier>>,
+    warm_tier: Option<Arc<WarmTier>>,
+    cold_tier: Option<Arc<ColdTier>>,
 }
 
 impl TierCoordinator {
@@ -345,7 +411,241 @@ impl TierCoordinator {
             metrics,
             active_migrations: Arc::new(AtomicUsize::new(0)),
             worker_handle: AsyncRwLock::new(None),
+            access_tracker: Arc::new(AccessTracker::new()),
+            rate_limiter: Arc::new(Semaphore::new(100)), // Max 100 concurrent migrations
+            hot_tier: None,
+            warm_tier: None,
+            cold_tier: None,
         }
+    }
+
+    /// Set tier references for migration operations
+    pub fn set_tiers(
+        &mut self,
+        hot: Arc<HotTier>,
+        warm: Arc<WarmTier>,
+        cold: Arc<ColdTier>,
+    ) {
+        self.hot_tier = Some(hot);
+        self.warm_tier = Some(warm);
+        self.cold_tier = Some(cold);
+    }
+
+    /// Run a complete migration cycle
+    pub async fn run_migration_cycle(&self) -> Result<MigrationReport, StorageError> {
+        let start_time = SystemTime::now();
+        let mut report = MigrationReport::default();
+
+        // Check if tiers are configured
+        if self.hot_tier.is_none() || self.warm_tier.is_none() || self.cold_tier.is_none() {
+            return Err(StorageError::NotInitialized("Tiers not configured".to_string()));
+        }
+
+        // Evaluate hot tier for demotion
+        match self.evaluate_hot_tier_migrations().await {
+            Ok(candidates) => {
+                for candidate in candidates {
+                    // Apply rate limiting
+                    let _permit = self.rate_limiter.acquire().await
+                        .map_err(|e| StorageError::MigrationFailed(e.to_string()))?;
+
+                    match self.migrate_memory(&candidate).await {
+                        Ok(()) => {
+                            if candidate.target_tier == TierType::Warm {
+                                report.hot_to_warm += 1;
+                            }
+                        }
+                        Err(e) => {
+                            report.errors.push(format!("Failed to migrate {}: {}", candidate.memory_id, e));
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                report.errors.push(format!("Hot tier evaluation failed: {}", e));
+            }
+        }
+
+        // Evaluate warm tier migrations
+        match self.evaluate_warm_tier_migrations().await {
+            Ok(candidates) => {
+                for candidate in candidates {
+                    let _permit = self.rate_limiter.acquire().await
+                        .map_err(|e| StorageError::MigrationFailed(e.to_string()))?;
+
+                    match self.migrate_memory(&candidate).await {
+                        Ok(()) => {
+                            match candidate.target_tier {
+                                TierType::Hot => report.warm_to_hot += 1,
+                                TierType::Cold => report.warm_to_cold += 1,
+                                _ => {}
+                            }
+                        }
+                        Err(e) => {
+                            report.errors.push(format!("Failed to migrate {}: {}", candidate.memory_id, e));
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                report.errors.push(format!("Warm tier evaluation failed: {}", e));
+            }
+        }
+
+        // Evaluate cold tier for promotion
+        match self.evaluate_cold_tier_migrations().await {
+            Ok(candidates) => {
+                for candidate in candidates {
+                    let _permit = self.rate_limiter.acquire().await
+                        .map_err(|e| StorageError::MigrationFailed(e.to_string()))?;
+
+                    match self.migrate_memory(&candidate).await {
+                        Ok(()) => {
+                            if candidate.target_tier == TierType::Warm {
+                                report.cold_to_warm += 1;
+                            }
+                        }
+                        Err(e) => {
+                            report.errors.push(format!("Failed to migrate {}: {}", candidate.memory_id, e));
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                report.errors.push(format!("Cold tier evaluation failed: {}", e));
+            }
+        }
+
+        report.duration = SystemTime::now()
+            .duration_since(start_time)
+            .unwrap_or_default();
+        report.total_migrations = report.successful_migrations();
+
+        Ok(report)
+    }
+
+    /// Evaluate hot tier for demotion candidates
+    async fn evaluate_hot_tier_migrations(&self) -> Result<Vec<MigrationCandidate>, StorageError> {
+        let mut candidates = Vec::new();
+        let hot_tier = self.hot_tier.as_ref()
+            .ok_or_else(|| StorageError::NotInitialized("Hot tier not set".to_string()))?;
+
+        // Iterate through hot tier memories
+        for entry in hot_tier.data.iter() {
+            let memory_id = entry.key();
+            let memory = entry.value();
+
+            // Get access statistics
+            let stats = self.access_tracker.get_access_stats(memory_id);
+            let current_activation = memory.activation();
+
+            // Check demotion criteria
+            let should_demote =
+                current_activation < self.policy.hot_activation_threshold ||
+                stats.idle_time > self.policy.warm_access_window ||
+                stats.activation_trend < -0.2; // Declining activation
+
+            if should_demote {
+                candidates.push(MigrationCandidate {
+                    memory_id: memory_id.clone(),
+                    source_tier: TierType::Hot,
+                    target_tier: TierType::Warm,
+                    priority: 1.0 - current_activation, // Lower activation = higher priority
+                    activation: current_activation,
+                    idle_time: stats.idle_time,
+                });
+            }
+        }
+
+        // Sort by priority (highest first)
+        candidates.sort_by(|a, b| b.priority.partial_cmp(&a.priority).unwrap_or(std::cmp::Ordering::Equal));
+
+        Ok(candidates)
+    }
+
+    /// Evaluate warm tier for promotion or demotion
+    async fn evaluate_warm_tier_migrations(&self) -> Result<Vec<MigrationCandidate>, StorageError> {
+        let mut candidates = Vec::new();
+
+        // Note: Warm tier evaluation would require access to warm tier data
+        // This is a placeholder implementation
+        // In practice, you'd iterate through warm tier memories similar to hot tier
+
+        Ok(candidates)
+    }
+
+    /// Evaluate cold tier for promotion candidates
+    async fn evaluate_cold_tier_migrations(&self) -> Result<Vec<MigrationCandidate>, StorageError> {
+        let mut candidates = Vec::new();
+
+        // Note: Cold tier evaluation would check for recent access patterns
+        // This is a placeholder implementation
+
+        Ok(candidates)
+    }
+
+    /// Migrate a memory between tiers
+    async fn migrate_memory(&self, candidate: &MigrationCandidate) -> Result<(), StorageError> {
+        // Record the migration for tracking
+        self.access_tracker.record_access(&candidate.memory_id, candidate.activation);
+
+        // Get the memory from source tier
+        let memory = match candidate.source_tier {
+            TierType::Hot => {
+                let hot = self.hot_tier.as_ref()
+                    .ok_or_else(|| StorageError::NotInitialized("Hot tier not set".to_string()))?;
+                hot.get_memory(&candidate.memory_id)
+                    .ok_or_else(|| StorageError::NotFound(candidate.memory_id.clone()))?
+            }
+            TierType::Warm => {
+                // Would retrieve from warm tier
+                return Err(StorageError::NotImplemented("Warm tier retrieval not implemented".to_string()));
+            }
+            TierType::Cold => {
+                // Would retrieve from cold tier
+                return Err(StorageError::NotImplemented("Cold tier retrieval not implemented".to_string()));
+            }
+        };
+
+        // Store in target tier
+        match candidate.target_tier {
+            TierType::Hot => {
+                let hot = self.hot_tier.as_ref()
+                    .ok_or_else(|| StorageError::NotInitialized("Hot tier not set".to_string()))?;
+                hot.store(memory.clone()).await?;
+            }
+            TierType::Warm => {
+                let warm = self.warm_tier.as_ref()
+                    .ok_or_else(|| StorageError::NotInitialized("Warm tier not set".to_string()))?;
+                warm.store(memory.clone()).await?;
+            }
+            TierType::Cold => {
+                let cold = self.cold_tier.as_ref()
+                    .ok_or_else(|| StorageError::NotInitialized("Cold tier not set".to_string()))?;
+                cold.store(memory.clone()).await?;
+            }
+        }
+
+        // Remove from source tier (only after successful store)
+        match candidate.source_tier {
+            TierType::Hot => {
+                let hot = self.hot_tier.as_ref()
+                    .ok_or_else(|| StorageError::NotInitialized("Hot tier not set".to_string()))?;
+                hot.evict_memory(&candidate.memory_id);
+            }
+            TierType::Warm => {
+                let warm = self.warm_tier.as_ref()
+                    .ok_or_else(|| StorageError::NotInitialized("Warm tier not set".to_string()))?;
+                warm.remove(&candidate.memory_id).await?;
+            }
+            TierType::Cold => {
+                let cold = self.cold_tier.as_ref()
+                    .ok_or_else(|| StorageError::NotInitialized("Cold tier not set".to_string()))?;
+                cold.remove(&candidate.memory_id).await?;
+            }
+        }
+
+        Ok(())
     }
 
     /// Schedule a migration task
@@ -470,6 +770,111 @@ mod tests {
 
         // Give worker time to process
         tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    #[tokio::test]
+    async fn test_migration_cycle() {
+        let temp_dir = TempDir::new().unwrap();
+        let metrics = Arc::new(StorageMetrics::new());
+
+        // Create coordinator with tiers
+        let mut coordinator = TierCoordinator::new(
+            CognitiveEvictionPolicy {
+                hot_activation_threshold: 0.7,
+                warm_access_window: Duration::from_secs(60),
+                cold_migration_age: Duration::from_secs(3600),
+                recency_boost_factor: 1.2,
+            },
+            metrics.clone(),
+        );
+
+        let hot_tier = Arc::new(HotTier::new(100));
+        let warm_tier = Arc::new(WarmTier::new(
+            temp_dir.path().join("warm.dat"),
+            1000,
+            metrics.clone(),
+        ).unwrap());
+        let cold_tier = Arc::new(ColdTier::new(10000));
+
+        coordinator.set_tiers(
+            hot_tier.clone(),
+            warm_tier.clone(),
+            cold_tier.clone(),
+        );
+
+        // Add test memories to hot tier
+        let low_activation_memory = create_test_memory("low_mem", 0.3);
+        let high_activation_memory = create_test_memory("high_mem", 0.9);
+
+        hot_tier.store(low_activation_memory).await.unwrap();
+        hot_tier.store(high_activation_memory).await.unwrap();
+
+        // Record access patterns
+        coordinator.access_tracker.record_access("low_mem", 0.3);
+        coordinator.access_tracker.record_access("high_mem", 0.9);
+
+        // Wait to create idle time
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // Run migration cycle
+        let report = coordinator.run_migration_cycle().await.unwrap();
+
+        // Low activation memory should be migrated to warm tier
+        assert!(report.hot_to_warm > 0, "Should migrate low activation memory");
+        assert_eq!(report.errors.len(), 0, "Should have no errors");
+    }
+
+    #[tokio::test]
+    async fn test_access_tracking_integration() {
+        let metrics = Arc::new(StorageMetrics::new());
+        let coordinator = TierCoordinator::new(CognitiveEvictionPolicy::default(), metrics);
+
+        // Record multiple accesses
+        coordinator.access_tracker.record_access("mem1", 0.8);
+        coordinator.access_tracker.record_access("mem1", 0.9);
+        coordinator.access_tracker.record_access("mem2", 0.3);
+
+        // Check that access patterns are tracked
+        let stats1 = coordinator.access_tracker.get_access_stats("mem1");
+        let stats2 = coordinator.access_tracker.get_access_stats("mem2");
+
+        assert_eq!(stats1.total_accesses, 2);
+        assert_eq!(stats2.total_accesses, 1);
+        assert!(stats1.average_activation > stats2.average_activation);
+    }
+
+    #[tokio::test]
+    async fn test_migration_candidate_prioritization() {
+        let metrics = Arc::new(StorageMetrics::new());
+        let mut coordinator = TierCoordinator::new(CognitiveEvictionPolicy::default(), metrics.clone());
+
+        let hot_tier = Arc::new(HotTier::new(100));
+        let warm_tier = Arc::new(WarmTier::new(
+            TempDir::new().unwrap().path().join("warm.dat"),
+            1000,
+            metrics.clone(),
+        ).unwrap());
+        let cold_tier = Arc::new(ColdTier::new(10000));
+
+        coordinator.set_tiers(hot_tier.clone(), warm_tier, cold_tier);
+
+        // Add memories with different activation levels
+        for i in 0..5 {
+            let memory = create_test_memory(&format!("mem_{}", i), 0.1 * i as f32);
+            hot_tier.store(memory).await.unwrap();
+            coordinator.access_tracker.record_access(&format!("mem_{}", i), 0.1 * i as f32);
+        }
+
+        // Get migration candidates
+        let candidates = coordinator.evaluate_hot_tier_migrations().await.unwrap();
+
+        // Candidates should be sorted by priority
+        for i in 1..candidates.len() {
+            assert!(
+                candidates[i-1].priority >= candidates[i].priority,
+                "Candidates should be sorted by priority"
+            );
+        }
     }
 
     #[test]

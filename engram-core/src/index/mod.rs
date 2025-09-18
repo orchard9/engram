@@ -371,7 +371,7 @@ impl CognitiveHnswIndex {
             
             // Process each result for potential spreading
             let mut new_activations = Vec::new();
-            for (episode, confidence) in &results {
+            for (episode, _confidence) in &results {
                 // Find connected memories via graph traversal
                 let connected = self.find_connected_memories(&episode.id, hop_energy);
                 new_activations.extend(connected);

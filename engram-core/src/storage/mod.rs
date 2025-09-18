@@ -15,6 +15,7 @@ use std::sync::Arc;
 use thiserror::Error;
 
 // Conditional imports based on feature flags
+pub mod access_tracking;
 #[cfg(feature = "memory_mapped_persistence")]
 pub mod cache;
 #[cfg(feature = "memory_mapped_persistence")]
@@ -39,6 +40,7 @@ pub mod warm_tier;
 pub mod numa;
 
 // Re-exports for public API
+pub use access_tracking::{AccessTracker, AccessStats, GlobalAccessStats};
 #[cfg(feature = "memory_mapped_persistence")]
 pub use cache::{CacheOptimalMemoryNode, CognitiveIndex};
 pub use cold_tier::{ColdTier, ColdTierConfig, CompactionResult};
@@ -51,7 +53,10 @@ pub use hot_tier::HotTier;
 #[cfg(feature = "memory_mapped_persistence")]
 pub use mapped::MappedWarmStorage;
 #[cfg(feature = "memory_mapped_persistence")]
-pub use tiers::{CognitiveTierArchitecture, TierArchitectureStats, TierCoordinator};
+pub use tiers::{
+    CognitiveTierArchitecture, MigrationCandidate, MigrationReport,
+    TierArchitectureStats, TierCoordinator,
+};
 #[cfg(feature = "memory_mapped_persistence")]
 pub use wal::{WalEntry, WalWriter};
 pub use warm_tier::{WarmTier, WarmTierConfig, CompactionStats, MemoryUsage};
@@ -242,8 +247,8 @@ pub enum StorageError {
     },
 
     /// Storage backend has not been initialized
-    #[error("Storage backend not initialized")]
-    NotInitialized,
+    #[error("Storage backend not initialized: {0}")]
+    NotInitialized(String),
 
     /// Operation exceeded the configured timeout
     #[error("Operation timeout after {duration:?}")]
@@ -251,6 +256,18 @@ pub enum StorageError {
         /// Duration after which the operation timed out
         duration: std::time::Duration,
     },
+
+    /// Memory or resource not found
+    #[error("Resource not found: {0}")]
+    NotFound(String),
+
+    /// Feature not yet implemented
+    #[error("Feature not implemented: {0}")]
+    NotImplemented(String),
+
+    /// Migration operation failed
+    #[error("Migration failed: {0}")]
+    MigrationFailed(String),
 }
 
 impl StorageError {
