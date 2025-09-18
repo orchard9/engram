@@ -21,6 +21,7 @@ pub mod cache;
 #[cfg(feature = "memory_mapped_persistence")]
 pub mod compact;
 pub mod cold_tier;
+pub mod confidence;
 pub mod content_addressing;
 pub mod deduplication;
 pub mod hot_tier;
@@ -47,6 +48,9 @@ pub use access_tracking::{
 #[cfg(feature = "memory_mapped_persistence")]
 pub use cache::{CacheOptimalMemoryNode, CognitiveIndex};
 pub use cold_tier::{ColdTier, ColdTierConfig, CompactionResult};
+pub use confidence::{
+    StorageConfidenceCalibrator, ConfidenceTier, TierConfidenceFactors, CalibrationStats,
+};
 pub use content_addressing::{ContentAddress, ContentIndex, ContentIndexStats};
 pub use deduplication::{
     DeduplicationAction, DeduplicationResult, DeduplicationStats,

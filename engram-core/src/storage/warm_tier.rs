@@ -9,6 +9,7 @@
 //! - Automatic compaction and defragmentation
 
 use super::{StorageError, StorageTier, TierStatistics, mapped::MappedWarmStorage};
+use super::confidence::{StorageConfidenceCalibrator, ConfidenceTier};
 use crate::{Confidence, Cue, Episode, Memory};
 use std::sync::Arc;
 
@@ -16,6 +17,8 @@ use std::sync::Arc;
 pub struct WarmTier {
     /// Underlying memory-mapped storage implementation
     storage: MappedWarmStorage,
+    /// Confidence calibrator for warm tier adjustments
+    confidence_calibrator: StorageConfidenceCalibrator,
 }
 
 impl WarmTier {
@@ -26,7 +29,8 @@ impl WarmTier {
         metrics: Arc<super::StorageMetrics>,
     ) -> Result<Self, StorageError> {
         let storage = MappedWarmStorage::new(file_path, capacity, metrics)?;
-        Ok(Self { storage })
+        let confidence_calibrator = StorageConfidenceCalibrator::new();
+        Ok(Self { storage, confidence_calibrator })
     }
 
     /// Create warm tier with custom configuration
@@ -36,17 +40,18 @@ impl WarmTier {
         metrics: Arc<super::StorageMetrics>,
     ) -> Result<Self, StorageError> {
         let storage = MappedWarmStorage::new(file_path, config.capacity, metrics)?;
-        
+        let confidence_calibrator = StorageConfidenceCalibrator::new();
+
         // Apply configuration settings
         if config.enable_compression {
             // Compression is handled internally by MappedWarmStorage
         }
-        
+
         if config.enable_numa_awareness {
             // NUMA awareness is built into MappedWarmStorage
         }
-        
-        Ok(Self { storage })
+
+        Ok(Self { storage, confidence_calibrator })
     }
 
     /// Get the underlying storage for direct access if needed
@@ -142,16 +147,28 @@ impl StorageTier for WarmTier {
     async fn recall(&self, cue: &Cue) -> Result<Vec<(Episode, Confidence)>, Self::Error> {
         // Delegate to underlying mapped storage with enhanced error handling
         match self.storage.recall(cue).await {
-            Ok(results) => Ok(results),
+            Ok(mut results) => {
+                // Apply warm tier confidence calibration
+                for (episode, confidence) in results.iter_mut() {
+                    // For warm tier, assume memories have been stored for some time
+                    let storage_duration = std::time::Duration::from_secs(3600); // 1 hour default
+                    *confidence = self.confidence_calibrator.adjust_for_storage_tier(
+                        *confidence,
+                        ConfidenceTier::Warm,
+                        storage_duration,
+                    );
+                }
+                Ok(results)
+            },
             Err(e) => {
                 // Log the error and attempt recovery
                 tracing::warn!("Warm tier recall failed, attempting recovery: {}", e);
-                
+
                 // Try maintenance to fix any issues
                 if let Err(maintenance_error) = self.storage.maintenance().await {
                     tracing::error!("Warm tier maintenance failed: {}", maintenance_error);
                 }
-                
+
                 // Return original error
                 Err(e)
             }

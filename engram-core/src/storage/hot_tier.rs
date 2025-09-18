@@ -9,6 +9,7 @@
 //! - Memory pressure-aware eviction
 
 use super::{StorageError, StorageTier, TierStatistics};
+use super::confidence::{StorageConfidenceCalibrator, ConfidenceTier};
 use crate::{
     compute, 
     Confidence, 
@@ -37,6 +38,8 @@ pub struct HotTier {
     total_accesses: AtomicU64,
     /// Capacity limit
     pub max_capacity: usize,
+    /// Confidence calibrator for storage tier adjustments
+    confidence_calibrator: StorageConfidenceCalibrator,
 }
 
 impl HotTier {
@@ -49,6 +52,23 @@ impl HotTier {
             cache_misses: AtomicU64::new(0),
             total_accesses: AtomicU64::new(0),
             max_capacity: capacity,
+            confidence_calibrator: StorageConfidenceCalibrator::new(),
+        }
+    }
+
+    /// Create a new hot tier with custom confidence calibrator
+    pub fn with_confidence_calibrator(
+        capacity: usize,
+        calibrator: StorageConfidenceCalibrator,
+    ) -> Self {
+        Self {
+            data: DashMap::with_capacity(capacity),
+            access_times: DashMap::with_capacity(capacity),
+            cache_hits: AtomicU64::new(0),
+            cache_misses: AtomicU64::new(0),
+            total_accesses: AtomicU64::new(0),
+            max_capacity: capacity,
+            confidence_calibrator: calibrator,
         }
     }
 
@@ -65,6 +85,41 @@ impl HotTier {
         let timestamp = Self::current_timestamp();
         self.access_times.insert(memory_id.to_string(), timestamp);
         self.total_accesses.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get storage duration for a memory (time since first stored)
+    pub fn get_storage_duration(&self, memory_id: &str) -> std::time::Duration {
+        if let Some(entry) = self.access_times.get(memory_id) {
+            let stored_timestamp = *entry.value();
+            let current_timestamp = Self::current_timestamp();
+            let duration_nanos = current_timestamp.saturating_sub(stored_timestamp);
+            std::time::Duration::from_nanos(duration_nanos)
+        } else {
+            // If no access time recorded, assume it was just stored
+            std::time::Duration::from_secs(0)
+        }
+    }
+
+    /// Apply confidence calibration for hot tier retrieval
+    pub fn calibrate_confidence(&self, raw_confidence: Confidence, memory_id: &str) -> Confidence {
+        let storage_duration = self.get_storage_duration(memory_id);
+        self.confidence_calibrator.adjust_for_storage_tier(
+            raw_confidence,
+            ConfidenceTier::Hot,
+            storage_duration,
+        )
+    }
+
+    /// Batch calibrate confidence for multiple results
+    pub fn calibrate_confidence_batch(&self, results: &mut [(Episode, Confidence)]) {
+        for (episode, confidence) in results.iter_mut() {
+            let storage_duration = self.get_storage_duration(&episode.id);
+            *confidence = self.confidence_calibrator.adjust_for_storage_tier(
+                *confidence,
+                ConfidenceTier::Hot,
+                storage_duration,
+            );
+        }
     }
 
     /// Check if tier is approaching capacity
@@ -109,8 +164,17 @@ impl HotTier {
             
             if similarity >= threshold.raw() {
                 let episode = self.memory_to_episode(memory);
-                let confidence = Confidence::exact(similarity);
-                results.push((episode, confidence));
+                let raw_confidence = Confidence::from_raw(similarity);
+
+                // Apply storage tier confidence calibration
+                let storage_duration = self.get_storage_duration(&memory.id);
+                let calibrated_confidence = self.confidence_calibrator.adjust_for_storage_tier(
+                    raw_confidence,
+                    ConfidenceTier::Hot,
+                    storage_duration,
+                );
+
+                results.push((episode, calibrated_confidence));
             }
         }
 

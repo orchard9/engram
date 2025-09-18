@@ -9,6 +9,7 @@
 //! - Automatic data compaction and garbage collection
 
 use super::{StorageError, StorageTier, TierStatistics};
+use super::confidence::{StorageConfidenceCalibrator, ConfidenceTier};
 use crate::{
     compute,
     Confidence,
@@ -334,6 +335,8 @@ pub struct ColdTier {
     /// Configuration
     max_capacity: usize,
     compression_enabled: bool,
+    /// Confidence calibrator for cold tier adjustments
+    confidence_calibrator: StorageConfidenceCalibrator,
 }
 
 impl ColdTier {
@@ -347,6 +350,7 @@ impl ColdTier {
             compaction_count: AtomicU64::new(0),
             max_capacity: capacity,
             compression_enabled: true,
+            confidence_calibrator: StorageConfidenceCalibrator::new(),
         }
     }
 
@@ -360,6 +364,7 @@ impl ColdTier {
             compaction_count: AtomicU64::new(0),
             max_capacity: config.capacity,
             compression_enabled: config.enable_compression,
+            confidence_calibrator: StorageConfidenceCalibrator::new(),
         }
     }
 
@@ -625,7 +630,20 @@ impl StorageTier for ColdTier {
             }
         }
 
-        Ok(results)
+        // Apply cold tier confidence calibration to all results
+        let mut calibrated_results = Vec::with_capacity(results.len());
+        for (episode, confidence) in results {
+            // For cold tier, assume memories have been stored for a long time
+            let storage_duration = std::time::Duration::from_secs(24 * 3600); // 1 day default
+            let calibrated_confidence = self.confidence_calibrator.adjust_for_storage_tier(
+                confidence,
+                ConfidenceTier::Cold,
+                storage_duration,
+            );
+            calibrated_results.push((episode, calibrated_confidence));
+        }
+
+        Ok(calibrated_results)
     }
 
     async fn update_activation(&self, memory_id: &str, activation: f32) -> Result<(), Self::Error> {
