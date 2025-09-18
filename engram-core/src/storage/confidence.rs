@@ -4,7 +4,7 @@
 //! to ensure uncertainty is properly tracked across different storage tiers.
 
 use crate::Confidence;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 /// Storage tier types for confidence calibration
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

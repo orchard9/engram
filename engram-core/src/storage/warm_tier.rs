@@ -149,7 +149,7 @@ impl StorageTier for WarmTier {
         match self.storage.recall(cue).await {
             Ok(mut results) => {
                 // Apply warm tier confidence calibration
-                for (episode, confidence) in results.iter_mut() {
+                for (_episode, confidence) in results.iter_mut() {
                     // For warm tier, assume memories have been stored for some time
                     let storage_duration = std::time::Duration::from_secs(3600); // 1 hour default
                     *confidence = self.confidence_calibrator.adjust_for_storage_tier(
