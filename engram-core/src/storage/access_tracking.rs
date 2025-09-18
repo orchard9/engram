@@ -4,6 +4,7 @@
 //! to inform intelligent tier migration decisions.
 
 use dashmap::DashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime};
 
@@ -265,6 +266,200 @@ impl Default for AccessTracker {
     }
 }
 
+/// Access event for pattern learning
+#[derive(Debug, Clone)]
+pub struct AccessEvent {
+    /// Memory identifier
+    pub memory_id: String,
+    /// When the access occurred
+    pub timestamp: SystemTime,
+    /// Activation level at time of access
+    pub activation: f32,
+}
+
+/// Predicted future access
+#[derive(Debug, Clone)]
+pub struct PredictedAccess {
+    /// Predicted next access time
+    pub next_access: SystemTime,
+    /// Confidence in prediction (0.0-1.0)
+    pub confidence: f32,
+    /// Inter-arrival time estimate
+    pub interval: Duration,
+}
+
+/// Access pattern predictor using EWMA and history analysis
+pub struct AccessPredictor {
+    /// EWMA alpha parameter for adaptation
+    ewma_alpha: f32,
+    /// Recent access history (circular buffer per memory)
+    access_history: DashMap<String, VecDeque<AccessEvent>>,
+    /// Current predictions
+    predictions: DashMap<String, PredictedAccess>,
+    /// Maximum history length per memory
+    max_history_len: usize,
+}
+
+impl AccessPredictor {
+    /// Create new access predictor
+    pub fn new() -> Self {
+        Self {
+            ewma_alpha: 0.3,
+            access_history: DashMap::new(),
+            predictions: DashMap::new(),
+            max_history_len: 10,
+        }
+    }
+
+    /// Create with custom parameters
+    pub fn with_params(ewma_alpha: f32, max_history_len: usize) -> Self {
+        Self {
+            ewma_alpha: ewma_alpha.clamp(0.1, 0.9),
+            access_history: DashMap::new(),
+            predictions: DashMap::new(),
+            max_history_len,
+        }
+    }
+
+    /// Record an access event for learning
+    pub fn record_access(&self, memory_id: &str, activation: f32) {
+        let event = AccessEvent {
+            memory_id: memory_id.to_string(),
+            timestamp: SystemTime::now(),
+            activation,
+        };
+
+        // Update access history
+        self.access_history
+            .entry(memory_id.to_string())
+            .and_modify(|history| {
+                history.push_back(event.clone());
+                if history.len() > self.max_history_len {
+                    history.pop_front();
+                }
+            })
+            .or_insert_with(|| {
+                let mut history = VecDeque::new();
+                history.push_back(event);
+                history
+            });
+
+        // Update prediction if we have enough history
+        if let Some(prediction) = self.predict_next_access(memory_id) {
+            self.predictions.insert(memory_id.to_string(), prediction);
+        }
+    }
+
+    /// Predict next access time for a memory
+    pub fn predict_next_access(&self, memory_id: &str) -> Option<PredictedAccess> {
+        let history = self.access_history.get(memory_id)?;
+        let history = history.value();
+
+        if history.len() < 2 {
+            return None;
+        }
+
+        // Calculate inter-arrival times
+        let intervals: Vec<Duration> = history
+            .iter()
+            .collect::<Vec<_>>()
+            .windows(2)
+            .filter_map(|w| w[1].timestamp.duration_since(w[0].timestamp).ok())
+            .collect();
+
+        if intervals.is_empty() {
+            return None;
+        }
+
+        // EWMA prediction of next interval
+        let mut predicted_interval = intervals[0].as_secs_f32();
+        for interval in intervals.iter().skip(1) {
+            predicted_interval = self.ewma_alpha * interval.as_secs_f32()
+                + (1.0 - self.ewma_alpha) * predicted_interval;
+        }
+
+        // Calculate prediction confidence based on variance
+        let mean_interval = intervals.iter().map(|d| d.as_secs_f32()).sum::<f32>() / intervals.len() as f32;
+        let variance = intervals
+            .iter()
+            .map(|d| (d.as_secs_f32() - mean_interval).powi(2))
+            .sum::<f32>() / intervals.len() as f32;
+
+        let confidence = (1.0 / (1.0 + variance.sqrt())).clamp(0.1, 1.0);
+
+        let interval_duration = Duration::from_secs_f32(predicted_interval.max(1.0));
+        let next_access = SystemTime::now() + interval_duration;
+
+        Some(PredictedAccess {
+            next_access,
+            confidence,
+            interval: interval_duration,
+        })
+    }
+
+    /// Update model based on prediction error
+    pub fn update_model(&mut self, prediction_error: f32) {
+        // Adaptive alpha based on prediction accuracy
+        if prediction_error > 0.2 {
+            // Large error, increase alpha for faster adaptation
+            self.ewma_alpha = (self.ewma_alpha * 1.1).min(0.9);
+        } else {
+            // Small error, decrease alpha for stability
+            self.ewma_alpha = (self.ewma_alpha * 0.95).max(0.1);
+        }
+    }
+
+    /// Get prediction for a memory if available
+    pub fn get_prediction(&self, memory_id: &str) -> Option<PredictedAccess> {
+        self.predictions.get(memory_id).map(|entry| entry.value().clone())
+    }
+
+    /// Check if memory is likely to be accessed soon
+    pub fn is_likely_access_soon(&self, memory_id: &str, threshold: Duration) -> bool {
+        if let Some(prediction) = self.get_prediction(memory_id) {
+            if let Ok(time_to_access) = prediction.next_access.duration_since(SystemTime::now()) {
+                return time_to_access <= threshold && prediction.confidence > 0.5;
+            }
+        }
+        false
+    }
+
+    /// Get access statistics
+    pub fn get_statistics(&self) -> PredictorStats {
+        PredictorStats {
+            tracked_memories: self.access_history.len(),
+            total_predictions: self.predictions.len(),
+            current_alpha: self.ewma_alpha,
+            avg_confidence: if self.predictions.is_empty() {
+                0.0
+            } else {
+                self.predictions.iter()
+                    .map(|entry| entry.value().confidence)
+                    .sum::<f32>() / self.predictions.len() as f32
+            },
+        }
+    }
+}
+
+impl Default for AccessPredictor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Statistics about the access predictor
+#[derive(Debug, Clone)]
+pub struct PredictorStats {
+    /// Number of tracked memories
+    pub tracked_memories: usize,
+    /// Total predictions available
+    pub total_predictions: usize,
+    /// Current EWMA alpha
+    pub current_alpha: f32,
+    /// Average prediction confidence
+    pub avg_confidence: f32,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -354,5 +549,47 @@ mod tests {
         assert_eq!(tracker.tracked_count(), 1);
         assert_eq!(tracker.get_access_stats("memory1").total_accesses, 0);
         assert_eq!(tracker.get_access_stats("memory2").total_accesses, 1);
+    }
+
+    #[test]
+    fn test_access_predictor() {
+        let predictor = AccessPredictor::new();
+
+        // Record access pattern
+        predictor.record_access("memory1", 0.8);
+        thread::sleep(Duration::from_millis(100));
+        predictor.record_access("memory1", 0.7);
+        thread::sleep(Duration::from_millis(100));
+        predictor.record_access("memory1", 0.6);
+
+        // Should have a prediction now
+        let prediction = predictor.predict_next_access("memory1");
+        assert!(prediction.is_some());
+
+        let prediction = prediction.unwrap();
+        assert!(prediction.confidence > 0.0);
+        assert!(prediction.interval.as_millis() > 50); // Should be around 100ms
+
+        // Test prediction access
+        assert!(!predictor.is_likely_access_soon("memory1", Duration::from_millis(1)));
+    }
+
+    #[test]
+    fn test_predictor_statistics() {
+        let predictor = AccessPredictor::new();
+
+        // Initially empty
+        let stats = predictor.get_statistics();
+        assert_eq!(stats.tracked_memories, 0);
+        assert_eq!(stats.total_predictions, 0);
+
+        // Add some data
+        predictor.record_access("mem1", 0.5);
+        predictor.record_access("mem1", 0.6);
+        predictor.record_access("mem2", 0.7);
+
+        let stats = predictor.get_statistics();
+        assert_eq!(stats.tracked_memories, 2);
+        assert!(stats.total_predictions <= 2); // May or may not have predictions yet
     }
 }

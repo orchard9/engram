@@ -4,7 +4,7 @@
 //! based on cognitive memory patterns and access frequency.
 
 use super::{
-    access_tracking::AccessTracker,
+    access_tracking::{AccessTracker, AccessPredictor},
     CognitiveEvictionPolicy, StorageMetrics, StorageResult, StorageTier, StorageError,
     TierStatistics, HotTier, WarmTier, ColdTier,
 };
@@ -407,6 +407,8 @@ pub struct TierCoordinator {
     worker_handle: AsyncRwLock<Option<tokio::task::JoinHandle<()>>>,
     /// Access tracking for migration decisions
     access_tracker: Arc<AccessTracker>,
+    /// Access pattern predictor for proactive migration
+    access_predictor: Arc<AccessPredictor>,
     /// Rate limiter for migrations (max 100/second)
     rate_limiter: Arc<Semaphore>,
     /// References to storage tiers
@@ -425,6 +427,7 @@ impl TierCoordinator {
             active_migrations: Arc::new(AtomicUsize::new(0)),
             worker_handle: AsyncRwLock::new(None),
             access_tracker: Arc::new(AccessTracker::new()),
+            access_predictor: Arc::new(AccessPredictor::new()),
             rate_limiter: Arc::new(Semaphore::new(100)), // Max 100 concurrent migrations
             hot_tier: None,
             warm_tier: None,
@@ -633,10 +636,10 @@ impl TierCoordinator {
             let stats = self.access_tracker.get_access_stats(memory_id);
             let current_activation = memory.activation();
 
-            // Check demotion criteria
+            // Check demotion criteria (research: activation < 0.3 OR idle_time > 5 minutes)
             let should_demote =
-                current_activation < self.policy.hot_activation_threshold ||
-                stats.idle_time > self.policy.warm_access_window ||
+                current_activation < 0.3 ||
+                stats.idle_time > Duration::from_secs(300) || // 5 minutes
                 stats.activation_trend < -0.2; // Declining activation
 
             if should_demote {
@@ -653,6 +656,9 @@ impl TierCoordinator {
 
         // Sort by priority (highest first)
         candidates.sort_by(|a, b| b.priority.partial_cmp(&a.priority).unwrap_or(std::cmp::Ordering::Equal));
+
+        // Limit batch size to 100 memories per cycle (research recommendation)
+        candidates.truncate(100);
 
         Ok(candidates)
     }
@@ -896,15 +902,15 @@ mod tests {
             cold_tier.clone(),
         );
 
-        // Add test memories to hot tier
-        let low_activation_memory = create_test_memory("low_mem", 0.3);
+        // Add test memories to hot tier (research: < 0.3 triggers migration)
+        let low_activation_memory = create_test_memory("low_mem", 0.2);
         let high_activation_memory = create_test_memory("high_mem", 0.9);
 
         hot_tier.store(low_activation_memory).await.unwrap();
         hot_tier.store(high_activation_memory).await.unwrap();
 
         // Record access patterns
-        coordinator.access_tracker.record_access("low_mem", 0.3);
+        coordinator.access_tracker.record_access("low_mem", 0.2);
         coordinator.access_tracker.record_access("high_mem", 0.9);
 
         // Wait to create idle time

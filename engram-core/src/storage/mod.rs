@@ -40,7 +40,10 @@ pub mod warm_tier;
 pub mod numa;
 
 // Re-exports for public API
-pub use access_tracking::{AccessTracker, AccessStats, GlobalAccessStats};
+pub use access_tracking::{
+    AccessTracker, AccessStats, GlobalAccessStats, AccessPredictor,
+    AccessEvent, PredictedAccess, PredictorStats,
+};
 #[cfg(feature = "memory_mapped_persistence")]
 pub use cache::{CacheOptimalMemoryNode, CognitiveIndex};
 pub use cold_tier::{ColdTier, ColdTierConfig, CompactionResult};
@@ -54,7 +57,7 @@ pub use hot_tier::HotTier;
 pub use mapped::MappedWarmStorage;
 #[cfg(feature = "memory_mapped_persistence")]
 pub use tiers::{
-    CognitiveTierArchitecture, MigrationCandidate, MigrationReport,
+    CognitiveTierArchitecture, MigrationCandidate, MigrationReport, MemoryPressure,
     TierArchitectureStats, TierCoordinator,
 };
 #[cfg(feature = "memory_mapped_persistence")]
