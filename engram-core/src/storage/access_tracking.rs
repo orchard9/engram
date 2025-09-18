@@ -18,6 +18,12 @@ pub struct AccessTracker {
     /// Rolling activation history (last 10 values)
     activation_history: DashMap<String, Vec<f32>>,
 
+    /// EWMA frequency estimates
+    ewma_frequencies: DashMap<String, f32>,
+
+    /// Adaptive EWMA alpha parameter (0.1-0.9)
+    ewma_alpha: AtomicU64, // Stored as u64, divide by 1000 for f32
+
     /// Global access counter for statistics
     total_accesses: AtomicU64,
 }
@@ -29,20 +35,59 @@ impl AccessTracker {
             access_times: DashMap::new(),
             access_counts: DashMap::new(),
             activation_history: DashMap::new(),
+            ewma_frequencies: DashMap::new(),
+            ewma_alpha: AtomicU64::new(300), // 0.3 as default (300/1000)
             total_accesses: AtomicU64::new(0),
         }
     }
 
+    /// Create with custom EWMA alpha
+    pub fn with_alpha(alpha: f32) -> Self {
+        let mut tracker = Self::new();
+        tracker.set_ewma_alpha(alpha);
+        tracker
+    }
+
+    /// Set EWMA alpha parameter (0.1 to 0.9)
+    pub fn set_ewma_alpha(&self, alpha: f32) {
+        let alpha_int = (alpha.clamp(0.1, 0.9) * 1000.0) as u64;
+        self.ewma_alpha.store(alpha_int, Ordering::Relaxed);
+    }
+
+    /// Get current EWMA alpha
+    fn get_ewma_alpha(&self) -> f32 {
+        self.ewma_alpha.load(Ordering::Relaxed) as f32 / 1000.0
+    }
+
     /// Record a memory access with activation level
     pub fn record_access(&self, memory_id: &str, activation: f32) {
+        let now = SystemTime::now();
+
+        // Calculate time since last access for frequency update
+        let time_delta = self.access_times
+            .get(memory_id)
+            .map(|entry| now.duration_since(*entry.value()).unwrap_or_default())
+            .unwrap_or(Duration::from_secs(3600)); // Default to 1 hour if first access
+
         // Update access time
-        self.access_times.insert(memory_id.to_string(), SystemTime::now());
+        self.access_times.insert(memory_id.to_string(), now);
 
         // Increment access count
         self.access_counts
             .entry(memory_id.to_string())
             .and_modify(|count| *count += 1)
             .or_insert(1);
+
+        // Update EWMA frequency (accesses per hour)
+        let instant_frequency = 3600.0 / time_delta.as_secs_f32().max(1.0);
+        let alpha = self.get_ewma_alpha();
+
+        self.ewma_frequencies
+            .entry(memory_id.to_string())
+            .and_modify(|freq| {
+                *freq = alpha * instant_frequency + (1.0 - alpha) * (*freq);
+            })
+            .or_insert(instant_frequency);
 
         // Update activation history (keep last 10 values)
         self.activation_history
@@ -70,22 +115,40 @@ impl AccessTracker {
             .unwrap_or(Duration::MAX)
     }
 
-    /// Calculate access frequency (accesses per hour)
+    /// Get EWMA-based access frequency (accesses per hour)
     pub fn get_access_frequency(&self, memory_id: &str) -> f32 {
-        let count = self.access_counts
+        // Use EWMA frequency if available, fallback to simple calculation
+        self.ewma_frequencies
             .get(memory_id)
             .map(|entry| *entry.value())
-            .unwrap_or(0);
+            .unwrap_or_else(|| {
+                // Fallback to simple frequency calculation
+                let count = self.access_counts
+                    .get(memory_id)
+                    .map(|entry| *entry.value())
+                    .unwrap_or(0);
 
-        let idle_hours = self.get_idle_time(memory_id).as_secs_f32() / 3600.0;
+                let idle_hours = self.get_idle_time(memory_id).as_secs_f32() / 3600.0;
 
-        if idle_hours < 0.001 {
-            // Very recent access, use raw count
-            count as f32
+                if idle_hours < 0.001 {
+                    count as f32
+                } else {
+                    count as f32 / idle_hours.max(1.0)
+                }
+            })
+    }
+
+    /// Adapt EWMA alpha based on prediction error
+    pub fn adapt_alpha(&self, prediction_error: f32) {
+        let current_alpha = self.get_ewma_alpha();
+        let new_alpha = if prediction_error > 0.2 {
+            // Large error, increase alpha for faster adaptation
+            (current_alpha * 1.1).min(0.9)
         } else {
-            // Calculate frequency per hour
-            count as f32 / idle_hours.max(1.0)
-        }
+            // Small error, decrease alpha for stability
+            (current_alpha * 0.95).max(0.1)
+        };
+        self.set_ewma_alpha(new_alpha);
     }
 
     /// Get average activation from recent history

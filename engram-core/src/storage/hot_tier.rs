@@ -36,7 +36,7 @@ pub struct HotTier {
     cache_misses: AtomicU64,
     total_accesses: AtomicU64,
     /// Capacity limit
-    max_capacity: usize,
+    pub max_capacity: usize,
 }
 
 impl HotTier {

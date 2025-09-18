@@ -57,6 +57,19 @@ pub enum MigrationPriority {
     Low = 3,
 }
 
+/// Memory pressure levels for emergency eviction
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub enum MemoryPressure {
+    /// System is healthy
+    Normal = 0,
+    /// Moderate pressure, accelerate migrations
+    Moderate = 1,
+    /// High pressure, aggressive migrations
+    High = 2,
+    /// Critical pressure, emergency eviction
+    Critical = 3,
+}
+
 /// Cognitive tier architecture with automatic migration
 pub struct CognitiveTierArchitecture {
     /// Hot tier: DashMap for immediate access
@@ -431,6 +444,80 @@ impl TierCoordinator {
         self.cold_tier = Some(cold);
     }
 
+    /// Calculate memory pressure for a tier
+    pub fn calculate_memory_pressure(&self, tier: &HotTier) -> MemoryPressure {
+        let usage_ratio = tier.len() as f32 / tier.max_capacity as f32;
+
+        if usage_ratio > 0.95 {
+            MemoryPressure::Critical
+        } else if usage_ratio > 0.85 {
+            MemoryPressure::High
+        } else if usage_ratio > 0.70 {
+            MemoryPressure::Moderate
+        } else {
+            MemoryPressure::Normal
+        }
+    }
+
+    /// Handle memory pressure with emergency eviction
+    pub async fn handle_memory_pressure(&self) -> Result<usize, StorageError> {
+        let hot_tier = self.hot_tier.as_ref()
+            .ok_or_else(|| StorageError::NotInitialized("Hot tier not set".to_string()))?;
+
+        let pressure = self.calculate_memory_pressure(hot_tier);
+        let mut evicted = 0;
+
+        match pressure {
+            MemoryPressure::Critical => {
+                // Emergency eviction: remove 20% of memories immediately
+                let target = (hot_tier.len() as f32 * 0.2) as usize;
+                let candidates = hot_tier.get_lru_candidates(target);
+
+                for memory_id in candidates {
+                    if let Some(memory) = hot_tier.evict_memory(&memory_id) {
+                        // Try to move to warm tier, drop if that fails
+                        if let Some(warm) = &self.warm_tier {
+                            let _ = warm.store(memory).await;
+                        }
+                        evicted += 1;
+                    }
+                }
+            }
+            MemoryPressure::High => {
+                // Accelerated migration: move 10% to warm tier
+                let target = (hot_tier.len() as f32 * 0.1) as usize;
+                let candidates = hot_tier.get_lru_candidates(target);
+
+                for memory_id in candidates {
+                    if let Some(memory) = hot_tier.get_memory(&memory_id) {
+                        if let Some(warm) = &self.warm_tier {
+                            if warm.store(memory).await.is_ok() {
+                                hot_tier.evict_memory(&memory_id);
+                                evicted += 1;
+                            }
+                        }
+                    }
+                }
+            }
+            MemoryPressure::Moderate => {
+                // Schedule normal migration
+                let task = MigrationTask {
+                    memory_id: "batch_migration".to_string(),
+                    from_tier: TierType::Hot,
+                    to_tier: TierType::Warm,
+                    priority: MigrationPriority::High,
+                    created_at: SystemTime::now(),
+                };
+                self.schedule_migration(task).await;
+            }
+            MemoryPressure::Normal => {
+                // No action needed
+            }
+        }
+
+        Ok(evicted)
+    }
+
     /// Run a complete migration cycle
     pub async fn run_migration_cycle(&self) -> Result<MigrationReport, StorageError> {
         let start_time = SystemTime::now();
@@ -439,6 +526,13 @@ impl TierCoordinator {
         // Check if tiers are configured
         if self.hot_tier.is_none() || self.warm_tier.is_none() || self.cold_tier.is_none() {
             return Err(StorageError::NotInitialized("Tiers not configured".to_string()));
+        }
+
+        // Check and handle memory pressure first
+        if let Ok(evicted) = self.handle_memory_pressure().await {
+            if evicted > 0 {
+                report.hot_to_warm += evicted;
+            }
         }
 
         // Evaluate hot tier for demotion
