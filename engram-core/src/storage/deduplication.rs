@@ -350,7 +350,37 @@ mod tests {
     
     fn create_test_memory(id: &str, embedding_val: f32, confidence: f32) -> Memory {
         let mut embedding = [0.0f32; 768];
-        embedding[0] = embedding_val;
+        
+        // Create orthogonal embeddings using different basis vectors
+        // This ensures different embeddings have low cosine similarity
+        match id {
+            "mem1" => {
+                // First basis vector: concentrated in first third
+                for i in 0..256 {
+                    embedding[i] = ((i as f32 + embedding_val) * 0.01).sin();
+                }
+            }
+            "mem2" => {
+                // Second basis vector: concentrated in middle third
+                for i in 256..512 {
+                    embedding[i] = ((i as f32 + embedding_val) * 0.01).cos();
+                }
+            }
+            _ => {
+                // Third basis vector: concentrated in last third
+                for i in 512..768 {
+                    embedding[i] = ((i as f32 * embedding_val) * 0.01).sin() * 0.5;
+                }
+            }
+        }
+        
+        // Normalize to unit vector
+        let norm = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
+        if norm > 0.0 {
+            for val in &mut embedding {
+                *val /= norm;
+            }
+        }
         
         MemoryBuilder::new()
             .id(id.to_string())
@@ -365,7 +395,10 @@ mod tests {
         let mut dedup = SemanticDeduplicator::new(0.95, MergeStrategy::KeepHighestConfidence);
         
         let memory1 = create_test_memory("mem1", 0.5, 0.8);
-        let memory2 = create_test_memory("mem2", 0.5, 0.9);
+        // Create actual duplicate with same embedding but different confidence
+        let mut memory2 = memory1.clone();
+        memory2.id = "mem2".to_string();
+        memory2.confidence = Confidence::exact(0.9);
         
         let existing = vec![Arc::new(memory1.clone())];
         let result = dedup.check_duplicate(&memory2, &existing);
@@ -394,7 +427,10 @@ mod tests {
         let mut dedup = SemanticDeduplicator::new(0.95, MergeStrategy::KeepHighestConfidence);
         
         let memory1 = create_test_memory("mem1", 0.5, 0.7);
-        let memory2 = create_test_memory("mem2", 0.5, 0.9);
+        // Create similar memory with same embedding but higher confidence
+        let mut memory2 = memory1.clone();
+        memory2.id = "mem2".to_string();
+        memory2.confidence = Confidence::exact(0.9);
         
         let existing = vec![Arc::new(memory1)];
         let result = dedup.check_duplicate(&memory2, &existing);
@@ -426,14 +462,34 @@ mod tests {
     fn test_composite_creation() {
         let dedup = SemanticDeduplicator::new(0.95, MergeStrategy::CreateComposite);
         
-        let memory1 = create_test_memory("mem1", 0.4, 0.8);
-        let memory2 = create_test_memory("mem2", 0.6, 0.8);
+        // Create two different embeddings for compositing
+        let mut embedding1 = [0.0f32; 768];
+        let mut embedding2 = [0.0f32; 768];
+        embedding1[0] = 0.4;
+        embedding2[0] = 0.6;
+        
+        let memory1 = MemoryBuilder::new()
+            .id("mem1".to_string())
+            .embedding(embedding1)
+            .confidence(Confidence::exact(0.8))
+            .content("Memory 1".to_string())
+            .build();
+            
+        let memory2 = MemoryBuilder::new()
+            .id("mem2".to_string())
+            .embedding(embedding2)
+            .confidence(Confidence::exact(0.8))
+            .content("Memory 2".to_string())
+            .build();
         
         let composite = dedup.merge_memories(&memory1, &memory2);
         
         // Composite embedding should be average and normalized
-        assert!(composite.embedding[0] > 0.4 && composite.embedding[0] < 0.6);
+        // After averaging (0.4 + 0.6) / 2 = 0.5 and normalizing
         assert!(composite.id.contains("composite"));
+        // Check that it was normalized (length should be 1)
+        let norm: f32 = composite.embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
+        assert!((norm - 1.0).abs() < 0.01, "Composite should be normalized");
     }
     
     #[test]
@@ -441,14 +497,18 @@ mod tests {
         let mut dedup = SemanticDeduplicator::default();
         
         let memory1 = create_test_memory("mem1", 0.5, 0.8);
-        let memory2 = create_test_memory("mem2", 0.5, 0.9);
+        // Create actual duplicate
+        let mut memory2 = memory1.clone();
+        memory2.id = "mem2".to_string();
+        memory2.confidence = Confidence::exact(0.9);
+        
         let memory3 = create_test_memory("mem3", 0.1, 0.7);
         
         let mut existing = vec![];
         
         // First memory is unique
         dedup.check_duplicate(&memory1, &existing);
-        existing.push(Arc::new(memory1));
+        existing.push(Arc::new(memory1.clone()));
         
         // Second is duplicate
         dedup.check_duplicate(&memory2, &existing);

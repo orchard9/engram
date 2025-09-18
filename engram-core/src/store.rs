@@ -681,12 +681,33 @@ impl MemoryStore {
         self.finalize_results(results, cue.max_results)
     }
     
-    /// Extract all episodes from the WAL buffer
+    /// Extract all episodes from the WAL buffer and hot memories
     fn get_episodes_from_buffer(&self) -> Vec<(String, Episode)> {
-        self.wal_buffer
-            .iter()
-            .map(|entry| (entry.key().clone(), entry.value().clone()))
-            .collect()
+        let mut episodes = Vec::new();
+        
+        // Get episodes from WAL buffer
+        for entry in self.wal_buffer.iter() {
+            episodes.push((entry.key().clone(), entry.value().clone()));
+        }
+        
+        // Also convert hot memories to episodes for recall
+        // This ensures deduplication doesn't prevent recall
+        for entry in self.hot_memories.iter() {
+            let memory = entry.value();
+            let episode = Episode::new(
+                memory.id.clone(),
+                memory.created_at,
+                memory.content.clone().unwrap_or_else(|| format!("Memory {}", memory.id)),
+                memory.embedding,
+                memory.confidence,
+            );
+            // Only add if not already in WAL buffer
+            if !self.wal_buffer.contains_key(&memory.id) {
+                episodes.push((memory.id.clone(), episode));
+            }
+        }
+        
+        episodes
     }
     
     /// Apply cue-specific filtering to episodes
@@ -1185,11 +1206,26 @@ mod tests {
     // Helper to create unique embeddings for tests
     fn create_test_embedding(seed: f32) -> [f32; 768] {
         let mut embedding = [0.0f32; 768];
-        embedding[0] = seed;
-        // Add some variation to avoid exact duplicates
-        for i in 1..8 {
-            embedding[i] = (seed * (i as f32)).sin();
+        
+        // Create different patterns based on seed to ensure orthogonality
+        for i in 0..768 {
+            // Use different mathematical functions for variety
+            embedding[i] = match (seed * 100.0) as i32 % 4 {
+                0 => ((i as f32 + seed * 10.0) * 0.01).sin(),
+                1 => ((i as f32 + seed * 10.0) * 0.01).cos(),
+                2 => ((i as f32 * seed * 0.01).exp() - 1.0) * 0.1,
+                _ => (i as f32 * 0.001 * seed) - 0.5,
+            };
         }
+        
+        // Normalize to unit vector for consistent cosine similarity
+        let norm = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
+        if norm > 0.0 {
+            for val in &mut embedding {
+                *val /= norm;
+            }
+        }
+        
         embedding
     }
 
