@@ -19,6 +19,8 @@ pub struct WarmTier {
     storage: MappedWarmStorage,
     /// Confidence calibrator for warm tier adjustments
     confidence_calibrator: StorageConfidenceCalibrator,
+    /// Storage timestamps for tracking time in storage
+    storage_timestamps: dashmap::DashMap<String, std::time::SystemTime>,
 }
 
 impl WarmTier {
@@ -30,7 +32,8 @@ impl WarmTier {
     ) -> Result<Self, StorageError> {
         let storage = MappedWarmStorage::new(file_path, capacity, metrics)?;
         let confidence_calibrator = StorageConfidenceCalibrator::new();
-        Ok(Self { storage, confidence_calibrator })
+        let storage_timestamps = dashmap::DashMap::new();
+        Ok(Self { storage, confidence_calibrator, storage_timestamps })
     }
 
     /// Create warm tier with custom configuration
@@ -51,12 +54,26 @@ impl WarmTier {
             // NUMA awareness is built into MappedWarmStorage
         }
 
-        Ok(Self { storage, confidence_calibrator })
+        let storage_timestamps = dashmap::DashMap::new();
+        Ok(Self { storage, confidence_calibrator, storage_timestamps })
     }
 
     /// Get the underlying storage for direct access if needed
     pub fn inner(&self) -> &MappedWarmStorage {
         &self.storage
+    }
+
+    /// Get storage duration for a memory (time since first stored)
+    pub fn get_storage_duration(&self, memory_id: &str) -> std::time::Duration {
+        if let Some(entry) = self.storage_timestamps.get(memory_id) {
+            let stored_time = *entry.value();
+            std::time::SystemTime::now()
+                .duration_since(stored_time)
+                .unwrap_or_default()
+        } else {
+            // If no timestamp recorded, assume it was just stored
+            std::time::Duration::from_secs(0)
+        }
     }
 
     /// Force a compaction of the warm tier data
@@ -140,6 +157,11 @@ impl StorageTier for WarmTier {
     type Error = StorageError;
 
     async fn store(&self, memory: Arc<Memory>) -> Result<(), Self::Error> {
+        let memory_id = memory.id.clone();
+
+        // Record storage timestamp for temporal decay calculation
+        self.storage_timestamps.insert(memory_id, std::time::SystemTime::now());
+
         // Delegate to underlying mapped storage
         self.storage.store(memory).await
     }
@@ -149,9 +171,9 @@ impl StorageTier for WarmTier {
         match self.storage.recall(cue).await {
             Ok(mut results) => {
                 // Apply warm tier confidence calibration
-                for (_episode, confidence) in results.iter_mut() {
-                    // For warm tier, assume memories have been stored for some time
-                    let storage_duration = std::time::Duration::from_secs(3600); // 1 hour default
+                for (episode, confidence) in results.iter_mut() {
+                    // Get actual storage duration for this memory
+                    let storage_duration = self.get_storage_duration(&episode.id);
                     *confidence = self.confidence_calibrator.adjust_for_storage_tier(
                         *confidence,
                         ConfidenceTier::Warm,
@@ -181,6 +203,9 @@ impl StorageTier for WarmTier {
     }
 
     async fn remove(&self, memory_id: &str) -> Result<(), Self::Error> {
+        // Clean up storage timestamp
+        self.storage_timestamps.remove(memory_id);
+
         // Delegate to underlying mapped storage
         self.storage.remove(memory_id).await
     }

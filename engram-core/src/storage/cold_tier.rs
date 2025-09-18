@@ -337,6 +337,8 @@ pub struct ColdTier {
     compression_enabled: bool,
     /// Confidence calibrator for cold tier adjustments
     confidence_calibrator: StorageConfidenceCalibrator,
+    /// Storage timestamps for tracking time in storage
+    storage_timestamps: DashMap<String, std::time::SystemTime>,
 }
 
 impl ColdTier {
@@ -351,6 +353,7 @@ impl ColdTier {
             max_capacity: capacity,
             compression_enabled: true,
             confidence_calibrator: StorageConfidenceCalibrator::new(),
+            storage_timestamps: DashMap::new(),
         }
     }
 
@@ -365,6 +368,7 @@ impl ColdTier {
             max_capacity: config.capacity,
             compression_enabled: config.enable_compression,
             confidence_calibrator: StorageConfidenceCalibrator::new(),
+            storage_timestamps: DashMap::new(),
         }
     }
 
@@ -481,6 +485,19 @@ impl ColdTier {
     pub fn utilization(&self) -> f32 {
         self.len() as f32 / self.max_capacity as f32
     }
+
+    /// Get storage duration for a memory (time since first stored)
+    pub fn get_storage_duration(&self, memory_id: &str) -> std::time::Duration {
+        if let Some(entry) = self.storage_timestamps.get(memory_id) {
+            let stored_time = *entry.value();
+            std::time::SystemTime::now()
+                .duration_since(stored_time)
+                .unwrap_or_default()
+        } else {
+            // If no timestamp recorded, assume it was just stored
+            std::time::Duration::from_secs(0)
+        }
+    }
 }
 
 /// Configuration for cold tier storage
@@ -527,13 +544,18 @@ impl StorageTier for ColdTier {
     type Error = StorageError;
 
     async fn store(&self, memory: Arc<Memory>) -> Result<(), Self::Error> {
+        let memory_id = memory.id.clone();
+
+        // Record storage timestamp for temporal decay calculation
+        self.storage_timestamps.insert(memory_id.clone(), std::time::SystemTime::now());
+
         let mut data = self.data.write().map_err(|_| {
             StorageError::AllocationFailed("Failed to acquire write lock".to_string())
         })?;
 
         let index = data.insert(&memory)?;
-        self.id_index.insert(memory.id.clone(), index);
-        
+        self.id_index.insert(memory_id, index);
+
         Ok(())
     }
 
@@ -633,8 +655,8 @@ impl StorageTier for ColdTier {
         // Apply cold tier confidence calibration to all results
         let mut calibrated_results = Vec::with_capacity(results.len());
         for (episode, confidence) in results {
-            // For cold tier, assume memories have been stored for a long time
-            let storage_duration = std::time::Duration::from_secs(24 * 3600); // 1 day default
+            // Get actual storage duration for this memory
+            let storage_duration = self.get_storage_duration(&episode.id);
             let calibrated_confidence = self.confidence_calibrator.adjust_for_storage_tier(
                 confidence,
                 ConfidenceTier::Cold,
@@ -677,6 +699,9 @@ impl StorageTier for ColdTier {
 
     async fn remove(&self, memory_id: &str) -> Result<(), Self::Error> {
         if let Some((_, _index)) = self.id_index.remove(memory_id) {
+            // Clean up storage timestamp
+            self.storage_timestamps.remove(memory_id);
+
             // Mark for removal in next compaction
             // For now, just remove from index to prevent access
             // Actual data removal happens during compaction
