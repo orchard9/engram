@@ -4,7 +4,7 @@
 //! to inform intelligent tier migration decisions.
 
 use dashmap::DashMap;
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime};
 
