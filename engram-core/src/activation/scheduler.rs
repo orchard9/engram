@@ -342,6 +342,8 @@ impl TierQueue {
                     })
             });
 
+            // Reverse so pop() gives us lowest depth first
+            tasks.reverse();
             *buffer = tasks;
         }
 
@@ -365,9 +367,22 @@ impl TierQueue {
     }
 
     fn is_idle(&self) -> bool {
-        self.queued.load(Ordering::Relaxed) == 0
-            && self.in_flight.load(Ordering::Relaxed) == 0
-            && self.tasks.is_empty()
+        let has_queued = self.queued.load(Ordering::Relaxed) > 0;
+        let has_in_flight = self.in_flight.load(Ordering::Relaxed) > 0;
+        let has_queue_tasks = !self.tasks.is_empty();
+
+        // Check deterministic buffer if in deterministic mode
+        let has_buffer_tasks = if self.deterministic {
+            if let Ok(buffer) = self.deterministic_buffer.lock() {
+                !buffer.is_empty()
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        !(has_queued || has_in_flight || has_queue_tasks || has_buffer_tasks)
     }
 
     fn mark_deadline_miss(&self) {

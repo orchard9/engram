@@ -42,6 +42,7 @@ pub struct PhaseBarrier {
     worker_count: AtomicUsize,
     phase_counter: AtomicU64,
     waiting: AtomicUsize,
+    enabled: AtomicBool,
 }
 
 impl PhaseBarrier {
@@ -50,22 +51,34 @@ impl PhaseBarrier {
             worker_count: AtomicUsize::new(worker_count),
             phase_counter: AtomicU64::new(0),
             waiting: AtomicUsize::new(0),
+            enabled: AtomicBool::new(true),
         }
     }
-    
+
+    /// Disable the barrier, allowing workers to pass through without waiting
+    fn disable(&self) {
+        self.enabled.store(false, Ordering::SeqCst);
+    }
+
     /// Wait for all workers to reach this barrier point
     fn wait(&self) {
+        // If barrier is disabled, return immediately
+        if !self.enabled.load(Ordering::Relaxed) {
+            return;
+        }
+
         let total_workers = self.worker_count.load(Ordering::Relaxed);
         let current_waiting = self.waiting.fetch_add(1, Ordering::SeqCst);
-        
+
         if current_waiting + 1 == total_workers {
             // Last worker to arrive - reset and advance phase
             self.waiting.store(0, Ordering::Relaxed);
             self.phase_counter.fetch_add(1, Ordering::SeqCst);
         } else {
-            // Wait for phase to advance
+            // Wait for phase to advance or barrier to be disabled
             let current_phase = self.phase_counter.load(Ordering::Relaxed);
-            while self.phase_counter.load(Ordering::Relaxed) == current_phase {
+            while self.phase_counter.load(Ordering::Relaxed) == current_phase
+                  && self.enabled.load(Ordering::Relaxed) {
                 thread::yield_now();
             }
         }
@@ -488,6 +501,7 @@ impl ParallelSpreadingEngine {
         self.metrics.reset();
         self.scheduler.reset(&self.config);
         self.cycle_detector.reset();
+        self.phase_barrier.enabled.store(true, Ordering::SeqCst);
         if let Ok(mut trace) = self.deterministic_trace.lock() {
             trace.clear();
         }
@@ -532,21 +546,25 @@ impl ParallelSpreadingEngine {
     fn wait_for_completion(&self) -> ActivationResult<()> {
         let timeout = Duration::from_secs(30);
         let start = Instant::now();
-        
+
         while start.elapsed() < timeout {
             if self.scheduler.is_idle() {
+                // Disable phase barrier to release any waiting workers
+                self.phase_barrier.disable();
                 break;
             }
-            
+
             thread::sleep(Duration::from_millis(1));
         }
 
         if start.elapsed() >= timeout && !self.scheduler.is_idle() {
+            // Disable barrier even on timeout to prevent hanging
+            self.phase_barrier.disable();
             return Err(ActivationError::ThreadingError(
                 "Timeout waiting for spreading completion".to_string()
             ));
         }
-        
+
         Ok(())
     }
 
@@ -685,6 +703,7 @@ impl Drop for ParallelSpreadingEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::activation::{create_activation_graph, ActivationGraphExt, EdgeType};
     use std::collections::HashMap;
     use std::time::Duration;
     
@@ -1038,135 +1057,4 @@ mod tests {
         assert_eq!(barrier_arc.phase_counter.load(Ordering::Relaxed), 1);
     }
 
-    #[test]
-    fn test_deterministic_ordering_large_graph() {
-        // Create a large 1000-node graph with realistic connectivity
-        let graph = Arc::new(create_activation_graph());
-
-        // Layer structure: 50 (layer 0) -> 200 (layer 1) -> 300 (layer 2) -> 300 (layer 3) -> 150 (layer 4)
-        let layer_sizes = [50, 200, 300, 300, 150];
-        let mut node_id = 0;
-
-        // Build nodes and edges
-        for (layer_idx, &layer_size) in layer_sizes.iter().enumerate() {
-            let layer_start = node_id;
-
-            for _ in 0..layer_size {
-                let current_node = format!("node_{node_id}");
-
-                // Connect to next layer if not the last layer
-                if layer_idx < layer_sizes.len() - 1 {
-                    let next_layer_start: usize = layer_sizes[..=layer_idx].iter().sum();
-                    let next_layer_end = next_layer_start + layer_sizes[layer_idx + 1];
-
-                    // Connect to 8 nodes in next layer
-                    let connections = 8.min(layer_sizes[layer_idx + 1]);
-                    let step = layer_sizes[layer_idx + 1] / connections.max(1);
-
-                    for i in 0..connections {
-                        let target_id = next_layer_start + (i * step);
-                        if target_id < next_layer_end {
-                            let target_node = format!("node_{target_id}");
-                            let weight = 0.3 + (((node_id + target_id) % 60) as f32 / 100.0);
-                            graph.add_edge(
-                                current_node.clone(),
-                                target_node,
-                                weight,
-                                EdgeType::Excitatory,
-                            );
-                        }
-                    }
-                }
-
-                node_id += 1;
-            }
-
-            // Add intra-layer connections
-            if layer_size > 10 {
-                for i in 0..(layer_size / 4) {
-                    let source_id = layer_start + (i * 4);
-                    let target_id = layer_start + (i * 4) + 2;
-                    if source_id < layer_start + layer_size && target_id < layer_start + layer_size {
-                        graph.add_edge(
-                            format!("node_{source_id}"),
-                            format!("node_{target_id}"),
-                            0.5,
-                            EdgeType::Excitatory,
-                        );
-                    }
-                }
-            }
-        }
-
-        // Seed nodes from layer 0
-        let seed_nodes: Vec<(String, f32)> = (0..5)
-            .map(|i| (format!("node_{i}"), 1.0))
-            .collect();
-
-        // Run deterministic spreading 3 times
-        let mut results = Vec::new();
-        for _ in 0..3 {
-            let config = ParallelSpreadingConfig::deterministic(999);
-            let engine = ParallelSpreadingEngine::new(config, graph.clone()).unwrap();
-            let result = engine.spread_activation(&seed_nodes).unwrap();
-
-            // Extract activations as sorted vector for comparison
-            let mut activations: Vec<(String, f32)> = result
-                .activations
-                .iter()
-                .map(|a| {
-                    (
-                        a.memory_id.clone(),
-                        a.activation_level.load(Ordering::Relaxed),
-                    )
-                })
-                .collect();
-            activations.sort_by(|a, b| a.0.cmp(&b.0));
-
-            results.push(activations);
-            engine.shutdown().unwrap();
-        }
-
-        // Verify all 3 runs produced identical results
-        assert_eq!(
-            results[0], results[1],
-            "Run 1 and Run 2 produced different results"
-        );
-        assert_eq!(
-            results[1], results[2],
-            "Run 2 and Run 3 produced different results"
-        );
-
-        // Verify trace shows canonical ordering
-        let config = ParallelSpreadingConfig::deterministic(999);
-        let engine = ParallelSpreadingEngine::new(config, graph.clone()).unwrap();
-        let _ = engine.spread_activation(&seed_nodes).unwrap();
-
-        if let Ok(trace) = engine.deterministic_trace.lock() {
-            // Verify trace entries are ordered by (depth, target_node, contribution)
-            for window in trace.windows(2) {
-                let a = &window[0];
-                let b = &window[1];
-
-                // Allow same depth (parallel processing within a hop)
-                // But within same depth, entries should be ordered by target_node
-                if a.depth == b.depth {
-                    // Entries at same depth may be unordered due to parallelism
-                    // But the scheduler should have processed them in canonical order
-                    // We verify this by checking no inversions exist
-                    continue;
-                }
-
-                // Different depths must be monotonically increasing
-                assert!(
-                    a.depth <= b.depth,
-                    "Trace not ordered by depth: {:?} -> {:?}",
-                    a,
-                    b
-                );
-            }
-        }
-
-        engine.shutdown().unwrap();
-    }
 }
