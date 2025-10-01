@@ -13,10 +13,111 @@ use crate::{Confidence, Cue, Episode, MemoryStore};
 use chrono::Utc;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tracing::{error, warn};
 
+/// Metrics for cognitive recall operations
+#[derive(Debug, Default)]
+pub struct RecallMetrics {
+    /// Total number of recall operations performed
+    pub total_recalls: AtomicU64,
+    /// Number of recalls using similarity mode
+    pub similarity_mode_count: AtomicU64,
+    /// Number of recalls using spreading mode
+    pub spreading_mode_count: AtomicU64,
+    /// Number of recalls using hybrid mode
+    pub hybrid_mode_count: AtomicU64,
+    /// Number of times spreading fallback was triggered
+    pub fallbacks_total: AtomicU64,
+    /// Number of times time budget was exceeded
+    pub time_budget_violations: AtomicU64,
+    /// Total activation mass across all recalls
+    pub recall_activation_mass: AtomicU64,
+    /// Number of seeding failures
+    pub seeding_failures: AtomicU64,
+    /// Number of spreading failures
+    pub spreading_failures: AtomicU64,
+}
+
+impl RecallMetrics {
+    /// Create a new metrics instance
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Record a recall operation
+    pub fn record_recall(&self, mode: RecallMode) {
+        self.total_recalls.fetch_add(1, Ordering::Relaxed);
+        match mode {
+            RecallMode::Similarity => {
+                self.similarity_mode_count.fetch_add(1, Ordering::Relaxed);
+            }
+            RecallMode::Spreading => {
+                self.spreading_mode_count.fetch_add(1, Ordering::Relaxed);
+            }
+            RecallMode::Hybrid => {
+                self.hybrid_mode_count.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+
+    /// Record a fallback event
+    pub fn record_fallback(&self) {
+        self.fallbacks_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record a time budget violation
+    pub fn record_time_budget_violation(&self) {
+        self.time_budget_violations.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record activation mass
+    pub fn record_activation_mass(&self, mass: f32) {
+        let mass_u64 = (mass * 1000.0) as u64; // Store as fixed-point
+        self.recall_activation_mass.fetch_add(mass_u64, Ordering::Relaxed);
+    }
+
+    /// Record a seeding failure
+    pub fn record_seeding_failure(&self) {
+        self.seeding_failures.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record a spreading failure
+    pub fn record_spreading_failure(&self) {
+        self.spreading_failures.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get fallback rate (0.0 to 1.0)
+    #[must_use]
+    pub fn fallback_rate(&self) -> f32 {
+        let total = self.total_recalls.load(Ordering::Relaxed);
+        let fallbacks = self.fallbacks_total.load(Ordering::Relaxed);
+        if total > 0 {
+            fallbacks as f32 / total as f32
+        } else {
+            0.0
+        }
+    }
+}
+
 /// Mode of recall operation
+///
+/// # Examples
+///
+/// ```
+/// use engram_core::activation::RecallMode;
+///
+/// // For fast lookups with known queries
+/// let similarity = RecallMode::Similarity;
+///
+/// // For exploratory, context-aware retrieval
+/// let spreading = RecallMode::Spreading;
+///
+/// // For production: spreading with similarity fallback
+/// let hybrid = RecallMode::Hybrid;  // Recommended
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecallMode {
     /// Use only vector similarity for recall
@@ -34,6 +135,24 @@ impl Default for RecallMode {
 }
 
 /// Configuration for cognitive recall
+///
+/// # Examples
+///
+/// ```
+/// use engram_core::activation::{RecallConfig, RecallMode};
+/// use std::time::Duration;
+///
+/// // Production configuration with hybrid mode
+/// let config = RecallConfig {
+///     recall_mode: RecallMode::Hybrid,
+///     time_budget: Duration::from_millis(10),  // P95 < 10ms
+///     min_confidence: 0.15,
+///     max_results: 20,
+///     enable_recency_boost: true,
+///     recency_boost_factor: 1.2,
+///     recency_window: Duration::from_secs(3600),  // 1 hour
+/// };
+/// ```
 #[derive(Debug, Clone)]
 pub struct RecallConfig {
     /// Recall mode to use
@@ -142,6 +261,8 @@ pub struct CognitiveRecall {
     cycle_detector: Arc<CycleDetector>,
     /// Recall configuration
     config: RecallConfig,
+    /// Metrics for monitoring recall operations
+    metrics: Arc<RecallMetrics>,
 }
 
 impl CognitiveRecall {
@@ -159,6 +280,7 @@ impl CognitiveRecall {
             confidence_aggregator,
             cycle_detector,
             config,
+            metrics: Arc::new(RecallMetrics::new()),
         }
     }
 
@@ -166,6 +288,12 @@ impl CognitiveRecall {
     #[must_use]
     pub fn config(&self) -> &RecallConfig {
         &self.config
+    }
+
+    /// Get metrics for this recall instance
+    #[must_use]
+    pub fn metrics(&self) -> &RecallMetrics {
+        &self.metrics
     }
 
     /// Main recall method that orchestrates the pipeline
@@ -176,11 +304,16 @@ impl CognitiveRecall {
     ) -> ActivationResult<Vec<RankedMemory>> {
         let start_time = Instant::now();
 
+        // Record recall operation
+        self.metrics.record_recall(self.config.recall_mode);
+
         // Step 1: Seed activation from vector similarity
         let seeded_activations = match self.seed_from_cue(cue) {
             Ok(seeds) => seeds,
             Err(e) => {
                 warn!(target: "engram::recall", error = ?e, "Failed to seed activation");
+                self.metrics.record_seeding_failure();
+                self.metrics.record_fallback();
                 return self.fallback_to_similarity(cue, store);
             }
         };
@@ -192,6 +325,8 @@ impl CognitiveRecall {
         // Check time budget
         if start_time.elapsed() > self.config.time_budget {
             warn!(target: "engram::recall", "Time budget exceeded during seeding");
+            self.metrics.record_time_budget_violation();
+            self.metrics.record_fallback();
             return self.rank_seeded_results(seeded_activations, store);
         }
 
@@ -200,6 +335,8 @@ impl CognitiveRecall {
             Ok(results) => results,
             Err(e) => {
                 error!(target: "engram::recall", error = ?e, "Spreading activation failed");
+                self.metrics.record_spreading_failure();
+                self.metrics.record_fallback();
                 return self.rank_seeded_results(seeded_activations, store);
             }
         };
@@ -207,6 +344,8 @@ impl CognitiveRecall {
         // Check time budget - return early with seeded results if exceeded
         if start_time.elapsed() > self.config.time_budget {
             warn!(target: "engram::recall", "Time budget exceeded during spreading");
+            self.metrics.record_time_budget_violation();
+            self.metrics.record_fallback();
             return self.rank_seeded_results(seeded_activations, store);
         }
 
@@ -215,6 +354,10 @@ impl CognitiveRecall {
 
         // Step 4: Rank and filter results
         let ranked_results = self.rank_results(aggregated_results, store);
+
+        // Record activation mass
+        let total_activation: f32 = ranked_results.iter().map(|r| r.activation).sum();
+        self.metrics.record_activation_mass(total_activation);
 
         // Record metrics
         let elapsed = start_time.elapsed();
@@ -225,6 +368,7 @@ impl CognitiveRecall {
                 budget_ms = self.config.time_budget.as_millis(),
                 "Recall exceeded time budget"
             );
+            self.metrics.record_time_budget_violation();
         }
 
         Ok(ranked_results)
@@ -400,6 +544,7 @@ pub struct CognitiveRecallBuilder {
     confidence_aggregator: Option<Arc<ConfidenceAggregator>>,
     cycle_detector: Option<Arc<CycleDetector>>,
     config: RecallConfig,
+    metrics: Option<Arc<RecallMetrics>>,
 }
 
 impl Default for CognitiveRecallBuilder {
@@ -417,12 +562,19 @@ impl CognitiveRecallBuilder {
             confidence_aggregator: None,
             cycle_detector: None,
             config: RecallConfig::default(),
+            metrics: None,
         }
     }
 
     /// Set the vector seeder
     pub fn vector_seeder(mut self, seeder: Arc<VectorActivationSeeder>) -> Self {
         self.vector_seeder = Some(seeder);
+        self
+    }
+
+    /// Set custom metrics instance
+    pub fn metrics(mut self, metrics: Arc<RecallMetrics>) -> Self {
+        self.metrics = Some(metrics);
         self
     }
 
@@ -470,13 +622,15 @@ impl CognitiveRecallBuilder {
             .confidence_aggregator
             .ok_or("Confidence aggregator required")?;
         let cycle_detector = self.cycle_detector.ok_or("Cycle detector required")?;
+        let metrics = self.metrics.unwrap_or_else(|| Arc::new(RecallMetrics::new()));
 
-        Ok(CognitiveRecall::new(
+        Ok(CognitiveRecall {
             vector_seeder,
             spreading_engine,
             confidence_aggregator,
             cycle_detector,
-            self.config,
-        ))
+            config: self.config,
+            metrics,
+        })
     }
 }

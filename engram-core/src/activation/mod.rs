@@ -45,7 +45,7 @@ pub use gpu_interface::{
 };
 pub use multi_cue::CueAggregationStrategy;
 pub use parallel::ParallelSpreadingEngine;
-pub use recall::{CognitiveRecall, CognitiveRecallBuilder, RankedMemory, RecallConfig, RecallMode};
+pub use recall::{CognitiveRecall, CognitiveRecallBuilder, RankedMemory, RecallConfig, RecallMetrics, RecallMode};
 pub use scheduler::{SchedulerSnapshot, TierAwareSpreadingScheduler, TierQueueStateSnapshot};
 #[cfg(feature = "hnsw_index")]
 pub use seeding::{

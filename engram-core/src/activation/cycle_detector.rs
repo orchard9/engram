@@ -59,8 +59,9 @@ impl CycleDetector {
         path: &[NodeId],
     ) -> bool {
         // If we've visited this node too many times, it's likely a cycle
+        // Budget of N means allow N visits; reject the (N+1)th visit
         let budget = self.max_visits_for_tier(tier);
-        if visit_count >= budget {
+        if visit_count > budget {
             self.cycle_nodes.insert(node_id.clone());
             if !path.is_empty() {
                 self.cycle_paths.insert(node_id.clone(), path.to_vec());
