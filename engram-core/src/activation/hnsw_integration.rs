@@ -129,14 +129,16 @@ impl HnswActivationEngine {
 
     /// Get neighbors from HNSW index with similarity scores
     fn get_hnsw_neighbors(&self, node_id: &NodeId) -> Vec<(NodeId, f32)> {
-        // This would integrate with the actual HNSW index
-        // For now, return empty to allow compilation
-        Vec::new()
-        
-        // Actual implementation would be:
-        // self.hnsw_graph.get_neighbors(node_id)
-        //     .map(|edge| (edge.target_id.clone(), edge.similarity))
-        //     .collect()
+        // Get neighbors from the HNSW graph
+        self.hnsw_graph
+            .get_neighbors(node_id, self.config.max_hops)
+            .into_iter()
+            .map(|(memory_id, distance, _confidence)| {
+                // Convert distance to similarity (1.0 - distance)
+                let similarity = 1.0 - distance;
+                (memory_id, similarity)
+            })
+            .collect()
     }
 
     /// Query-based activation: activate nodes similar to query
@@ -162,12 +164,20 @@ impl HnswActivationEngine {
 
     /// Search for similar nodes using HNSW
     fn search_similar(&self, query: &[f32; 768], k: usize) -> Vec<SearchResult> {
-        // This would call the actual HNSW search
-        // For now, return empty to allow compilation
-        Vec::new()
-        
-        // Actual implementation:
-        // self.hnsw_graph.search(query, k, self.config.confidence_threshold)
+        // Use SIMD vector operations for search
+        use crate::compute::get_vector_ops;
+        let vector_ops = get_vector_ops();
+
+        // Search with ef=k*2 for better quality, applying confidence threshold
+        let results = self.hnsw_graph.search_with_details(
+            query,
+            k,
+            k * 2,
+            self.config.confidence_threshold,
+            vector_ops.as_ref(),
+        );
+
+        results.hits
     }
 
     /// Get current activation levels for all nodes

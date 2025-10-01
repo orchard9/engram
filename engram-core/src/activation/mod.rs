@@ -605,6 +605,14 @@ pub struct ParallelSpreadingConfig {
     pub enable_gpu: bool,
     /// Minimum batch size to use GPU acceleration
     pub gpu_threshold: usize,
+
+    // Memory pool configuration
+    /// Enable memory pool for efficient allocation
+    pub enable_memory_pool: bool,
+    /// Size of each memory pool chunk in bytes
+    pub pool_chunk_size: usize,
+    /// Maximum number of memory pool chunks
+    pub pool_max_chunks: usize,
 }
 
 impl Default for ParallelSpreadingConfig {
@@ -644,6 +652,9 @@ impl Default for ParallelSpreadingConfig {
             trace_activation_flow: false,
             enable_gpu: false,
             gpu_threshold: 64,
+            enable_memory_pool: true,
+            pool_chunk_size: 8192,    // 8KB per chunk
+            pool_max_chunks: 16,       // Max 128KB total
         }
     }
 }

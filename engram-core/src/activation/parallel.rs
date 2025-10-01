@@ -5,10 +5,10 @@
 
 use crate::activation::{
     cycle_detector::CycleDetector, gpu_interface::{AdaptiveConfig, AdaptiveSpreadingEngine},
-    latency_budget::LatencyBudgetManager, storage_aware::StorageTier, ActivationError,
-    ActivationGraphExt, ActivationRecord, ActivationResult, ActivationTask, EdgeType, MemoryGraph,
-    NodeId, ParallelSpreadingConfig, SpreadingMetrics, SpreadingResults,
-    TierAwareSpreadingScheduler, TierSummary, TraceEntry,
+    latency_budget::LatencyBudgetManager, memory_pool::ActivationMemoryPool,
+    storage_aware::StorageTier, ActivationError, ActivationGraphExt, ActivationRecord,
+    ActivationResult, ActivationTask, EdgeType, MemoryGraph, NodeId, ParallelSpreadingConfig,
+    SpreadingMetrics, SpreadingResults, TierAwareSpreadingScheduler, TierSummary, TraceEntry,
 };
 use dashmap::DashMap;
 use rand::rngs::StdRng;
@@ -35,6 +35,7 @@ pub struct ParallelSpreadingEngine {
     cycle_detector: Arc<CycleDetector>,
     deterministic_trace: Arc<Mutex<Vec<TraceEntry>>>,
     adaptive_engine: Arc<Mutex<AdaptiveSpreadingEngine>>,
+    memory_pool: Option<Arc<ActivationMemoryPool>>,
 }
 
 /// Synchronization barrier for deterministic parallel execution
@@ -148,6 +149,16 @@ impl ParallelSpreadingEngine {
             adaptive_config,
         )));
 
+        // Initialize memory pool if configured
+        let memory_pool = if config.enable_memory_pool {
+            Some(Arc::new(ActivationMemoryPool::new(
+                config.pool_chunk_size,
+                config.pool_max_chunks,
+            )))
+        } else {
+            None
+        };
+
         let mut engine = Self {
             config: config.clone(),
             activation_records,
@@ -161,6 +172,7 @@ impl ParallelSpreadingEngine {
             cycle_detector,
             deterministic_trace,
             adaptive_engine,
+            memory_pool,
         };
 
         engine.spawn_workers()?;

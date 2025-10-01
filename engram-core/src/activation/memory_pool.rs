@@ -232,17 +232,16 @@ mod tests {
     #[test]
     fn test_local_memory_pool() {
         let mut pool = LocalMemoryPool::new(256);
-        
+
         // Allocate some values
         let val1: &mut u32 = pool.allocate().unwrap();
         *val1 = 42;
-        
+        assert_eq!(*val1, 42);
+
         let val2: &mut u64 = pool.allocate().unwrap();
         *val2 = 100;
-        
-        assert_eq!(*val1, 42);
         assert_eq!(*val2, 100);
-        
+
         // Reset and reuse
         pool.reset();
         let val3: &mut u32 = pool.allocate().unwrap();
