@@ -3,18 +3,19 @@
 //! Optimized queue structures for high-throughput task distribution
 //! with work-stealing and batching support.
 
-use crate::activation::{ActivationTask, NodeId};
+use crate::activation::{ActivationTask, NodeId, storage_aware::StorageTier};
 use crossbeam_queue::SegQueue;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-/// High-performance work-stealing queue for activation tasks  
+/// High-performance work-stealing queue for activation tasks
 pub struct WorkStealingQueue {
     local_deque: VecDeque<ActivationTask>,
     global_queue: Arc<SegQueue<ActivationTask>>,
     batch_size: usize,
     local_count: AtomicUsize,
+    deterministic: bool,
 }
 
 impl WorkStealingQueue {
@@ -25,6 +26,18 @@ impl WorkStealingQueue {
             global_queue,
             batch_size,
             local_count: AtomicUsize::new(0),
+            deterministic: false,
+        }
+    }
+
+    /// Create new work-stealing queue with deterministic mode
+    pub const fn new_deterministic(global_queue: Arc<SegQueue<ActivationTask>>, batch_size: usize) -> Self {
+        Self {
+            local_deque: VecDeque::new(),
+            global_queue,
+            batch_size,
+            local_count: AtomicUsize::new(0),
+            deterministic: true,
         }
     }
 
@@ -75,6 +88,33 @@ impl WorkStealingQueue {
     pub fn try_global(&self) -> Option<ActivationTask> {
         self.global_queue.pop()
     }
+
+    /// Sort local queue for deterministic execution
+    /// Orders by (depth, target_node, contribution) for reproducible task processing
+    pub fn sort_deterministic(&mut self) {
+        if !self.deterministic {
+            return;
+        }
+
+        // Convert to Vec for sorting
+        let mut tasks: Vec<ActivationTask> = self.local_deque.drain(..).collect();
+
+        // Sort by (depth, target_node, contribution)
+        tasks.sort_by(|a, b| {
+            a.depth
+                .cmp(&b.depth)
+                .then_with(|| a.target_node.cmp(&b.target_node))
+                .then_with(|| {
+                    // Higher contribution first (reverse order)
+                    b.contribution()
+                        .partial_cmp(&a.contribution())
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+        });
+
+        // Rebuild deque
+        self.local_deque = tasks.into_iter().collect();
+    }
 }
 
 /// Priority queue for activation tasks with biological decay
@@ -109,12 +149,18 @@ impl PriorityActivationQueue {
 
     /// Push task with priority based on contribution
     pub fn push(&self, task: ActivationTask) {
-        let contribution = task.contribution();
+        let contribution = task.tier_adjusted_contribution();
+        let tier = task.storage_tier;
+        let (high_cutoff, medium_cutoff) = match tier {
+            Some(StorageTier::Hot) | None => (0.5, 0.1),
+            Some(StorageTier::Warm) => (0.35, 0.05),
+            Some(StorageTier::Cold) => (0.2, 0.01),
+        };
 
-        if contribution > 0.5 {
+        if contribution > high_cutoff {
             self.high_priority.push(task);
             self.high_count.fetch_add(1, Ordering::Relaxed);
-        } else if contribution > 0.1 {
+        } else if contribution > medium_cutoff {
             self.medium_priority.push(task);
             self.medium_count.fetch_add(1, Ordering::Relaxed);
         } else {
@@ -285,6 +331,7 @@ impl NodeLocalQueue {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
     // use crate::activation::DecayFunction; // Not used in current tests
 
@@ -411,5 +458,53 @@ mod tests {
         assert!(task1.target_node == "nodeA" || task1.target_node == "nodeB");
         assert!(task2.target_node == "nodeA" || task2.target_node == "nodeB");
         assert!(task3.target_node == "nodeA" || task3.target_node == "nodeB");
+    }
+
+    #[test]
+    fn test_deterministic_queue_sorting() {
+        let global_queue = Arc::new(SegQueue::new());
+        let mut queue = WorkStealingQueue::new_deterministic(global_queue, 100);
+
+        // Add tasks in random order
+        queue.push(create_test_task("C", 0.5, 2));
+        queue.push(create_test_task("A", 0.8, 1));
+        queue.push(create_test_task("B", 0.3, 1));
+        queue.push(create_test_task("D", 0.9, 2));
+
+        // Sort deterministically
+        queue.sort_deterministic();
+
+        // Pop in order - should be sorted by depth, then node name, then contribution
+        let task1 = queue.pop().unwrap();
+        assert_eq!(task1.target_node, "A"); // depth 1, higher contribution
+
+        let task2 = queue.pop().unwrap();
+        assert_eq!(task2.target_node, "B"); // depth 1, lower contribution
+
+        let task3 = queue.pop().unwrap();
+        assert_eq!(task3.target_node, "C"); // depth 2, higher contribution (0.5)
+
+        let task4 = queue.pop().unwrap();
+        assert_eq!(task4.target_node, "D"); // depth 2, node D comes after C alphabetically
+    }
+
+    #[test]
+    fn test_non_deterministic_queue_no_sorting() {
+        let global_queue = Arc::new(SegQueue::new());
+        let mut queue = WorkStealingQueue::new(global_queue, 100);
+
+        // Add tasks
+        queue.push(create_test_task("C", 0.5, 2));
+        queue.push(create_test_task("A", 0.8, 1));
+
+        // Call sort_deterministic - should have no effect
+        queue.sort_deterministic();
+
+        // Tasks should be in original LIFO order (pop from back)
+        let task1 = queue.pop().unwrap();
+        assert_eq!(task1.target_node, "A");
+
+        let task2 = queue.pop().unwrap();
+        assert_eq!(task2.target_node, "C");
     }
 }
