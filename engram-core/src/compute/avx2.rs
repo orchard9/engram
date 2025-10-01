@@ -32,24 +32,16 @@ impl VectorOps for Avx2VectorOps {
     }
 
     fn cosine_similarity_batch_768(&self, query: &[f32; 768], vectors: &[[f32; 768]]) -> Vec<f32> {
-        let query_norm = self.l2_norm_768(query);
-        if query_norm == 0.0 {
-            return vec![0.0; vectors.len()];
+        if vectors.is_empty() {
+            return Vec::new();
         }
 
-        vectors
-            .iter()
-            .map(|vector| {
-                let dot_product = self.dot_product_768(query, vector);
-                let vector_norm = self.l2_norm_768(vector);
-
-                if vector_norm == 0.0 {
-                    0.0
-                } else {
-                    (dot_product / (query_norm * vector_norm)).clamp(-1.0, 1.0)
-                }
-            })
-            .collect()
+        // Use optimized batch implementation when available
+        if self.has_fma {
+            unsafe { cosine_similarity_batch_768_avx2_fma(query, vectors) }
+        } else {
+            unsafe { cosine_similarity_batch_768_avx2(query, vectors) }
+        }
     }
 
     fn dot_product_768(&self, a: &[f32; 768], b: &[f32; 768]) -> f32 {
@@ -316,6 +308,117 @@ mod tests {
     }
 }
 
+/// Optimized batch cosine similarity with AVX2 and FMA
+/// Processes multiple vectors against a single query with better cache utilization
+#[target_feature(enable = "avx2,fma")]
+unsafe fn cosine_similarity_batch_768_avx2_fma(
+    query: &[f32; 768],
+    vectors: &[[f32; 768]],
+) -> Vec<f32> {
+    let mut results = Vec::with_capacity(vectors.len());
+
+    // Pre-compute query norm once
+    let mut query_norm_sq = _mm256_setzero_ps();
+    for chunk_idx in (0..768).step_by(8) {
+        let vq = _mm256_loadu_ps(query.as_ptr().add(chunk_idx));
+        query_norm_sq = _mm256_fmadd_ps(vq, vq, query_norm_sq);
+    }
+    let query_norm = horizontal_add_ps_256(query_norm_sq).sqrt();
+
+    if query_norm == 0.0 {
+        return vec![0.0; vectors.len()];
+    }
+
+    // Process each vector against the query
+    for vector in vectors {
+        let mut dot_product = _mm256_setzero_ps();
+        let mut vector_norm_sq = _mm256_setzero_ps();
+
+        // Prefetch next vector for better cache performance
+        let next_idx = results.len() + 1;
+        if next_idx < vectors.len() {
+            let prefetch_ptr = vectors[next_idx].as_ptr() as *const i8;
+            _mm_prefetch(prefetch_ptr, _MM_HINT_T0);
+        }
+
+        for chunk_idx in (0..768).step_by(8) {
+            let vq = _mm256_loadu_ps(query.as_ptr().add(chunk_idx));
+            let vv = _mm256_loadu_ps(vector.as_ptr().add(chunk_idx));
+
+            dot_product = _mm256_fmadd_ps(vq, vv, dot_product);
+            vector_norm_sq = _mm256_fmadd_ps(vv, vv, vector_norm_sq);
+        }
+
+        let dot_sum = horizontal_add_ps_256(dot_product);
+        let vector_norm = horizontal_add_ps_256(vector_norm_sq).sqrt();
+
+        let similarity = if vector_norm == 0.0 {
+            0.0
+        } else {
+            (dot_sum / (query_norm * vector_norm)).clamp(-1.0, 1.0)
+        };
+
+        results.push(similarity);
+    }
+
+    results
+}
+
+/// Optimized batch cosine similarity with AVX2 without FMA
+#[target_feature(enable = "avx2")]
+unsafe fn cosine_similarity_batch_768_avx2(
+    query: &[f32; 768],
+    vectors: &[[f32; 768]],
+) -> Vec<f32> {
+    let mut results = Vec::with_capacity(vectors.len());
+
+    // Pre-compute query norm once
+    let mut query_norm_sq = _mm256_setzero_ps();
+    for chunk_idx in (0..768).step_by(8) {
+        let vq = _mm256_loadu_ps(query.as_ptr().add(chunk_idx));
+        query_norm_sq = _mm256_add_ps(query_norm_sq, _mm256_mul_ps(vq, vq));
+    }
+    let query_norm = horizontal_add_ps_256(query_norm_sq).sqrt();
+
+    if query_norm == 0.0 {
+        return vec![0.0; vectors.len()];
+    }
+
+    // Process each vector against the query
+    for vector in vectors {
+        let mut dot_product = _mm256_setzero_ps();
+        let mut vector_norm_sq = _mm256_setzero_ps();
+
+        // Prefetch next vector for better cache performance
+        let next_idx = results.len() + 1;
+        if next_idx < vectors.len() {
+            let prefetch_ptr = vectors[next_idx].as_ptr() as *const i8;
+            _mm_prefetch(prefetch_ptr, _MM_HINT_T0);
+        }
+
+        for chunk_idx in (0..768).step_by(8) {
+            let vq = _mm256_loadu_ps(query.as_ptr().add(chunk_idx));
+            let vv = _mm256_loadu_ps(vector.as_ptr().add(chunk_idx));
+
+            dot_product = _mm256_add_ps(dot_product, _mm256_mul_ps(vq, vv));
+            vector_norm_sq = _mm256_add_ps(vector_norm_sq, _mm256_mul_ps(vv, vv));
+        }
+
+        let dot_sum = horizontal_add_ps_256(dot_product);
+        let vector_norm = horizontal_add_ps_256(vector_norm_sq).sqrt();
+
+        let similarity = if vector_norm == 0.0 {
+            0.0
+        } else {
+            (dot_sum / (query_norm * vector_norm)).clamp(-1.0, 1.0)
+        };
+
+        results.push(similarity);
+    }
+
+    results
+}
+
 /// AVX2 FMA accumulate for columnar operations
 #[target_feature(enable = "avx2,fma")]
 unsafe fn fma_accumulate_avx2(column: &[f32], scalar: f32, accumulator: &mut [f32]) {
@@ -374,10 +477,7 @@ unsafe fn horizontal_sum_avx2(values: &[f32]) -> f32 {
 
     // Horizontal sum of the AVX register
     // First, sum upper and lower 128-bit lanes
-    let sum_128 = _mm_add_ps(
-        _mm256_extractf128_ps(sum, 0),
-        _mm256_extractf128_ps(sum, 1)
-    );
+    let sum_128 = _mm_add_ps(_mm256_extractf128_ps(sum, 0), _mm256_extractf128_ps(sum, 1));
 
     // Now do horizontal adds within the 128-bit register
     let sum_64 = _mm_hadd_ps(sum_128, sum_128);
