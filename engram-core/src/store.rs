@@ -131,6 +131,13 @@ pub struct MemoryStore {
 
     /// Semantic deduplicator for preventing near-duplicates
     deduplicator: Arc<RwLock<SemanticDeduplicator>>,
+
+    /// Cognitive recall pipeline for spreading activation
+    #[cfg(feature = "hnsw_index")]
+    cognitive_recall: Option<Arc<crate::activation::CognitiveRecall>>,
+
+    /// Configuration for recall operations
+    recall_config: crate::activation::RecallConfig,
 }
 
 /// Wrapper for f32 that implements Ord for `BTreeMap`
@@ -243,6 +250,9 @@ impl MemoryStore {
             pattern_reconstructor: None,
             content_index: Arc::new(ContentIndex::new()),
             deduplicator: Arc::new(RwLock::new(SemanticDeduplicator::default())),
+            #[cfg(feature = "hnsw_index")]
+            cognitive_recall: None,
+            recall_config: crate::activation::RecallConfig::default(),
         }
     }
 
@@ -260,6 +270,21 @@ impl MemoryStore {
     #[must_use]
     pub(crate) fn hnsw_index(&self) -> Option<&CognitiveHnswIndex> {
         self.hnsw_index.as_deref()
+    }
+
+    /// Set cognitive recall pipeline for spreading activation
+    #[cfg(feature = "hnsw_index")]
+    #[must_use]
+    pub fn with_cognitive_recall(mut self, recall: Arc<crate::activation::CognitiveRecall>) -> Self {
+        self.cognitive_recall = Some(recall);
+        self
+    }
+
+    /// Set recall configuration
+    #[must_use]
+    pub fn with_recall_config(mut self, config: crate::activation::RecallConfig) -> Self {
+        self.recall_config = config;
+        self
     }
 
     /// Create a memory store with persistent backend enabled
@@ -579,6 +604,28 @@ impl MemoryStore {
         self.count() < self.max_memories
     }
 
+    /// Get all episodes stored in the memory store
+    /// Returns an iterator over (id, episode) pairs
+    pub fn get_all_episodes(&self) -> impl Iterator<Item = (String, Episode)> + '_ {
+        self.wal_buffer
+            .iter()
+            .map(|entry| (entry.key().clone(), entry.value().clone()))
+            .chain(self.hot_memories.iter().map(|entry| {
+                let memory = entry.value();
+                let episode = Episode::new(
+                    memory.id.clone(),
+                    memory.created_at,
+                    memory
+                        .content
+                        .clone()
+                        .unwrap_or_else(|| format!("Memory {}", memory.id)),
+                    memory.embedding,
+                    memory.confidence,
+                );
+                (memory.id.clone(), episode)
+            }))
+    }
+
     /// Recall memories based on a cue, returning episodes with confidence scores
     ///
     /// # Returns
@@ -595,6 +642,51 @@ impl MemoryStore {
     pub fn recall(&self, cue: &Cue) -> Vec<(Episode, Confidence)> {
         #[cfg(feature = "monitoring")]
         let start = Instant::now();
+
+        // Dispatch based on recall mode if cognitive recall is available
+        #[cfg(feature = "hnsw_index")]
+        {
+            use crate::activation::RecallMode;
+
+            match self.recall_config.recall_mode {
+                RecallMode::Spreading if self.cognitive_recall.is_some() => {
+                    // Use spreading activation pipeline
+                    if let Some(ref cognitive_recall) = self.cognitive_recall {
+                        return match cognitive_recall.recall(cue, self) {
+                            Ok(ranked_memories) => ranked_memories
+                                .into_iter()
+                                .map(|r| (r.episode, r.confidence))
+                                .collect(),
+                            Err(e) => {
+                                // Fallback to similarity on error
+                                tracing::warn!(target: "engram::store", error = ?e, "Spreading activation failed, falling back to similarity");
+                                self.recall_similarity_only(cue)
+                            }
+                        };
+                    }
+                }
+                RecallMode::Hybrid if self.cognitive_recall.is_some() => {
+                    // Try spreading, fallback to similarity
+                    if let Some(ref cognitive_recall) = self.cognitive_recall {
+                        match cognitive_recall.recall(cue, self) {
+                            Ok(ranked_memories) if !ranked_memories.is_empty() => {
+                                return ranked_memories
+                                    .into_iter()
+                                    .map(|r| (r.episode, r.confidence))
+                                    .collect();
+                            }
+                            Ok(_) | Err(_) => {
+                                // Empty results or error - fallback to similarity
+                                return self.recall_similarity_only(cue);
+                            }
+                        }
+                    }
+                }
+                RecallMode::Similarity | _ => {
+                    // Use similarity-only recall (default path below)
+                }
+            }
+        }
 
         // Try persistent backend first if available
         #[cfg(feature = "memory_mapped_persistence")]
@@ -755,6 +847,25 @@ impl MemoryStore {
         results = self.apply_spreading_activation(results, cue);
 
         // 4. Sort and limit results
+        Self::finalize_results(results, cue.max_results)
+    }
+
+    /// Recall using similarity only, without spreading activation
+    /// Used as fallback when spreading fails or times out
+    fn recall_similarity_only(&self, cue: &Cue) -> Vec<(Episode, Confidence)> {
+        // Try HNSW index for embedding cues if available
+        #[cfg(feature = "hnsw_index")]
+        {
+            if let CueType::Embedding { vector, threshold } = &cue.cue_type {
+                if let Some(ref hnsw) = self.hnsw_index {
+                    return self.recall_with_hnsw(cue, hnsw, vector, *threshold);
+                }
+            }
+        }
+
+        // Fallback to basic filtering without spreading
+        let episodes = self.get_episodes_from_buffer();
+        let results = Self::apply_cue_filtering(episodes, cue);
         Self::finalize_results(results, cue.max_results)
     }
 

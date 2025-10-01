@@ -35,12 +35,11 @@ fn test_batch_cosine_similarity_matches_scalar() {
             scalar,
             simd,
             max_ulps = 2,
-            epsilon = 1e-6,
-            "SIMD result differs from scalar at index {}: scalar={}, simd={}",
-            i,
-            scalar,
-            simd
+            epsilon = 1e-6
         );
+        if (scalar - simd).abs() >= 1e-6 {
+            panic!("SIMD result differs from scalar at index {}: scalar={}, simd={}", i, scalar, simd);
+        }
     }
 }
 
@@ -131,12 +130,11 @@ fn test_sigmoid_activation_matches_scalar() {
             simd,
             scalar,
             max_ulps = 2,
-            epsilon = 1e-6,
-            "Sigmoid activation differs at index {}: simd={}, scalar={}",
-            i,
-            simd,
-            scalar
+            epsilon = 1e-6
         );
+        if (simd - scalar).abs() >= 1e-6 {
+            panic!("Sigmoid activation differs at index {}: simd={}, scalar={}", i, simd, scalar);
+        }
     }
 }
 
@@ -187,12 +185,11 @@ fn test_fma_confidence_aggregate_correctness() {
             simd,
             scalar,
             max_ulps = 2,
-            epsilon = 1e-6,
-            "FMA aggregate differs at index {}: simd={}, scalar={}",
-            i,
-            simd,
-            scalar
+            epsilon = 1e-6
         );
+        if (simd - scalar).abs() >= 1e-6 {
+            panic!("FMA aggregate differs at index {}: simd={}, scalar={}", i, simd, scalar);
+        }
     }
 }
 
@@ -248,11 +245,10 @@ fn test_integrated_pipeline_consistency() {
             r1,
             r2,
             max_ulps = 0,
-            epsilon = 0.0,
-            "Pipeline not deterministic at index {}: run1={}, run2={}",
-            i,
-            r1,
-            r2
+            epsilon = 0.0
         );
+        if r1 != r2 {
+            panic!("Pipeline not deterministic at index {}: run1={}, run2={}", i, r1, r2);
+        }
     }
 }

@@ -76,6 +76,7 @@ assert_cmd = "2.0"
 predicates = "3.0"
 divan = "0.1"
 rand = "0.8"
+approx = "0.5"
 
 # Profiling
 pprof = "0.13"

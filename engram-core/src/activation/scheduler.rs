@@ -79,16 +79,19 @@ impl TierAwareSpreadingScheduler {
                     StorageTier::Hot,
                     config.tier_timeouts[StorageTier::Hot as usize],
                     config.max_concurrent_per_tier,
+                    config.deterministic,
                 ),
                 TierQueue::new(
                     StorageTier::Warm,
                     config.tier_timeouts[StorageTier::Warm as usize],
                     config.max_concurrent_per_tier,
+                    config.deterministic,
                 ),
                 TierQueue::new(
                     StorageTier::Cold,
                     config.tier_timeouts[StorageTier::Cold as usize],
                     config.max_concurrent_per_tier,
+                    config.deterministic,
                 ),
             ],
             priority_hot_tier: config.priority_hot_tier,
@@ -249,10 +252,14 @@ struct TierQueue {
     max_in_flight: usize,
     timeout: Duration,
     deadline_missed: AtomicBool,
+    /// When true, tasks are sorted by (depth, target_node, contribution) for deterministic execution
+    deterministic: bool,
+    /// Buffer for deterministic sorting - only used when deterministic=true
+    deterministic_buffer: Mutex<Vec<ScheduledTask>>,
 }
 
 impl TierQueue {
-    const fn new(tier: StorageTier, timeout: Duration, max_in_flight: usize) -> Self {
+    fn new(tier: StorageTier, timeout: Duration, max_in_flight: usize, deterministic: bool) -> Self {
         Self {
             tier,
             tasks: SegQueue::new(),
@@ -261,6 +268,8 @@ impl TierQueue {
             max_in_flight,
             timeout,
             deadline_missed: AtomicBool::new(false),
+            deterministic,
+            deterministic_buffer: Mutex::new(Vec::new()),
         }
     }
 
@@ -279,9 +288,65 @@ impl TierQueue {
             return None;
         }
 
+        // Deterministic mode: sort tasks before popping
+        if self.deterministic {
+            return self.pop_deterministic(now);
+        }
+
+        // Performance mode: standard FIFO popping
         while let Some(task) = self.tasks.pop() {
             self.queued.fetch_sub(1, Ordering::Relaxed);
 
+            let waited = now.saturating_duration_since(task.enqueued_at);
+            if waited > self.timeout {
+                self.mark_deadline_miss();
+                continue;
+            }
+
+            self.in_flight.fetch_add(1, Ordering::Relaxed);
+            return Some(task);
+        }
+
+        None
+    }
+
+    /// Pop task in deterministic mode with canonical ordering
+    fn pop_deterministic(&self, now: Instant) -> Option<ScheduledTask> {
+        let mut buffer = match self.deterministic_buffer.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+
+        // If buffer is empty, refill from queue with sorting
+        if buffer.is_empty() {
+            let mut tasks = Vec::new();
+            while let Some(task) = self.tasks.pop() {
+                self.queued.fetch_sub(1, Ordering::Relaxed);
+                tasks.push(task);
+            }
+
+            if tasks.is_empty() {
+                return None;
+            }
+
+            // Sort by (depth, target_node, contribution) for canonical ordering
+            tasks.sort_by(|a, b| {
+                a.task.depth
+                    .cmp(&b.task.depth)
+                    .then_with(|| a.task.target_node.cmp(&b.task.target_node))
+                    .then_with(|| {
+                        // Higher contribution first (reverse order)
+                        b.task.contribution()
+                            .partial_cmp(&a.task.contribution())
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    })
+            });
+
+            *buffer = tasks;
+        }
+
+        // Pop from sorted buffer
+        while let Some(task) = buffer.pop() {
             let waited = now.saturating_duration_since(task.enqueued_at);
             if waited > self.timeout {
                 self.mark_deadline_miss();
@@ -323,6 +388,13 @@ impl TierQueue {
         self.queued.store(0, Ordering::Relaxed);
         self.in_flight.store(0, Ordering::Relaxed);
         self.deadline_missed.store(false, Ordering::Relaxed);
+
+        // Clear deterministic buffer
+        if self.deterministic {
+            if let Ok(mut buffer) = self.deterministic_buffer.lock() {
+                buffer.clear();
+            }
+        }
     }
 }
 

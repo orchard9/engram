@@ -7,7 +7,7 @@ use super::{
     cycle_detector::CycleDetector,
     parallel::ParallelSpreadingEngine,
     seeding::{self, SeededActivation, VectorActivationSeeder},
-    ActivationResult, ConfidenceAggregator, NodeId,
+    ActivationError, ActivationResult, ConfidenceAggregator, NodeId,
 };
 use crate::{Confidence, Cue, Episode, MemoryStore};
 use chrono::Utc;
@@ -162,6 +162,12 @@ impl CognitiveRecall {
         }
     }
 
+    /// Get the recall configuration
+    #[must_use]
+    pub fn config(&self) -> &RecallConfig {
+        &self.config
+    }
+
     /// Main recall method that orchestrates the pipeline
     pub fn recall(
         &self,
@@ -198,9 +204,10 @@ impl CognitiveRecall {
             }
         };
 
-        // Check time budget
+        // Check time budget - return early with seeded results if exceeded
         if start_time.elapsed() > self.config.time_budget {
             warn!(target: "engram::recall", "Time budget exceeded during spreading");
+            return self.rank_seeded_results(seeded_activations, store);
         }
 
         // Step 3: Aggregate confidence scores
@@ -265,6 +272,12 @@ impl CognitiveRecall {
     }
 
     /// Aggregate confidence from multiple sources
+    ///
+    /// Note: This method does simple confidence boosting rather than using the full
+    /// ConfidenceAggregator because spreading_results don't include path information
+    /// (hop counts, tiers, weights) needed for proper path aggregation. The aggregator
+    /// is designed for scenarios where multiple convergent paths with different characteristics
+    /// arrive at the same node. Here we only have final activation and confidence values.
     fn aggregate_confidence(
         &self,
         spreading_results: HashMap<NodeId, (f32, Confidence)>,
@@ -334,20 +347,17 @@ impl CognitiveRecall {
         ranked
     }
 
-    /// Fallback to similarity-based recall
+    /// Fallback to similarity-based recall using vector seeder only
     fn fallback_to_similarity(
         &self,
         cue: &Cue,
         store: &MemoryStore,
     ) -> ActivationResult<Vec<RankedMemory>> {
-        let results = store.recall(cue);
-
-        Ok(results
-            .into_iter()
-            .map(|(episode, confidence)| {
-                RankedMemory::new(episode, 1.0, confidence, Some(1.0), &self.config)
-            })
-            .collect())
+        // Use vector seeder to get similar memories without spreading
+        let seeded_activations = self.seed_from_cue(cue).map_err(|e| {
+            ActivationError::InvalidConfig(format!("Seeding failed in fallback: {:?}", e))
+        })?;
+        self.rank_seeded_results(seeded_activations, store)
     }
 
     /// Rank seeded results without spreading

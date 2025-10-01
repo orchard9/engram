@@ -1,4 +1,134 @@
 const LANES: usize = 8;
+const TILE_DIM: usize = 96; // 768 / 8 = 96 tiles
+
+/// Cache-aligned batch structure for SIMD processing (AoSoA layout)
+/// Stores embeddings in Array-of-Structures-of-Arrays format for optimal SIMD access
+#[repr(align(64))]
+#[derive(Clone)]
+pub struct ActivationBatch {
+    /// Embeddings stored in AoSoA layout: [dim][lane]
+    /// Each dimension has LANES elements grouped together for SIMD access
+    embeddings: Vec<[f32; LANES]>,
+    /// Number of valid embeddings in this batch
+    count: usize,
+}
+
+impl ActivationBatch {
+    /// Create new activation batch with specified capacity
+    #[must_use]
+    pub fn new(capacity: usize) -> Self {
+        // Round up to next multiple of LANES for alignment
+        let aligned_capacity = (capacity + LANES - 1) / LANES * LANES;
+        Self {
+            embeddings: vec![[0.0; LANES]; TILE_DIM * aligned_capacity / LANES],
+            count: 0,
+        }
+    }
+
+    /// Add an embedding to the batch
+    /// Returns true if successful, false if batch is full
+    pub fn push(&mut self, embedding: &[f32; 768]) -> bool {
+        if self.count >= self.capacity() {
+            return false;
+        }
+
+        let lane_idx = self.count % LANES;
+        let batch_offset = (self.count / LANES) * TILE_DIM;
+
+        // Copy embedding into AoSoA layout
+        for dim in 0..768 {
+            let tile_idx = dim / LANES;
+            let tile_offset = batch_offset + tile_idx;
+            self.embeddings[tile_offset][lane_idx] = embedding[dim];
+        }
+
+        self.count += 1;
+        true
+    }
+
+    /// Get the number of embeddings in this batch
+    #[must_use]
+    pub const fn len(&self) -> usize {
+        self.count
+    }
+
+    /// Check if batch is empty
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.count == 0
+    }
+
+    /// Get the capacity of this batch
+    #[must_use]
+    pub fn capacity(&self) -> usize {
+        self.embeddings.len() / TILE_DIM * LANES
+    }
+
+    /// Clear the batch for reuse
+    pub fn clear(&mut self) {
+        self.count = 0;
+    }
+
+    /// Get embeddings in standard [f32; 768] format for batch processing
+    #[must_use]
+    pub fn as_standard_vectors(&self) -> Vec<[f32; 768]> {
+        let mut result = Vec::with_capacity(self.count);
+
+        for i in 0..self.count {
+            let mut embedding = [0.0f32; 768];
+            let lane_idx = i % LANES;
+            let batch_offset = (i / LANES) * TILE_DIM;
+
+            for dim in 0..768 {
+                let tile_idx = dim / LANES;
+                let tile_offset = batch_offset + tile_idx;
+                embedding[dim] = self.embeddings[tile_offset][lane_idx];
+            }
+
+            result.push(embedding);
+        }
+
+        result
+    }
+
+    /// Verify alignment for safe SIMD operations
+    #[must_use]
+    pub fn is_aligned(&self) -> bool {
+        let ptr = self.embeddings.as_ptr() as usize;
+        ptr % 64 == 0
+    }
+
+    /// Assert alignment for safety-critical operations
+    ///
+    /// # Panics
+    ///
+    /// Panics if the batch is not properly aligned
+    pub fn assert_alignment(&self) {
+        assert!(
+            self.is_aligned(),
+            "ActivationBatch not aligned to 64-byte boundary. Pointer: {:p}",
+            self.embeddings.as_ptr()
+        );
+    }
+}
+
+/// Determines if SIMD should be used based on storage tier and batch size
+#[must_use]
+pub fn should_use_simd_for_tier(tier: crate::activation::storage_aware::StorageTier, batch_size: usize, min_batch_size: usize) -> bool {
+    use crate::activation::storage_aware::StorageTier;
+
+    // Don't use SIMD for batches smaller than threshold
+    if batch_size < min_batch_size {
+        return false;
+    }
+
+    // Tier-aware SIMD selection
+    match tier {
+        StorageTier::Hot => true,  // Always use SIMD for hot tier
+        StorageTier::Warm => batch_size >= min_batch_size * 2, // Higher threshold for warm
+        StorageTier::Cold => false, // Never use SIMD for cold tier (bandwidth limited)
+    }
+}
 
 /// SIMD-aware activation mapper that converts similarity scores into activations.
 #[derive(Debug, Clone, Copy)]
@@ -180,6 +310,53 @@ unsafe fn fma_confidence_aggregate_avx2(
     }
 }
 
+/// Auto-tune SIMD batch size by benchmarking different configurations
+/// Returns the optimal batch size based on performance measurements
+#[must_use]
+pub fn auto_tune_batch_size() -> usize {
+    use crate::compute::cosine_similarity_batch_768;
+    use std::time::Instant;
+
+    // Test batch sizes
+    let batch_sizes = [8, 16, 32];
+    let iterations = 100;
+
+    // Generate test data
+    let query = [0.5f32; 768];
+    let mut best_batch_size = 8;
+    let mut best_duration = std::time::Duration::MAX;
+
+    for &batch_size in &batch_sizes {
+        let vectors: Vec<[f32; 768]> = (0..batch_size)
+            .map(|i| {
+                let mut v = [0.0f32; 768];
+                for (j, item) in v.iter_mut().enumerate() {
+                    let idx = (i + j) as f32;
+                    *item = (idx * 0.01).sin();
+                }
+                v
+            })
+            .collect();
+
+        // Benchmark this batch size
+        let start = Instant::now();
+        for _ in 0..iterations {
+            let _ = cosine_similarity_batch_768(&query, &vectors);
+        }
+        let duration = start.elapsed();
+
+        // Normalize by batch size (throughput metric)
+        let per_vector_duration = duration / (batch_size as u32 * iterations);
+
+        if per_vector_duration < best_duration / best_batch_size as u32 {
+            best_duration = per_vector_duration * best_batch_size as u32;
+            best_batch_size = batch_size;
+        }
+    }
+
+    best_batch_size
+}
+
 #[cfg(test)]
 mod tests {
     use super::SimdActivationMapper;
@@ -193,5 +370,11 @@ mod tests {
         for value in activations {
             assert!((0.0..=1.0).contains(&value), "value {value} out of bounds");
         }
+    }
+
+    #[test]
+    fn test_auto_tune_batch_size() {
+        let optimal_size = super::auto_tune_batch_size();
+        assert!([8, 16, 32].contains(&optimal_size), "Auto-tuned batch size should be one of the test sizes");
     }
 }
