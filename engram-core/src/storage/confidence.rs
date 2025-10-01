@@ -18,23 +18,33 @@ pub enum ConfidenceTier {
 }
 
 /// Configuration for tier-specific confidence factors
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TierConfidenceFactors {
     /// Hot tier factor: 1.0 - no degradation
-    pub hot_factor: f32,
+    pub hot: f32,
     /// Warm tier factor: 0.95 - slight degradation from compression
-    pub warm_factor: f32,
+    pub warm: f32,
     /// Cold tier factor: 0.9 - degradation from quantization
-    pub cold_factor: f32,
+    pub cold: f32,
+}
+
+impl TierConfidenceFactors {
+    /// Create a new set of tier confidence factors.
+    #[must_use]
+    pub const fn new(hot: f32, warm: f32, cold: f32) -> Self {
+        Self { hot, warm, cold }
+    }
+
+    /// Default configuration used by storage calibrators.
+    #[must_use]
+    pub const fn defaults() -> Self {
+        Self::new(1.0, 0.95, 0.9)
+    }
 }
 
 impl Default for TierConfidenceFactors {
     fn default() -> Self {
-        Self {
-            hot_factor: 1.0,   // No degradation
-            warm_factor: 0.95, // Slight degradation from compression
-            cold_factor: 0.9,  // Degradation from quantization
-        }
+        Self::defaults()
     }
 }
 
@@ -51,6 +61,7 @@ pub struct StorageConfidenceCalibrator {
 
 impl StorageConfidenceCalibrator {
     /// Create a new calibrator with default settings
+    #[must_use]
     pub fn new() -> Self {
         Self {
             tier_confidence_factors: TierConfidenceFactors::default(),
@@ -60,7 +71,8 @@ impl StorageConfidenceCalibrator {
     }
 
     /// Create a calibrator with custom tier factors
-    pub fn with_tier_factors(factors: TierConfidenceFactors) -> Self {
+    #[must_use]
+    pub const fn with_tier_factors(factors: TierConfidenceFactors) -> Self {
         Self {
             tier_confidence_factors: factors,
             enable_temporal_decay: true,
@@ -69,13 +81,24 @@ impl StorageConfidenceCalibrator {
     }
 
     /// Create a calibrator with custom temporal decay settings
-    pub fn with_temporal_decay(mut self, enabled: bool, half_life_days: f32) -> Self {
-        self.enable_temporal_decay = enabled;
-        self.temporal_half_life_days = half_life_days.max(1.0);
-        self
+    #[must_use]
+    pub const fn with_temporal_decay(self, enabled: bool, half_life_days: f32) -> Self {
+        let tier_confidence_factors = self.tier_confidence_factors;
+        let temporal_half_life_days = if half_life_days < 1.0 {
+            1.0
+        } else {
+            half_life_days
+        };
+
+        Self {
+            tier_confidence_factors,
+            enable_temporal_decay: enabled,
+            temporal_half_life_days,
+        }
     }
 
     /// Adjust confidence for storage tier characteristics and time in storage
+    #[must_use]
     pub fn adjust_for_storage_tier(
         &self,
         original_confidence: Confidence,
@@ -84,9 +107,9 @@ impl StorageConfidenceCalibrator {
     ) -> Confidence {
         // Get tier-specific confidence factor
         let tier_factor = match tier {
-            ConfidenceTier::Hot => self.tier_confidence_factors.hot_factor,
-            ConfidenceTier::Warm => self.tier_confidence_factors.warm_factor,
-            ConfidenceTier::Cold => self.tier_confidence_factors.cold_factor,
+            ConfidenceTier::Hot => self.tier_confidence_factors.hot,
+            ConfidenceTier::Warm => self.tier_confidence_factors.warm,
+            ConfidenceTier::Cold => self.tier_confidence_factors.cold,
         };
 
         let mut adjusted_confidence = original_confidence.raw() * tier_factor;
@@ -99,31 +122,38 @@ impl StorageConfidenceCalibrator {
         }
 
         // Ensure confidence is within valid range with minimum threshold
-        Confidence::from_raw(adjusted_confidence.max(0.01).min(1.0))
+        Confidence::from_raw(adjusted_confidence.clamp(0.01, 1.0))
     }
 
     /// Adjust confidence for storage tier only (no temporal decay)
-    pub fn adjust_for_tier_only(&self, original_confidence: Confidence, tier: ConfidenceTier) -> Confidence {
+    #[must_use]
+    pub fn adjust_for_tier_only(
+        &self,
+        original_confidence: Confidence,
+        tier: ConfidenceTier,
+    ) -> Confidence {
         let tier_factor = match tier {
-            ConfidenceTier::Hot => self.tier_confidence_factors.hot_factor,
-            ConfidenceTier::Warm => self.tier_confidence_factors.warm_factor,
-            ConfidenceTier::Cold => self.tier_confidence_factors.cold_factor,
+            ConfidenceTier::Hot => self.tier_confidence_factors.hot,
+            ConfidenceTier::Warm => self.tier_confidence_factors.warm,
+            ConfidenceTier::Cold => self.tier_confidence_factors.cold,
         };
 
         let adjusted = original_confidence.raw() * tier_factor;
-        Confidence::from_raw(adjusted.max(0.01).min(1.0))
+        Confidence::from_raw(adjusted.clamp(0.01, 1.0))
     }
 
     /// Get the confidence factor for a specific tier
-    pub fn get_tier_factor(&self, tier: ConfidenceTier) -> f32 {
+    #[must_use]
+    pub const fn get_tier_factor(&self, tier: ConfidenceTier) -> f32 {
         match tier {
-            ConfidenceTier::Hot => self.tier_confidence_factors.hot_factor,
-            ConfidenceTier::Warm => self.tier_confidence_factors.warm_factor,
-            ConfidenceTier::Cold => self.tier_confidence_factors.cold_factor,
+            ConfidenceTier::Hot => self.tier_confidence_factors.hot,
+            ConfidenceTier::Warm => self.tier_confidence_factors.warm,
+            ConfidenceTier::Cold => self.tier_confidence_factors.cold,
         }
     }
 
     /// Calculate temporal decay factor for given time in storage
+    #[must_use]
     pub fn calculate_temporal_factor(&self, time_in_storage: Duration) -> f32 {
         if !self.enable_temporal_decay {
             return 1.0;
@@ -134,17 +164,14 @@ impl StorageConfidenceCalibrator {
     }
 
     /// Batch adjustment for multiple results
-    pub fn adjust_batch(
-        &self,
-        results: &mut [(Confidence, ConfidenceTier, Duration)],
-    ) {
+    pub fn adjust_batch(&self, results: &mut [(Confidence, ConfidenceTier, Duration)]) {
         for (confidence, tier, time_in_storage) in results.iter_mut() {
             *confidence = self.adjust_for_storage_tier(*confidence, *tier, *time_in_storage);
         }
     }
 
     /// Update tier factors
-    pub fn update_tier_factors(&mut self, factors: TierConfidenceFactors) {
+    pub const fn update_tier_factors(&mut self, factors: TierConfidenceFactors) {
         self.tier_confidence_factors = factors;
     }
 }
@@ -171,15 +198,37 @@ pub struct CalibrationStats {
 impl CalibrationStats {
     /// Record an adjustment
     pub fn record_adjustment(&mut self, original: f32, adjusted: f32) {
-        let adjustment_factor = if original > 0.0 { adjusted / original } else { 1.0 };
+        let adjustment_factor = if original > 0.0 {
+            adjusted / original
+        } else {
+            1.0
+        };
 
         self.total_adjustments += 1;
-        self.average_adjustment_factor =
-            (self.average_adjustment_factor * (self.total_adjustments - 1) as f32 + adjustment_factor)
-            / self.total_adjustments as f32;
+        if let (Some(previous), Some(current)) = (
+            usize_to_f32(self.total_adjustments.saturating_sub(1)),
+            usize_to_f32(self.total_adjustments),
+        ) {
+            self.average_adjustment_factor = self
+                .average_adjustment_factor
+                .mul_add(previous, adjustment_factor)
+                / current.max(f32::EPSILON);
+        }
 
         self.min_adjusted_confidence = self.min_adjusted_confidence.min(adjusted);
         self.max_adjusted_confidence = self.max_adjusted_confidence.max(adjusted);
+    }
+}
+
+#[inline]
+#[must_use]
+const fn usize_to_f32(value: usize) -> Option<f32> {
+    if value <= u32::MAX as usize {
+        #[allow(clippy::cast_precision_loss)]
+        let truncated = value as f32;
+        Some(truncated)
+    } else {
+        None
     }
 }
 
@@ -194,7 +243,7 @@ mod tests {
 
         // Hot tier should have no degradation
         let hot_adjusted = calibrator.adjust_for_tier_only(original, ConfidenceTier::Hot);
-        assert_eq!(hot_adjusted.raw(), 0.8);
+        assert!((hot_adjusted.raw() - 0.8).abs() < 0.001);
 
         // Warm tier should have slight degradation (0.95 factor)
         let warm_adjusted = calibrator.adjust_for_tier_only(original, ConfidenceTier::Warm);
@@ -207,8 +256,7 @@ mod tests {
 
     #[test]
     fn test_temporal_decay() {
-        let calibrator = StorageConfidenceCalibrator::new()
-            .with_temporal_decay(true, 365.0); // 1 year half-life
+        let calibrator = StorageConfidenceCalibrator::new().with_temporal_decay(true, 365.0); // 1 year half-life
 
         let original = Confidence::from_raw(0.8);
         let one_year = Duration::from_secs(365 * 24 * 3600);
@@ -237,9 +285,9 @@ mod tests {
     #[test]
     fn test_custom_tier_factors() {
         let custom_factors = TierConfidenceFactors {
-            hot_factor: 1.0,
-            warm_factor: 0.8,
-            cold_factor: 0.6,
+            hot: 1.0,
+            warm: 0.8,
+            cold: 0.6,
         };
 
         let calibrator = StorageConfidenceCalibrator::with_tier_factors(custom_factors);
@@ -253,14 +301,26 @@ mod tests {
     fn test_batch_adjustment() {
         let calibrator = StorageConfidenceCalibrator::new();
         let mut results = vec![
-            (Confidence::from_raw(0.8), ConfidenceTier::Hot, Duration::from_secs(0)),
-            (Confidence::from_raw(0.8), ConfidenceTier::Warm, Duration::from_secs(0)),
-            (Confidence::from_raw(0.8), ConfidenceTier::Cold, Duration::from_secs(0)),
+            (
+                Confidence::from_raw(0.8),
+                ConfidenceTier::Hot,
+                Duration::from_secs(0),
+            ),
+            (
+                Confidence::from_raw(0.8),
+                ConfidenceTier::Warm,
+                Duration::from_secs(0),
+            ),
+            (
+                Confidence::from_raw(0.8),
+                ConfidenceTier::Cold,
+                Duration::from_secs(0),
+            ),
         ];
 
         calibrator.adjust_batch(&mut results);
 
-        assert_eq!(results[0].0.raw(), 0.8);     // Hot: no change
+        assert!((results[0].0.raw() - 0.8).abs() < 0.001); // Hot: no change
         assert!((results[1].0.raw() - 0.76).abs() < 0.001); // Warm: 0.8 * 0.95
         assert!((results[2].0.raw() - 0.72).abs() < 0.001); // Cold: 0.8 * 0.9
     }
@@ -280,15 +340,14 @@ mod tests {
     fn test_tier_factor_retrieval() {
         let calibrator = StorageConfidenceCalibrator::new();
 
-        assert_eq!(calibrator.get_tier_factor(ConfidenceTier::Hot), 1.0);
-        assert_eq!(calibrator.get_tier_factor(ConfidenceTier::Warm), 0.95);
-        assert_eq!(calibrator.get_tier_factor(ConfidenceTier::Cold), 0.9);
+        assert!((calibrator.get_tier_factor(ConfidenceTier::Hot) - 1.0).abs() < 0.001);
+        assert!((calibrator.get_tier_factor(ConfidenceTier::Warm) - 0.95).abs() < 0.001);
+        assert!((calibrator.get_tier_factor(ConfidenceTier::Cold) - 0.9).abs() < 0.001);
     }
 
     #[test]
     fn test_temporal_factor_calculation() {
-        let calibrator = StorageConfidenceCalibrator::new()
-            .with_temporal_decay(true, 365.0); // 1 year half-life
+        let calibrator = StorageConfidenceCalibrator::new().with_temporal_decay(true, 365.0); // 1 year half-life
 
         let one_year = Duration::from_secs(365 * 24 * 3600);
         let factor = calibrator.calculate_temporal_factor(one_year);
@@ -297,9 +356,8 @@ mod tests {
         assert!((factor - 0.5).abs() < 0.1);
 
         // With temporal decay disabled
-        let no_decay = StorageConfidenceCalibrator::new()
-            .with_temporal_decay(false, 365.0);
+        let no_decay = StorageConfidenceCalibrator::new().with_temporal_decay(false, 365.0);
         let factor_no_decay = no_decay.calculate_temporal_factor(one_year);
-        assert_eq!(factor_no_decay, 1.0);
+        assert!((factor_no_decay - 1.0).abs() < 0.001);
     }
 }

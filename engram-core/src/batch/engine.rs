@@ -9,8 +9,9 @@ use crate::{
     compute::{self, VectorOps},
     store::MemoryStore,
 };
-use crossbeam_queue::SegQueue;
+use num_traits::ToPrimitive;
 use rayon::prelude::*;
+use std::convert::TryInto;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
@@ -21,8 +22,6 @@ pub struct BatchEngine {
     memory_store: Arc<MemoryStore>,
     /// SIMD vector operations
     vector_ops: &'static dyn VectorOps,
-    /// Work queue for batch operations
-    work_queue: Arc<SegQueue<BatchOperation>>,
     /// Metrics tracking
     metrics: Arc<BatchMetrics>,
 }
@@ -40,7 +39,6 @@ impl BatchEngine {
         Self {
             memory_store,
             vector_ops: compute::get_vector_ops(),
-            work_queue: Arc::new(SegQueue::new()),
             metrics: Arc::new(BatchMetrics {
                 total_operations: AtomicU64::new(0),
                 simd_operations: AtomicU64::new(0),
@@ -76,7 +74,7 @@ impl BatchEngine {
                     }
                 }
                 BatchOperation::Recall(cue) => {
-                    let results = self.memory_store.recall(cue);
+                    let results = self.memory_store.recall(&cue);
                     self.metrics
                         .total_operations
                         .fetch_add(1, Ordering::Relaxed);
@@ -148,7 +146,7 @@ impl BatchEngine {
             .collect();
 
         // Sort by confidence and take top k
-        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        results.sort_by(|a, b| b.1.raw().total_cmp(&a.1.raw()));
         results.truncate(k);
 
         results
@@ -188,18 +186,21 @@ impl BatchOperations for BatchEngine {
             .partition(|cue| matches!(cue.cue_type, crate::CueType::Embedding { .. }));
 
         let mut results = Vec::new();
-        let mut simd_accelerated_count = 0;
 
         // Process embedding cues with SIMD if available
-        if !embedding_cues.is_empty() && config.use_simd {
-            results.extend(self.batch_recall_embeddings(&embedding_cues));
-            simd_accelerated_count = results.len();
-        }
+        let simd_accelerated_count = if !embedding_cues.is_empty() && config.use_simd {
+            let simd_results = self.batch_recall_embeddings(&embedding_cues);
+            let count = simd_results.len();
+            results.extend(simd_results);
+            count
+        } else {
+            0
+        };
 
         // Process other cue types in parallel
         let other_results: Vec<_> = other_cues
             .into_par_iter()
-            .map(|cue| self.memory_store.recall(cue))
+            .map(|cue| self.memory_store.recall(&cue))
             .collect();
 
         results.extend(other_results);
@@ -225,11 +226,14 @@ impl BatchOperations for BatchEngine {
             .map(|query| self.batch_similarity_search_single(query, k, threshold))
             .collect();
 
-        let simd_efficiency = if self.metrics.total_operations.load(Ordering::Relaxed) > 0 {
-            self.metrics.simd_operations.load(Ordering::Relaxed) as f32
-                / self.metrics.total_operations.load(Ordering::Relaxed) as f32
-        } else {
-            0.0
+        let simd_efficiency = {
+            let total_ops = self.metrics.total_operations.load(Ordering::Relaxed);
+            let simd_ops = self.metrics.simd_operations.load(Ordering::Relaxed);
+
+            match (simd_ops.to_f32(), total_ops.to_f32()) {
+                (Some(simd), Some(total)) if total > 0.0 => (simd / total).clamp(0.0, 1.0),
+                _ => 0.0,
+            }
         };
 
         BatchSimilarityResult {

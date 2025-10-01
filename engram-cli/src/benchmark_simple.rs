@@ -9,7 +9,15 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 /// Run the startup benchmark
-pub async fn run_benchmark(repo_url: String, use_release: bool, verbose: bool) -> Result<bool> {
+///
+/// # Errors
+///
+/// Returns error if git clone, build, or server start fails
+///
+/// # Panics
+///
+/// Panics if temporary directory path cannot be converted to string
+pub fn run_benchmark(repo_url: String, use_release: bool, verbose: bool) -> Result<bool> {
     println!("🚀 Engram Startup Benchmark");
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     println!("Target: Git clone to operational in <60 seconds");
@@ -29,7 +37,14 @@ pub async fn run_benchmark(repo_url: String, use_release: bool, verbose: bool) -
     let clone_start = Instant::now();
 
     let clone_result = Command::new("git")
-        .args(["clone", "--depth=1", &repo_url, temp_dir.to_str().unwrap()])
+        .args([
+            "clone",
+            "--depth=1",
+            &repo_url,
+            temp_dir
+                .to_str()
+                .expect("temp dir path should be valid UTF-8"),
+        ])
         .stdout(if verbose {
             Stdio::inherit()
         } else {
@@ -210,7 +225,15 @@ pub async fn run_benchmark(repo_url: String, use_release: bool, verbose: bool) -
 }
 
 /// Run benchmark with hyperfine for statistical analysis
-pub async fn run_with_hyperfine(
+///
+/// # Errors
+///
+/// Returns error if Hyperfine is not installed or benchmark fails
+///
+/// # Panics
+///
+/// Panics if script path cannot be converted to string
+pub fn run_with_hyperfine(
     repo_url: String,
     warmup_runs: u32,
     benchmark_runs: u32,
@@ -279,7 +302,9 @@ rm -rf $TEMP_DIR
             &benchmark_runs.to_string(),
             "--time-unit",
             "second",
-            script_path.to_str().unwrap(),
+            script_path
+                .to_str()
+                .expect("script path should be valid UTF-8"),
         ])
         .output()
         .context("Failed to run hyperfine")?;
@@ -306,7 +331,7 @@ fn print_phase(title: &str) {
 
 fn print_timing(phase: &str, duration: Duration, total: Duration) {
     let percentage = (duration.as_secs_f64() / total.as_secs_f64()) * 100.0;
-    let bar_length = (percentage / 2.0) as usize;
+    let bar_length = (percentage / 2.0).max(0.0).min(50.0) as usize;
     let bar = "█".repeat(bar_length.min(50));
 
     println!(

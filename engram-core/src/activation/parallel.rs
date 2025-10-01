@@ -6,9 +6,9 @@
 use crate::activation::{
     cycle_detector::CycleDetector, gpu_interface::{AdaptiveConfig, AdaptiveSpreadingEngine},
     latency_budget::LatencyBudgetManager, storage_aware::StorageTier, ActivationError,
-    ActivationRecord, ActivationResult, ActivationTask, EdgeType, MemoryGraph, NodeId,
-    ParallelSpreadingConfig, SpreadingMetrics, SpreadingResults, TierAwareSpreadingScheduler,
-    TierSummary, TraceEntry,
+    ActivationGraphExt, ActivationRecord, ActivationResult, ActivationTask, EdgeType, MemoryGraph,
+    NodeId, ParallelSpreadingConfig, SpreadingMetrics, SpreadingResults,
+    TierAwareSpreadingScheduler, TierSummary, TraceEntry,
 };
 use dashmap::DashMap;
 use rand::rngs::StdRng;
@@ -335,7 +335,7 @@ impl ParallelSpreadingEngine {
         }
 
         // Get neighbors and create new tasks
-        if let Some(neighbors) = context.memory_graph.get_neighbors(&task.target_node) {
+        if let Some(neighbors) = ActivationGraphExt::get_neighbors(&*context.memory_graph, &task.target_node) {
             let decay_factor = context.config.decay_function.apply(task.depth + 1);
             let next_tier = StorageTier::from_depth(task.depth + 1);
 
@@ -401,7 +401,7 @@ impl ParallelSpreadingEngine {
             record.accumulate_activation(*initial_activation);
             self.activation_records.insert(node_id.clone(), record);
 
-            if let Some(neighbors) = self.memory_graph.get_neighbors(node_id) {
+            if let Some(neighbors) = ActivationGraphExt::get_neighbors(&*self.memory_graph, node_id) {
                 let decay_factor = self.config.decay_function.apply(1);
                 let next_tier = StorageTier::from_depth(1);
 
@@ -590,13 +590,15 @@ mod tests {
     use std::time::Duration;
     
     fn create_test_graph() -> Arc<MemoryGraph> {
-        let graph = Arc::new(MemoryGraph::new());
-        
+        use crate::activation::{create_activation_graph, ActivationGraphExt};
+
+        let graph = Arc::new(create_activation_graph());
+
         // Create a simple test graph: A -> B -> C, A -> C
-        graph.add_edge("A".to_string(), "B".to_string(), 0.8, EdgeType::Excitatory);
-        graph.add_edge("B".to_string(), "C".to_string(), 0.6, EdgeType::Excitatory);
-        graph.add_edge("A".to_string(), "C".to_string(), 0.4, EdgeType::Excitatory);
-        
+        ActivationGraphExt::add_edge(&*graph, "A".to_string(), "B".to_string(), 0.8, EdgeType::Excitatory);
+        ActivationGraphExt::add_edge(&*graph, "B".to_string(), "C".to_string(), 0.6, EdgeType::Excitatory);
+        ActivationGraphExt::add_edge(&*graph, "A".to_string(), "C".to_string(), 0.4, EdgeType::Excitatory);
+
         graph
     }
     
@@ -880,9 +882,11 @@ mod tests {
             ..Default::default()
         };
 
-        let graph = Arc::new(MemoryGraph::new());
-        graph.add_edge("A".to_string(), "B".to_string(), 0.9, EdgeType::Excitatory);
-        graph.add_edge("B".to_string(), "A".to_string(), 0.9, EdgeType::Excitatory);
+        use crate::activation::{create_activation_graph, ActivationGraphExt};
+
+        let graph = Arc::new(create_activation_graph());
+        ActivationGraphExt::add_edge(&*graph, "A".to_string(), "B".to_string(), 0.9, EdgeType::Excitatory);
+        ActivationGraphExt::add_edge(&*graph, "B".to_string(), "A".to_string(), 0.9, EdgeType::Excitatory);
 
         let engine = ParallelSpreadingEngine::new(config, graph).unwrap();
         let seed_activations = vec![("A".to_string(), 1.0)];

@@ -6,16 +6,18 @@
 
 use super::{
     ConfidenceInterval, Evidence, EvidenceSource, MatchType, ProbabilisticQueryResult,
-    ProbabilisticRecall, UncertaintySource, evidence::EvidenceAggregator,
+    ProbabilisticRecall, UncertaintySource, VectorSimilarityEvidence, evidence::EvidenceAggregator,
 };
 use crate::{Activation, Confidence, Cue, CueType, Episode, MemoryStore};
+use chrono::Utc;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 impl ProbabilisticRecall for MemoryStore {
     /// Enhanced recall with probabilistic uncertainty propagation
     fn recall_probabilistic(&self, cue: Cue) -> ProbabilisticQueryResult {
         // Start with standard recall
-        let standard_results = self.recall(cue.clone());
+        let standard_results = self.recall(&cue);
 
         if standard_results.is_empty() {
             return ProbabilisticQueryResult::from_episodes(Vec::new());
@@ -28,9 +30,9 @@ impl ProbabilisticRecall for MemoryStore {
 
         // Add evidence for each recalled episode
         for (episode, confidence) in &standard_results {
-            let evidence_id = self.create_evidence_for_episode(
+            let evidence_id = Self::create_evidence_for_episode(
                 episode,
-                confidence,
+                *confidence,
                 &cue,
                 &mut evidence_aggregator,
             );
@@ -41,12 +43,9 @@ impl ProbabilisticRecall for MemoryStore {
         self.add_system_uncertainty_sources(&mut uncertainty_sources);
 
         // Combine all evidence
-        let combined_evidence = match evidence_aggregator.combine_evidence(evidence_ids) {
-            Ok(combined) => combined,
-            Err(_) => {
-                // Fallback to standard result on error
-                return ProbabilisticQueryResult::from_episodes(standard_results);
-            }
+        let Ok(combined_evidence) = evidence_aggregator.combine_evidence(&evidence_ids) else {
+            // Fallback to standard result on error
+            return ProbabilisticQueryResult::from_episodes(standard_results);
         };
 
         // Create enhanced confidence interval
@@ -73,9 +72,8 @@ impl ProbabilisticRecall for MemoryStore {
 impl MemoryStore {
     /// Create evidence for a recalled episode based on match type
     fn create_evidence_for_episode(
-        &self,
         episode: &Episode,
-        confidence: &Confidence,
+        confidence: Confidence,
         cue: &Cue,
         aggregator: &mut EvidenceAggregator,
     ) -> u64 {
@@ -85,13 +83,13 @@ impl MemoryStore {
                 threshold: _,
             } => {
                 // Vector similarity evidence
-                let similarity = self.compute_embedding_similarity(&episode.embedding, vector);
+                let similarity = Self::compute_embedding_similarity(&episode.embedding, vector);
                 Evidence {
-                    source: EvidenceSource::VectorSimilarity {
-                        query_vector: *vector,
+                    source: EvidenceSource::VectorSimilarity(Box::new(VectorSimilarityEvidence {
+                        query_vector: Arc::new(*vector),
                         result_distance: 1.0 - similarity,
-                        index_confidence: *confidence,
-                    },
+                        index_confidence: confidence,
+                    })),
                     strength: Confidence::exact(similarity),
                     timestamp: SystemTime::now(),
                     dependencies: Vec::new(),
@@ -105,36 +103,28 @@ impl MemoryStore {
                         similarity_score: confidence.raw(),
                         match_type: MatchType::Semantic,
                     },
-                    strength: *confidence,
+                    strength: confidence,
                     timestamp: SystemTime::now(),
                     dependencies: Vec::new(),
                 }
             }
             CueType::Context { .. } => {
                 // Temporal match evidence with decay
-                let time_since_episode = SystemTime::now()
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_secs() as i64
-                    - episode.when.timestamp();
-
-                let decay_evidence = if time_since_episode > 0 {
-                    EvidenceAggregator::evidence_from_decay(
-                        *confidence,
-                        Duration::from_secs(time_since_episode as u64),
-                        0.0001, // Conservative decay rate
-                    )
-                } else {
-                    Evidence {
+                let signed_elapsed = Utc::now().signed_duration_since(episode.when);
+                let decay_evidence = match signed_elapsed.to_std() {
+                    Ok(elapsed) if !elapsed.is_zero() => EvidenceAggregator::evidence_from_decay(
+                        confidence, elapsed, 0.0001, // Conservative decay rate
+                    ),
+                    _ => Evidence {
                         source: EvidenceSource::DirectMatch {
                             cue_id: "temporal_match".to_string(),
                             similarity_score: confidence.raw(),
                             match_type: MatchType::Temporal,
                         },
-                        strength: *confidence,
+                        strength: confidence,
                         timestamp: SystemTime::now(),
                         dependencies: Vec::new(),
-                    }
+                    },
                 };
 
                 return aggregator.add_evidence(decay_evidence);
@@ -147,7 +137,7 @@ impl MemoryStore {
                         similarity_score: confidence.raw(),
                         match_type: MatchType::Context,
                     },
-                    strength: *confidence,
+                    strength: confidence,
                     timestamp: SystemTime::now(),
                     dependencies: Vec::new(),
                 }
@@ -158,7 +148,7 @@ impl MemoryStore {
     }
 
     /// Compute cosine similarity between embeddings
-    fn compute_embedding_similarity(&self, a: &[f32; 768], b: &[f32; 768]) -> f32 {
+    fn compute_embedding_similarity(a: &[f32; 768], b: &[f32; 768]) -> f32 {
         #[cfg(feature = "hnsw_index")]
         {
             // Use optimized SIMD implementation if available
@@ -213,40 +203,40 @@ impl MemoryStore {
 
     /// Enhanced recall with activation spreading uncertainty tracking
     pub fn recall_with_activation_spreading(&self, cue: Cue) -> ProbabilisticQueryResult {
+        // Generate spreading activation evidence before consuming the cue
+        let spreading_evidence = Self::simulate_spreading_activation(&cue);
+
         // Start with basic probabilistic recall
-        let mut result = self.recall_probabilistic(cue.clone());
+        let mut result = self.recall_probabilistic(cue);
 
         // Add spreading activation evidence
-        let spreading_evidence = self.simulate_spreading_activation(&cue);
         result.evidence_chain.extend(spreading_evidence);
 
         // Update confidence interval based on spreading activation
         result.confidence_interval =
-            self.adjust_confidence_for_spreading(&result.confidence_interval);
+            Self::adjust_confidence_for_spreading(&result.confidence_interval);
 
         result
     }
 
     /// Simulate spreading activation for evidence generation
-    fn simulate_spreading_activation(&self, _cue: &Cue) -> Vec<Evidence> {
-        let mut evidence = Vec::new();
-
-        // Simulate activation spreading from initial cue matches
-        // In a full implementation, this would traverse the actual memory graph
-        for activation_level in [0.8, 0.6, 0.4, 0.2] {
-            let spreading_evidence = EvidenceAggregator::evidence_from_activation(
-                format!("spreading_activation_{activation_level}"),
-                Activation::new(activation_level),
-                ((1.0 - activation_level) * 10.0) as u16, // Higher path length for lower activation
-            );
-            evidence.push(spreading_evidence);
-        }
-
-        evidence
+    fn simulate_spreading_activation(_cue: &Cue) -> Vec<Evidence> {
+        // Simulate activation spreading from initial cue matches.
+        // In a full implementation, this would traverse the actual memory graph.
+        [(0.8_f32, 2_u16), (0.6, 4), (0.4, 6), (0.2, 8)]
+            .into_iter()
+            .map(|(activation_level, path_length)| {
+                EvidenceAggregator::evidence_from_activation(
+                    format!("spreading_activation_{activation_level}"),
+                    Activation::new(activation_level),
+                    path_length,
+                )
+            })
+            .collect()
     }
 
     /// Adjust confidence interval based on spreading activation patterns
-    fn adjust_confidence_for_spreading(&self, original: &ConfidenceInterval) -> ConfidenceInterval {
+    fn adjust_confidence_for_spreading(original: &ConfidenceInterval) -> ConfidenceInterval {
         // Spreading activation typically increases uncertainty due to path diversity
         let spreading_uncertainty = 0.1; // Conservative estimate
 
@@ -263,12 +253,12 @@ impl MemoryStore {
 
         // Try HNSW-accelerated recall first
 
-        if let Some(hnsw_index) = self.hnsw_index() {
-            self.recall_with_hnsw_evidence(cue, hnsw_index)
-        } else {
+        let Some(hnsw_index) = self.hnsw_index() else {
             // Fallback to standard probabilistic recall
-            self.recall_probabilistic(cue)
-        }
+            return self.recall_probabilistic(cue);
+        };
+
+        self.recall_with_hnsw_evidence(cue, hnsw_index)
     }
 
     #[cfg(feature = "hnsw_index")]
@@ -305,14 +295,6 @@ impl MemoryStore {
 
         base_result
     }
-
-    /// Get HNSW index reference (if available)
-    #[cfg(feature = "hnsw_index")]
-    const fn hnsw_index(&self) -> Option<&crate::index::CognitiveHnswIndex> {
-        // This would access the actual HNSW index from MemoryStore
-        // Implementation depends on how HNSW is integrated in store.rs
-        None // Placeholder - would be implemented based on actual HNSW integration
-    }
 }
 
 /// Extension methods for enhanced probabilistic operations
@@ -345,8 +327,12 @@ impl ProbabilisticQueryResult {
         );
 
         // Inherit evidence chain and uncertainty sources
-        filtered_result.evidence_chain = self.evidence_chain.clone();
-        filtered_result.uncertainty_sources = self.uncertainty_sources.clone();
+        filtered_result
+            .evidence_chain
+            .clone_from(&self.evidence_chain);
+        filtered_result
+            .uncertainty_sources
+            .clone_from(&self.uncertainty_sources);
 
         filtered_result
     }
@@ -354,8 +340,12 @@ impl ProbabilisticQueryResult {
     /// Combine with another probabilistic query result
     #[must_use]
     pub fn combine_with(&self, other: &Self) -> Self {
-        let mut combined_episodes = self.episodes.clone();
-        combined_episodes.extend(other.episodes.clone());
+        let mut combined_episodes: Vec<_> = self
+            .episodes
+            .iter()
+            .chain(other.episodes.iter())
+            .cloned()
+            .collect();
 
         // Remove duplicates by episode ID
         combined_episodes.sort_by(|a, b| a.0.id.cmp(&b.0.id));
@@ -368,16 +358,20 @@ impl ProbabilisticQueryResult {
             self.confidence_interval.or(&other.confidence_interval);
 
         // Combine evidence chains
-        combined_result.evidence_chain = self.evidence_chain.clone();
-        combined_result
+        combined_result.evidence_chain = self
             .evidence_chain
-            .extend(other.evidence_chain.clone());
+            .iter()
+            .chain(other.evidence_chain.iter())
+            .cloned()
+            .collect();
 
         // Combine uncertainty sources
-        combined_result.uncertainty_sources = self.uncertainty_sources.clone();
-        combined_result
+        combined_result.uncertainty_sources = self
             .uncertainty_sources
-            .extend(other.uncertainty_sources.clone());
+            .iter()
+            .chain(other.uncertainty_sources.iter())
+            .cloned()
+            .collect();
 
         combined_result
     }
@@ -404,9 +398,13 @@ impl ProbabilisticQueryResult {
 /// Confidence categorization considering uncertainty
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConfidenceCategory {
+    /// High-confidence result with tight bounds.
     High,
+    /// Medium confidence where the interval is slightly wider.
     Medium,
+    /// Low confidence but still actionable under caution.
     Low,
+    /// Uncertainty dominates and no category is reliable.
     VeryUncertain,
 }
 
@@ -495,7 +493,7 @@ mod tests {
             when: Utc::now(),
             where_location: None,
             who: None,
-            what: format!("Test episode {}", id),
+            what: format!("Test episode {id}"),
             embedding: [0.5f32; 768],
             encoding_confidence: Confidence::HIGH,
             vividness_confidence: Confidence::HIGH,

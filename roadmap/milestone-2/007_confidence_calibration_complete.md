@@ -1,12 +1,21 @@
 # Task 007: Confidence Calibration for Storage Operations
 
-## Status: Pending
+## Status: Complete ✅
 ## Priority: P2 - Quality Enhancement
 ## Estimated Effort: 0.5 days
 ## Dependencies: Tasks 001-006 (storage system)
 
 ## Objective
 Add confidence calibration for storage retrieval operations to ensure uncertainty is properly tracked across storage tiers.
+
+## Current Implementation Status
+- ✅ Tier-specific calibrator implemented with temporal decay support (`engram-core/src/storage/confidence.rs:1-145`).
+- ✅ Hot, warm, and cold tier recall paths adjust confidence using the calibrator (`engram-core/src/storage/hot_tier.rs:100-121`, `engram-core/src/storage/warm_tier.rs:204-218`, `engram-core/src/storage/cold_tier.rs:660-671`).
+- ✅ Helper tests cover calibrator defaults (`engram-core/src/storage/confidence.rs:196-211`).
+- ⚠️ No metrics or logging track calibration adjustments; consider exposing stats in future.
+
+## Remaining Work
+None required for milestone completion. Optional follow-up: emit calibration stats via monitoring hooks if needed.
 
 ## Current State Analysis
 - **Existing**: `Confidence` type throughout system

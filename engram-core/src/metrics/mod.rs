@@ -70,7 +70,6 @@ impl MetricsRegistry {
     }
 
     /// Record a counter increment with <50ns overhead
-    #[inline(always)]
     pub fn increment_counter(&self, name: &'static str, value: u64) {
         self.counters.increment(name, value);
 
@@ -83,7 +82,6 @@ impl MetricsRegistry {
     }
 
     /// Record a histogram observation with <100ns overhead
-    #[inline(always)]
     pub fn observe_histogram(&self, name: &'static str, value: f64) {
         self.histograms.observe(name, value);
 
@@ -96,14 +94,12 @@ impl MetricsRegistry {
     }
 
     /// Record cognitive architecture metrics
-    #[inline(always)]
-    pub fn record_cognitive(&self, metric: cognitive::CognitiveMetric) {
+    pub fn record_cognitive(&self, metric: &cognitive::CognitiveMetric) {
         self.cognitive.record(metric);
     }
 
     /// Record hardware performance metrics
-    #[inline(always)]
-    pub fn record_hardware(&self, metric: hardware::HardwareMetric) {
+    pub fn record_hardware(&self, metric: &hardware::HardwareMetric) {
         self.hardware.record(metric);
     }
 
@@ -137,7 +133,6 @@ impl LockFreeCounters {
     }
 
     /// Increment a named counter by the given value
-    #[inline(always)]
     pub fn increment(&self, name: &'static str, value: u64) {
         self.counters
             .entry(name)
@@ -170,7 +165,6 @@ impl LockFreeHistograms {
     }
 
     /// Record an observation in the named histogram
-    #[inline(always)]
     pub fn observe(&self, name: &'static str, value: f64) {
         self.histograms
             .entry(name)
@@ -198,6 +192,7 @@ macro_rules! record_counter {
     };
 }
 
+/// Macro to record histogram metrics
 #[macro_export]
 macro_rules! record_histogram {
     ($registry:expr, $name:literal, $value:expr) => {
@@ -208,22 +203,26 @@ macro_rules! record_histogram {
     };
 }
 
+/// Macro to record cognitive metrics
 #[macro_export]
 macro_rules! record_cognitive {
     ($registry:expr, $metric:expr) => {
         #[cfg(feature = "monitoring")]
         {
-            $registry.record_cognitive($metric);
+            let metric = $metric;
+            $registry.record_cognitive(&metric);
         }
     };
 }
 
+/// Macro to record hardware metrics
 #[macro_export]
 macro_rules! record_hardware {
     ($registry:expr, $metric:expr) => {
         #[cfg(feature = "monitoring")]
         {
-            $registry.record_hardware($metric);
+            let metric = $metric;
+            $registry.record_hardware(&metric);
         }
     };
 }
@@ -256,7 +255,7 @@ pub fn observe_histogram(name: &'static str, value: f64) {
 }
 
 /// Record a cognitive metric
-pub fn record_cognitive(metric: cognitive::CognitiveMetric) {
+pub fn record_cognitive(metric: &cognitive::CognitiveMetric) {
     if let Some(metrics) = metrics() {
         metrics.record_cognitive(metric);
     }

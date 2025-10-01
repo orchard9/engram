@@ -186,8 +186,8 @@ proptest! {
         let id2_b = aggregator2.add_evidence(evidence2);
         let id1_b = aggregator2.add_evidence(evidence1);
 
-        let result1 = aggregator1.combine_evidence(vec![id1_a, id2_a]);
-        let result2 = aggregator2.combine_evidence(vec![id2_b, id1_b]);
+        let result1 = aggregator1.combine_evidence(&[id1_a, id2_a]);
+        let result2 = aggregator2.combine_evidence(&[id2_b, id1_b]);
 
         // Both should succeed or both should fail
         match (result1, result2) {
@@ -214,7 +214,7 @@ proptest! {
 
         for (i, activation) in activations.iter().enumerate() {
             let evidence = EvidenceAggregator::evidence_from_activation(
-                format!("episode_{}", i),
+                format!("episode_{i}"),
                 *activation,
                 1
             );
@@ -222,7 +222,7 @@ proptest! {
             evidence_ids.push(id);
         }
 
-        if let Ok(result) = aggregator.combine_evidence(evidence_ids) {
+        if let Ok(result) = aggregator.combine_evidence(&evidence_ids) {
             // Combined confidence must be valid probability
             prop_assert!(result.confidence.raw() >= 0.0);
             prop_assert!(result.confidence.raw() <= 1.0);
@@ -327,7 +327,7 @@ proptest! {
 
         // Equal weights should give average
         if (w1 - w2).abs() < 1e-6 {
-            let expected_avg = (p1.raw() + p2.raw()) / 2.0;
+            let expected_avg = f32::midpoint(p1.raw(), p2.raw());
             prop_assert!((result.raw() - expected_avg).abs() < 1e-5);
         }
     }
@@ -340,17 +340,31 @@ mod integration_tests {
     use crate::Episode;
     use chrono::Utc;
 
+    fn assert_close(actual: f32, expected: f32) {
+        let diff = (actual - expected).abs();
+        assert!(
+            diff <= f32::EPSILON,
+            "expected {expected}, got {actual} (diff {diff})"
+        );
+    }
+
     #[test]
     fn test_probabilistic_query_result_from_episodes() {
         // Create test episodes with different confidence levels
         // Use values that average to >= 0.7 to ensure is_successful() passes
         let episodes = vec![
             (create_test_episode("high_conf"), Confidence::HIGH),
-            (create_test_episode("medium_high_conf"), Confidence::exact(0.8)),
-            (create_test_episode("very_high_conf"), Confidence::exact(0.9)),
+            (
+                create_test_episode("medium_high_conf"),
+                Confidence::exact(0.8),
+            ),
+            (
+                create_test_episode("very_high_conf"),
+                Confidence::exact(0.9),
+            ),
         ];
 
-        let result = ProbabilisticQueryResult::from_episodes(episodes.clone());
+        let result = ProbabilisticQueryResult::from_episodes(episodes);
 
         // Should have correct number of episodes
         assert_eq!(result.episodes.len(), 3);
@@ -369,7 +383,7 @@ mod integration_tests {
         assert!(result.is_empty());
         assert!(!result.is_successful());
         assert_eq!(result.confidence_interval.point, Confidence::NONE);
-        assert_eq!(result.confidence_interval.width, 0.0);
+        assert_close(result.confidence_interval.width, 0.0);
     }
 
     #[test]
@@ -382,7 +396,7 @@ mod integration_tests {
         assert!(result.is_successful());
 
         // Single result should have zero width (no uncertainty from diversity)
-        assert_eq!(result.confidence_interval.width, 0.0);
+        assert_close(result.confidence_interval.width, 0.0);
         assert_eq!(result.confidence_interval.point, Confidence::HIGH);
     }
 
@@ -392,7 +406,7 @@ mod integration_tests {
             when: Utc::now(),
             where_location: Some("test_location".to_string()),
             who: Some(vec!["test_person".to_string()]),
-            what: format!("test content for {}", id),
+            what: format!("test content for {id}"),
             embedding: [0.5f32; 768],
             encoding_confidence: Confidence::HIGH,
             vividness_confidence: Confidence::MEDIUM,
@@ -416,18 +430,18 @@ mod benchmarks {
 
         // Add 100 pieces of evidence
         let mut evidence_ids = Vec::new();
-        for i in 0..100 {
+        for i in 0u8..100 {
             let evidence = EvidenceAggregator::evidence_from_activation(
-                format!("episode_{}", i),
-                Activation::new(f32::from(i as u8).mul_add(0.005, 0.5)),
-                i % 10,
+                format!("episode_{i}"),
+                Activation::new(f32::from(i).mul_add(0.005, 0.5)),
+                u16::from(i % 10),
             );
             let id = aggregator.add_evidence(evidence);
             evidence_ids.push(id);
         }
 
         let start = Instant::now();
-        let result = aggregator.combine_evidence(evidence_ids);
+        let result = aggregator.combine_evidence(&evidence_ids);
         let duration = start.elapsed();
 
         assert!(result.is_ok());

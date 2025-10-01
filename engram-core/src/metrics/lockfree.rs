@@ -1,6 +1,8 @@
 //! Lock-free, wait-free metrics primitives with cache-line alignment
 
 use crossbeam_utils::CachePadded;
+use std::cmp::Ordering as CmpOrdering;
+use std::convert::TryFrom;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 
 /// Lock-free counter with atomic operations
@@ -10,6 +12,7 @@ pub struct LockFreeCounter {
 }
 
 impl LockFreeCounter {
+    /// Create a zero-initialized counter.
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -17,16 +20,17 @@ impl LockFreeCounter {
         }
     }
 
-    #[inline(always)]
+    /// Add `delta` to the counter using relaxed ordering.
     pub fn increment(&self, delta: u64) {
         self.value.fetch_add(delta, Ordering::Relaxed);
     }
 
-    #[inline(always)]
+    /// Load the current value with acquire semantics.
     pub fn get(&self) -> u64 {
         self.value.load(Ordering::Acquire)
     }
 
+    /// Reset the counter to zero, returning the previous value.
     pub fn reset(&self) -> u64 {
         self.value.swap(0, Ordering::AcqRel)
     }
@@ -39,6 +43,7 @@ pub struct LockFreeGauge {
 }
 
 impl LockFreeGauge {
+    /// Create a zero-initialized gauge.
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -46,22 +51,22 @@ impl LockFreeGauge {
         }
     }
 
-    #[inline(always)]
+    /// Set the gauge to an absolute value.
     pub fn set(&self, value: i64) {
         self.value.store(value, Ordering::Release);
     }
 
-    #[inline(always)]
+    /// Increment the gauge by `delta` using relaxed ordering.
     pub fn increment(&self, delta: i64) {
         self.value.fetch_add(delta, Ordering::Relaxed);
     }
 
-    #[inline(always)]
+    /// Decrement the gauge by `delta` using relaxed ordering.
     pub fn decrement(&self, delta: i64) {
         self.value.fetch_sub(delta, Ordering::Relaxed);
     }
 
-    #[inline(always)]
+    /// Load the current gauge value with acquire semantics.
     pub fn get(&self) -> i64 {
         self.value.load(Ordering::Acquire)
     }
@@ -106,7 +111,10 @@ impl LockFreeHistogram {
         let mut buckets = Vec::with_capacity(64);
         let mut boundary = 0.001; // Start at 1μs
 
-        while boundary <= 10000.0 {
+        loop {
+            if boundary > 10_000.0 {
+                break;
+            }
             // Up to 10s
             buckets.push(boundary);
             boundary *= 1.5; // Exponential growth
@@ -116,13 +124,13 @@ impl LockFreeHistogram {
     }
 
     /// Record a value with <100ns overhead
-    #[inline(always)]
     pub fn record(&self, value: f64) {
         // Find the appropriate bucket using binary search
-        let bucket_idx = match self
-            .buckets
-            .binary_search_by(|b| b.partial_cmp(&value).unwrap())
-        {
+        let bucket_idx = match self.buckets.binary_search_by(|boundary| {
+            boundary
+                .partial_cmp(&value)
+                .map_or(CmpOrdering::Greater, |ordering| ordering)
+        }) {
             Ok(idx) => idx + 1,
             Err(idx) => idx,
         };
@@ -137,6 +145,10 @@ impl LockFreeHistogram {
     }
 
     /// Calculate quantiles from the histogram
+    ///
+    /// # Panics
+    /// Panics if any requested quantile is not a finite number.
+    #[must_use]
     pub fn quantiles(&self, quantiles: &[f64]) -> Vec<f64> {
         let total = self.total_count.load(Ordering::Acquire);
         if total == 0 {
@@ -146,29 +158,30 @@ impl LockFreeHistogram {
         let mut results = Vec::with_capacity(quantiles.len());
 
         for quantile in quantiles {
-            let target = (total as f64 * quantile) as u64;
-            let mut cumulative = 0u64; // Reset for each quantile
+            assert!(quantile.is_finite(), "quantile must be finite");
+            let clamped = quantile.clamp(0.0, 1.0);
+            let target = u64_to_f64(total) * clamped;
+            let mut cumulative = 0_u64;
+            let mut found = None;
 
             for (i, count) in self.counts.iter().enumerate() {
                 cumulative += count.load(Ordering::Acquire);
 
-                if cumulative >= target {
-                    // Return the bucket boundary value
-                    let bucket_value = if i == 0 {
-                        // First bucket (values below minimum boundary)
-                        self.buckets.first().copied().unwrap_or(0.0) / 2.0
-                    } else if i > self.buckets.len() {
-                        // Last bucket (overflow bucket)
-                        *self.buckets.last().unwrap()
-                    } else {
-                        // Regular bucket - use the upper boundary
-                        self.buckets[i - 1]
+                if u64_to_f64(cumulative) >= target {
+                    let bucket_value = match i {
+                        0 => self.buckets.first().copied().unwrap_or(0.0) / 2.0,
+                        idx if idx > self.buckets.len() => {
+                            self.buckets.last().copied().unwrap_or(0.0)
+                        }
+                        _ => self.buckets[i - 1],
                     };
 
-                    results.push(bucket_value);
+                    found = Some(bucket_value);
                     break;
                 }
             }
+
+            results.push(found.unwrap_or_else(|| self.buckets.last().copied().unwrap_or(0.0)));
         }
 
         results
@@ -182,7 +195,7 @@ impl LockFreeHistogram {
         }
 
         let sum_bits = self.sum.load(Ordering::Acquire);
-        f64::from_bits(sum_bits) / count as f64
+        f64::from_bits(sum_bits) / u64_to_f64(count)
     }
 
     /// Get the total count
@@ -218,17 +231,38 @@ impl Default for LockFreeHistogram {
     }
 }
 
+fn u64_to_f64(value: u64) -> f64 {
+    // Split into high/low 32-bit components to use lossless conversions
+    let high_part = u32::try_from(value >> 32).unwrap_or(u32::MAX);
+    let low_part = u32::try_from(value & 0xFFFF_FFFF).unwrap_or(u32::MAX);
+    f64::from(high_part).mul_add(4_294_967_296.0, f64::from(low_part))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fmt::Debug;
     use std::sync::Arc;
     use std::thread;
 
+    type TestResult<T = ()> = Result<T, String>;
+
+    fn ensure_eq<T>(actual: &T, expected: &T, context: &str) -> TestResult
+    where
+        T: PartialEq + Debug,
+    {
+        if actual == expected {
+            Ok(())
+        } else {
+            Err(format!("{context}: expected {expected:?}, got {actual:?}"))
+        }
+    }
+
     #[test]
-    fn test_lock_free_counter() {
+    fn test_lock_free_counter() -> TestResult {
         let counter = Arc::new(LockFreeCounter::new());
-        let num_threads = 10;
-        let increments_per_thread = 1000;
+        let num_threads = 10usize;
+        let increments_per_thread = 1000usize;
 
         let handles: Vec<_> = (0..num_threads)
             .map(|_| {
@@ -242,10 +276,20 @@ mod tests {
             .collect();
 
         for handle in handles {
-            handle.join().unwrap();
+            handle
+                .join()
+                .map_err(|err| format!("worker thread panicked: {err:?}"))?;
         }
 
-        assert_eq!(counter.get(), (num_threads * increments_per_thread) as u64);
+        let expected_threads = u64::try_from(num_threads).unwrap_or(u64::MAX);
+        let expected_increments = u64::try_from(increments_per_thread).unwrap_or(u64::MAX);
+        ensure_eq(
+            &counter.get(),
+            &expected_threads.saturating_mul(expected_increments),
+            "counter value",
+        )?;
+
+        Ok(())
     }
 
     #[test]

@@ -1,12 +1,25 @@
 # Task 005: FAISS and Annoy Benchmark Framework
 
-## Status: Pending
+## Status: Partial ✅
 ## Priority: P1 - Validation Critical
 ## Estimated Effort: 1 day
 ## Dependencies: Tasks 001-004 (complete storage system)
 
 ## Objective
 Create comprehensive benchmark framework comparing Engram's vector storage against FAISS and Annoy on standard ANN datasets, validating 90% recall@10 with <1ms query time.
+
+## Current Implementation Status
+- ✅ Benchmark harness with pluggable `AnnIndex` trait (`engram-core/benches/ann_comparison.rs:1-197`).
+- ✅ Synthetic and mock dataset loaders available (`engram-core/benches/datasets.rs:1-178`).
+- ✅ Placeholder FAISS/Annoy implementations provide API compatibility for framework smoke tests (`engram-core/benches/mock_faiss.rs:1-126`, `engram-core/benches/mock_annoy.rs:1-133`).
+- ⚠️ Real FAISS/Annoy bindings not integrated; mocks do exact search with perturbation and cannot validate true performance.
+- ⚠️ No benchmark outputs captured (CSV/JSON) or compared against Engram’s native index; the CLI/CI still lacks instructions for running the suite.
+- ⚠️ Recall target verification (<1 ms, 90% recall@10) not enforced; current harness only prints metrics.
+
+## Remaining Work for Completion
+1. Replace mock implementations with actual FAISS and Annoy bindings (or wrap official C++ libraries) and wire build instructions into repository docs.
+2. Automate benchmark run (e.g., criterion group or standalone binary) that exports CSV summaries for Engram vs FAISS/Annoy.
+3. Add assertion layer comparing recall/latency to spec thresholds and fail CI when regressions occur.
 
 ## Current State Analysis
 - **Existing**: Basic benchmarking from milestone-1/task-009

@@ -5,11 +5,18 @@
 //! All types support confidence propagation and follow forgetting curve research.
 
 use crate::Confidence;
+use crate::numeric::saturating_f32_from_f64;
 use atomic_float::AtomicF32;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::convert::TryFrom;
 use std::marker::PhantomData;
 use std::sync::atomic::Ordering;
+
+fn small_usize_to_f32(value: usize) -> f32 {
+    let value_u16 = u16::try_from(value).unwrap_or(u16::MAX);
+    f32::from(value_u16)
+}
 
 /// Core Memory type with 768-dimensional embeddings and cognitive confidence.
 ///
@@ -80,6 +87,7 @@ mod embedding_serde {
 impl Memory {
     /// Creates a new memory with given parameters
     #[must_use]
+    #[allow(clippy::large_types_passed_by_value)] // The embedding becomes owned by the memory; taking by value avoids an extra copy.
     pub fn new(id: String, embedding: [f32; 768], confidence: Confidence) -> Self {
         let now = Utc::now();
         Self {
@@ -148,7 +156,7 @@ impl Memory {
         let retention_factor = (-time_elapsed_hours / strength).exp();
 
         let current_confidence = self.confidence.raw();
-        let decayed_confidence = current_confidence * retention_factor as f32;
+        let decayed_confidence = current_confidence * saturating_f32_from_f64(retention_factor);
 
         self.confidence = Confidence::exact(decayed_confidence);
     }
@@ -227,6 +235,7 @@ pub struct Episode {
 impl Episode {
     /// Creates a new episode
     #[must_use]
+    #[allow(clippy::large_types_passed_by_value)] // Owning the embedding is intentional to keep episodes self-contained.
     pub fn new(
         id: String,
         when: DateTime<Utc>,
@@ -286,7 +295,8 @@ impl Episode {
     /// Apply forgetting to all episode confidence measures
     pub fn apply_episode_forgetting(&mut self, time_elapsed_hours: f64) {
         let strength = 1.0 / f64::from(self.decay_rate);
-        let retention_factor = (-time_elapsed_hours / strength).exp() as f32;
+        let retention_factor = (-time_elapsed_hours / strength).exp();
+        let retention_factor = saturating_f32_from_f64(retention_factor);
 
         // Different confidence types decay at different rates
         let encoding_decay = Confidence::exact(self.encoding_confidence.raw() * retention_factor);
@@ -327,7 +337,8 @@ impl Episode {
         // Mask embedding dimensions
         let mut partial_embedding = Vec::with_capacity(768);
         for i in 0..768 {
-            if (i as f32) / 768.0 > mask_percentage {
+            let index_ratio = small_usize_to_f32(i) / 768.0;
+            if index_ratio > mask_percentage {
                 partial_embedding.push(Some(self.embedding[i]));
             } else {
                 partial_embedding.push(None);
@@ -374,7 +385,7 @@ impl Episode {
 
         // Check embedding quality (non-zero values)
         let non_zero_count = self.embedding.iter().filter(|&&x| x != 0.0).count();
-        score += non_zero_count as f32 / 768.0;
+        score += small_usize_to_f32(non_zero_count) / 768.0;
         total += 1.0;
 
         score / total
@@ -383,27 +394,37 @@ impl Episode {
 
 /// Different types of cues for memory queries
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)] // Embedding cues need to embed the vector inline to avoid extra allocations downstream.
 pub enum CueType {
     /// Embedding-based similarity search
     Embedding {
         #[serde(with = "embedding_serde")]
+        /// Embedding vector for similarity search
         vector: [f32; 768],
+        /// Similarity threshold for matches
         threshold: Confidence,
     },
     /// Context-based search (temporal, spatial)
     Context {
+        /// Optional time range for temporal filtering
         time_range: Option<(DateTime<Utc>, DateTime<Utc>)>,
+        /// Optional location for spatial filtering
         location: Option<String>,
+        /// Confidence threshold for context matches
         confidence_threshold: Confidence,
     },
     /// Temporal pattern search
     Temporal {
+        /// Temporal pattern to match
         pattern: TemporalPattern,
+        /// Confidence threshold for pattern matches
         confidence_threshold: Confidence,
     },
     /// Semantic content search
     Semantic {
+        /// Semantic content to search for
         content: String,
+        /// Fuzzy matching threshold
         fuzzy_threshold: Confidence,
     },
 }
@@ -422,6 +443,7 @@ pub enum TemporalPattern {
 }
 
 /// Cue for memory retrieval with confidence thresholds
+#[allow(clippy::struct_field_names)] // Maintain stable serialized field names that align with the public API.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Cue {
     /// Unique identifier for this cue
@@ -443,6 +465,7 @@ pub struct Cue {
 impl Cue {
     /// Creates a new embedding-based cue
     #[must_use]
+    #[allow(clippy::missing_const_for_fn, clippy::large_types_passed_by_value)]
     pub fn embedding(id: String, vector: [f32; 768], threshold: Confidence) -> Self {
         Self {
             id,
@@ -455,6 +478,7 @@ impl Cue {
 
     /// Creates a context-based cue
     #[must_use]
+    #[allow(clippy::missing_const_for_fn)]
     pub fn context(
         id: String,
         time_range: Option<(DateTime<Utc>, DateTime<Utc>)>,
@@ -476,6 +500,7 @@ impl Cue {
 
     /// Creates a semantic content cue
     #[must_use]
+    #[allow(clippy::missing_const_for_fn)]
     pub fn semantic(id: String, content: String, fuzzy_threshold: Confidence) -> Self {
         Self {
             id,
@@ -517,12 +542,16 @@ impl Cue {
 
 /// Typestate markers for Memory builder
 pub mod memory_builder_states {
+    /// Builder state: no ID set
     #[derive(Debug, Clone, Copy)]
     pub struct NoId;
+    /// Builder state: no embedding set
     #[derive(Debug, Clone, Copy)]
     pub struct NoEmbedding;
+    /// Builder state: no confidence set
     #[derive(Debug, Clone, Copy)]
     pub struct NoConfidence;
+    /// Builder state: ready to build
     #[derive(Debug, Clone, Copy)]
     pub struct Ready;
 }
@@ -576,6 +605,7 @@ impl<State> MemoryBuilder<State> {
 impl MemoryBuilder<memory_builder_states::NoEmbedding> {
     /// Set the embedding
     #[must_use]
+    #[allow(clippy::large_types_passed_by_value)]
     pub fn embedding(
         self,
         embedding: [f32; 768],
@@ -621,32 +651,53 @@ impl MemoryBuilder<memory_builder_states::Ready> {
         self
     }
 
-    /// Build the memory
+    /// Build the memory.
+    ///
+    /// # Panics
+    ///
+    /// Panics if typestate invariants are violated and required fields were not
+    /// supplied before calling `build`. When the builder is used through the
+    /// provided state transitions this condition is unreachable.
     #[must_use]
     pub fn build(self) -> Memory {
-        let mut memory = Memory::new(
-            self.id.unwrap(),
-            self.embedding.unwrap(),
-            self.confidence.unwrap(),
-        );
-        memory.content = self.content;
-        memory.decay_rate = self.decay_rate;
+        let Self {
+            id,
+            embedding,
+            confidence,
+            content,
+            decay_rate,
+            _state: _,
+        } = self;
+
+        let (Some(id), Some(embedding), Some(confidence)) = (id, embedding, confidence) else {
+            unreachable!("typestate guarantees required fields are set");
+        };
+
+        let mut memory = Memory::new(id, embedding, confidence);
+        memory.content = content;
+        memory.decay_rate = decay_rate;
         memory
     }
 }
 
 /// Similar builder pattern for Episode
 pub mod episode_builder_states {
+    /// Builder state: no ID set
     #[derive(Debug, Clone, Copy)]
     pub struct NoId;
+    /// Builder state: no when timestamp set
     #[derive(Debug, Clone, Copy)]
     pub struct NoWhen;
+    /// Builder state: no what content set
     #[derive(Debug, Clone, Copy)]
     pub struct NoWhat;
+    /// Builder state: no embedding set
     #[derive(Debug, Clone, Copy)]
     pub struct NoEmbedding;
+    /// Builder state: no confidence set
     #[derive(Debug, Clone, Copy)]
     pub struct NoConfidence;
+    /// Builder state: ready to build
     #[derive(Debug, Clone, Copy)]
     pub struct Ready;
 }
@@ -745,6 +796,7 @@ impl EpisodeBuilder<episode_builder_states::NoWhat> {
 impl EpisodeBuilder<episode_builder_states::NoEmbedding> {
     /// Set embedding
     #[must_use]
+    #[allow(clippy::large_types_passed_by_value)]
     pub fn embedding(
         self,
         embedding: [f32; 768],
@@ -806,29 +858,50 @@ impl EpisodeBuilder<episode_builder_states::Ready> {
         self
     }
 
-    /// Build the episode
+    /// Build the episode.
+    ///
+    /// # Panics
+    ///
+    /// Panics if typestate invariants are violated and required fields were not
+    /// populated prior to calling `build`. Following the builder's state flow
+    /// keeps this branch unreachable.
     #[must_use]
     pub fn build(self) -> Episode {
-        let mut episode = Episode::new(
-            self.id.unwrap(),
-            self.when.unwrap(),
-            self.what.unwrap(),
-            self.embedding.unwrap(),
-            self.encoding_confidence.unwrap(),
-        );
-        episode.where_location = self.where_location;
-        episode.who = self.who;
-        episode.decay_rate = self.decay_rate;
+        let Self {
+            id,
+            when,
+            what,
+            embedding,
+            encoding_confidence,
+            where_location,
+            who,
+            decay_rate,
+            _state: _,
+        } = self;
+
+        let (Some(id), Some(when), Some(what), Some(embedding), Some(encoding_confidence)) =
+            (id, when, what, embedding, encoding_confidence)
+        else {
+            unreachable!("typestate guarantees required episode fields are set");
+        };
+
+        let mut episode = Episode::new(id, when, what, embedding, encoding_confidence);
+        episode.where_location = where_location;
+        episode.who = who;
+        episode.decay_rate = decay_rate;
         episode
     }
 }
 
 /// Typestate markers for Cue builder
 pub mod cue_builder_states {
+    /// Builder state: no ID set
     #[derive(Debug, Clone, Copy)]
     pub struct NoId;
+    /// Builder state: no cue type set
     #[derive(Debug, Clone, Copy)]
     pub struct NoCueType;
+    /// Builder state: ready to build
     #[derive(Debug, Clone, Copy)]
     pub struct Ready;
 }
@@ -899,6 +972,7 @@ impl CueBuilder<cue_builder_states::NoCueType> {
     /// Semantic embedding search is the most intuitive for developers,
     /// so it's provided as a simple method that transitions to Ready state.
     #[must_use]
+    #[allow(clippy::large_types_passed_by_value)]
     pub fn embedding_search(
         self,
         vector: [f32; 768],
@@ -1023,20 +1097,39 @@ impl CueBuilder<cue_builder_states::Ready> {
         self
     }
 
-    /// Build the cue (only available when all required fields are set)
+    /// Build the cue (only available when all required fields are set).
     ///
     /// # Cognitive Design
     /// Build method only available in Ready state, preventing construction
     /// of incomplete cues at compile time. This eliminates a common source
     /// of runtime errors and builds procedural knowledge about correct usage.
+    ///
+    /// # Panics
+    ///
+    /// Panics if typestate guarantees are violated and required fields are
+    /// missing. Proper use of the builder API keeps this path unreachable in
+    /// production code.
     #[must_use]
     pub fn build(self) -> Cue {
+        let Self {
+            id,
+            cue_type,
+            cue_confidence,
+            result_threshold,
+            max_results,
+            _state: _,
+        } = self;
+
+        let (Some(id), Some(cue_type)) = (id, cue_type) else {
+            unreachable!("typestate guarantees cue ID and type are set");
+        };
+
         Cue {
-            id: self.id.unwrap(),             // Safe unwrap - guaranteed by typestate
-            cue_type: self.cue_type.unwrap(), // Safe unwrap - guaranteed by typestate
-            cue_confidence: self.cue_confidence,
-            result_threshold: self.result_threshold,
-            max_results: self.max_results,
+            id,
+            cue_type,
+            cue_confidence,
+            result_threshold,
+            max_results,
         }
     }
 }
@@ -1044,6 +1137,53 @@ impl CueBuilder<cue_builder_states::Ready> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fmt::Debug;
+
+    type TestResult<T = ()> = Result<T, String>;
+
+    const FLOAT_TOLERANCE: f32 = 1e-5;
+
+    fn assert_f32_close(actual: f32, expected: f32) {
+        assert!(
+            (actual - expected).abs() <= FLOAT_TOLERANCE,
+            "expected {expected}, got {actual}"
+        );
+    }
+
+    fn ensure(condition: bool, message: impl Into<String>) -> TestResult {
+        if condition {
+            Ok(())
+        } else {
+            Err(message.into())
+        }
+    }
+
+    fn ensure_eq<T>(actual: &T, expected: &T, context: &str) -> TestResult
+    where
+        T: PartialEq + Debug,
+    {
+        if actual == expected {
+            Ok(())
+        } else {
+            Err(format!("{context}: expected {expected:?}, got {actual:?}"))
+        }
+    }
+
+    fn ensure_f32_slice_close(actual: &[f32], expected: &[f32], context: &str) -> TestResult {
+        if actual.len() != expected.len() {
+            return Err(format!(
+                "{context}: length mismatch (expected {}, got {})",
+                expected.len(),
+                actual.len()
+            ));
+        }
+        for (idx, (&lhs, &rhs)) in actual.iter().zip(expected.iter()).enumerate() {
+            if (lhs - rhs).abs() > FLOAT_TOLERANCE {
+                return Err(format!("{context}: index {idx} expected {rhs}, got {lhs}"));
+            }
+        }
+        Ok(())
+    }
 
     #[test]
     fn test_memory_creation_and_activation() {
@@ -1051,7 +1191,7 @@ mod tests {
         let memory = Memory::new("test_memory".to_string(), embedding, Confidence::HIGH);
 
         assert_eq!(memory.id, "test_memory");
-        assert_eq!(memory.activation(), 0.0);
+        assert_f32_close(memory.activation(), 0.0);
         assert!(memory.seems_reliable());
         assert!(memory.is_accurate());
     }
@@ -1062,14 +1202,14 @@ mod tests {
         let memory = Memory::new("test_memory".to_string(), embedding, Confidence::HIGH);
 
         memory.set_activation(0.5);
-        assert_eq!(memory.activation(), 0.5);
+        assert_f32_close(memory.activation(), 0.5);
 
         memory.add_activation(0.3);
-        assert_eq!(memory.activation(), 0.8);
+        assert_f32_close(memory.activation(), 0.8);
 
         // Test clamping
         memory.add_activation(0.5);
-        assert_eq!(memory.activation(), 1.0);
+        assert_f32_close(memory.activation(), 1.0);
     }
 
     #[test]
@@ -1129,7 +1269,7 @@ mod tests {
             .build();
 
         assert_eq!(memory.id, "built_memory");
-        assert_eq!(memory.decay_rate, 0.05);
+        assert_f32_close(memory.decay_rate, 0.05);
         assert_eq!(memory.content, Some("Built with builder".to_string()));
     }
 
@@ -1209,7 +1349,7 @@ mod tests {
     }
 
     #[test]
-    fn test_cue_builder_embedding_search() {
+    fn test_cue_builder_embedding_search() -> TestResult {
         let embedding = [0.3; 768];
         let cue = CueBuilder::new()
             .id("embedding_cue".to_string())
@@ -1219,22 +1359,22 @@ mod tests {
             .max_results(5)
             .build();
 
-        assert_eq!(cue.id, "embedding_cue");
-        assert_eq!(cue.cue_confidence, Confidence::HIGH);
-        assert_eq!(cue.result_threshold, Confidence::LOW);
-        assert_eq!(cue.max_results, 5);
+        ensure_eq(&cue.id, &"embedding_cue".to_string(), "cue id")?;
+        ensure_eq(&cue.cue_confidence, &Confidence::HIGH, "cue confidence")?;
+        ensure_eq(&cue.result_threshold, &Confidence::LOW, "result threshold")?;
+        ensure_eq(&cue.max_results, &5, "max results")?;
 
         match cue.cue_type {
             CueType::Embedding { vector, threshold } => {
-                assert_eq!(vector, embedding);
-                assert_eq!(threshold, Confidence::MEDIUM);
+                ensure_f32_slice_close(&vector, &embedding, "embedding vector")?;
+                ensure_eq(&threshold, &Confidence::MEDIUM, "embedding threshold")
             }
-            _ => panic!("Wrong cue type"),
+            other => Err(format!("expected embedding cue type, got {other:?}")),
         }
     }
 
     #[test]
-    fn test_cue_builder_context_search() {
+    fn test_cue_builder_context_search() -> TestResult {
         let start = Utc::now();
         let end = start + chrono::Duration::hours(1);
         let cue = CueBuilder::new()
@@ -1246,7 +1386,7 @@ mod tests {
             )
             .build();
 
-        assert_eq!(cue.id, "context_cue");
+        ensure_eq(&cue.id, &"context_cue".to_string(), "cue id")?;
 
         match cue.cue_type {
             CueType::Context {
@@ -1254,16 +1394,27 @@ mod tests {
                 location,
                 confidence_threshold,
             } => {
-                assert!(time_range.is_some());
-                assert_eq!(location, Some("Test Location".to_string()));
-                assert_eq!(confidence_threshold, Confidence::HIGH);
+                ensure(
+                    time_range.is_some(),
+                    "context cue should include time range",
+                )?;
+                ensure_eq(
+                    &location.as_deref(),
+                    &Some("Test Location"),
+                    "context location",
+                )?;
+                ensure_eq(
+                    &confidence_threshold,
+                    &Confidence::HIGH,
+                    "context confidence threshold",
+                )
             }
-            _ => panic!("Wrong cue type"),
+            other => Err(format!("expected context cue type, got {other:?}")),
         }
     }
 
     #[test]
-    fn test_cue_builder_temporal_search() {
+    fn test_cue_builder_temporal_search() -> TestResult {
         let pattern = TemporalPattern::Recent(chrono::Duration::hours(24));
         let cue = CueBuilder::new()
             .id("temporal_cue".to_string())
@@ -1275,15 +1426,22 @@ mod tests {
                 pattern: stored_pattern,
                 confidence_threshold,
             } => {
-                matches!(stored_pattern, TemporalPattern::Recent(_));
-                assert_eq!(confidence_threshold, Confidence::MEDIUM);
+                ensure(
+                    matches!(stored_pattern, TemporalPattern::Recent(_)),
+                    "temporal cue should store recent pattern",
+                )?;
+                ensure_eq(
+                    &confidence_threshold,
+                    &Confidence::MEDIUM,
+                    "temporal confidence threshold",
+                )
             }
-            _ => panic!("Wrong cue type"),
+            other => Err(format!("expected temporal cue type, got {other:?}")),
         }
     }
 
     #[test]
-    fn test_cue_builder_semantic_search() {
+    fn test_cue_builder_semantic_search() -> TestResult {
         let cue = CueBuilder::new()
             .id("semantic_cue".to_string())
             .semantic_search("search text".to_string(), Confidence::LOW)
@@ -1294,10 +1452,14 @@ mod tests {
                 content,
                 fuzzy_threshold,
             } => {
-                assert_eq!(content, "search text");
-                assert_eq!(fuzzy_threshold, Confidence::LOW);
+                ensure_eq(&content, &"search text".to_string(), "semantic content")?;
+                ensure_eq(
+                    &fuzzy_threshold,
+                    &Confidence::LOW,
+                    "semantic fuzzy threshold",
+                )
             }
-            _ => panic!("Wrong cue type"),
+            other => Err(format!("expected semantic cue type, got {other:?}")),
         }
     }
 
@@ -1402,18 +1564,17 @@ mod tests {
     }
 
     #[test]
-    fn test_cue_types_and_patterns() {
+    fn test_cue_types_and_patterns() -> TestResult {
         let embedding = [0.8; 768];
 
         // Test embedding cue
         let embedding_cue = Cue::embedding("embed_cue".to_string(), embedding, Confidence::MEDIUM);
 
-        match &embedding_cue.cue_type {
-            CueType::Embedding { vector, threshold } => {
-                assert_eq!(*vector, embedding);
-                assert_eq!(*threshold, Confidence::MEDIUM);
-            }
-            _ => panic!("Wrong cue type"),
+        if let CueType::Embedding { vector, threshold } = &embedding_cue.cue_type {
+            ensure_f32_slice_close(vector, &embedding, "embedding cue vector")?;
+            ensure_eq(threshold, &Confidence::MEDIUM, "embedding cue threshold")?;
+        } else {
+            return Err("expected embedding cue type".to_string());
         }
 
         // Test context cue
@@ -1426,17 +1587,25 @@ mod tests {
             Confidence::LOW,
         );
 
-        match &context_cue.cue_type {
-            CueType::Context {
-                time_range,
-                location,
+        if let CueType::Context {
+            time_range,
+            location,
+            confidence_threshold,
+        } = &context_cue.cue_type
+        {
+            ensure(time_range.is_some(), "context cue should have time range")?;
+            ensure_eq(
+                &location.as_deref(),
+                &Some("Test location"),
+                "context cue location",
+            )?;
+            ensure_eq(
                 confidence_threshold,
-            } => {
-                assert!(time_range.is_some());
-                assert_eq!(location, &Some("Test location".to_string()));
-                assert_eq!(*confidence_threshold, Confidence::LOW);
-            }
-            _ => panic!("Wrong cue type"),
+                &Confidence::LOW,
+                "context cue confidence",
+            )?;
+        } else {
+            return Err("expected context cue type".to_string());
         }
 
         // Test semantic cue
@@ -1446,15 +1615,21 @@ mod tests {
             Confidence::HIGH,
         );
 
-        match &semantic_cue.cue_type {
-            CueType::Semantic {
-                content,
+        if let CueType::Semantic {
+            content,
+            fuzzy_threshold,
+        } = &semantic_cue.cue_type
+        {
+            ensure_eq(content, &"search content".to_string(), "semantic content")?;
+            ensure_eq(
                 fuzzy_threshold,
-            } => {
-                assert_eq!(content, "search content");
-                assert_eq!(*fuzzy_threshold, Confidence::HIGH);
-            }
-            _ => panic!("Wrong cue type"),
+                &Confidence::HIGH,
+                "semantic fuzzy threshold",
+            )?;
+        } else {
+            return Err("expected semantic cue type".to_string());
         }
+
+        Ok(())
     }
 }

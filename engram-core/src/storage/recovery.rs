@@ -2,36 +2,45 @@
 //!
 //! This module handles recovery from crashes and validates data integrity.
 
-use super::{IntegrityReport, RecoveryReport, StorageResult};
+use super::{IntegrityReport, RecoveryReport};
 
 /// Recovery coordinator for crash consistency
-pub struct CrashRecoveryCoordinator {
-    _placeholder: bool,
-}
+pub struct CrashRecoveryCoordinator {}
 
 impl CrashRecoveryCoordinator {
     /// Create a new crash recovery coordinator
-    pub fn new() -> Self {
-        Self { _placeholder: true }
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {}
     }
 
     /// Recover from crash by replaying WAL
-    pub async fn recover_from_crash(&self) -> StorageResult<RecoveryReport> {
-        Ok(RecoveryReport {
+    #[must_use]
+    pub const fn recover_from_crash(&self) -> RecoveryReport {
+        let _ = self;
+        RecoveryReport {
             recovered_entries: 0,
             corrupted_entries: 0,
-            recovery_duration: std::time::Duration::from_millis(0),
+            recovery_duration: std::time::Duration::ZERO,
             last_valid_sequence: 0,
-        })
+        }
     }
 
     /// Validate data integrity
-    pub async fn validate_integrity(&self) -> StorageResult<IntegrityReport> {
-        Ok(IntegrityReport {
+    #[must_use]
+    pub const fn validate_integrity(&self) -> IntegrityReport {
+        let _ = self;
+        IntegrityReport {
             total_entries_checked: 0,
             checksum_failures: 0,
             missing_entries: Vec::new(),
             corrupted_files: Vec::new(),
-        })
+        }
+    }
+}
+
+impl Default for CrashRecoveryCoordinator {
+    fn default() -> Self {
+        Self::new()
     }
 }

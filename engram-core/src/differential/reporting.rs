@@ -9,7 +9,8 @@ use super::{
     OperationResult, PerformanceComparison, PerformanceStats,
 };
 use std::collections::HashMap;
-use std::fmt;
+use std::convert::TryFrom;
+use std::fmt::{self, Write};
 
 /// Comprehensive report of differential testing results
 #[derive(Debug)]
@@ -142,7 +143,7 @@ impl DifferentialTestReport {
     /// Create a new report from test results
     #[must_use]
     pub fn new(
-        implementations: Vec<Implementation>,
+        implementations: &[Implementation],
         reference: Implementation,
         duration: std::time::Duration,
         results: Vec<(
@@ -153,14 +154,14 @@ impl DifferentialTestReport {
     ) -> Self {
         let session_info = SessionInfo {
             timestamp: chrono::Utc::now(),
-            implementations: implementations.clone(),
+            implementations: implementations.to_vec(),
             reference_implementation: reference,
             duration,
             config_summary: "Default configuration".to_string(),
         };
 
         let summary = Self::build_summary(&results);
-        let performance_analysis = Self::build_performance_analysis(&results, &implementations);
+        let performance_analysis = Self::build_performance_analysis(&results, implementations);
         let divergences = Self::extract_divergences(results);
         let insights = Self::generate_insights(&summary, &performance_analysis, &divergences);
 
@@ -186,157 +187,173 @@ impl DifferentialTestReport {
     #[must_use]
     pub fn to_text(&self) -> String {
         let mut report = String::new();
+        self.write_text_header(&mut report);
+        self.write_text_summary(&mut report);
+        self.write_text_performance(&mut report);
+        self.write_text_insights(&mut report);
+        self.write_text_divergences(&mut report);
+        self.write_text_recommendations(&mut report);
+        report
+    }
 
-        // Header
-        report.push_str("🔬 Differential Testing Report\n");
-        report.push_str("==============================\n\n");
-
-        // Session info
-        report.push_str(&format!(
-            "📅 Test Date: {}\n",
+    fn write_text_header(&self, out: &mut String) {
+        let _ = writeln!(out, "Differential Testing Report");
+        let _ = writeln!(out, "============================");
+        let _ = writeln!(out);
+        let _ = writeln!(
+            out,
+            "Test Date: {}",
             self.session_info.timestamp.format("%Y-%m-%d %H:%M:%S UTC")
-        ));
-        report.push_str(&format!(
-            "⏱️  Duration: {:.2}s\n",
+        );
+        let _ = writeln!(
+            out,
+            "Duration: {:.2}s",
             self.session_info.duration.as_secs_f64()
-        ));
-        report.push_str(&format!(
-            "🏗️  Implementations: {}\n",
+        );
+        let _ = writeln!(
+            out,
+            "Implementations: {}",
             self.session_info
                 .implementations
                 .iter()
                 .map(std::string::ToString::to_string)
                 .collect::<Vec<_>>()
                 .join(", ")
-        ));
-        report.push_str(&format!(
-            "📖 Reference: {}\n\n",
+        );
+        let _ = writeln!(
+            out,
+            "Reference Implementation: {}",
             self.session_info.reference_implementation
-        ));
+        );
+        let _ = writeln!(out);
+    }
 
-        // Summary
-        report.push_str("📊 Summary\n");
-        report.push_str("----------\n");
-        report.push_str(&format!(
-            "Total Operations: {}\n",
-            self.summary.total_operations
-        ));
-        report.push_str(&format!(
-            "✅ Equivalent: {} ({:.1}%)\n",
-            self.summary.equivalent_operations,
-            self.summary.equivalence_rate * 100.0
-        ));
-        report.push_str(&format!(
-            "❌ Divergent: {} ({:.1}%)\n\n",
-            self.summary.divergent_operations,
-            self.summary.equivalence_rate.mul_add(-100.0, 100.0)
-        ));
+    fn write_text_summary(&self, out: &mut String) {
+        let _ = writeln!(out, "Summary");
+        let _ = writeln!(out, "-------");
+        let _ = writeln!(out, "Total Operations: {}", self.summary.total_operations);
+        let equivalence_percent = (self.summary.equivalence_rate * 100.0).clamp(0.0, 100.0);
+        let divergent_percent = (100.0 - equivalence_percent).max(0.0);
+        let _ = writeln!(
+            out,
+            "Equivalent: {} ({equivalence_percent:.1}%)",
+            self.summary.equivalent_operations
+        );
+        let _ = writeln!(
+            out,
+            "Divergent: {} ({divergent_percent:.1}%)",
+            self.summary.divergent_operations
+        );
+        let _ = writeln!(out);
+    }
 
-        // Performance analysis
-        if !self.performance_analysis.per_implementation.is_empty() {
-            report.push_str("⚡ Performance Analysis\n");
-            report.push_str("----------------------\n");
-            for (impl_type, stats) in &self.performance_analysis.per_implementation {
-                report.push_str(&format!(
-                    "{}: {:.0}ns avg, {:.1}% success rate\n",
-                    impl_type,
-                    stats.mean_execution_time_nanos,
-                    stats.success_rate * 100.0
-                ));
-            }
-            report.push('\n');
+    fn write_text_performance(&self, out: &mut String) {
+        if self.performance_analysis.per_implementation.is_empty() {
+            return;
         }
 
-        // Insights
-        if !self.insights.is_empty() {
-            report.push_str("💡 Key Insights\n");
-            report.push_str("---------------\n");
-
-            // Sort insights by impact
-            let mut sorted_insights = self.insights.clone();
-            sorted_insights.sort_by(|a, b| b.impact.cmp(&a.impact));
-
-            for insight in sorted_insights.iter().take(5) {
-                // Top 5 insights
-                let impact_emoji = match insight.impact {
-                    InsightImpact::Critical => "🚨",
-                    InsightImpact::High => "⚠️",
-                    InsightImpact::Medium => "⚡",
-                    InsightImpact::Low => "ℹ️",
-                };
-                report.push_str(&format!(
-                    "{} [{}] {}\n",
-                    impact_emoji, insight.impact, insight.description
-                ));
-                if !insight.suggested_actions.is_empty() {
-                    report.push_str(&format!("   Action: {}\n", insight.suggested_actions[0]));
-                }
-            }
-            report.push('\n');
-        }
-
-        // Divergences (if any)
-        if !self.divergences.is_empty() {
-            report.push_str("🔍 Implementation Divergences\n");
-            report.push_str("-----------------------------\n");
-
-            for (i, divergence) in self.divergences.iter().enumerate().take(3) {
-                // Top 3 divergences
-                report.push_str(&format!(
-                    "{}. {} [{}]\n",
-                    i + 1,
-                    divergence.operation.description(),
-                    divergence.severity
-                ));
-                report.push_str(&format!("   {}\n", divergence.explanation));
-                if !divergence.investigation_steps.is_empty() {
-                    report.push_str(&format!("   Next: {}\n", divergence.investigation_steps[0]));
-                }
-                report.push('\n');
-            }
-
-            if self.divergences.len() > 3 {
-                report.push_str(&format!(
-                    "... and {} more divergences\n\n",
-                    self.divergences.len() - 3
-                ));
-            }
-        }
-
-        // Recommendations
-        report.push_str("🎯 Recommendations\n");
-        report.push_str("------------------\n");
-
-        if self.summary.equivalence_rate >= 0.99 {
-            report.push_str(
-                "✅ Excellent equivalence rate! Implementations are highly consistent.\n",
-            );
-        } else if self.summary.equivalence_rate >= 0.95 {
-            report
-                .push_str("✅ Good equivalence rate. Minor divergences should be investigated.\n");
-        } else if self.summary.equivalence_rate >= 0.90 {
-            report.push_str("⚠️ Moderate equivalence rate. Several divergences need attention.\n");
-        } else {
-            report.push_str(
-                "🚨 Low equivalence rate. Significant implementation differences detected.\n",
+        let _ = writeln!(out, "Performance Analysis");
+        let _ = writeln!(out, "--------------------");
+        for (impl_type, stats) in &self.performance_analysis.per_implementation {
+            let _ = writeln!(
+                out,
+                "{}: {:.0} ns average, {:.1}% success",
+                impl_type,
+                stats.mean_execution_time_nanos,
+                stats.success_rate * 100.0
             );
         }
+        let _ = writeln!(out);
+    }
 
-        // Add specific recommendations based on performance
+    fn write_text_insights(&self, out: &mut String) {
+        if self.insights.is_empty() {
+            return;
+        }
+
+        let mut insights = self.insights.clone();
+        insights.sort_by(|a, b| b.impact.cmp(&a.impact));
+
+        let _ = writeln!(out, "Key Insights");
+        let _ = writeln!(out, "-----------");
+        for insight in insights.iter().take(5) {
+            let _ = writeln!(
+                out,
+                "[{}][{}] {}",
+                insight.impact,
+                insight_category_name(insight.category),
+                insight.description
+            );
+            if let Some(action) = insight.suggested_actions.first() {
+                let _ = writeln!(out, "  Recommended Action: {action}");
+            }
+        }
+        let _ = writeln!(out);
+    }
+
+    fn write_text_divergences(&self, out: &mut String) {
+        if self.divergences.is_empty() {
+            return;
+        }
+
+        let _ = writeln!(out, "Implementation Divergences");
+        let _ = writeln!(out, "--------------------------");
+
+        for (index, divergence) in self.divergences.iter().enumerate().take(3) {
+            let _ = writeln!(
+                out,
+                "{}. {} [{}]",
+                index + 1,
+                divergence.operation.description(),
+                divergence.severity
+            );
+            let _ = writeln!(out, "   {}", divergence.explanation);
+            if let Some(next_step) = divergence.investigation_steps.first() {
+                let _ = writeln!(out, "   Next Step: {next_step}");
+            }
+            let _ = writeln!(out);
+        }
+
+        if self.divergences.len() > 3 {
+            let _ = writeln!(
+                out,
+                "... and {} additional divergences",
+                self.divergences.len() - 3
+            );
+            let _ = writeln!(out);
+        }
+    }
+
+    fn write_text_recommendations(&self, out: &mut String) {
+        let _ = writeln!(out, "Recommendations");
+        let _ = writeln!(out, "----------------");
+
+        let summary_line = match self.summary.equivalence_rate {
+            rate if rate >= 0.99 => {
+                "Excellent equivalence rate; implementations are highly consistent."
+            }
+            rate if rate >= 0.95 => "Good equivalence rate; investigate minor divergences.",
+            rate if rate >= 0.90 => {
+                "Moderate equivalence rate; several divergences need attention."
+            }
+            _ => "Low equivalence rate detected; prioritize investigating divergent operations.",
+        };
+        let _ = writeln!(out, "{summary_line}");
+
         for suggestion in self
             .performance_analysis
             .optimization_suggestions
             .iter()
             .take(3)
         {
-            report.push_str(&format!("• {suggestion}\n"));
+            let _ = writeln!(out, "- {suggestion}");
         }
 
-        report.push_str(
-            "\n📚 For detailed analysis, run bisection on specific divergent operations.\n",
+        let _ = writeln!(
+            out,
+            "For detailed analysis, run bisection on specific divergent operations."
         );
-
-        report
+        let _ = writeln!(out);
     }
 
     /// Generate an HTML report with interactive elements
@@ -367,10 +384,11 @@ impl DifferentialTestReport {
 <body>");
 
         // Header
-        html.push_str(&format!(
+        let _ = write!(
+            &mut html,
             r#"
     <div class="header">
-        <h1>🔬 Differential Testing Report</h1>
+        <h1>Differential Testing Report</h1>
         <p><strong>Date:</strong> {}</p>
         <p><strong>Duration:</strong> {:.2}s</p>
         <p><strong>Implementations:</strong> {}</p>
@@ -385,11 +403,14 @@ impl DifferentialTestReport {
                 .collect::<Vec<_>>()
                 .join(", "),
             self.session_info.reference_implementation
-        ));
+        );
 
         // Summary metrics
-        html.push_str(r#"<div class="section"><h2>📊 Summary</h2><div>"#);
-        html.push_str(&format!(
+        html.push_str(r#"<div class="section"><h2>Summary</h2><div>"#);
+        let equivalence_percent = (self.summary.equivalence_rate * 100.0).clamp(0.0, 100.0);
+        let equivalence_percent_display = format!("{equivalence_percent:.0}");
+        let _ = write!(
+            &mut html,
             r#"
             <div class="metric">
                 <h3>{}</h3>
@@ -404,33 +425,35 @@ impl DifferentialTestReport {
                 <p>Divergences Found</p>
             </div>"#,
             self.summary.total_operations,
-            (self.summary.equivalence_rate * 100.0) as u32,
+            equivalence_percent_display,
             self.summary.divergent_operations
-        ));
+        );
         html.push_str("</div></div>");
 
         // Insights
-        html.push_str(r#"<div class="section"><h2>💡 Key Insights</h2>"#);
+        html.push_str(r#"<div class="section"><h2>Key Insights</h2>"#);
         for insight in &self.insights {
             let impact_class = match insight.impact {
                 InsightImpact::Critical | InsightImpact::High => "high-impact",
                 InsightImpact::Medium => "medium-impact",
                 InsightImpact::Low => "low-impact",
             };
-            html.push_str(&format!(
+            let _ = write!(
+                &mut html,
                 r#"<div class="insight {}">
                 <strong>[{}]</strong> {}
             </div>"#,
                 impact_class, insight.impact, insight.description
-            ));
+            );
         }
         html.push_str("</div>");
 
         // Divergences
         if !self.divergences.is_empty() {
-            html.push_str(r#"<div class="section"><h2>🔍 Implementation Divergences</h2>"#);
+            html.push_str(r#"<div class="section"><h2>Implementation Divergences</h2>"#);
             for divergence in &self.divergences {
-                html.push_str(&format!(
+                let _ = write!(
+                    &mut html,
                     r#"<div class="divergence">
                     <h4>{} [{}]</h4>
                     <p>{}</p>
@@ -438,7 +461,7 @@ impl DifferentialTestReport {
                     divergence.operation.description(),
                     divergence.severity,
                     divergence.explanation
-                ));
+                );
             }
             html.push_str("</div>");
         }
@@ -447,7 +470,14 @@ impl DifferentialTestReport {
         html
     }
 
-    /// Save report to file
+    /// Save the generated report to disk in the requested format.
+    ///
+    /// # Errors
+    /// - Returns an error if writing to `path` fails (for example, missing directories or
+    ///   insufficient permissions).
+    ///
+    /// # Panics
+    /// - Never panics.
     pub fn save_to_file(
         &self,
         path: &std::path::Path,
@@ -469,8 +499,10 @@ impl DifferentialTestReport {
             bool,
         )],
     ) -> TestSummary {
-        let total_operations = results.len() as u32;
-        let equivalent_operations = results.iter().filter(|(_, _, equiv)| *equiv).count() as u32;
+        let total_operations = u32::try_from(results.len()).unwrap_or(u32::MAX);
+        let equivalent_operations =
+            u32::try_from(results.iter().filter(|(_, _, equiv)| *equiv).count())
+                .unwrap_or(u32::MAX);
         let divergent_operations = total_operations - equivalent_operations;
         let equivalence_rate = f64::from(equivalent_operations) / f64::from(total_operations);
 
@@ -521,15 +553,15 @@ impl DifferentialTestReport {
         // Collect stats per implementation
         for impl_type in implementations {
             let mut execution_times = Vec::new();
-            let mut success_count = 0;
-            let mut total_count = 0;
+            let mut success_count: u32 = 0;
+            let mut total_count: u32 = 0;
 
             for (_, impl_results, _) in results {
                 if let Some(result) = impl_results.get(impl_type) {
                     total_count += 1;
                     if result.success {
                         success_count += 1;
-                        execution_times.push(result.execution_time_nanos as f64);
+                        execution_times.push(nanos_to_f64(result.execution_time_nanos));
                     }
                 }
             }
@@ -537,18 +569,26 @@ impl DifferentialTestReport {
             let mean_time = if execution_times.is_empty() {
                 0.0
             } else {
-                execution_times.iter().sum::<f64>() / execution_times.len() as f64
+                let len_f64 = count_to_f64(execution_times.len());
+                execution_times.iter().sum::<f64>() / len_f64
             };
 
             let std_dev = if execution_times.len() < 2 {
                 0.0
             } else {
+                let denominator = count_to_f64(execution_times.len().saturating_sub(1));
                 let variance = execution_times
                     .iter()
                     .map(|t| (t - mean_time).powi(2))
                     .sum::<f64>()
-                    / (execution_times.len() - 1) as f64;
+                    / denominator;
                 variance.sqrt()
+            };
+
+            let success_rate = if total_count == 0 {
+                0.0
+            } else {
+                f64::from(success_count) / f64::from(total_count)
             };
 
             per_implementation.insert(
@@ -558,7 +598,7 @@ impl DifferentialTestReport {
                     mean_execution_time_nanos: mean_time,
                     std_dev_execution_time_nanos: std_dev,
                     peak_memory_bytes: None,
-                    success_rate: f64::from(success_count) / f64::from(total_count),
+                    success_rate,
                 },
             );
         }
@@ -645,8 +685,12 @@ impl DifferentialTestReport {
                 .collect();
 
             if let (Some(&min_time), Some(&max_time)) = (
-                times.iter().min_by(|a, b| a.partial_cmp(b).unwrap()),
-                times.iter().max_by(|a, b| a.partial_cmp(b).unwrap()),
+                times
+                    .iter()
+                    .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)),
+                times
+                    .iter()
+                    .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)),
             ) {
                 if max_time > min_time * 2.0 {
                     insights.push(Insight {
@@ -702,4 +746,36 @@ pub enum ReportFormat {
     Text,
     /// HTML report with styling
     Html,
+}
+
+fn count_to_f64(value: usize) -> f64 {
+    let capped = u64::try_from(value).unwrap_or(u64::MAX);
+    u64_to_f64(capped)
+}
+
+fn nanos_to_f64(nanos: u64) -> f64 {
+    std::time::Duration::from_nanos(nanos).as_secs_f64() * 1_000_000_000.0
+}
+
+fn u64_to_f64(value: u64) -> f64 {
+    const SHIFT: u32 = 32;
+    const FACTOR: f64 = 4_294_967_296.0; // 2^32
+
+    let high = value >> SHIFT;
+    let low = value & 0xFFFF_FFFF;
+
+    let high_part = u32::try_from(high).map_or_else(|_| f64::from(u32::MAX), f64::from);
+    let low_part = u32::try_from(low).map_or_else(|_| f64::from(u32::MAX), f64::from);
+
+    high_part.mul_add(FACTOR, low_part)
+}
+
+const fn insight_category_name(category: InsightCategory) -> &'static str {
+    match category {
+        InsightCategory::Correctness => "Correctness",
+        InsightCategory::Performance => "Performance",
+        InsightCategory::ErrorHandling => "Error Handling",
+        InsightCategory::Precision => "Precision",
+        InsightCategory::Complexity => "Complexity",
+    }
 }

@@ -5,9 +5,11 @@
 
 use crate::activation::{
     ActivationError, ActivationResult, DecayFunction, EdgeType, MemoryGraph, NodeId,
+    storage_aware::StorageTier,
 };
 use dashmap::DashMap;
 use std::collections::{HashSet, VecDeque};
+use std::convert::TryFrom;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use uuid::Uuid;
@@ -15,19 +17,42 @@ use uuid::Uuid;
 /// Cache-optimized breadth-first traversal for activation spreading
 pub struct BreadthFirstTraversal {
     visited: DashMap<NodeId, AtomicUsize>, // Visit count per node
-    max_visits: usize,                     // Cycle detection limit
-    prefetch_distance: usize,              // Cache prefetch lookahead
+    tier_budgets: std::collections::HashMap<StorageTier, usize>,
+    default_budget: usize,
+    prefetch_distance: usize, // Cache prefetch lookahead
 }
 
 impl BreadthFirstTraversal {
     /// Create new breadth-first traversal
     #[must_use]
-    pub fn new(max_visits: usize, prefetch_distance: usize) -> Self {
+    pub fn new(
+        tier_budgets: std::collections::HashMap<StorageTier, usize>,
+        prefetch_distance: usize,
+    ) -> Self {
+        let default_budget = tier_budgets
+            .get(&StorageTier::Hot)
+            .copied()
+            .or_else(|| tier_budgets.values().copied().min())
+            .unwrap_or(3);
         Self {
             visited: DashMap::new(),
-            max_visits,
+            tier_budgets,
+            default_budget,
             prefetch_distance,
         }
+    }
+
+    /// Helper to create traversal with the same budget for every tier.
+    #[must_use]
+    pub fn with_uniform_budget(max_visits: usize, prefetch_distance: usize) -> Self {
+        Self::new(
+            std::collections::HashMap::from([
+                (StorageTier::Hot, max_visits),
+                (StorageTier::Warm, max_visits.saturating_add(1)),
+                (StorageTier::Cold, max_visits.saturating_add(2)),
+            ]),
+            prefetch_distance,
+        )
     }
 
     /// Execute breadth-first traversal from seed nodes
@@ -60,22 +85,31 @@ impl BreadthFirstTraversal {
             // Process current level
             while let Some((node_id, activation, depth)) = current_level.pop_front() {
                 // Check visit count for cycle detection
+                let tier = StorageTier::from_depth(depth);
+                let budget = self
+                    .tier_budgets
+                    .get(&tier)
+                    .copied()
+                    .unwrap_or(self.default_budget);
+
                 let (_current_visits, should_continue) = {
                     let visits_entry = self
                         .visited
                         .entry(node_id.clone())
                         .or_insert_with(|| AtomicUsize::new(0));
-                    
+
                     let current_visits = visits_entry.load(Ordering::Relaxed);
-                    if current_visits >= self.max_visits {
-                        (current_visits, true) // Skip nodes visited too many times
+                    let should_skip = if current_visits >= budget {
+                        true
                     } else {
                         // Increment visit count since we're processing this node
                         visits_entry.fetch_add(1, Ordering::Relaxed);
-                        (current_visits, false)
-                    }
+                        false
+                    };
+                    drop(visits_entry);
+                    (current_visits, should_skip)
                 };
-                
+
                 if should_continue {
                     continue;
                 }
@@ -87,22 +121,23 @@ impl BreadthFirstTraversal {
 
                 // Get neighbors and add to next level
                 let node_uuid = Uuid::new_v5(&Uuid::NAMESPACE_OID, node_id.as_bytes());
-                if let Ok(neighbors) = graph.get_neighbors(&node_uuid) {
-                    let decay_factor = decay_function.apply(depth + 1);
+                let neighbors = graph
+                    .get_neighbors(&node_uuid)
+                    .map_err(|err| ActivationError::ThreadingError(err.to_string()))?;
+                let decay_factor = decay_function.apply(depth + 1);
 
-                    for (neighbor_id, weight) in neighbors {
-                        let neighbor_node_id = neighbor_id.to_string();
-                        let new_activation = Self::calculate_activation(
-                            activation,
-                            weight,
-                            decay_factor,
-                            EdgeType::Excitatory, // Default edge type
-                        );
+                for (neighbor_id, weight) in neighbors {
+                    let neighbor_node_id = neighbor_id.to_string();
+                    let new_activation = Self::calculate_activation(
+                        activation,
+                        weight,
+                        decay_factor,
+                        EdgeType::Excitatory, // Default edge type
+                    );
 
-                        if new_activation > 0.01 {
-                            // Threshold check
-                            next_level.push_back((neighbor_node_id, new_activation, depth + 1));
-                        }
+                    if new_activation > 0.01 {
+                        // Threshold check
+                        next_level.push_back((neighbor_node_id, new_activation, depth + 1));
                     }
                 }
 
@@ -222,21 +257,22 @@ impl DepthFirstTraversal {
 
             // Add neighbors to stack (in reverse order for proper DFS ordering)
             let node_uuid = Uuid::new_v5(&Uuid::NAMESPACE_OID, node_id.as_bytes());
-            if let Ok(neighbors) = graph.get_neighbors(&node_uuid) {
-                let decay_factor = decay_function.apply(depth + 1);
+            let neighbors = graph
+                .get_neighbors(&node_uuid)
+                .map_err(|err| ActivationError::ThreadingError(err.to_string()))?;
+            let decay_factor = decay_function.apply(depth + 1);
 
-                for (neighbor_id, weight) in neighbors.iter().rev() {
-                    let neighbor_node_id = neighbor_id.to_string();
-                    let new_activation = BreadthFirstTraversal::calculate_activation(
-                        activation,
-                        *weight,
-                        decay_factor,
-                        EdgeType::Excitatory, // Default edge type
-                    );
+            for (neighbor_id, weight) in neighbors.iter().rev() {
+                let neighbor_node_id = neighbor_id.to_string();
+                let new_activation = BreadthFirstTraversal::calculate_activation(
+                    activation,
+                    *weight,
+                    decay_factor,
+                    EdgeType::Excitatory, // Default edge type
+                );
 
-                    if new_activation > 0.01 {
-                        stack.push((neighbor_node_id, new_activation, depth + 1));
-                    }
+                if new_activation > 0.01 {
+                    stack.push((neighbor_node_id, new_activation, depth + 1));
                 }
             }
 
@@ -283,7 +319,7 @@ impl AdaptiveTraversal {
         branching_threshold: f32,
     ) -> Self {
         Self {
-            bfs: BreadthFirstTraversal::new(max_visits, prefetch_distance),
+            bfs: BreadthFirstTraversal::with_uniform_budget(max_visits, prefetch_distance),
             dfs: DepthFirstTraversal::new(recursion_limit),
             branching_threshold,
         }
@@ -306,7 +342,7 @@ impl AdaptiveTraversal {
         F: FnMut(&NodeId, f32, u16) -> bool,
     {
         // Analyze graph structure to choose traversal method
-        let avg_branching_factor = self.estimate_branching_factor(graph, seed_nodes);
+        let avg_branching_factor = Self::estimate_branching_factor(graph, seed_nodes);
 
         if avg_branching_factor > self.branching_threshold {
             // High branching factor - use BFS for better cache locality
@@ -320,7 +356,7 @@ impl AdaptiveTraversal {
     }
 
     /// Estimate average branching factor
-    fn estimate_branching_factor(&self, graph: &MemoryGraph, seed_nodes: &[(NodeId, f32)]) -> f32 {
+    fn estimate_branching_factor(graph: &MemoryGraph, seed_nodes: &[(NodeId, f32)]) -> f32 {
         let sample_size = std::cmp::min(seed_nodes.len(), 10);
         let mut total_neighbors = 0;
         let mut sampled_nodes = 0;
@@ -334,7 +370,10 @@ impl AdaptiveTraversal {
         }
 
         if sampled_nodes > 0 {
-            total_neighbors as f32 / sampled_nodes as f32
+            let total_neighbors = u64::try_from(total_neighbors).unwrap_or(u64::MAX);
+            let sampled_nodes = u64::try_from(sampled_nodes).unwrap_or(1);
+            let average = u64_to_f64(total_neighbors) / u64_to_f64(sampled_nodes);
+            f64_to_f32(average)
         } else {
             0.0
         }
@@ -344,6 +383,20 @@ impl AdaptiveTraversal {
     pub fn reset(&self) {
         self.bfs.reset();
         self.dfs.reset();
+    }
+}
+
+const fn u64_to_f64(value: u64) -> f64 {
+    #[allow(clippy::cast_precision_loss)]
+    {
+        value as f64
+    }
+}
+
+const fn f64_to_f32(value: f64) -> f32 {
+    #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+    {
+        value as f32
     }
 }
 
@@ -385,6 +438,9 @@ impl ParallelBreadthFirstTraversal {
             .map(|(id, act)| (id.clone(), *act, 0))
             .collect();
 
+        let chunk_size = self.chunk_size.max(1);
+        let max_batch = chunk_size.saturating_mul(self.num_workers.max(1));
+
         for _depth in 0..max_depth {
             if current_level.is_empty() {
                 break;
@@ -392,24 +448,35 @@ impl ParallelBreadthFirstTraversal {
 
             let mut next_level = VecDeque::new();
 
-            while let Some((node_id, activation, depth)) = current_level.pop_front() {
-                results.push((node_id.clone(), activation, depth));
+            while !current_level.is_empty() {
+                let mut chunk = Vec::with_capacity(max_batch.min(current_level.len()));
+                for _ in 0..max_batch {
+                    if let Some(item) = current_level.pop_front() {
+                        chunk.push(item);
+                    } else {
+                        break;
+                    }
+                }
 
-                let node_uuid = Uuid::new_v5(&Uuid::NAMESPACE_OID, node_id.as_bytes());
-                if let Ok(neighbors) = graph.get_neighbors(&node_uuid) {
-                    let decay_factor = decay_function.apply(depth + 1);
+                for (node_id, activation, depth) in chunk {
+                    results.push((node_id.clone(), activation, depth));
 
-                    for (neighbor_id, weight) in neighbors {
-                        let neighbor_node_id = neighbor_id.to_string();
-                        let new_activation = BreadthFirstTraversal::calculate_activation(
-                            activation,
-                            weight,
-                            decay_factor,
-                            EdgeType::Excitatory, // Default edge type
-                        );
+                    let node_uuid = Uuid::new_v5(&Uuid::NAMESPACE_OID, node_id.as_bytes());
+                    if let Ok(neighbors) = graph.get_neighbors(&node_uuid) {
+                        let decay_factor = decay_function.apply(depth + 1);
 
-                        if new_activation > 0.01 {
-                            next_level.push_back((neighbor_node_id, new_activation, depth + 1));
+                        for (neighbor_id, weight) in neighbors {
+                            let neighbor_node_id = neighbor_id.to_string();
+                            let new_activation = BreadthFirstTraversal::calculate_activation(
+                                activation,
+                                weight,
+                                decay_factor,
+                                EdgeType::Excitatory, // Default edge type
+                            );
+
+                            if new_activation > 0.01 {
+                                next_level.push_back((neighbor_node_id, new_activation, depth + 1));
+                            }
                         }
                     }
                 }
@@ -424,18 +491,49 @@ impl ParallelBreadthFirstTraversal {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
     use super::*;
-    use crate::activation::{EdgeType, ActivationGraphExt};
+    use crate::activation::{ActivationGraphExt, EdgeType};
 
     fn create_test_graph() -> MemoryGraph {
         let graph = crate::activation::create_activation_graph();
 
         // Create test graph: A -> B -> C, A -> D, B -> D
-        ActivationGraphExt::add_edge(&graph, "A".to_string(), "B".to_string(), 0.8, EdgeType::Excitatory);
-        ActivationGraphExt::add_edge(&graph, "B".to_string(), "C".to_string(), 0.6, EdgeType::Excitatory);
-        ActivationGraphExt::add_edge(&graph, "A".to_string(), "D".to_string(), 0.4, EdgeType::Excitatory);
-        ActivationGraphExt::add_edge(&graph, "B".to_string(), "D".to_string(), 0.5, EdgeType::Excitatory);
-        ActivationGraphExt::add_edge(&graph, "D".to_string(), "E".to_string(), 0.3, EdgeType::Inhibitory);
+        ActivationGraphExt::add_edge(
+            &graph,
+            "A".to_string(),
+            "B".to_string(),
+            0.8,
+            EdgeType::Excitatory,
+        );
+        ActivationGraphExt::add_edge(
+            &graph,
+            "B".to_string(),
+            "C".to_string(),
+            0.6,
+            EdgeType::Excitatory,
+        );
+        ActivationGraphExt::add_edge(
+            &graph,
+            "A".to_string(),
+            "D".to_string(),
+            0.4,
+            EdgeType::Excitatory,
+        );
+        ActivationGraphExt::add_edge(
+            &graph,
+            "B".to_string(),
+            "D".to_string(),
+            0.5,
+            EdgeType::Excitatory,
+        );
+        ActivationGraphExt::add_edge(
+            &graph,
+            "D".to_string(),
+            "E".to_string(),
+            0.3,
+            EdgeType::Inhibitory,
+        );
 
         graph
     }
@@ -443,7 +541,7 @@ mod tests {
     #[test]
     fn test_breadth_first_traversal() {
         let graph = create_test_graph();
-        let bfs = BreadthFirstTraversal::new(3, 2);
+        let bfs = BreadthFirstTraversal::with_uniform_budget(3, 2);
         let decay_fn = DecayFunction::Exponential { rate: 0.5 };
 
         let mut visited_nodes = Vec::new();
@@ -551,10 +649,9 @@ mod tests {
     #[test]
     fn test_branching_factor_estimation() {
         let graph = create_test_graph();
-        let adaptive = AdaptiveTraversal::new(3, 2, 100, 2.0);
 
         let seed_nodes = vec![("A".to_string(), 1.0)];
-        let branching_factor = adaptive.estimate_branching_factor(&graph, &seed_nodes);
+        let branching_factor = AdaptiveTraversal::estimate_branching_factor(&graph, &seed_nodes);
 
         // Node A has 2 neighbors (B and D)
         assert!((branching_factor - 2.0).abs() < 1e-6);
@@ -562,16 +659,28 @@ mod tests {
 
     #[test]
     fn test_cycle_detection() {
-        use crate::graph::create_concurrent_graph;
         use crate::activation::ActivationGraphExt;
+        use crate::graph::create_concurrent_graph;
         let graph = create_concurrent_graph();
 
         // Create cycle: A -> B -> A
         // Use the ActivationGraphExt trait for String-based node IDs
-        ActivationGraphExt::add_edge(&graph, "A".to_string(), "B".to_string(), 0.8, EdgeType::Excitatory);
-        ActivationGraphExt::add_edge(&graph, "B".to_string(), "A".to_string(), 0.8, EdgeType::Excitatory);
+        ActivationGraphExt::add_edge(
+            &graph,
+            "A".to_string(),
+            "B".to_string(),
+            0.8,
+            EdgeType::Excitatory,
+        );
+        ActivationGraphExt::add_edge(
+            &graph,
+            "B".to_string(),
+            "A".to_string(),
+            0.8,
+            EdgeType::Excitatory,
+        );
 
-        let bfs = BreadthFirstTraversal::new(2, 1); // Max 2 visits
+        let bfs = BreadthFirstTraversal::with_uniform_budget(2, 1); // Max 2 visits
         let decay_fn = DecayFunction::Exponential { rate: 0.3 };
 
         let mut visit_count = 0;

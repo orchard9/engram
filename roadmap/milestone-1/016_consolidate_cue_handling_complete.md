@@ -1,12 +1,17 @@
 # Task 016: Consolidate Cue Handling Patterns
 
-## Status: Pending
+## Status: Complete ✅
 ## Priority: P1 - Architecture Quality
 ## Estimated Effort: 1 day
 ## Dependencies: Tasks 014 (error handling), 015 (function refactoring)
 
 ## Objective
 Eliminate code duplication by creating a centralized cue handling strategy that replaces the 7 identical pattern-matching blocks scattered across different modules.
+
+## Post-Completion Notes
+- `CueDispatcher`/`CueHandler` live under `engram-core/src/cue`; audit legacy call sites periodically to retire any remaining ad-hoc `match cue.cue_type` blocks that slipped through code review (`rg "match cue.cue_type" engram-core/src`).
+- Handler registration is static—new cue types must be added to `CueDispatcher::new`; add an integration test per module so future handlers cannot ship without dispatcher wiring (`engram-core/src/cue/dispatcher.rs:53`).
+- The dispatcher relies on context traits provided by the store; document the expectations (`search_similar_episodes`, `apply_decay`) for feature-flagged builds so null providers continue to degrade gracefully (`engram-core/src/cue/dispatcher.rs:33`).
 
 ## Current State Analysis
 - **Critical Issue**: Same cue pattern-matching logic duplicated in 7 locations

@@ -4,6 +4,8 @@
 //! performance to unsafe alternatives, demonstrating that compile-time safety
 //! comes without performance compromise.
 
+#![allow(missing_docs)]
+
 use chrono::Utc;
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use engram_core::Confidence;
@@ -24,7 +26,7 @@ fn benchmark_memory_construction(c: &mut Criterion) {
                 .decay_rate(black_box(0.1))
                 .build();
             black_box(memory);
-        })
+        });
     });
 
     group.bench_function("direct_construction", |b| {
@@ -37,7 +39,7 @@ fn benchmark_memory_construction(c: &mut Criterion) {
             // Note: Direct construction doesn't allow setting content/decay_rate
             // This demonstrates that builder provides more functionality at same cost
             black_box(memory);
-        })
+        });
     });
 
     group.finish();
@@ -61,7 +63,7 @@ fn benchmark_episode_construction(c: &mut Criterion) {
                 .decay_rate(black_box(0.05))
                 .build();
             black_box(episode);
-        })
+        });
     });
 
     group.bench_function("direct_construction", |b| {
@@ -75,7 +77,7 @@ fn benchmark_episode_construction(c: &mut Criterion) {
             );
             // Direct construction provides fewer customization options
             black_box(episode);
-        })
+        });
     });
 
     group.finish();
@@ -95,7 +97,7 @@ fn benchmark_cue_construction(c: &mut Criterion) {
                 .max_results(black_box(50))
                 .build();
             black_box(cue);
-        })
+        });
     });
 
     group.bench_function("direct_embedding_cue", |b| {
@@ -106,7 +108,7 @@ fn benchmark_cue_construction(c: &mut Criterion) {
                 black_box(Confidence::HIGH),
             );
             black_box(cue);
-        })
+        });
     });
 
     group.bench_function("typestate_semantic_cue", |b| {
@@ -120,7 +122,7 @@ fn benchmark_cue_construction(c: &mut Criterion) {
                 .max_results(black_box(25))
                 .build();
             black_box(cue);
-        })
+        });
     });
 
     group.bench_function("direct_semantic_cue", |b| {
@@ -131,7 +133,7 @@ fn benchmark_cue_construction(c: &mut Criterion) {
                 black_box(Confidence::MEDIUM),
             );
             black_box(cue);
-        })
+        });
     });
 
     group.finish();
@@ -168,7 +170,7 @@ fn benchmark_complex_patterns(c: &mut Criterion) {
                 .build();
 
             black_box((memory, episode, cue));
-        })
+        });
     });
 
     group.bench_function("batch_memory_creation", |b| {
@@ -176,14 +178,17 @@ fn benchmark_complex_patterns(c: &mut Criterion) {
             let memories: Vec<_> = (0..10)
                 .map(|i| {
                     MemoryBuilder::new()
-                        .id(black_box(format!("batch_memory_{}", i)))
-                        .embedding(black_box([i as f32 * 0.1; 768]))
+                        .id(black_box(format!("batch_memory_{i}")))
+                        .embedding(black_box({
+                            #[allow(clippy::cast_precision_loss)]
+                            [i as f32 * 0.1; 768]
+                        }))
                         .confidence(black_box(Confidence::MEDIUM))
                         .build()
                 })
                 .collect();
             black_box(memories);
-        })
+        });
     });
 
     group.finish();
@@ -213,7 +218,7 @@ fn benchmark_memory_operations(c: &mut Criterion) {
             let activation = memory.activation();
             memory.add_activation(black_box(0.1));
             black_box(activation);
-        })
+        });
     });
 
     group.bench_function("memory_confidence_ops", |b| {
@@ -222,7 +227,7 @@ fn benchmark_memory_operations(c: &mut Criterion) {
             let accurate = memory.is_accurate();
             let trustworthy = memory.is_trustworthy();
             black_box((reliable, accurate, trustworthy));
-        })
+        });
     });
 
     group.bench_function("episode_operations", |b| {
@@ -232,7 +237,7 @@ fn benchmark_memory_operations(c: &mut Criterion) {
             let authentic = episode.feels_authentic();
             episode.record_recall();
             black_box((vivid, detailed, authentic));
-        })
+        });
     });
 
     group.finish();
@@ -254,7 +259,7 @@ fn benchmark_compilation_patterns(c: &mut Criterion) {
             let builder4 = builder3.confidence(black_box(Confidence::HIGH));
             let memory = builder4.build();
             black_box(memory);
-        })
+        });
     });
 
     group.bench_function("phantom_type_overhead", |b| {
@@ -267,7 +272,7 @@ fn benchmark_compilation_patterns(c: &mut Criterion) {
                 .confidence(black_box(Confidence::LOW))
                 .build();
             black_box(memory);
-        })
+        });
     });
 
     group.finish();

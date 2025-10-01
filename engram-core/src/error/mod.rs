@@ -3,12 +3,12 @@
 //! Combines cognitive error design with production-ready recovery strategies
 
 pub mod cognitive;
-pub mod recovery;
 pub mod cue;
+pub mod recovery;
 
 // Re-export core error types from cognitive module
 pub use cognitive::{
-    CognitiveError, CognitiveErrorBuilder, ErrorContext, PartialResult, CognitiveContext,
+    CognitiveContext, CognitiveError, CognitiveErrorBuilder, ErrorContext, PartialResult,
 };
 
 // Re-export recovery types and utilities

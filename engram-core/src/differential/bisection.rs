@@ -150,7 +150,7 @@ impl BisectionSession {
                 let comparison = tester.compare_results(&results);
 
                 let divergent = !comparison.equivalent;
-                let insight = self.generate_insight(&test_operation, &results, divergent);
+                let insight = Self::generate_insight(&test_operation, &results, divergent);
 
                 let bisection_result = BisectionResult {
                     operation: test_operation.clone(),
@@ -324,7 +324,6 @@ impl BisectionSession {
 
     /// Generate insight from a bisection test result
     fn generate_insight(
-        &self,
         operation: &DifferentialOperation,
         results: &HashMap<Implementation, OperationResult>,
         divergent: bool,
@@ -467,9 +466,9 @@ impl BisectionSession {
 
         BisectionReport {
             original_operation: self.original_operation.clone(),
-            total_tests_performed: total_tests as u32,
-            divergent_tests: divergent_tests as u32,
-            equivalent_tests: equivalent_tests as u32,
+            total_tests_performed: u32::try_from(total_tests).unwrap_or(u32::MAX),
+            divergent_tests: u32::try_from(divergent_tests).unwrap_or(u32::MAX),
+            equivalent_tests: u32::try_from(equivalent_tests).unwrap_or(u32::MAX),
             identified_patterns: patterns,
             final_hypothesis: self.current_hypothesis.clone(),
             recommendations,
@@ -485,7 +484,7 @@ impl BisectionSession {
         let boundary_tests: Vec<_> = self
             .bisection_results
             .iter()
-            .filter(|r| self.is_boundary_test(&r.operation))
+            .filter(|r| Self::is_boundary_test(&r.operation))
             .collect();
 
         if !boundary_tests.is_empty() {
@@ -517,11 +516,14 @@ impl BisectionSession {
     }
 
     /// Check if an operation is a boundary test
-    fn is_boundary_test(&self, operation: &DifferentialOperation) -> bool {
+    fn is_boundary_test(operation: &DifferentialOperation) -> bool {
         match operation {
             DifferentialOperation::ConfidenceAnd { conf_a, conf_b }
             | DifferentialOperation::ConfidenceOr { conf_a, conf_b } => {
-                *conf_a == 0.0 || *conf_a == 1.0 || *conf_b == 0.0 || *conf_b == 1.0
+                const ERROR_MARGIN: f32 = 1e-6;
+                let near_zero = |value: &f32| value.abs() < ERROR_MARGIN;
+                let near_one = |value: &f32| (value - 1.0).abs() < ERROR_MARGIN;
+                near_zero(conf_a) || near_one(conf_a) || near_zero(conf_b) || near_one(conf_b)
             }
             DifferentialOperation::ConfidenceFromSuccesses { successes, total } => {
                 *successes == 0 || *successes == *total || *total <= 1

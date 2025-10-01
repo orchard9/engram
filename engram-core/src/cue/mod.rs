@@ -9,10 +9,7 @@ pub mod handlers;
 #[cfg(test)]
 mod tests;
 
-pub use dispatcher::{CueDispatcher, CueHandler, CueContext};
+pub use dispatcher::{CueContext, CueDispatcher, CueHandler};
 pub use handlers::{
-    EmbeddingCueHandler,
-    ContextCueHandler, 
-    SemanticCueHandler,
-    TemporalCueHandler,
+    ContextCueHandler, EmbeddingCueHandler, SemanticCueHandler, TemporalCueHandler,
 };

@@ -12,16 +12,16 @@ description = "Protocol buffer definitions for Engram cognitive graph database"
 readme = "../README.md"
 
 [dependencies]
-prost = "0.12"
-prost-types = "0.12"
-tonic = { version = "0.10", features = ["transport", "tls"] }
+prost = "0.13"
+prost-types = "0.13"
+tonic = { version = "0.13", features = ["transport", "tls-webpki-roots"] }
 chrono = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-uuid = { version = "1.6", features = ["v4", "serde"] }
+uuid = { version = "1.6.1", features = ["v4", "serde"] }
 
 [build-dependencies]
-tonic-build = "0.10"
+tonic-build = "0.13"
 
 [lib]
 name = "engram_proto"

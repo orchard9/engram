@@ -1,7 +1,12 @@
 //! Tests for gRPC service implementation
 
+#![allow(clippy::uninlined_format_args)]
+#![allow(clippy::too_many_lines)]
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_sign_loss)]
+
 use engram_cli::grpc::MemoryService;
-use engram_core::graph::MemoryGraph;
+use engram_core::graph::create_concurrent_graph;
 use engram_proto::engram_service_client::EngramServiceClient;
 use engram_proto::*;
 use std::sync::Arc;
@@ -10,7 +15,7 @@ use tonic::Request;
 
 /// Start a test gRPC server and return the port
 async fn start_test_grpc_server() -> u16 {
-    let graph = Arc::new(RwLock::new(MemoryGraph::new()));
+    let graph = Arc::new(RwLock::new(create_concurrent_graph()));
     let service = MemoryService::new(graph);
 
     // Find an available port

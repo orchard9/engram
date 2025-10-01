@@ -1,5 +1,22 @@
 //! Engram CLI library functions for testing
 
+#![allow(clippy::multiple_crate_versions)]
+#![allow(clippy::too_many_lines)]
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_sign_loss)]
+#![allow(clippy::cast_precision_loss)]
+#![allow(clippy::cognitive_complexity)]
+#![allow(clippy::map_unwrap_or)]
+#![allow(clippy::uninlined_format_args)]
+#![allow(clippy::implicit_hasher)]
+#![allow(clippy::collection_is_never_read)]
+#![allow(clippy::doc_markdown)]
+#![allow(clippy::needless_pass_by_value)]
+#![allow(clippy::manual_clamp)]
+#![allow(clippy::indexing_slicing)]
+#![allow(clippy::match_single_binding)]
+#![allow(clippy::single_match)]
+
 pub mod api;
 pub mod benchmark_simple;
 pub mod cli;
@@ -17,6 +34,10 @@ pub async fn is_port_available(port: u16) -> bool {
 }
 
 /// Find an available port starting from the preferred port
+///
+/// # Errors
+///
+/// Returns error if no available ports can be found
 pub async fn find_available_port(preferred_port: u16) -> Result<u16> {
     // Try the preferred port first
     if is_port_available(preferred_port).await {
@@ -42,6 +63,10 @@ pub async fn find_available_port(preferred_port: u16) -> Result<u16> {
 }
 
 /// Start a test server on a specific port for integration tests
+///
+/// # Errors
+///
+/// Returns error if server cannot bind to port or start
 pub async fn start_test_server(port: u16) -> Result<()> {
     use axum::{Router, response::Json, routing::get};
     use serde_json::json;

@@ -28,6 +28,8 @@ impl OscillatoryConstraints {
     /// Compute theta wave modulation for given phase (0.0-1.0)
     #[must_use]
     pub fn theta_modulation(&self, phase: f32) -> f32 {
-        0.1f32.mul_add((phase * 2.0 * std::f32::consts::PI).sin(), 1.0)
+        let normalized_frequency = (self.theta_freq / 6.0).clamp(0.5, 1.5);
+        let angular_phase = phase * normalized_frequency * std::f32::consts::TAU;
+        0.1f32.mul_add(angular_phase.sin(), 1.0)
     }
 }

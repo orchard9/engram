@@ -10,6 +10,7 @@ use engram_core::compute::{self, VectorOps};
 use engram_core::compute::avx2::Avx2VectorOps;
 
 const EPSILON: f32 = 1e-6;
+const BENCH_ITERATIONS: u32 = 10_000;
 
 /// Test that all implementations produce the same results
 #[test]
@@ -41,15 +42,15 @@ fn test_cosine_similarity_consistency() {
         (
             {
                 let mut v = [0.0f32; 768];
-                for i in 0..768 {
-                    v[i] = if i % 2 == 0 { 1.0 } else { -1.0 };
+                for (idx, slot) in v.iter_mut().enumerate() {
+                    *slot = if idx % 2 == 0 { 1.0 } else { -1.0 };
                 }
                 v
             },
             {
                 let mut v = [0.0f32; 768];
-                for i in 0..768 {
-                    v[i] = if i % 2 == 0 { -1.0 } else { 1.0 };
+                for (idx, slot) in v.iter_mut().enumerate() {
+                    *slot = if idx % 2 == 0 { -1.0 } else { 1.0 };
                 }
                 v
             },
@@ -63,16 +64,12 @@ fn test_cosine_similarity_consistency() {
 
         assert!(
             (scalar_result - simd_result).abs() < EPSILON,
-            "Results differ: scalar={}, simd={}",
-            scalar_result,
-            simd_result
+            "Results differ: scalar={scalar_result}, simd={simd_result}"
         );
 
         assert!(
             (scalar_result - expected).abs() < 0.01,
-            "Unexpected result: got={}, expected={}",
-            scalar_result,
-            expected
+            "Unexpected result: got={scalar_result}, expected={expected}"
         );
     }
 }
@@ -94,16 +91,12 @@ fn test_dot_product_consistency() {
 
         assert!(
             (scalar_result - simd_result).abs() < 0.01,
-            "Dot product differs: scalar={}, simd={}",
-            scalar_result,
-            simd_result
+            "Dot product differs: scalar={scalar_result}, simd={simd_result}"
         );
 
         assert!(
             (scalar_result - expected).abs() < 0.01,
-            "Unexpected dot product: got={}, expected={}",
-            scalar_result,
-            expected
+            "Unexpected dot product: got={scalar_result}, expected={expected}"
         );
     }
 }
@@ -123,15 +116,12 @@ fn test_l2_norm_consistency() {
 
     assert!(
         (scalar_norm - simd_norm).abs() < EPSILON,
-        "L2 norm differs: scalar={}, simd={}",
-        scalar_norm,
-        simd_norm
+        "L2 norm differs: scalar={scalar_norm}, simd={simd_norm}"
     );
 
     assert!(
         (scalar_norm - 5.0).abs() < EPSILON,
-        "Unexpected L2 norm: got={}, expected=5.0",
-        scalar_norm
+        "Unexpected L2 norm: got={scalar_norm}, expected=5.0"
     );
 }
 
@@ -155,10 +145,7 @@ fn test_batch_cosine_similarity() {
     for (i, (scalar_res, simd_res)) in scalar_results.iter().zip(simd_results.iter()).enumerate() {
         assert!(
             (scalar_res - simd_res).abs() < EPSILON,
-            "Batch result {} differs: scalar={}, simd={}",
-            i,
-            scalar_res,
-            simd_res
+            "Batch result {i} differs: scalar={scalar_res}, simd={simd_res}"
         );
     }
 }
@@ -175,15 +162,15 @@ fn test_vector_operations() {
     let scalar_add = scalar_ops.vector_add_768(&a, &b);
     let simd_add = simd_ops.vector_add_768(&a, &b);
 
-    for i in 0..768 {
+    for (index, (scalar, simd)) in scalar_add.iter().zip(simd_add.iter()).enumerate() {
         assert!(
-            (scalar_add[i] - simd_add[i]).abs() < EPSILON,
-            "Addition differs at index {}: scalar={}, simd={}",
-            i,
-            scalar_add[i],
-            simd_add[i]
+            (scalar - simd).abs() < EPSILON,
+            "Addition differs at index {index}: scalar={scalar}, simd={simd}"
         );
-        assert_eq!(scalar_add[i], 3.0);
+        assert!(
+            (scalar - 3.0).abs() < EPSILON,
+            "Expected 3.0 at index {index}, got {scalar}"
+        );
     }
 
     // Test scaling
@@ -191,15 +178,15 @@ fn test_vector_operations() {
     let scalar_scale = scalar_ops.vector_scale_768(&a, scale);
     let simd_scale = simd_ops.vector_scale_768(&a, scale);
 
-    for i in 0..768 {
+    for (index, (scalar, simd)) in scalar_scale.iter().zip(simd_scale.iter()).enumerate() {
         assert!(
-            (scalar_scale[i] - simd_scale[i]).abs() < EPSILON,
-            "Scaling differs at index {}: scalar={}, simd={}",
-            i,
-            scalar_scale[i],
-            simd_scale[i]
+            (scalar - simd).abs() < EPSILON,
+            "Scaling differs at index {index}: scalar={scalar}, simd={simd}"
         );
-        assert_eq!(scalar_scale[i], 2.5);
+        assert!(
+            (scalar - scale).abs() < EPSILON,
+            "Expected {scale} at index {index}, got {scalar}"
+        );
     }
 }
 
@@ -216,15 +203,15 @@ fn test_weighted_average() {
     let scalar_avg = scalar_ops.weighted_average_768(&vectors, &weights);
     let simd_avg = simd_ops.weighted_average_768(&vectors, &weights);
 
-    for i in 0..768 {
+    for (index, (scalar, simd)) in scalar_avg.iter().zip(simd_avg.iter()).enumerate() {
         assert!(
-            (scalar_avg[i] - simd_avg[i]).abs() < EPSILON,
-            "Weighted average differs at index {}: scalar={}, simd={}",
-            i,
-            scalar_avg[i],
-            simd_avg[i]
+            (scalar - simd).abs() < EPSILON,
+            "Weighted average differs at index {index}: scalar={scalar}, simd={simd}"
         );
-        assert_eq!(scalar_avg[i], 2.0); // Average of 1 and 3
+        assert!(
+            (scalar - 2.0).abs() < EPSILON,
+            "Expected 2.0 at index {index}, got {scalar}"
+        );
     }
 }
 
@@ -237,7 +224,10 @@ fn test_edge_cases() {
     let normal = [1.0f32; 768];
 
     let similarity = ops.cosine_similarity_768(&zero, &normal);
-    assert_eq!(similarity, 0.0, "Zero vector should have 0 similarity");
+    assert!(
+        similarity.abs() < EPSILON,
+        "Zero vector should have 0 similarity, got {similarity}"
+    );
 
     // NaN/Inf handling
     let mut invalid = [1.0f32; 768];
@@ -251,7 +241,7 @@ fn test_edge_cases() {
 fn test_performance_validation() {
     // Ensure SIMD is actually being used on supported platforms
     let capability = compute::detect_cpu_features();
-    println!("Detected CPU capability: {:?}", capability);
+    println!("Detected CPU capability: {capability:?}");
 
     #[cfg(target_arch = "x86_64")]
     {
@@ -289,36 +279,31 @@ fn bench_simd_speedup() {
     let a = [0.707f32; 768];
     let b = [0.707f32; 768];
 
-    const ITERATIONS: u32 = 10000;
-
     // Benchmark scalar
     let start = Instant::now();
-    for _ in 0..ITERATIONS {
+    for _ in 0..BENCH_ITERATIONS {
         std::hint::black_box(scalar_ops.cosine_similarity_768(&a, &b));
     }
     let scalar_duration = start.elapsed();
 
     // Benchmark SIMD
     let start = Instant::now();
-    for _ in 0..ITERATIONS {
+    for _ in 0..BENCH_ITERATIONS {
         std::hint::black_box(simd_ops.cosine_similarity_768(&a, &b));
     }
     let simd_duration = start.elapsed();
 
-    let speedup = scalar_duration.as_nanos() as f64 / simd_duration.as_nanos() as f64;
+    let speedup = scalar_duration.as_secs_f64() / simd_duration.as_secs_f64();
 
-    println!(
-        "Scalar: {:?} for {} iterations",
-        scalar_duration, ITERATIONS
-    );
-    println!("SIMD: {:?} for {} iterations", simd_duration, ITERATIONS);
-    println!("Speedup: {:.2}x", speedup);
+    println!("Scalar: {scalar_duration:?} for {BENCH_ITERATIONS} iterations");
+    println!("SIMD: {simd_duration:?} for {BENCH_ITERATIONS} iterations");
+    println!("Speedup: {speedup:.2}x");
 
     // On AVX2 hardware, we should see at least 2x speedup
     #[cfg(target_arch = "x86_64")]
     {
         if is_x86_feature_detected!("avx2") {
-            assert!(speedup > 1.5, "SIMD speedup too low: {:.2}x", speedup);
+            assert!(speedup > 1.5, "SIMD speedup too low: {speedup:.2}x");
         }
     }
 }

@@ -56,6 +56,10 @@ Successfully implemented high-performance parallel activation spreading with the
 - SIMD-optimized batch processing
 - Configurable thread pools and work distribution
 
+## Post-Completion Notes
+- `activation::memory_pool` and the dedicated HNSW integration module are still marked TODOs; keep those follow-ups tracked before claiming full cache-aware pooling and index coupling (`engram-core/src/activation/mod.rs:44`).
+- The documented 31/36 activation test pass rate signals five cases needing stabilization; schedule a clean-up to bring them into the default test run before closing this workstream.
+
 This implementation provides a solid foundation for cognitive graph processing with biological constraints while maintaining high performance through parallel processing and SIMD optimization.
 ## Estimated Effort: 18 days (increased for cognitive architecture integration)
 ## Dependencies: 

@@ -1,6 +1,6 @@
 # Task 010: Production Monitoring - Systems-Level Observability
 
-## Status: Pending
+## Status: Complete ✅
 ## Priority: P1 - Operational Requirement
 ## Estimated Effort: 12 days (expanded for systems-level monitoring)
 ## Dependencies: 
@@ -11,6 +11,11 @@
 
 ## Objective
 Design and implement a high-performance, low-overhead monitoring system optimized for Engram's cognitive memory architecture, achieving <1% performance overhead through lock-free metrics collection, NUMA-aware monitoring, and CPU cache-conscious design. Create observability that provides deep insights into cognitive performance while maintaining system performance characteristics through atomic operations and wait-free data structures.
+
+## Post-Completion Notes
+- NUMA collectors are temporarily disabled because `hwloc` bindings are not `Send + Sync`; track the TODO in `metrics::MetricsRegistry` so we can restore socket-level telemetry once the wrapper lands (`engram-core/src/metrics/mod.rs:47`).
+- Prometheus export remains feature-gated—ensure deployment manifests enable the `monitoring` feature before expecting `/metrics` output, and add a fallback documentation path for builds that omit it (`engram-core/src/metrics/mod.rs:117`).
+- Lock-free gauges and histograms exist, but alert wiring is still manual; coordinate with Task 009’s nightly benchmarking so regression signals feed the same observability pipeline.
 
 ## Systems-Level Architecture Design
 

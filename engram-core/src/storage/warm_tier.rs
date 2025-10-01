@@ -8,8 +8,8 @@
 //! - NUMA-aware allocation
 //! - Automatic compaction and defragmentation
 
-use super::{StorageError, StorageTier, TierStatistics, mapped::MappedWarmStorage};
-use super::confidence::{StorageConfidenceCalibrator, ConfidenceTier};
+use super::confidence::{ConfidenceTier, StorageConfidenceCalibrator};
+use super::{StorageError, StorageTierBackend, TierStatistics, mapped::MappedWarmStorage};
 use crate::{Confidence, Cue, Episode, Memory};
 use std::sync::Arc;
 
@@ -25,6 +25,11 @@ pub struct WarmTier {
 
 impl WarmTier {
     /// Create a new warm tier with specified file path and capacity
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying mapped storage cannot be
+    /// initialised or if the warm tier resources fail during setup.
     pub fn new<P: AsRef<std::path::Path>>(
         file_path: P,
         capacity: usize,
@@ -33,13 +38,22 @@ impl WarmTier {
         let storage = MappedWarmStorage::new(file_path, capacity, metrics)?;
         let confidence_calibrator = StorageConfidenceCalibrator::new();
         let storage_timestamps = dashmap::DashMap::new();
-        Ok(Self { storage, confidence_calibrator, storage_timestamps })
+        Ok(Self {
+            storage,
+            confidence_calibrator,
+            storage_timestamps,
+        })
     }
 
     /// Create warm tier with custom configuration
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the mapped storage cannot be created with the
+    /// provided configuration.
     pub fn with_config<P: AsRef<std::path::Path>>(
         file_path: P,
-        config: WarmTierConfig,
+        config: &WarmTierConfig,
         metrics: Arc<super::StorageMetrics>,
     ) -> Result<Self, StorageError> {
         let storage = MappedWarmStorage::new(file_path, config.capacity, metrics)?;
@@ -55,32 +69,40 @@ impl WarmTier {
         }
 
         let storage_timestamps = dashmap::DashMap::new();
-        Ok(Self { storage, confidence_calibrator, storage_timestamps })
+        Ok(Self {
+            storage,
+            confidence_calibrator,
+            storage_timestamps,
+        })
     }
 
     /// Get the underlying storage for direct access if needed
-    pub fn inner(&self) -> &MappedWarmStorage {
+    pub const fn inner(&self) -> &MappedWarmStorage {
         &self.storage
     }
 
     /// Get storage duration for a memory (time since first stored)
     pub fn get_storage_duration(&self, memory_id: &str) -> std::time::Duration {
-        if let Some(entry) = self.storage_timestamps.get(memory_id) {
-            let stored_time = *entry.value();
-            std::time::SystemTime::now()
-                .duration_since(stored_time)
-                .unwrap_or_default()
-        } else {
-            // If no timestamp recorded, assume it was just stored
-            std::time::Duration::from_secs(0)
-        }
+        self.storage_timestamps.get(memory_id).map_or_else(
+            || std::time::Duration::from_secs(0),
+            |entry| {
+                let stored_time = *entry.value();
+                std::time::SystemTime::now()
+                    .duration_since(stored_time)
+                    .unwrap_or_default()
+            },
+        )
     }
 
     /// Force a compaction of the warm tier data
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if maintenance on the underlying storage fails.
     pub async fn compact(&self) -> Result<CompactionStats, StorageError> {
         // Trigger maintenance which includes compaction
         self.storage.maintenance().await?;
-        
+
         // Return compaction statistics
         let stats = self.storage.statistics();
         Ok(CompactionStats {
@@ -92,18 +114,36 @@ impl WarmTier {
 
     /// Get memory usage statistics
     pub fn memory_usage(&self) -> MemoryUsage {
+        const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_992; // 2^53
+
         let stats = self.storage.statistics();
+        let ratio = f64::from(stats.compaction_ratio.clamp(0.0, 1.0));
+        let capped_total = stats.total_size_bytes.min(MAX_SAFE_INTEGER);
+        #[allow(clippy::cast_precision_loss)]
+        let total_f64 = capped_total as f64;
+        let compressed_estimate = ratio * total_f64;
+        #[allow(clippy::cast_precision_loss)]
+        let rounded = compressed_estimate
+            .round()
+            .clamp(0.0, MAX_SAFE_INTEGER as f64);
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let compressed_bytes = rounded as u64;
         MemoryUsage {
             total_bytes: stats.total_size_bytes,
-            compressed_bytes: (stats.total_size_bytes as f32 * stats.compaction_ratio) as u64,
+            compressed_bytes,
             compression_ratio: stats.compaction_ratio,
             fragmentation_ratio: 1.0 - stats.compaction_ratio,
         }
     }
+
+    /// Check whether the tier currently holds the provided memory identifier.
+    pub fn contains_memory(&self, memory_id: &str) -> bool {
+        self.storage_timestamps.contains_key(memory_id)
+    }
 }
 
 /// Configuration for warm tier storage
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct WarmTierConfig {
     /// Maximum number of memories to store
     pub capacity: usize,
@@ -153,14 +193,15 @@ pub struct MemoryUsage {
     pub fragmentation_ratio: f32,
 }
 
-impl StorageTier for WarmTier {
+impl StorageTierBackend for WarmTier {
     type Error = StorageError;
 
     async fn store(&self, memory: Arc<Memory>) -> Result<(), Self::Error> {
         let memory_id = memory.id.clone();
 
         // Record storage timestamp for temporal decay calculation
-        self.storage_timestamps.insert(memory_id, std::time::SystemTime::now());
+        self.storage_timestamps
+            .insert(memory_id, std::time::SystemTime::now());
 
         // Delegate to underlying mapped storage
         self.storage.store(memory).await
@@ -171,7 +212,7 @@ impl StorageTier for WarmTier {
         match self.storage.recall(cue).await {
             Ok(mut results) => {
                 // Apply warm tier confidence calibration
-                for (episode, confidence) in results.iter_mut() {
+                for (episode, confidence) in &mut results {
                     // Get actual storage duration for this memory
                     let storage_duration = self.get_storage_duration(&episode.id);
                     *confidence = self.confidence_calibrator.adjust_for_storage_tier(
@@ -181,7 +222,7 @@ impl StorageTier for WarmTier {
                     );
                 }
                 Ok(results)
-            },
+            }
             Err(e) => {
                 // Log the error and attempt recovery
                 tracing::warn!("Warm tier recall failed, attempting recovery: {}", e);
@@ -213,29 +254,29 @@ impl StorageTier for WarmTier {
     fn statistics(&self) -> TierStatistics {
         // Get base statistics from underlying storage
         let mut stats = self.storage.statistics();
-        
+
         // Enhance with warm tier specific information
-        stats.cache_hit_rate = stats.cache_hit_rate * 0.9; // Slightly lower than hot tier
-        
+        stats.cache_hit_rate *= 0.9; // Slightly lower than hot tier
+
         stats
     }
 
     async fn maintenance(&self) -> Result<(), Self::Error> {
         // Perform comprehensive warm tier maintenance
-        
+
         // 1. Run underlying storage maintenance
         self.storage.maintenance().await?;
-        
+
         // 2. Check for fragmentation and trigger compaction if needed
         let stats = self.statistics();
         if stats.compaction_ratio < 0.7 {
             // Trigger compaction by running maintenance again
             self.storage.maintenance().await?;
         }
-        
+
         // 3. Validate data integrity
         // This would be implemented with checksums in a production system
-        
+
         Ok(())
     }
 }
@@ -244,6 +285,7 @@ impl StorageTier for WarmTier {
 mod tests {
     use super::*;
     use crate::{CueBuilder, EpisodeBuilder};
+    use anyhow::{Context, Result, ensure};
     use chrono::Utc;
     use tempfile::TempDir;
 
@@ -251,7 +293,7 @@ mod tests {
         let episode = EpisodeBuilder::new()
             .id(id.to_string())
             .when(Utc::now())
-            .what(format!("test memory {}", id))
+            .what(format!("test memory {id}"))
             .embedding([0.5f32; 768])
             .confidence(Confidence::HIGH)
             .build();
@@ -260,80 +302,100 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_warm_tier_creation() {
-        let temp_dir = TempDir::new().unwrap();
+    async fn test_warm_tier_creation() -> Result<()> {
+        let temp_dir = TempDir::new()?;
         let file_path = temp_dir.path().join("warm_tier_test.dat");
         let metrics = Arc::new(super::super::StorageMetrics::new());
-        
-        let warm_tier = WarmTier::new(file_path, 1000, metrics).unwrap();
+
+        let warm_tier =
+            WarmTier::new(file_path, 1000, metrics).context("failed to create warm tier")?;
         let stats = warm_tier.statistics();
-        
-        assert_eq!(stats.memory_count, 0);
+
+        ensure!(stats.memory_count == 0, "new warm tier should be empty");
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_warm_tier_store_and_recall() {
-        let temp_dir = TempDir::new().unwrap();
+    async fn test_warm_tier_store_and_recall() -> Result<()> {
+        let temp_dir = TempDir::new()?;
         let file_path = temp_dir.path().join("warm_tier_test.dat");
         let metrics = Arc::new(super::super::StorageMetrics::new());
-        
-        let warm_tier = WarmTier::new(file_path, 1000, metrics).unwrap();
-        
+
+        let warm_tier =
+            WarmTier::new(file_path, 1000, metrics).context("failed to create warm tier")?;
+
         // Store test memory
         let memory = create_test_memory("test1", 0.6);
-        warm_tier.store(memory).await.unwrap();
-        
+        warm_tier.store(memory).await.context("store failed")?;
+
         // Test recall
         let cue = CueBuilder::new()
             .id("test_cue".to_string())
             .embedding_search([0.5f32; 768], Confidence::MEDIUM)
             .max_results(10)
             .build();
-        
-        let results = warm_tier.recall(&cue).await.unwrap();
-        assert!(!results.is_empty());
-        assert_eq!(results[0].0.id, "test1");
+
+        let results = warm_tier.recall(&cue).await.context("recall failed")?;
+        ensure!(!results.is_empty(), "recall should return stored memory");
+        ensure!(
+            results[0].0.id == "test1",
+            "recalled memory id should match"
+        );
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_warm_tier_maintenance() {
-        let temp_dir = TempDir::new().unwrap();
+    async fn test_warm_tier_maintenance() -> Result<()> {
+        let temp_dir = TempDir::new()?;
         let file_path = temp_dir.path().join("warm_tier_test.dat");
         let metrics = Arc::new(super::super::StorageMetrics::new());
-        
-        let warm_tier = WarmTier::new(file_path, 1000, metrics).unwrap();
-        
+
+        let warm_tier =
+            WarmTier::new(file_path, 1000, metrics).context("failed to create warm tier")?;
+
         // Store some memories
         for i in 0..10 {
-            let memory = create_test_memory(&format!("mem_{}", i), 0.5);
-            warm_tier.store(memory).await.unwrap();
+            let memory = create_test_memory(&format!("mem_{i}"), 0.5);
+            warm_tier.store(memory).await.context("store failed")?;
         }
-        
+
         // Run maintenance
-        warm_tier.maintenance().await.unwrap();
-        
+        warm_tier
+            .maintenance()
+            .await
+            .context("maintenance failed")?;
+
         // Verify stats are still valid
         let stats = warm_tier.statistics();
-        assert_eq!(stats.memory_count, 10);
+        ensure!(
+            stats.memory_count == 10,
+            "expected warm tier to track inserted memories"
+        );
+        Ok(())
     }
 
     #[tokio::test]
-    async fn test_warm_tier_compaction() {
-        let temp_dir = TempDir::new().unwrap();
+    async fn test_warm_tier_compaction() -> Result<()> {
+        let temp_dir = TempDir::new()?;
         let file_path = temp_dir.path().join("warm_tier_test.dat");
         let metrics = Arc::new(super::super::StorageMetrics::new());
-        
-        let warm_tier = WarmTier::new(file_path, 1000, metrics).unwrap();
-        
+
+        let warm_tier =
+            WarmTier::new(file_path, 1000, metrics).context("failed to create warm tier")?;
+
         // Store memories
         for i in 0..20 {
-            let memory = create_test_memory(&format!("mem_{}", i), 0.5);
-            warm_tier.store(memory).await.unwrap();
+            let memory = create_test_memory(&format!("mem_{i}"), 0.5);
+            warm_tier.store(memory).await.context("store failed")?;
         }
-        
+
         // Force compaction
-        let compaction_stats = warm_tier.compact().await.unwrap();
-        assert!(compaction_stats.entries_compacted > 0);
+        let compaction_stats = warm_tier.compact().await.context("compaction failed")?;
+        ensure!(
+            compaction_stats.entries_compacted > 0,
+            "compaction should reclaim at least one entry"
+        );
+        Ok(())
     }
 
     #[test]
@@ -342,20 +404,31 @@ mod tests {
         assert_eq!(config.capacity, 10000);
         assert!(config.enable_compression);
         assert!(config.enable_numa_awareness);
-        assert_eq!(config.compaction_threshold, 0.7);
+        assert!((config.compaction_threshold - 0.7).abs() < f32::EPSILON);
     }
 
     #[test]
-    fn test_memory_usage() {
-        let temp_dir = TempDir::new().unwrap();
+    fn test_memory_usage() -> Result<()> {
+        let temp_dir = TempDir::new()?;
         let file_path = temp_dir.path().join("warm_tier_test.dat");
         let metrics = Arc::new(super::super::StorageMetrics::new());
-        
-        let warm_tier = WarmTier::new(file_path, 1000, metrics).unwrap();
+
+        let warm_tier =
+            WarmTier::new(file_path, 1000, metrics).context("failed to create warm tier")?;
         let usage = warm_tier.memory_usage();
-        
-        assert_eq!(usage.total_bytes, 0);
-        assert!(usage.compression_ratio >= 0.0);
-        assert!(usage.fragmentation_ratio >= 0.0);
+
+        ensure!(
+            usage.total_bytes == 0,
+            "fresh warm tier should not consume bytes"
+        );
+        ensure!(
+            usage.compression_ratio >= 0.0,
+            "compression ratio should be non-negative"
+        );
+        ensure!(
+            usage.fragmentation_ratio >= 0.0,
+            "fragmentation ratio should be non-negative"
+        );
+        Ok(())
     }
 }

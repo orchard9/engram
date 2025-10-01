@@ -4,7 +4,7 @@
 //! allowing activation to flow through the hierarchical navigable small world
 //! graph based on vector similarity.
 
-use super::{ActivationRecord, NodeId};
+use super::{storage_aware::StorageTier, ActivationRecord, NodeId};
 use crate::index::{HnswGraph, HnswNode, SearchResult};
 use crate::Confidence;
 use dashmap::DashMap;
@@ -63,10 +63,9 @@ impl HnswActivationEngine {
         let mut visited = dashmap::DashSet::new();
         
         // Initialize source activation
-        self.activations.insert(
-            source_id.clone(),
-            ActivationRecord::new(source_id.clone(), 0.1),
-        );
+        let mut base_record = ActivationRecord::new(source_id.clone(), 0.1);
+        base_record.set_storage_tier(StorageTier::Hot);
+        self.activations.insert(source_id.clone(), base_record);
         
         if let Some(record) = self.activations.get(source_id) {
             record.accumulate_activation(initial_activation);
@@ -111,8 +110,13 @@ impl HnswActivationEngine {
             let propagated = activation * similarity * decay;
             
             // Update neighbor activation
+            let tier = StorageTier::from_depth(depth as u16 + 1);
             let record = self.activations.entry(neighbor_id.clone())
-                .or_insert_with(|| ActivationRecord::new(neighbor_id.clone(), 0.1));
+                .or_insert_with(|| {
+                    let mut base = ActivationRecord::new(neighbor_id.clone(), 0.1);
+                    base.set_storage_tier(tier);
+                    base
+                });
             
             if record.accumulate_activation(propagated) {
                 results.push((neighbor_id.clone(), propagated));

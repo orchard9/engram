@@ -1,6 +1,6 @@
 //! Lock-free HNSW graph structure using crossbeam data structures
 
-use super::{CognitiveHnswParams, HnswEdge, HnswNode};
+use super::{CognitiveHnswParams, HnswEdge, HnswNode, SearchResult, SearchResults, SearchStats};
 use crate::{Confidence, compute::VectorOps};
 use crossbeam_epoch::{self as epoch, Guard};
 use crossbeam_skiplist::SkipMap;
@@ -52,6 +52,11 @@ impl HnswGraph {
     }
 
     /// Insert a node into the graph
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if required neighbor nodes cannot be loaded or if
+    /// connection updates fail while building bidirectional edges.
     pub fn insert_node(
         &self,
         node: HnswNode,
@@ -84,6 +89,7 @@ impl HnswGraph {
                     vector_ops,
                     &guard,
                 )?
+                .candidates
             };
 
             // Select M neighbors with diversity
@@ -116,7 +122,7 @@ impl HnswGraph {
                 neighbor_node.add_connection(layer as usize, reverse_edge)?;
 
                 // Prune neighbor's connections if exceeded M
-                self.prune_connections(neighbor_node, layer as usize, m, vector_ops)?;
+                Self::prune_connections(neighbor_node, layer as usize, m, vector_ops);
             }
 
             // Insert node into layer
@@ -141,7 +147,25 @@ impl HnswGraph {
         threshold: Confidence,
         vector_ops: &dyn VectorOps,
     ) -> Vec<(String, Confidence)> {
+        let detailed = self.search_with_details(query, k, ef, threshold, vector_ops);
+        detailed
+            .hits
+            .into_iter()
+            .map(|result| (result.memory_id, result.confidence))
+            .collect()
+    }
+
+    /// Search with detailed statistics and threshold filtering
+    pub fn search_with_details(
+        &self,
+        query: &[f32; 768],
+        k: usize,
+        ef: usize,
+        threshold: Confidence,
+        vector_ops: &dyn VectorOps,
+    ) -> SearchResults {
         let guard = epoch::pin();
+        let mut stats = SearchStats::with_ef(ef);
 
         // Start from highest layer with an entry point
         let mut current_nearest = Vec::new();
@@ -152,8 +176,7 @@ impl HnswGraph {
                 continue;
             }
 
-            // Search in this layer
-            let candidates = self
+            let layer_result = self
                 .search_layer(
                     query,
                     entry_point,
@@ -164,25 +187,41 @@ impl HnswGraph {
                 )
                 .unwrap_or_default();
 
-            if !candidates.is_empty() {
-                current_nearest = candidates;
+            stats.record_layer(layer_result.nodes_visited);
+
+            if !layer_result.candidates.is_empty() {
+                current_nearest = layer_result.candidates;
             }
         }
 
-        // Filter by confidence threshold and convert to results
-        let mut results = Vec::new();
+        let mut hits = Vec::new();
+        let mut distances = Vec::new();
+
         for candidate in current_nearest.into_iter().take(k) {
             if candidate.confidence.raw() >= threshold.raw() {
                 if let Ok(node) = self.get_node(candidate.node_id, &guard) {
-                    results.push((node.memory.id.clone(), candidate.confidence));
+                    distances.push(candidate.distance);
+                    hits.push(SearchResult::new(
+                        candidate.node_id,
+                        candidate.distance,
+                        candidate.confidence,
+                        node.memory.id.clone(),
+                    ));
                 }
             }
         }
 
-        results
+        stats.finalize(&distances);
+
+        SearchResults { hits, stats }
     }
 
     /// Search within a single layer
+    /// Search within a single layer
+    ///
+    /// # Errors
+    ///
+    /// Propagates errors when node lookups fail during the beam search.
     fn search_layer(
         &self,
         query: &[f32; 768],
@@ -191,7 +230,7 @@ impl HnswGraph {
         layer: usize,
         vector_ops: &dyn VectorOps,
         guard: &Guard,
-    ) -> Result<Vec<SearchCandidate>, super::HnswError> {
+    ) -> Result<LayerSearchResult, super::HnswError> {
         let mut visited = std::collections::HashSet::new();
         let mut candidates = BinaryHeap::new();
         let mut w = BinaryHeap::new();
@@ -252,7 +291,12 @@ impl HnswGraph {
         }
         results.reverse(); // Best first
 
-        Ok(results)
+        let visited_count = visited.len();
+
+        Ok(LayerSearchResult {
+            candidates: results,
+            nodes_visited: visited_count,
+        })
     }
 
     /// Select diverse neighbors using heuristic
@@ -272,7 +316,7 @@ impl HnswGraph {
         candidates.sort_by(|a, b| {
             let a_score = a.distance * (1.0 - a.confidence.raw());
             let b_score = b.distance * (1.0 - b.confidence.raw());
-            a_score.partial_cmp(&b_score).unwrap_or(CmpOrdering::Equal)
+            a_score.total_cmp(&b_score)
         });
 
         let mut selected = Vec::with_capacity(m);
@@ -307,18 +351,20 @@ impl HnswGraph {
 
     /// Prune connections to maintain M limit
     fn prune_connections(
-        &self,
         _node: Arc<HnswNode>,
         _layer: usize,
         _m: usize,
         _vector_ops: &dyn VectorOps,
-    ) -> Result<(), super::HnswError> {
-        // This would be implemented with proper lock-free pruning
-        // For now, we'll keep it simple
-        Ok(())
+    ) {
+        // Placeholder for lock-free pruning implementation
     }
 
     /// Get a node by ID
+    ///
+    /// # Errors
+    ///
+    /// Returns `HnswError::MemoryNotFound` if the requested node is absent from
+    /// every layer.
     fn get_node(&self, node_id: u32, _guard: &Guard) -> Result<Arc<HnswNode>, super::HnswError> {
         // Try each layer until we find the node
         for layer in &self.layers {
@@ -469,24 +515,30 @@ struct SearchCandidate {
     confidence: Confidence,
 }
 
+#[derive(Clone, Debug, Default)]
+struct LayerSearchResult {
+    candidates: Vec<SearchCandidate>,
+    nodes_visited: usize,
+}
+
 impl PartialEq for SearchCandidate {
     fn eq(&self, other: &Self) -> bool {
-        self.distance == other.distance
+        self.distance.total_cmp(&other.distance) == CmpOrdering::Equal
     }
 }
 
 impl Eq for SearchCandidate {}
 
-impl PartialOrd for SearchCandidate {
-    fn partial_cmp(&self, other: &Self) -> Option<CmpOrdering> {
+impl Ord for SearchCandidate {
+    fn cmp(&self, other: &Self) -> CmpOrdering {
         // Reverse order for min-heap behavior
-        other.distance.partial_cmp(&self.distance)
+        other.distance.total_cmp(&self.distance)
     }
 }
 
-impl Ord for SearchCandidate {
-    fn cmp(&self, other: &Self) -> CmpOrdering {
-        self.partial_cmp(other).unwrap_or(CmpOrdering::Equal)
+impl PartialOrd for SearchCandidate {
+    fn partial_cmp(&self, other: &Self) -> Option<CmpOrdering> {
+        Some(self.cmp(other))
     }
 }
 

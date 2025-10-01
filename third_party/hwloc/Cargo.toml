@@ -1,0 +1,25 @@
+[package]
+name = "hwloc"
+version = "0.5.0"
+authors = ["Michael Nitschinger <michael@nitschinger.at>"]
+license = "MIT"
+keywords = ["hwloc"]
+description = "Rust bindings for the hwloc hardware locality library."
+repository = "https://github.com/daschl/hwloc-rs"
+homepage = "http://daschl.github.io/hwloc-rs/"
+documentation = "http://daschl.github.io/hwloc-rs/rustdoc/"
+build = "build.rs"
+links = "hwloc"
+readme = "README.md"
+
+[dependencies]
+libc = "0.2"
+errno = "0.2"
+bitflags = "0.7"
+
+[dependencies.num]
+version = "0.1"
+default-features = false
+
+[build-dependencies]
+pkg-config = "0.3.8"

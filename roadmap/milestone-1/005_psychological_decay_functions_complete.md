@@ -1,12 +1,17 @@
 # Task 005: Psychological Decay Functions with Empirical Memory Research Foundation
 
-## Status: Pending
+## Status: Complete ✅
 ## Priority: P1 - Cognitive Accuracy Requirement
 ## Estimated Effort: 12 days (expanded for comprehensive empirical validation)
 ## Dependencies: Task 004 (Parallel Activation Spreading), Task 003 (Memory-Mapped Persistence)
 
 ## Objective
 Implement biologically plausible psychological decay functions grounded in complementary learning systems (CLS) theory and decades of memory research, achieving <3% deviation from empirical data across multiple memory systems. Integrate hippocampal pattern separation/completion dynamics with neocortical schema extraction processes, ensuring compatibility with Engram's existing Memory/Episode types and Confidence system while supporting cognitive spreading activation and sharp-wave ripple consolidation mechanisms.
+
+## Post-Completion Notes
+- Calibration data that powers `decay::validation::EmpiricalValidator` remains static; refresh the reference datasets whenever new replication studies land so the <3% deviation target stays defensible (`engram-core/src/decay/validation.rs`).
+- The `DecayIntegration` trait and `BiologicalDecaySystem` ship behind the `psychological_decay` feature gate; audit downstream call sites during rollout to confirm every recall path invokes the new decay hooks before disabling the legacy exponential fallback (`engram-core/src/decay/mod.rs`).
+- Individual-difference sampling and testing helpers require the `psychological_decay` + `testing` feature combo; document that limitation for CI jobs so we keep deterministic regression runs (`engram-core/src/decay/mod.rs:147`).
 
 ## Empirical Memory Research Foundation
 

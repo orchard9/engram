@@ -93,7 +93,7 @@ impl StreamingBatchProcessor {
                     }
                 },
                 BatchOperation::Recall(cue) => {
-                    let results = memory_store.recall(cue.clone());
+                    let results = memory_store.recall(&cue);
                     BatchOperationResult::Recall(results)
                 },
                 BatchOperation::SimilaritySearch { embedding, k, threshold } => {

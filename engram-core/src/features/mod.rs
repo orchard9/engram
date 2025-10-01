@@ -15,7 +15,7 @@
 //! ### `FeatureProvider` Trait
 //! The core abstraction that all feature providers must implement:
 //! - `is_enabled()`: Runtime check if feature is available
-//! - `name()`: Human-readable feature identifier 
+//! - `name()`: Human-readable feature identifier
 //! - `description()`: Feature documentation
 //! - `is_compatible_with()`: Inter-feature compatibility checking
 //!
@@ -28,11 +28,11 @@
 //!
 //! ### Provider Interfaces
 //! Each feature domain has a specific provider interface:
-//! - **IndexProvider**: Vector similarity search (HNSW → linear search)
-//! - **StorageProvider**: Persistence backends (memory-mapped → in-memory)
-//! - **DecayProvider**: Psychological decay models (research-based → simple exponential)
-//! - **MonitoringProvider**: Metrics collection (Prometheus → no-op)
-//! - **CompletionProvider**: Pattern completion (neural → similarity-based)
+//! - `IndexProvider`: Vector similarity search (HNSW -> linear search)
+//! - `StorageProvider`: Persistence backends (memory-mapped -> in-memory)
+//! - `DecayProvider`: Psychological decay models (research-based -> simple exponential)
+//! - `MonitoringProvider`: Metrics collection (Prometheus -> no-op)
+//! - `CompletionProvider`: Pattern completion (neural -> similarity-based)
 //!
 //! ## Usage Pattern
 //!
@@ -67,11 +67,11 @@
 //! ## Graceful Degradation
 //!
 //! When optional features are disabled:
-//! - **HNSW Index** → **Linear Search**: O(n) search with same API
-//! - **Memory-Mapped Storage** → **In-Memory HashMap**: No persistence, same interface
-//! - **Psychological Decay** → **Simple Exponential**: Basic time-based decay
-//! - **Prometheus Monitoring** → **No-op**: All metrics calls become no-ops
-//! - **Neural Completion** → **Similarity Matching**: Cosine similarity fallback
+//! - HNSW index -> linear search: O(n) search with the same API
+//! - Memory-mapped storage -> in-memory `HashMap`: No persistence, same interface
+//! - Psychological decay -> simple exponential: Basic time-based decay
+//! - Prometheus monitoring -> no-op: All metrics calls become no-ops
+//! - Neural completion -> similarity matching: Cosine similarity fallback
 //!
 //! ## Compile-Time Optimization
 //!
@@ -98,39 +98,40 @@
 
 use std::any::Any;
 use std::collections::HashMap;
+use std::fmt::Write;
 use std::sync::Arc;
 
-pub mod index;
-pub mod storage;
-pub mod decay;
-pub mod monitoring;
 pub mod completion;
+pub mod decay;
+pub mod index;
+pub mod monitoring;
 pub mod null_impls;
+pub mod storage;
 
 // Re-export provider traits
-pub use index::IndexProvider;
-pub use storage::StorageProvider;
-pub use decay::DecayProvider;
-pub use monitoring::MonitoringProvider;
 pub use completion::CompletionProvider;
+pub use decay::DecayProvider;
+pub use index::IndexProvider;
+pub use monitoring::MonitoringProvider;
+pub use storage::StorageProvider;
 
 /// Core trait for all feature providers
 pub trait FeatureProvider: Send + Sync + Any {
     /// Check if this feature is enabled
     fn is_enabled(&self) -> bool;
-    
+
     /// Get the name of this feature
     fn name(&self) -> &'static str;
-    
+
     /// Get a human-readable description
     fn description(&self) -> &'static str;
-    
+
     /// Check compatibility with other features
     fn is_compatible_with(&self, _other: &str) -> bool {
         // By default, all features are compatible
         true
     }
-    
+
     /// As any for downcasting
     fn as_any(&self) -> &dyn Any;
 }
@@ -143,81 +144,129 @@ pub struct FeatureRegistry {
 
 impl FeatureRegistry {
     /// Create a new feature registry with all available providers
+    #[must_use]
     pub fn new() -> Self {
         let mut providers = HashMap::new();
         let compatibility_matrix = FeatureCompatibilityMatrix::default();
-        
+
         // Register null implementations (always available)
-        providers.insert("index_null", Arc::new(null_impls::NullIndexProvider::new()) as Arc<dyn FeatureProvider>);
-        providers.insert("storage_null", Arc::new(null_impls::NullStorageProvider::new()) as Arc<dyn FeatureProvider>);
-        providers.insert("decay_null", Arc::new(null_impls::NullDecayProvider::new()) as Arc<dyn FeatureProvider>);
-        providers.insert("monitoring_null", Arc::new(null_impls::NullMonitoringProvider::new()) as Arc<dyn FeatureProvider>);
-        providers.insert("completion_null", Arc::new(null_impls::NullCompletionProvider::new()) as Arc<dyn FeatureProvider>);
-        
+        providers.insert(
+            "index_null",
+            Arc::new(null_impls::NullIndexProvider::new()) as Arc<dyn FeatureProvider>,
+        );
+        providers.insert(
+            "storage_null",
+            Arc::new(null_impls::NullStorageProvider::new()) as Arc<dyn FeatureProvider>,
+        );
+        providers.insert(
+            "decay_null",
+            Arc::new(null_impls::NullDecayProvider::new()) as Arc<dyn FeatureProvider>,
+        );
+        providers.insert(
+            "monitoring_null",
+            Arc::new(null_impls::NullMonitoringProvider::new()) as Arc<dyn FeatureProvider>,
+        );
+        providers.insert(
+            "completion_null",
+            Arc::new(null_impls::NullCompletionProvider::new()) as Arc<dyn FeatureProvider>,
+        );
+
         // Override with real implementations if features are enabled
         #[cfg(feature = "hnsw_index")]
         {
-            providers.insert("index", Arc::new(index::HnswIndexProvider::new()) as Arc<dyn FeatureProvider>);
+            providers.insert(
+                "index",
+                Arc::new(index::HnswIndexProvider::new()) as Arc<dyn FeatureProvider>,
+            );
         }
-        
+
         #[cfg(feature = "memory_mapped_persistence")]
         {
-            providers.insert("storage", Arc::new(storage::MmapStorageProvider::new()) as Arc<dyn FeatureProvider>);
+            providers.insert(
+                "storage",
+                Arc::new(storage::MmapStorageProvider::new()) as Arc<dyn FeatureProvider>,
+            );
         }
-        
+
         #[cfg(feature = "psychological_decay")]
         {
-            providers.insert("decay", Arc::new(decay::PsychologicalDecayProvider::new()) as Arc<dyn FeatureProvider>);
+            providers.insert(
+                "decay",
+                Arc::new(decay::PsychologicalDecayProvider::new()) as Arc<dyn FeatureProvider>,
+            );
         }
-        
+
         #[cfg(feature = "monitoring")]
         {
-            providers.insert("monitoring", Arc::new(monitoring::PrometheusMonitoringProvider::new()) as Arc<dyn FeatureProvider>);
+            providers.insert(
+                "monitoring",
+                Arc::new(monitoring::PrometheusMonitoringProvider::new())
+                    as Arc<dyn FeatureProvider>,
+            );
         }
-        
+
         #[cfg(feature = "pattern_completion")]
         {
-            providers.insert("completion", Arc::new(completion::PatternCompletionProvider::new()) as Arc<dyn FeatureProvider>);
+            providers.insert(
+                "completion",
+                Arc::new(completion::PatternCompletionProvider::new()) as Arc<dyn FeatureProvider>,
+            );
         }
-        
+
         Self {
             providers,
             compatibility_matrix,
         }
     }
-    
+
     /// Get a feature provider by name
+    #[must_use]
     pub fn get(&self, name: &str) -> Option<Arc<dyn FeatureProvider>> {
         self.providers.get(name).cloned()
     }
-    
+
     /// Get a typed feature provider
+    #[must_use]
     pub fn get_typed<T: FeatureProvider + 'static>(&self, name: &str) -> Option<Arc<T>> {
-        self.providers.get(name).and_then(|provider| {
-            provider.as_any().downcast_ref::<Arc<T>>().cloned()
-        })
+        self.providers
+            .get(name)
+            .and_then(|provider| provider.as_any().downcast_ref::<Arc<T>>().cloned())
     }
-    
+
     /// Get the best available provider for a feature type
+    #[must_use]
     pub fn get_best(&self, feature_type: &str) -> Arc<dyn FeatureProvider> {
-        // Try to get the real implementation first
         if let Some(provider) = self.get(feature_type) {
             if provider.is_enabled() {
                 return provider;
             }
         }
-        
-        // Fall back to null implementation
-        self.get(&format!("{}_null", feature_type))
-            .expect("Null implementation should always exist")
+
+        if let Some(provider) = self.get(&format!("{feature_type}_null")) {
+            return provider;
+        }
+
+        let fallback: Arc<dyn FeatureProvider> = match feature_type {
+            "index" => Arc::new(null_impls::NullIndexProvider::new()),
+            "storage" => Arc::new(null_impls::NullStorageProvider::new()),
+            "decay" => Arc::new(null_impls::NullDecayProvider::new()),
+            "monitoring" => Arc::new(null_impls::NullMonitoringProvider::new()),
+            _ => Arc::new(null_impls::NullCompletionProvider::new()),
+        };
+
+        fallback
     }
-    
+
     /// Check if a set of features are compatible
+    ///
+    /// # Errors
+    /// Returns an error message describing the first incompatible pair that is detected.
     pub fn check_compatibility(&self, features: &[&str]) -> Result<(), String> {
         self.compatibility_matrix.check_compatibility(features)
     }
-    
+
     /// Get all enabled features
+    #[must_use]
     pub fn enabled_features(&self) -> Vec<&'static str> {
         self.providers
             .iter()
@@ -225,21 +274,22 @@ impl FeatureRegistry {
             .map(|(name, _)| *name)
             .collect()
     }
-    
+
     /// Get a summary of feature status
+    #[must_use]
     pub fn status_summary(&self) -> String {
         let mut summary = String::from("Feature Status:\n");
-        
+
         for feature_type in &["index", "storage", "decay", "monitoring", "completion"] {
             let provider = self.get_best(feature_type);
-            summary.push_str(&format!(
-                "  {}: {} ({})\n",
-                feature_type,
-                provider.name(),
-                if provider.is_enabled() { "enabled" } else { "fallback" }
-            ));
+            let status = if provider.is_enabled() {
+                "enabled"
+            } else {
+                "fallback"
+            };
+            let _ = writeln!(summary, "  {feature_type}: {} ({status})", provider.name());
         }
-        
+
         summary
     }
 }
@@ -251,29 +301,23 @@ impl Default for FeatureRegistry {
 }
 
 /// Matrix defining which features can work together
+#[derive(Default)]
 pub struct FeatureCompatibilityMatrix {
     incompatible_pairs: Vec<(&'static str, &'static str)>,
 }
 
-impl Default for FeatureCompatibilityMatrix {
-    fn default() -> Self {
-        Self {
-            // Define any incompatible feature pairs here
-            incompatible_pairs: vec![
-                // Example: ("feature_a", "feature_b"),
-            ],
-        }
-    }
-}
-
 impl FeatureCompatibilityMatrix {
     /// Check if a set of features are compatible
+    ///
+    /// # Errors
+    /// Returns an error describing the first incompatible feature pair encountered.
     pub fn check_compatibility(&self, features: &[&str]) -> Result<(), String> {
         for i in 0..features.len() {
             for j in (i + 1)..features.len() {
                 for &(a, b) in &self.incompatible_pairs {
-                    if (features[i] == a && features[j] == b) ||
-                       (features[i] == b && features[j] == a) {
+                    if (features[i] == a && features[j] == b)
+                        || (features[i] == b && features[j] == a)
+                    {
                         return Err(format!(
                             "Features '{}' and '{}' are incompatible",
                             features[i], features[j]
@@ -284,7 +328,7 @@ impl FeatureCompatibilityMatrix {
         }
         Ok(())
     }
-    
+
     /// Add an incompatible pair
     pub fn add_incompatible_pair(&mut self, feature_a: &'static str, feature_b: &'static str) {
         self.incompatible_pairs.push((feature_a, feature_b));
@@ -294,11 +338,11 @@ impl FeatureCompatibilityMatrix {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_feature_registry_creation() {
         let registry = FeatureRegistry::new();
-        
+
         // Null implementations should always be available
         assert!(registry.get("index_null").is_some());
         assert!(registry.get("storage_null").is_some());
@@ -306,25 +350,33 @@ mod tests {
         assert!(registry.get("monitoring_null").is_some());
         assert!(registry.get("completion_null").is_some());
     }
-    
+
     #[test]
     fn test_get_best_provider() {
         let registry = FeatureRegistry::new();
-        
+
         // Should get null implementation if feature not enabled
         let index_provider = registry.get_best("index");
         assert!(index_provider.name().ends_with("null") || index_provider.is_enabled());
     }
-    
+
     #[test]
     fn test_compatibility_checking() {
         let mut matrix = FeatureCompatibilityMatrix::default();
         matrix.add_incompatible_pair("feature_a", "feature_b");
-        
+
         // Compatible features
-        assert!(matrix.check_compatibility(&["feature_a", "feature_c"]).is_ok());
-        
+        assert!(
+            matrix
+                .check_compatibility(&["feature_a", "feature_c"])
+                .is_ok()
+        );
+
         // Incompatible features
-        assert!(matrix.check_compatibility(&["feature_a", "feature_b"]).is_err());
+        assert!(
+            matrix
+                .check_compatibility(&["feature_a", "feature_b"])
+                .is_err()
+        );
     }
 }

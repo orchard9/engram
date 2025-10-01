@@ -15,6 +15,7 @@ pub mod consolidation;
 pub mod context;
 pub mod hippocampal;
 pub mod hypothesis;
+pub mod numeric;
 pub mod reconstruction;
 
 pub use confidence::MetacognitiveConfidence;
@@ -146,6 +147,11 @@ pub enum ActivationPathway {
 /// Core trait for pattern completion engines
 pub trait PatternCompleter {
     /// Complete a partial episode using the engine's algorithm
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the implementation cannot complete the episode with the
+    /// available evidence or encounters an internal failure.
     fn complete(&self, partial: &PartialEpisode) -> CompletionResult<CompletedEpisode>;
 
     /// Update the engine with new episodes for learning
@@ -246,7 +252,8 @@ mod tests {
     #[test]
     fn test_completion_config_defaults() {
         let config = CompletionConfig::default();
-        assert_eq!(config.ca3_sparsity, 0.05);
+        // Use tolerance to accommodate floating point representation differences
+        assert!((config.ca3_sparsity - 0.05).abs() < 1e-6);
         assert_eq!(config.max_iterations, 7);
         assert_eq!(config.working_memory_capacity, 7);
     }

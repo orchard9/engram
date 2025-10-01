@@ -6,12 +6,9 @@
     clippy::expect_used,
     clippy::panic,
     clippy::unimplemented,
-    clippy::todo,
+    clippy::todo
 )]
-#![deny(
-    clippy::unwrap_in_result,
-    clippy::panic_in_result_fn,
-)]
+#![deny(clippy::unwrap_in_result, clippy::panic_in_result_fn)]
 
 // Allow in tests only
 #[cfg(test)]
@@ -42,6 +39,7 @@ pub mod memory;
 pub mod memory_graph;
 #[cfg(feature = "monitoring")]
 pub mod metrics;
+mod numeric;
 pub mod query;
 #[cfg(feature = "memory_mapped_persistence")]
 pub mod storage;
@@ -101,7 +99,11 @@ impl Confidence {
         if total == 0 {
             return Self::NONE;
         }
-        let ratio = successes as f32 / total as f32;
+        #[allow(clippy::cast_precision_loss)]
+        let successes_f32 = successes as f32;
+        #[allow(clippy::cast_precision_loss)]
+        let total_f32 = total as f32;
+        let ratio = (successes_f32 / total_f32).clamp(0.0, 1.0);
         Self::exact(ratio)
     }
 
@@ -131,6 +133,25 @@ impl Confidence {
     }
 
     // System 1-friendly operations that feel automatic and natural
+
+    /// Complementary probability (1 - confidence) with safe clamping.
+    #[must_use]
+    pub const fn complement(self) -> Self {
+        Self::from_raw(1.0 - self.0)
+    }
+
+    /// Apply exponential decay based on hop count to model activation attenuation.
+    #[must_use]
+    pub fn decayed(self, decay_rate: f32, hop_count: u16) -> Self {
+        let decay_factor = (-decay_rate * f32::from(hop_count)).exp();
+        Self::from_raw(self.0 * decay_factor)
+    }
+
+    /// Scale the confidence by the provided factor, preserving probabilistic bounds.
+    #[must_use]
+    pub fn scaled(self, factor: f32) -> Self {
+        Self::from_raw(self.0 * factor.clamp(0.0, 1.0))
+    }
 
     /// Fast cognitive check: "Does this seem high confidence?"
     /// Matches natural "seems legitimate" thinking pattern
@@ -255,7 +276,7 @@ pub use batch::{
     BatchStoreResult,
 };
 pub use cue::{
-    CueDispatcher, CueHandler, CueContext, EmbeddingCueHandler, ContextCueHandler,
+    ContextCueHandler, CueContext, CueDispatcher, CueHandler, EmbeddingCueHandler,
     SemanticCueHandler, TemporalCueHandler,
 };
 pub use memory::{
@@ -337,7 +358,14 @@ impl MemoryNode<Unvalidated> {
         }
     }
 
-    /// Validates the memory node, transitioning to Validated state
+    /// Validates the memory node, transitioning to the `Validated` state.
+    ///
+    /// # Errors
+    /// - Returns [`types::CoreError::ValidationError`] when `content` is empty so callers can
+    ///   attach meaningful memory data prior to validation.
+    ///
+    /// # Panics
+    /// - Never panics.
     pub fn validate(self) -> Result<MemoryNode<Validated>, types::CoreError> {
         // Validation logic
         if self.content.is_empty() {
@@ -514,45 +542,71 @@ impl<State> Activatable for MemoryNode<State> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::{Context, Result, ensure};
+
+    const FLOAT_TOLERANCE: f32 = 1e-6;
+    const FLOAT_TOLERANCE_F64: f64 = 1e-9;
+
+    fn assert_close(actual: f32, expected: f32) {
+        assert!(
+            (actual - expected).abs() < FLOAT_TOLERANCE,
+            "expected {expected}, got {actual}"
+        );
+    }
+
+    fn assert_close_f64(actual: f64, expected: f64) {
+        assert!(
+            (actual - expected).abs() < FLOAT_TOLERANCE_F64,
+            "expected {expected}, got {actual}"
+        );
+    }
+
+    fn ensure_close(actual: f32, expected: f32) -> Result<()> {
+        ensure!(
+            (actual - expected).abs() < FLOAT_TOLERANCE,
+            "expected {expected}, got {actual}"
+        );
+        Ok(())
+    }
 
     // Cognitive Confidence Type Tests
 
     #[test]
     fn test_confidence_range_enforcement() {
         // Values should be automatically clamped to [0,1]
-        assert_eq!(Confidence::exact(-0.5).raw(), 0.0);
-        assert_eq!(Confidence::exact(1.5).raw(), 1.0);
-        assert_eq!(Confidence::exact(0.5).raw(), 0.5);
+        assert_close(Confidence::exact(-0.5).raw(), 0.0);
+        assert_close(Confidence::exact(1.5).raw(), 1.0);
+        assert_close(Confidence::exact(0.5).raw(), 0.5);
     }
 
     #[test]
     fn test_qualitative_categories() {
         // Test that qualitative categories match expected values
-        assert_eq!(Confidence::HIGH.raw(), 0.9);
-        assert_eq!(Confidence::MEDIUM.raw(), 0.5);
-        assert_eq!(Confidence::LOW.raw(), 0.1);
-        assert_eq!(Confidence::CERTAIN.raw(), 1.0);
-        assert_eq!(Confidence::NONE.raw(), 0.0);
+        assert_close(Confidence::HIGH.raw(), 0.9);
+        assert_close(Confidence::MEDIUM.raw(), 0.5);
+        assert_close(Confidence::LOW.raw(), 0.1);
+        assert_close(Confidence::CERTAIN.raw(), 1.0);
+        assert_close(Confidence::NONE.raw(), 0.0);
     }
 
     #[test]
     fn test_frequency_based_constructors() {
         // Test frequency-based reasoning: "3 out of 10 times"
         let conf = Confidence::from_successes(3, 10);
-        assert_eq!(conf.raw(), 0.3);
+        assert_close(conf.raw(), 0.3);
 
         // Edge cases
-        assert_eq!(Confidence::from_successes(0, 10).raw(), 0.0);
-        assert_eq!(Confidence::from_successes(10, 10).raw(), 1.0);
-        assert_eq!(Confidence::from_successes(5, 0).raw(), 0.0); // Division by zero protection
+        assert_close(Confidence::from_successes(0, 10).raw(), 0.0);
+        assert_close(Confidence::from_successes(10, 10).raw(), 1.0);
+        assert_close(Confidence::from_successes(5, 0).raw(), 0.0); // Division by zero protection
     }
 
     #[test]
     fn test_percentage_constructor() {
-        assert_eq!(Confidence::from_percent(0).raw(), 0.0);
-        assert_eq!(Confidence::from_percent(50).raw(), 0.5);
-        assert_eq!(Confidence::from_percent(100).raw(), 1.0);
-        assert_eq!(Confidence::from_percent(150).raw(), 1.0); // Should clamp to 100%
+        assert_close(Confidence::from_percent(0).raw(), 0.0);
+        assert_close(Confidence::from_percent(50).raw(), 0.5);
+        assert_close(Confidence::from_percent(100).raw(), 1.0);
+        assert_close(Confidence::from_percent(150).raw(), 1.0); // Should clamp to 100%
     }
 
     #[test]
@@ -589,7 +643,7 @@ mod tests {
         // Test conjunction fallacy prevention: P(A ∧ B) ≤ min(P(A), P(B))
         let and_result = conf_a.and(conf_b);
         assert!(and_result.raw() <= conf_a.raw().min(conf_b.raw()));
-        assert_eq!(and_result.raw(), 0.8 * 0.6); // Should be 0.48
+        assert_close(and_result.raw(), 0.8 * 0.6); // Should be 0.48
 
         // Test OR operation
         let or_result = conf_a.or(conf_b);
@@ -598,7 +652,7 @@ mod tests {
 
         // Test negation
         let not_a = conf_a.not();
-        assert_eq!(not_a.raw(), 1.0 - 0.8);
+        assert_close(not_a.raw(), 1.0 - 0.8);
     }
 
     #[test]
@@ -608,7 +662,7 @@ mod tests {
 
         // Equal weights should give average
         let combined = conf_a.combine_weighted(conf_b, 1.0, 1.0);
-        assert_eq!(combined.raw(), 0.6); // (0.9 + 0.3) / 2
+        assert_close(combined.raw(), 0.6); // (0.9 + 0.3) / 2
 
         // Higher weight to first confidence
         let weighted = conf_a.combine_weighted(conf_b, 3.0, 1.0);
@@ -617,7 +671,7 @@ mod tests {
 
         // Zero weights should return MEDIUM
         let zero_weights = conf_a.combine_weighted(conf_b, 0.0, 0.0);
-        assert_eq!(zero_weights.raw(), Confidence::MEDIUM.raw());
+        assert_close(zero_weights.raw(), Confidence::MEDIUM.raw());
     }
 
     #[test]
@@ -626,18 +680,18 @@ mod tests {
         let high_conf = Confidence::exact(0.9);
         let calibrated_high = high_conf.calibrate_overconfidence();
         assert!(calibrated_high.raw() < high_conf.raw());
-        assert_eq!(calibrated_high.raw(), 0.9 * 0.85);
+        assert_close(calibrated_high.raw(), 0.9 * 0.85);
 
         // Medium confidence should be reduced modestly
         let medium_high_conf = Confidence::exact(0.7);
         let calibrated_medium = medium_high_conf.calibrate_overconfidence();
         assert!(calibrated_medium.raw() < medium_high_conf.raw());
-        assert_eq!(calibrated_medium.raw(), 0.7 * 0.9);
+        assert_close(calibrated_medium.raw(), 0.7 * 0.9);
 
         // Low confidence should remain unchanged
         let low_conf = Confidence::exact(0.4);
         let calibrated_low = low_conf.calibrate_overconfidence();
-        assert_eq!(calibrated_low.raw(), low_conf.raw());
+        assert_close(calibrated_low.raw(), low_conf.raw());
     }
 
     #[test]
@@ -664,30 +718,36 @@ mod tests {
 
         // Basic operations should compile to simple f32 operations
         let doubled = Confidence::exact(raw_value * 2.0); // Should clamp to 1.0
-        assert_eq!(doubled.raw(), 1.0);
+        assert_close(doubled.raw(), 1.0);
 
         // Constants should be inlined
-        assert_eq!(Confidence::HIGH.raw(), 0.9);
+        assert_close(Confidence::HIGH.raw(), 0.9);
     }
 
     #[test]
-    fn test_serde_validation() {
+    fn test_serde_validation() -> Result<()> {
         use serde_json;
 
         // Valid confidence should serialize/deserialize correctly
         let conf = Confidence::exact(0.7);
-        let serialized = serde_json::to_string(&conf).unwrap();
-        let deserialized: Confidence = serde_json::from_str(&serialized).unwrap();
-        assert_eq!(conf.raw(), deserialized.raw());
+        let serialized = serde_json::to_string(&conf).context("serialization failed")?;
+        let deserialized: Confidence =
+            serde_json::from_str(&serialized).context("deserialization failed")?;
+        ensure_close(conf.raw(), deserialized.raw())?;
 
         // Invalid values should fail deserialization
         let invalid_json = "1.5"; // Outside [0,1] range
         let result: Result<Confidence, _> = serde_json::from_str(invalid_json);
-        assert!(result.is_err());
+        ensure!(result.is_err(), "invalid confidence should not deserialize");
 
         let negative_json = "-0.1"; // Negative value
         let result: Result<Confidence, _> = serde_json::from_str(negative_json);
-        assert!(result.is_err());
+        ensure!(
+            result.is_err(),
+            "negative confidence should not deserialize"
+        );
+
+        Ok(())
     }
 
     #[test]
@@ -712,26 +772,32 @@ mod tests {
         node.activation = 0.3; // Set initial activation for test
 
         node.activate(0.4);
-        assert_eq!(node.activation_level(), 0.7);
+        assert_close_f64(node.activation_level(), 0.7);
 
         node.activate(0.5);
-        assert_eq!(node.activation_level(), 1.0); // Capped at 1.0
+        assert_close_f64(node.activation_level(), 1.0); // Capped at 1.0
 
         node.decay(0.2);
-        assert_eq!(node.activation_level(), 0.8);
+        assert_close_f64(node.activation_level(), 0.8);
     }
 
     #[test]
-    fn test_type_state_transitions() {
+    fn test_type_state_transitions() -> Result<()> {
         let unvalidated = MemoryNode::new_unvalidated("test".to_string(), vec![1, 2, 3]);
-        let validated = unvalidated.validate().unwrap();
+        let validated = unvalidated
+            .validate()
+            .context("validation should succeed for non-empty node")?;
         let active = validated.activate();
         let consolidated = active.consolidate();
 
         // Can't call validate on already validated node (won't compile)
         // consolidated.validate(); // This would be a compile error
 
-        assert_eq!(consolidated.id, "test");
+        ensure!(
+            consolidated.id == "test",
+            "expected consolidated id to match"
+        );
+        Ok(())
     }
 
     #[test]
@@ -764,16 +830,26 @@ mod tests {
     }
 
     #[test]
-    fn test_validation_error_with_cognitive_context() {
+    fn test_validation_error_with_cognitive_context() -> Result<(), String> {
         let node = MemoryNode::new_unvalidated("test".to_string(), vec![]);
         let result = node.validate();
 
-        assert!(result.is_err());
-        let err = result.unwrap_err();
+        let err = match result {
+            Ok(_) => return Err("validation should fail for empty node".to_string()),
+            Err(err) => err,
+        };
         let msg = err.to_string();
 
-        assert!(msg.contains("empty"));
-        assert!(msg.contains("Non-empty content"));
-        assert!(msg.contains("Provide actual memory content"));
+        if !msg.contains("empty") {
+            return Err("validation error message should mention empty".to_string());
+        }
+        if !msg.contains("Non-empty content") {
+            return Err("validation message should suggest non-empty content".to_string());
+        }
+        if !msg.contains("Provide actual memory content") {
+            return Err("validation message should guide content provision".to_string());
+        }
+
+        Ok(())
     }
 }

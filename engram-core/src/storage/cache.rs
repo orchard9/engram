@@ -12,6 +12,9 @@
 use super::{StorageError, StorageMetrics, StorageResult};
 use crate::Memory;
 use atomic_float::AtomicF32;
+use std::convert::TryFrom;
+#[cfg(not(all(feature = "memory_mapped_persistence", unix)))]
+use std::mem::MaybeUninit;
 use std::sync::{
     Arc,
     atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering},
@@ -26,19 +29,19 @@ pub struct CacheOptimalMemoryNode {
     /// Hot data: accessed on every activation (exactly 64 bytes = 1 cache line)
     pub id_hash: u64, // Fast comparison hash, 8 bytes
     /// Current activation level (0.0 to 1.0)
-    pub activation: AtomicF32,  // Current activation level, 4 bytes
+    pub activation: AtomicF32, // Current activation level, 4 bytes
     /// Memory confidence score (0.0 to 1.0)
-    pub confidence: f32,        // Memory confidence, 4 bytes
+    pub confidence: f32, // Memory confidence, 4 bytes
     /// Timestamp of last access for LRU eviction
     pub last_access: AtomicU64, // Timestamp for LRU, 8 bytes
     /// Bitfield containing node state and type information
-    pub node_flags: AtomicU32,  // State and type flags, 4 bytes
+    pub node_flags: AtomicU32, // State and type flags, 4 bytes
     /// Number of outgoing edges from this memory node
     pub edges_count: AtomicU32, // Number of outgoing edges, 4 bytes
     /// Pointer to the full Memory object in storage
-    pub memory_ptr: AtomicU64,  // Pointer to full Memory object, 8 bytes
+    pub memory_ptr: AtomicU64, // Pointer to full Memory object, 8 bytes
     /// Padding to align hot data to exactly 64 bytes
-    pub _hot_padding: [u8; 24], // Pad to exactly 64 bytes
+    _hot_padding: [u8; 24], // Pad to exactly 64 bytes
 
     /// Warm data: accessed during recall operations (768*4 = 3072 bytes = 48 cache lines)
     pub embedding: [f32; 768], // Dense vector for similarity computation
@@ -46,19 +49,19 @@ pub struct CacheOptimalMemoryNode {
     /// Cold data: accessed during maintenance (exactly 64 bytes = 1 cache line)
     pub decay_rate: f32, // Forgetting curve parameter, 4 bytes
     /// Timestamp when this memory was originally created
-    pub creation_time: u64,      // Original encoding time, 8 bytes
+    pub creation_time: u64, // Original encoding time, 8 bytes
     /// Counter tracking how many times this memory was recalled
     pub recall_count: AtomicU32, // Access frequency counter, 4 bytes
     /// Hash of memory content for deduplication
-    pub content_hash: u64,       // For deduplication, 8 bytes
+    pub content_hash: u64, // For deduplication, 8 bytes
     /// Offset to the list of outgoing edges
     pub edges_offset: AtomicU64, // Offset to edge list, 8 bytes
     /// Pointer to backup storage location
-    pub backup_ptr: AtomicU64,   // Backup storage pointer, 8 bytes
+    pub backup_ptr: AtomicU64, // Backup storage pointer, 8 bytes
     /// Schema identifier for memory type information
-    pub schema_id: u32,          // Memory schema type, 4 bytes
+    pub schema_id: u32, // Memory schema type, 4 bytes
     /// Padding to align cold data to exactly 64 bytes
-    pub _cold_padding: [u8; 12], // Pad to exactly 64 bytes
+    _cold_padding: [u8; 12], // Pad to exactly 64 bytes
 }
 
 // Verify our structure sizes at compile time
@@ -69,11 +72,14 @@ const _: () = {
 
 impl CacheOptimalMemoryNode {
     /// Create a new node from a memory object
-    pub fn new(memory: Arc<Memory>, node_id_hash: u64) -> Self {
+    #[must_use = "Constructed nodes must be stored to preserve memory state"]
+    pub fn new(memory: &Arc<Memory>, node_id_hash: u64) -> Self {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::SystemTime::UNIX_EPOCH)
             .unwrap_or_default()
-            .as_nanos() as u64;
+            .as_nanos()
+            .try_into()
+            .unwrap_or(u64::MAX);
 
         Self {
             id_hash: node_id_hash,
@@ -82,7 +88,7 @@ impl CacheOptimalMemoryNode {
             last_access: AtomicU64::new(now),
             node_flags: AtomicU32::new(0),
             edges_count: AtomicU32::new(0),
-            memory_ptr: AtomicU64::new(Arc::as_ptr(&memory) as u64),
+            memory_ptr: AtomicU64::new(Arc::as_ptr(memory) as u64),
             _hot_padding: [0; 24],
 
             embedding: memory.embedding,
@@ -91,7 +97,9 @@ impl CacheOptimalMemoryNode {
             creation_time: std::time::SystemTime::from(memory.created_at)
                 .duration_since(std::time::SystemTime::UNIX_EPOCH)
                 .unwrap_or_default()
-                .as_nanos() as u64,
+                .as_nanos()
+                .try_into()
+                .unwrap_or(u64::MAX),
             recall_count: AtomicU32::new(0),
             content_hash: Self::compute_content_hash(&memory.id),
             edges_offset: AtomicU64::new(0),
@@ -151,17 +159,23 @@ impl CacheOptimalMemoryNode {
     #[cfg(not(all(feature = "memory_mapped_persistence", target_arch = "x86_64")))]
     #[inline]
     /// Prefetch hot data (no-op on non-x86_64 platforms)
-    pub fn prefetch_hot(&self) {}
+    pub const fn prefetch_hot(&self) {
+        let _ = self;
+    }
 
     #[cfg(not(all(feature = "memory_mapped_persistence", target_arch = "x86_64")))]
     #[inline]
     /// Prefetch warm data (no-op on non-x86_64 platforms)
-    pub fn prefetch_warm(&self) {}
+    pub const fn prefetch_warm(&self) {
+        let _ = self;
+    }
 
     #[cfg(not(all(feature = "memory_mapped_persistence", target_arch = "x86_64")))]
     #[inline]
     /// Prefetch cold data (no-op on non-x86_64 platforms)
-    pub fn prefetch_cold(&self) {}
+    pub const fn prefetch_cold(&self) {
+        let _ = self;
+    }
 
     /// Update activation level atomically
     pub fn update_activation(&self, new_activation: f32) {
@@ -170,7 +184,9 @@ impl CacheOptimalMemoryNode {
             std::time::SystemTime::now()
                 .duration_since(std::time::SystemTime::UNIX_EPOCH)
                 .unwrap_or_default()
-                .as_nanos() as u64,
+                .as_nanos()
+                .try_into()
+                .unwrap_or(u64::MAX),
             Ordering::Relaxed,
         );
         self.recall_count.fetch_add(1, Ordering::Relaxed);
@@ -202,17 +218,17 @@ pub struct CognitiveIndex {
     #[cfg(all(feature = "memory_mapped_persistence", unix))]
     nodes: NumaMemoryMap,
     #[cfg(not(all(feature = "memory_mapped_persistence", unix)))]
-    nodes: Vec<u8>,
+    nodes: Vec<MaybeUninit<CacheOptimalMemoryNode>>,
 
     node_count: AtomicUsize,
     node_capacity: usize,
 
     /// Generation counter for ABA prevention
-    generation: AtomicU64,
+    _generation: AtomicU64,
 
-    /// Allocator for NUMA-aware node allocation  
+    /// Allocator for NUMA-aware node allocation
     #[cfg(all(feature = "memory_mapped_persistence", unix))]
-    allocator: NumaAllocator,
+    _allocator: NumaAllocator,
 
     /// Performance metrics
     metrics: Arc<StorageMetrics>,
@@ -220,6 +236,13 @@ pub struct CognitiveIndex {
 
 impl CognitiveIndex {
     /// Create a new cognitive index with specified capacity
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - NUMA topology detection fails on Unix systems
+    /// - Memory allocation fails
+    #[must_use = "CognitiveIndex creation may fail and should be handled"]
     pub fn new(capacity: usize, metrics: Arc<StorageMetrics>) -> StorageResult<Self> {
         // Round capacity up to next power of 2
         let table_capacity = capacity.next_power_of_two();
@@ -231,8 +254,9 @@ impl CognitiveIndex {
             .collect::<Vec<_>>()
             .into_boxed_slice();
 
-        // Calculate node storage size
+        #[cfg(all(feature = "memory_mapped_persistence", unix))]
         let node_size = std::mem::size_of::<CacheOptimalMemoryNode>();
+        #[cfg(all(feature = "memory_mapped_persistence", unix))]
         let storage_size = capacity * node_size;
 
         #[cfg(all(feature = "memory_mapped_persistence", unix))]
@@ -242,7 +266,7 @@ impl CognitiveIndex {
         let nodes = NumaMemoryMap::new_interleaved(storage_size, numa_topology.clone())?;
 
         #[cfg(not(all(feature = "memory_mapped_persistence", unix)))]
-        let nodes = vec![0u8; storage_size];
+        let nodes = vec![MaybeUninit::uninit(); capacity];
 
         #[cfg(all(feature = "memory_mapped_persistence", unix))]
         let allocator = NumaAllocator::new(numa_topology);
@@ -253,58 +277,61 @@ impl CognitiveIndex {
             nodes,
             node_count: AtomicUsize::new(0),
             node_capacity: capacity,
-            generation: AtomicU64::new(0),
+            _generation: AtomicU64::new(0),
             #[cfg(all(feature = "memory_mapped_persistence", unix))]
-            allocator,
+            _allocator: allocator,
             metrics,
         })
     }
 
     /// Insert a memory node with lock-free operation
-    pub fn insert(&self, memory: Arc<Memory>) -> StorageResult<u64> {
-        let id_hash = self.hash_memory_id(&memory.id);
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The index is at maximum capacity
+    /// - Node allocation fails
+    pub fn insert(&self, memory: &Arc<Memory>) -> StorageResult<u64> {
+        let id_hash = Self::hash_memory_id(&memory.id);
         let mut probe_distance = 0;
 
         loop {
             let slot_idx = (id_hash + probe_distance) & self.table_mask;
-            let slot = &self.table[slot_idx as usize];
+            let slot = &self.table[usize::try_from(slot_idx)
+                .unwrap_or(usize::MAX)
+                .min(self.table.len() - 1)];
 
             let current = slot.load(Ordering::Acquire);
 
             if current == 0 {
                 // Empty slot found - try to claim it
                 let node_offset = self.allocate_node_slot()?;
-                let packed_value = self.pack_hash_offset(id_hash, node_offset);
+                let packed_value = Self::pack_hash_offset(id_hash, node_offset);
 
-                match slot.compare_exchange_weak(
-                    0,
-                    packed_value,
-                    Ordering::AcqRel,
-                    Ordering::Acquire,
-                ) {
-                    Ok(_) => {
-                        // Successfully claimed slot - initialize node
-                        let node = CacheOptimalMemoryNode::new(memory, id_hash);
-                        unsafe {
-                            let node_ptr = self.node_ptr_mut(node_offset);
-                            std::ptr::write(node_ptr, node);
-                        }
-
-                        self.node_count.fetch_add(1, Ordering::Relaxed);
-                        self.metrics
-                            .record_write(std::mem::size_of::<CacheOptimalMemoryNode>() as u64);
-
-                        return Ok(node_offset);
+                if slot
+                    .compare_exchange_weak(0, packed_value, Ordering::AcqRel, Ordering::Acquire)
+                    .is_ok()
+                {
+                    // Successfully claimed slot - initialize node
+                    let node = CacheOptimalMemoryNode::new(memory, id_hash);
+                    unsafe {
+                        let node_ptr = self.node_ptr_mut(node_offset);
+                        std::ptr::write(node_ptr, node);
                     }
-                    Err(_) => {
-                        // Slot was taken - deallocate and retry
-                        self.deallocate_node_slot(node_offset);
-                        probe_distance += 1;
-                    }
+
+                    self.node_count.fetch_add(1, Ordering::Relaxed);
+                    self.metrics
+                        .record_write(std::mem::size_of::<CacheOptimalMemoryNode>() as u64);
+
+                    return Ok(node_offset);
                 }
+
+                // Slot was taken - deallocate and retry
+                Self::deallocate_node_slot(node_offset);
+                probe_distance += 1;
             } else {
                 // Check if this is the same memory (update case)
-                let (existing_hash, existing_offset) = self.unpack_hash_offset(current);
+                let (existing_hash, existing_offset) = Self::unpack_hash_offset(current);
                 if existing_hash == (id_hash >> 32) {
                     // Found existing entry - update in place
                     unsafe {
@@ -323,13 +350,16 @@ impl CognitiveIndex {
     }
 
     /// Lookup a memory by ID  
+    #[must_use = "Lookup result indicates whether the memory exists in the cache"]
     pub fn lookup(&self, memory_id: &str) -> Option<&CacheOptimalMemoryNode> {
-        let id_hash = self.hash_memory_id(memory_id);
+        let id_hash = Self::hash_memory_id(memory_id);
         let mut probe_distance = 0;
 
         loop {
             let slot_idx = (id_hash + probe_distance) & self.table_mask;
-            let slot = &self.table[slot_idx as usize];
+            let slot = &self.table[usize::try_from(slot_idx)
+                .unwrap_or(usize::MAX)
+                .min(self.table.len() - 1)];
             let current = slot.load(Ordering::Acquire);
 
             if current == 0 {
@@ -338,7 +368,7 @@ impl CognitiveIndex {
                 return None;
             }
 
-            let (hash, offset) = self.unpack_hash_offset(current);
+            let (hash, offset) = Self::unpack_hash_offset(current);
             if hash == (id_hash >> 32) {
                 // Found it
                 unsafe {
@@ -358,25 +388,28 @@ impl CognitiveIndex {
     }
 
     /// Remove a memory from the index
+    #[must_use = "Return value reveals whether a memory was actually removed"]
     pub fn remove(&self, memory_id: &str) -> bool {
-        let id_hash = self.hash_memory_id(memory_id);
+        let id_hash = Self::hash_memory_id(memory_id);
         let mut probe_distance = 0;
 
         loop {
             let slot_idx = (id_hash + probe_distance) & self.table_mask;
-            let slot = &self.table[slot_idx as usize];
+            let slot = &self.table[usize::try_from(slot_idx)
+                .unwrap_or(usize::MAX)
+                .min(self.table.len() - 1)];
             let current = slot.load(Ordering::Acquire);
 
             if current == 0 {
                 return false; // Not found
             }
 
-            let (hash, offset) = self.unpack_hash_offset(current);
+            let (hash, offset) = Self::unpack_hash_offset(current);
             if hash == (id_hash >> 32) {
                 // Found it - try to remove
                 match slot.compare_exchange_weak(current, 0, Ordering::AcqRel, Ordering::Acquire) {
                     Ok(_) => {
-                        self.deallocate_node_slot(offset);
+                        Self::deallocate_node_slot(offset);
                         self.node_count.fetch_sub(1, Ordering::Relaxed);
                         return true;
                     }
@@ -399,10 +432,10 @@ impl CognitiveIndex {
     where
         F: FnMut(&CacheOptimalMemoryNode),
     {
-        for slot in self.table.iter() {
+        for slot in &self.table {
             let current = slot.load(Ordering::Acquire);
             if current != 0 {
-                let (_, offset) = self.unpack_hash_offset(current);
+                let (_, offset) = Self::unpack_hash_offset(current);
                 unsafe {
                     let node_ptr = self.node_ptr(offset);
                     callback(&*node_ptr);
@@ -412,9 +445,18 @@ impl CognitiveIndex {
     }
 
     /// Get performance statistics
+    #[must_use]
     pub fn statistics(&self) -> IndexStatistics {
         let node_count = self.node_count.load(Ordering::Relaxed);
-        let load_factor = node_count as f32 / self.node_capacity as f32;
+        let load_factor = if self.node_capacity == 0 {
+            0.0
+        } else {
+            let numerator = u64::try_from(node_count).unwrap_or(u64::MAX);
+            let denominator = u64::try_from(self.node_capacity).unwrap_or(u64::MAX).max(1);
+            #[allow(clippy::cast_precision_loss)]
+            let ratio = (numerator as f64) / (denominator as f64);
+            Self::f32_from_f64(ratio.min(1.0))
+        };
 
         IndexStatistics {
             node_count,
@@ -425,7 +467,7 @@ impl CognitiveIndex {
     }
 
     /// Hash a memory ID to table index
-    fn hash_memory_id(&self, memory_id: &str) -> u64 {
+    fn hash_memory_id(memory_id: &str) -> u64 {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
 
@@ -434,7 +476,12 @@ impl CognitiveIndex {
         hasher.finish()
     }
 
-    /// Allocate a slot in the node storage
+    /// Allocate a slot in the node storage.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the index is already at capacity and cannot
+    /// accept additional nodes.
     fn allocate_node_slot(&self) -> StorageResult<u64> {
         let current_count = self.node_count.load(Ordering::Relaxed);
         if current_count >= self.node_capacity {
@@ -443,23 +490,23 @@ impl CognitiveIndex {
 
         // Simple sequential allocation for now
         // In production, this would use a free list
-        Ok(current_count as u64)
+        Ok(u64::try_from(current_count).unwrap_or(u64::MAX))
     }
 
     /// Deallocate a node slot
-    fn deallocate_node_slot(&self, _offset: u64) {
+    const fn deallocate_node_slot(_offset: u64) {
         // For now, we just leak the slot
         // In production, this would add to free list
     }
 
     /// Pack hash and offset into single u64
-    fn pack_hash_offset(&self, hash: u64, offset: u64) -> u64 {
+    const fn pack_hash_offset(hash: u64, offset: u64) -> u64 {
         let hash_upper = hash >> 32; // Use upper 32 bits of hash
         (hash_upper << 32) | (offset & 0xFFFF_FFFF)
     }
 
     /// Unpack hash and offset from u64
-    fn unpack_hash_offset(&self, packed: u64) -> (u64, u64) {
+    const fn unpack_hash_offset(packed: u64) -> (u64, u64) {
         let hash_upper = packed >> 32;
         let offset = packed & 0xFFFF_FFFF;
         (hash_upper, offset)
@@ -467,31 +514,53 @@ impl CognitiveIndex {
 
     /// Get pointer to node at offset
     unsafe fn node_ptr(&self, offset: u64) -> *const CacheOptimalMemoryNode {
-        let node_size = std::mem::size_of::<CacheOptimalMemoryNode>();
+        let offset = usize::try_from(offset).unwrap_or(0);
 
         #[cfg(all(feature = "memory_mapped_persistence", unix))]
         {
-            (unsafe { self.nodes.as_ptr().add(offset as usize * node_size) }) as *const CacheOptimalMemoryNode
+            #[allow(clippy::cast_ptr_alignment)]
+            {
+                let base = self.nodes.as_ptr().cast::<CacheOptimalMemoryNode>();
+                unsafe { base.add(offset) }
+            }
         }
 
         #[cfg(not(all(feature = "memory_mapped_persistence", unix)))]
         {
-            (unsafe { self.nodes.as_ptr().add(offset as usize * node_size) }) as *const CacheOptimalMemoryNode
+            self.nodes
+                .get(offset)
+                .map_or(std::ptr::null(), |slot| slot.as_ptr())
         }
     }
 
     /// Get mutable pointer to node at offset
     unsafe fn node_ptr_mut(&self, offset: u64) -> *mut CacheOptimalMemoryNode {
-        let node_size = std::mem::size_of::<CacheOptimalMemoryNode>();
+        let offset = usize::try_from(offset).unwrap_or(0);
 
         #[cfg(all(feature = "memory_mapped_persistence", unix))]
         {
-            (unsafe { self.nodes.as_ptr().add(offset as usize * node_size) }) as *mut CacheOptimalMemoryNode
+            #[allow(clippy::cast_ptr_alignment)]
+            {
+                let base = self.nodes.as_ptr().cast::<CacheOptimalMemoryNode>();
+                #[allow(clippy::ptr_as_ptr, clippy::unnecessary_cast)]
+                unsafe {
+                    base.add(offset) as *mut CacheOptimalMemoryNode
+                }
+            }
         }
 
         #[cfg(not(all(feature = "memory_mapped_persistence", unix)))]
         {
-            (unsafe { self.nodes.as_ptr().add(offset as usize * node_size) }) as *mut CacheOptimalMemoryNode
+            self.nodes
+                .get(offset)
+                .map_or(std::ptr::null_mut(), |slot| slot.as_ptr().cast_mut())
+        }
+    }
+
+    const fn f32_from_f64(value: f64) -> f32 {
+        #[allow(clippy::cast_possible_truncation)]
+        {
+            value as f32
         }
     }
 }
@@ -503,7 +572,7 @@ pub struct IndexStatistics {
     pub node_count: usize,
     /// Maximum number of nodes that can fit in the index
     pub capacity: usize,
-    /// Current load factor (node_count / capacity)
+    /// Current load factor (`node_count` / capacity)
     pub load_factor: f32,
     /// Percentage of cache hits vs total accesses
     pub cache_hit_rate: f32,
@@ -520,6 +589,7 @@ pub struct CognitivePreloader {
 
 impl CognitivePreloader {
     /// Create a new cognitive preloader with performance metrics tracking
+    #[must_use]
     pub fn new(metrics: Arc<StorageMetrics>) -> Self {
         Self {
             access_history: parking_lot::RwLock::new(Vec::with_capacity(1000)),
@@ -539,6 +609,7 @@ impl CognitivePreloader {
     }
 
     /// Predict next accesses based on patterns
+    #[must_use = "Predictions drive prefetch decisions and should not be ignored"]
     pub fn predict_next_accesses(&self, current_hash: u64, count: usize) -> Vec<u64> {
         let history = self.access_history.read();
         let mut predictions = Vec::new();
@@ -556,6 +627,7 @@ impl CognitivePreloader {
             }
         }
 
+        drop(history);
         predictions
     }
 
@@ -574,12 +646,35 @@ mod tests {
     use super::*;
     use crate::{Confidence, EpisodeBuilder};
     use chrono::Utc;
+    use std::fmt::Debug;
+    use std::sync::Arc;
+
+    type TestResult<T = ()> = Result<T, String>;
+
+    fn ensure(condition: bool, message: impl Into<String>) -> TestResult {
+        if condition {
+            Ok(())
+        } else {
+            Err(message.into())
+        }
+    }
+
+    fn ensure_eq<T>(actual: &T, expected: &T, context: &str) -> TestResult
+    where
+        T: PartialEq + Debug,
+    {
+        if actual == expected {
+            Ok(())
+        } else {
+            Err(format!("{context}: expected {expected:?}, got {actual:?}"))
+        }
+    }
 
     fn create_test_memory(id: &str) -> Arc<Memory> {
         let episode = EpisodeBuilder::new()
             .id(id.to_string())
             .when(Utc::now())
-            .what(format!("test memory {}", id))
+            .what(format!("test memory {id}"))
             .embedding([0.5f32; 768])
             .confidence(Confidence::HIGH)
             .build();
@@ -594,35 +689,44 @@ mod tests {
         assert_eq!(std::mem::align_of::<CacheOptimalMemoryNode>(), 64);
 
         // Verify hot data is in first cache line
-        let node = CacheOptimalMemoryNode::new(create_test_memory("test"), 12345);
+        let memory = create_test_memory("test");
+        let node = CacheOptimalMemoryNode::new(&memory, 12345);
         assert_eq!(node.id_hash, 12345);
     }
 
     #[test]
-    fn test_cognitive_index_operations() {
+    fn test_cognitive_index_operations() -> TestResult {
         let metrics = Arc::new(StorageMetrics::new());
-        let index = CognitiveIndex::new(1000, metrics).unwrap();
+        let index = CognitiveIndex::new(1000, metrics)
+            .map_err(|err| format!("create cognitive index: {err:?}"))?;
 
         let memory = create_test_memory("test_memory");
 
         // Test insert
-        let offset = index.insert(memory.clone()).unwrap();
-        assert!(offset < 1000);
+        let offset = index
+            .insert(&memory)
+            .map_err(|err| format!("insert memory into cognitive index: {err:?}"))?;
+        ensure(offset < 1000, "index offset should be within capacity")?;
 
         // Test lookup
         let found = index.lookup("test_memory");
-        assert!(found.is_some());
+        ensure(found.is_some(), "lookup should return inserted memory")?;
 
-        let node = found.unwrap();
-        assert_eq!(node.confidence, memory.confidence.raw());
+        let node = found.ok_or_else(|| "expected memory to be present in index".to_string())?;
+        ensure(
+            (node.confidence - memory.confidence.raw()).abs() < f32::EPSILON,
+            "stored confidence should match memory",
+        )?;
 
         // Test remove
         let removed = index.remove("test_memory");
-        assert!(removed);
+        ensure(removed, "removing memory should succeed")?;
 
         // Verify it's gone
         let not_found = index.lookup("test_memory");
-        assert!(not_found.is_none());
+        ensure(not_found.is_none(), "memory should no longer be indexed")?;
+
+        Ok(())
     }
 
     #[test]
@@ -643,19 +747,27 @@ mod tests {
     }
 
     #[test]
-    fn test_index_statistics() {
+    fn test_index_statistics() -> TestResult {
         let metrics = Arc::new(StorageMetrics::new());
-        let index = CognitiveIndex::new(100, metrics).unwrap();
+        let index = CognitiveIndex::new(100, metrics)
+            .map_err(|err| format!("create cognitive index: {err:?}"))?;
 
         // Insert some memories
         for i in 0..10 {
-            let memory = create_test_memory(&format!("memory_{}", i));
-            index.insert(memory).unwrap();
+            let memory = create_test_memory(&format!("memory_{i}"));
+            index
+                .insert(&memory)
+                .map_err(|err| format!("insert memory into cognitive index: {err:?}"))?;
         }
 
         let stats = index.statistics();
-        assert_eq!(stats.node_count, 10);
-        assert_eq!(stats.capacity, 100);
-        assert!((stats.load_factor - 0.1).abs() < 0.01);
+        ensure_eq(&stats.node_count, &10_usize, "node count")?;
+        ensure_eq(&stats.capacity, &100_usize, "capacity")?;
+        ensure(
+            (stats.load_factor - 0.1).abs() < 0.01,
+            "load factor within tolerance",
+        )?;
+
+        Ok(())
     }
 }

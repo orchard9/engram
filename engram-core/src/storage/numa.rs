@@ -30,6 +30,10 @@ pub struct NumaTopology {
 
 impl NumaTopology {
     /// Detect NUMA topology from the system
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if topology information cannot be retrieved from the OS.
     pub fn detect() -> StorageResult<Self> {
         #[cfg(unix)]
         {
@@ -42,30 +46,36 @@ impl NumaTopology {
             Ok(Self {
                 socket_count: 1,
                 node_count: 1,
-                socket_to_nodes: [(0, vec![0])].iter().cloned().collect(),
-                cpu_to_socket: [(0, 0)].iter().cloned().collect(),
+                socket_to_nodes: HashMap::from([(0usize, vec![0usize])]),
+                cpu_to_socket: HashMap::from([(0usize, 0usize)]),
                 memory_per_node_mb: vec![8192], // Assume 8GB
             })
         }
     }
 
     /// Create a single-node topology for fallback scenarios
+    #[must_use]
     pub fn single_node() -> Self {
         Self {
             socket_count: 1,
             node_count: 1,
-            socket_to_nodes: [(0, vec![0])].iter().cloned().collect(),
-            cpu_to_socket: [(0, 0)].iter().cloned().collect(),
+            socket_to_nodes: HashMap::from([(0usize, vec![0usize])]),
+            cpu_to_socket: HashMap::from([(0usize, 0usize)]),
             memory_per_node_mb: vec![8192], // Assume 8GB
         }
     }
 
     #[cfg(unix)]
+    /// Detect topology using Unix-specific facilities
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if sysfs cannot be read or parsed.
     fn detect_unix() -> StorageResult<Self> {
         // Try to read from /sys/devices/system/node/
         let node_path = std::path::Path::new("/sys/devices/system/node");
         if !node_path.exists() {
-            return Self::detect_fallback();
+            return Ok(Self::detect_fallback());
         }
 
         let mut socket_to_nodes = HashMap::new();
@@ -75,15 +85,15 @@ impl NumaTopology {
 
         // Read NUMA nodes
         for entry in std::fs::read_dir(node_path)
-            .map_err(|e| StorageError::NumaError(format!("Failed to read NUMA nodes: {}", e)))?
+            .map_err(|e| StorageError::NumaError(format!("Failed to read NUMA nodes: {e}")))?
         {
             let entry =
-                entry.map_err(|e| StorageError::NumaError(format!("NUMA entry error: {}", e)))?;
+                entry.map_err(|e| StorageError::NumaError(format!("NUMA entry error: {e}")))?;
             let file_name = entry.file_name();
             let name_str = file_name.to_string_lossy();
 
-            if name_str.starts_with("node") {
-                if let Ok(node_id) = name_str[4..].parse::<usize>() {
+            if let Some(stripped) = name_str.strip_prefix("node") {
+                if let Ok(node_id) = stripped.parse::<usize>() {
                     node_count = node_count.max(node_id + 1);
 
                     // Read memory info for this node
@@ -125,17 +135,18 @@ impl NumaTopology {
     }
 
     #[cfg(unix)]
-    fn detect_fallback() -> StorageResult<Self> {
+    fn detect_fallback() -> Self {
         // Use sysconf to get basic info
-        let cpu_count = unsafe { libc::sysconf(libc::_SC_NPROCESSORS_ONLN) } as usize;
+        let cpu_count_raw = unsafe { libc::sysconf(libc::_SC_NPROCESSORS_ONLN) };
+        let cpu_count = usize::try_from(cpu_count_raw).unwrap_or(1);
 
-        Ok(Self {
+        Self {
             socket_count: 1,
             node_count: 1,
-            socket_to_nodes: [(0, vec![0])].iter().cloned().collect(),
-            cpu_to_socket: (0..cpu_count).map(|i| (i, 0)).collect(),
+            socket_to_nodes: HashMap::from([(0usize, vec![0usize])]),
+            cpu_to_socket: (0..cpu_count).map(|i| (i, 0usize)).collect(),
             memory_per_node_mb: vec![8192],
-        })
+        }
     }
 
     #[cfg(unix)]
@@ -183,28 +194,58 @@ impl NumaTopology {
     }
 
     /// Get the socket for the current thread
+    #[cfg(target_os = "linux")]
+    #[must_use]
     pub fn current_socket(&self) -> usize {
-        // Try to get current CPU and map to socket (Linux only)
-        #[cfg(target_os = "linux")]
-        {
-            let cpu = unsafe { libc::sched_getcpu() };
-            if cpu >= 0 {
-                return self
-                    .cpu_to_socket
-                    .get(&(cpu as usize))
-                    .copied()
-                    .unwrap_or(0);
-            }
+        let cpu = unsafe { libc::sched_getcpu() };
+        if cpu >= 0 {
+            let cpu_index = usize::try_from(cpu).unwrap_or(0);
+            return self.cpu_to_socket.get(&cpu_index).copied().unwrap_or(0);
         }
 
-        0 // Default to socket 0
+        0
+    }
+
+    /// Get the socket for the current thread
+    #[cfg(not(target_os = "linux"))]
+    #[must_use]
+    pub const fn current_socket(&self) -> usize {
+        let _ = self;
+        0
     }
 
     /// Suggest NUMA placement for temporal clustering
-    pub fn suggest_socket_for_timestamp(&self, timestamp_ns: u64) -> usize {
+    #[cfg(target_pointer_width = "64")]
+    #[must_use]
+    pub const fn suggest_socket_for_timestamp(&self, timestamp_ns: u64) -> usize {
+        if self.socket_count == 0 {
+            return 0;
+        }
+
         // Hash timestamp to distribute across sockets
+        if self.socket_count == 0 {
+            return 0;
+        }
+
         let hash = timestamp_ns.wrapping_mul(0x9e37_79b9);
-        (hash as usize) % self.socket_count
+        #[allow(clippy::cast_possible_truncation)]
+        let socket_index = (hash % (self.socket_count as u64)) as usize;
+        socket_index
+    }
+
+    /// Suggest NUMA placement for temporal clustering
+    #[cfg(not(target_pointer_width = "64"))]
+    #[must_use]
+    pub fn suggest_socket_for_timestamp(&self, timestamp_ns: u64) -> usize {
+        if self.socket_count == 0 {
+            return 0;
+        }
+
+        let hash = timestamp_ns.wrapping_mul(0x9e37_79b9);
+        let Ok(count_u64) = u64::try_from(self.socket_count) else {
+            return 0;
+        };
+        usize::try_from(hash % count_u64).unwrap_or(0)
     }
 }
 
@@ -225,33 +266,38 @@ pub enum NumaPolicy {
 pub struct NumaMemoryMap {
     mapping: *mut u8,
     size: usize,
-    numa_policy: NumaPolicy,
-    topology: Arc<NumaTopology>,
 }
 
 impl NumaMemoryMap {
     /// Create a new NUMA-aware memory mapping
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying OS mapping fails or NUMA policy cannot be applied.
     pub fn new(
         size: usize,
         policy: NumaPolicy,
-        topology: Arc<NumaTopology>,
+        _topology: Arc<NumaTopology>,
     ) -> StorageResult<Self> {
         let mapping = Self::allocate_mapping(size, policy)?;
 
-        Ok(Self {
-            mapping,
-            size,
-            numa_policy: policy,
-            topology,
-        })
+        Ok(Self { mapping, size })
     }
 
     /// Create interleaved mapping for balanced access
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if mapping cannot be created with the requested policy.
     pub fn new_interleaved(size: usize, topology: Arc<NumaTopology>) -> StorageResult<Self> {
         Self::new(size, NumaPolicy::Interleaved, topology)
     }
 
     /// Create socket-local mapping
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if mapping cannot be created with the requested policy.
     pub fn new_socket_local(
         size: usize,
         socket: usize,
@@ -263,7 +309,8 @@ impl NumaMemoryMap {
     #[cfg(unix)]
     fn allocate_mapping(size: usize, policy: NumaPolicy) -> StorageResult<*mut u8> {
         // Align size to page boundary
-        let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as usize;
+        let page_size =
+            usize::try_from(unsafe { libc::sysconf(libc::_SC_PAGESIZE) }).unwrap_or(4096);
         let aligned_size = (size + page_size - 1) & !(page_size - 1);
 
         // Create anonymous mapping
@@ -348,7 +395,7 @@ impl NumaMemoryMap {
             }
         }
 
-        Ok(mapping as *mut u8)
+        Ok(mapping.cast::<u8>())
     }
 
     #[cfg(not(unix))]
@@ -369,22 +416,36 @@ impl NumaMemoryMap {
     }
 
     /// Get raw pointer to mapped memory
-    pub fn as_ptr(&self) -> *mut u8 {
+    #[must_use]
+    pub const fn as_ptr(&self) -> *mut u8 {
         self.mapping
     }
 
     /// Get size of mapping
-    pub fn size(&self) -> usize {
+    #[must_use]
+    pub const fn size(&self) -> usize {
         self.size
     }
 
     /// Get slice view of mapped memory
-    pub unsafe fn as_slice(&self) -> &[u8] {
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that the memory mapped region is valid and initialized.
+    /// The returned slice lifetime is tied to self, but the underlying memory
+    /// must remain valid for the duration of use.
+    #[must_use]
+    pub const unsafe fn as_slice(&self) -> &[u8] {
         unsafe { std::slice::from_raw_parts(self.mapping, self.size) }
     }
 
     /// Get mutable slice view of mapped memory
-    pub unsafe fn as_mut_slice(&mut self) -> &mut [u8] {
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that the memory mapped region is valid and initialized.
+    /// The caller must ensure exclusive access to the memory region.
+    pub const unsafe fn as_mut_slice(&mut self) -> &mut [u8] {
         unsafe { std::slice::from_raw_parts_mut(self.mapping, self.size) }
     }
 
@@ -394,7 +455,7 @@ impl NumaMemoryMap {
             #[cfg(unix)]
             unsafe {
                 libc::madvise(
-                    self.mapping.add(offset) as *mut libc::c_void,
+                    self.mapping.add(offset).cast::<libc::c_void>(),
                     len,
                     libc::MADV_WILLNEED,
                 );
@@ -407,7 +468,7 @@ impl NumaMemoryMap {
         #[cfg(unix)]
         unsafe {
             libc::madvise(
-                self.mapping as *mut libc::c_void,
+                self.mapping.cast::<libc::c_void>(),
                 self.size,
                 libc::MADV_SEQUENTIAL,
             );
@@ -419,7 +480,7 @@ impl NumaMemoryMap {
         #[cfg(unix)]
         unsafe {
             libc::madvise(
-                self.mapping as *mut libc::c_void,
+                self.mapping.cast::<libc::c_void>(),
                 self.size,
                 libc::MADV_RANDOM,
             );
@@ -427,6 +488,10 @@ impl NumaMemoryMap {
     }
 
     /// Lock pages in memory to prevent swapping
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the mlock system call fails.
     pub fn lock_in_memory(&self) -> StorageResult<()> {
         #[cfg(unix)]
         {
@@ -448,7 +513,7 @@ impl Drop for NumaMemoryMap {
         if !self.mapping.is_null() {
             #[cfg(unix)]
             unsafe {
-                libc::munmap(self.mapping as *mut libc::c_void, self.size);
+                libc::munmap(self.mapping.cast::<libc::c_void>(), self.size);
             }
 
             #[cfg(not(unix))]
@@ -472,6 +537,7 @@ pub struct NumaAllocator {
 
 impl NumaAllocator {
     /// Create a new NUMA-aware allocator with the given topology
+    #[must_use]
     pub fn new(topology: Arc<NumaTopology>) -> Self {
         let socket_pools = (0..topology.socket_count)
             .map(|_| parking_lot::Mutex::new(Vec::new()))
@@ -484,6 +550,10 @@ impl NumaAllocator {
     }
 
     /// Allocate aligned memory on preferred socket
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if memory allocation fails.
     pub fn allocate_aligned(
         &self,
         size: usize,
@@ -493,8 +563,11 @@ impl NumaAllocator {
         let socket = preferred_socket.min(self.topology.socket_count - 1);
 
         // Try to reuse from pool first
-        if let Some(ptr) = self.socket_pools[socket].lock().pop() {
-            return Ok(ptr);
+        {
+            let mut pool = self.socket_pools[socket].lock();
+            if let Some(ptr) = pool.pop() {
+                return Ok(ptr);
+            }
         }
 
         // Allocate new mapping on the socket
@@ -510,7 +583,8 @@ impl NumaAllocator {
         _policy: NumaPolicy,
     ) -> StorageResult<*mut u8> {
         // Align size to page boundary
-        let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as usize;
+        let page_size =
+            usize::try_from(unsafe { libc::sysconf(libc::_SC_PAGESIZE) }).unwrap_or(4096);
         let aligned_size = (size + page_size - 1) & !(page_size - 1);
 
         // Allocate with posix_memalign for guaranteed alignment
@@ -541,7 +615,7 @@ impl NumaAllocator {
             _ => {}
         }
 
-        Ok(ptr as *mut u8)
+        Ok(ptr.cast::<u8>())
     }
 
     #[cfg(not(unix))]
@@ -575,40 +649,62 @@ impl NumaAllocator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::{Context, Result, ensure};
 
     #[test]
-    fn test_numa_topology_detection() {
-        let topology = NumaTopology::detect().unwrap();
-        assert!(topology.socket_count > 0);
-        assert!(topology.node_count > 0);
+    fn test_numa_topology_detection() -> Result<()> {
+        let topology = NumaTopology::detect().context("topology detection failed")?;
+        ensure!(
+            topology.socket_count > 0,
+            "expected at least one NUMA socket"
+        );
+        ensure!(topology.node_count > 0, "expected at least one NUMA node");
+        Ok(())
     }
 
     #[test]
-    fn test_numa_memory_mapping() {
-        let topology = Arc::new(NumaTopology::detect().unwrap());
-        let mapping = NumaMemoryMap::new_interleaved(4096, topology).unwrap();
+    fn test_numa_memory_mapping() -> Result<()> {
+        let topology = Arc::new(NumaTopology::detect().context("topology detection failed")?);
+        let mapping =
+            NumaMemoryMap::new_interleaved(4096, topology).context("mapping creation failed")?;
 
-        assert_eq!(mapping.size(), 4096);
-        assert!(!mapping.as_ptr().is_null());
+        ensure!(
+            mapping.size() == 4096,
+            "mapping should cover requested size"
+        );
+        ensure!(
+            !mapping.as_ptr().is_null(),
+            "mapping base pointer should be valid"
+        );
 
         // Test basic memory access
         unsafe {
             let slice = mapping.as_slice();
-            assert_eq!(slice.len(), 4096);
+            ensure!(
+                slice.len() == 4096,
+                "mapped slice should reflect allocated size"
+            );
         }
+        Ok(())
     }
 
     #[test]
-    fn test_numa_allocator() {
-        let topology = Arc::new(NumaTopology::detect().unwrap());
+    fn test_numa_allocator() -> Result<()> {
+        let topology = Arc::new(NumaTopology::detect().context("topology detection failed")?);
         let allocator = NumaAllocator::new(topology);
 
-        let ptr = allocator.allocate_aligned(1024, 64, 0).unwrap();
-        assert!(!ptr.is_null());
+        let ptr = allocator
+            .allocate_aligned(1024, 64, 0)
+            .context("allocation failed")?;
+        ensure!(!ptr.is_null(), "allocator should return non-null pointer");
 
         // Test alignment
-        assert_eq!(ptr as usize % 64, 0);
+        ensure!(
+            ptr as usize % 64 == 0,
+            "pointer should be aligned to 64 bytes"
+        );
 
         allocator.deallocate(ptr, 0);
+        Ok(())
     }
 }

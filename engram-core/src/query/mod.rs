@@ -14,7 +14,19 @@
 //! 5. **Uncertainty Tracking**: Comprehensive tracking of uncertainty sources
 
 use crate::{Activation, Confidence, Episode};
+use std::convert::TryFrom;
+use std::sync::Arc;
 use std::time::SystemTime;
+
+#[must_use]
+#[inline]
+pub(crate) const fn clamp_probability_to_f32(value: f64) -> f32 {
+    // Confidence values are guaranteed to be within [0,1], so truncation is safe.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
+    {
+        value.clamp(0.0, 1.0) as f32
+    }
+}
 
 // Conditional compilation for SMT verification features
 #[cfg(feature = "probabilistic_queries")]
@@ -158,56 +170,88 @@ pub struct Evidence {
 pub enum EvidenceSource {
     /// From existing `MemoryStore` spreading activation
     SpreadingActivation {
+        /// Identifier for the episode the activation originated from.
         source_episode: String,
+        /// Activation strength recorded during the spread.
         activation_level: Activation,
+        /// Hop count taken to reach the current node.
         path_length: u16,
     },
     /// From decay functions (Task 005 integration)
     TemporalDecay {
+        /// Baseline confidence before decay was applied.
         original_confidence: Confidence,
+        /// Duration elapsed since the memory was encoded.
         time_elapsed: std::time::Duration,
+        /// Decay rate used to adjust the confidence.
         decay_rate: f32,
     },
     /// From direct cue matching (existing recall logic)
     DirectMatch {
+        /// Cue identifier that produced the match.
         cue_id: String,
+        /// Similarity score returned by the matcher.
         similarity_score: f32,
+        /// Type of cue match that was performed.
         match_type: MatchType,
     },
     /// From HNSW index results (Task 002 integration)
-    VectorSimilarity {
-        query_vector: [f32; 768],
-        result_distance: f32,
-        index_confidence: Confidence,
-    },
+    VectorSimilarity(Box<VectorSimilarityEvidence>),
+}
+
+/// Evidence collected from vector similarity comparisons.
+#[derive(Debug, Clone)]
+pub struct VectorSimilarityEvidence {
+    /// Query embedding vector used in the search.
+    pub query_vector: Arc<[f32; 768]>,
+    /// Distance between the query and the retrieved vector.
+    pub result_distance: f32,
+    /// Confidence derived from index ranking heuristics.
+    pub index_confidence: Confidence,
 }
 
 /// Types of matches for evidence classification
 #[derive(Debug, Clone, Copy)]
 pub enum MatchType {
+    /// Embedding similarity comparison.
     Embedding,
+    /// Semantic or symbolic match detected.
     Semantic,
+    /// Temporal overlap or proximity.
     Temporal,
+    /// Contextual association match.
     Context,
 }
 
 /// Sources of uncertainty in the system
 #[derive(Debug, Clone)]
 pub enum UncertaintySource {
+    /// Elevated system load affecting recall paths.
     SystemPressure {
+        /// Severity of the load or contention.
         pressure_level: f32,
+        /// Estimated impact on resulting confidence scores.
         effect_on_confidence: f32,
     },
+    /// Randomness introduced by spreading activation heuristics.
     SpreadingActivationNoise {
+        /// Variance observed across activation samples.
         activation_variance: f32,
+        /// Diversity of paths explored during spreading.
         path_diversity: f32,
     },
+    /// Uncertainty stemming from incomplete decay models.
     TemporalDecayUnknown {
+        /// Time elapsed since the memory was encoded.
         time_since_encoding: std::time::Duration,
+        /// Amount of uncertainty in the decay model parameters.
         decay_model_uncertainty: f32,
     },
+    /// Instrumentation or measurement noise.
     MeasurementError {
+        /// Magnitude of the observed error.
         error_magnitude: f32,
+        /// Estimated reduction in confidence due to noise.
         confidence_degradation: f32,
     },
 }
@@ -218,20 +262,31 @@ pub type EvidenceId = u64;
 /// Error types for probabilistic operations
 #[derive(Debug, thiserror::Error)]
 pub enum ProbabilisticError {
+    /// Provided probability is outside the valid [0,1] interval.
     #[error("Invalid probability value: {value} (must be in range [0,1])")]
-    InvalidProbability { value: f32 },
+    InvalidProbability {
+        /// Value that violated probability bounds.
+        value: f32,
+    },
 
+    /// Evidence graph forms a loop that prevents stable inference.
     #[error("Circular dependency detected in evidence chain")]
     CircularDependency,
 
+    /// Not enough supporting data to produce a confident result.
     #[error("Insufficient evidence for reliable probability estimate")]
     InsufficientEvidence,
 
+    /// Numerical operations became unstable or divergent.
     #[error("Numerical instability in probability calculation")]
     NumericalInstability,
 
+    /// SMT solver reported a failure while validating a property.
     #[error("SMT verification failed: {reason}")]
-    VerificationFailed { reason: String },
+    VerificationFailed {
+        /// Explanation reported by the solver.
+        reason: String,
+    },
 }
 
 /// Result type for probabilistic operations
@@ -246,21 +301,25 @@ impl ProbabilisticQueryResult {
         let overall_confidence = if episodes.is_empty() {
             ConfidenceInterval::from_confidence(Confidence::NONE)
         } else {
-            let avg_confidence =
-                episodes.iter().map(|(_, c)| c.raw()).sum::<f32>() / episodes.len() as f32;
+            let len_u32 = u32::try_from(episodes.len()).unwrap_or(u32::MAX);
+            let total_count = f64::from(len_u32).max(1.0);
+            let sum_confidence: f64 = episodes.iter().map(|(_, c)| f64::from(c.raw())).sum();
+            let avg_confidence = sum_confidence / total_count;
 
             // Estimate uncertainty from result diversity
-            let mean = avg_confidence;
             let variance = episodes
                 .iter()
-                .map(|(_, c)| (c.raw() - mean).powi(2))
-                .sum::<f32>()
-                / episodes.len() as f32;
+                .map(|(_, c)| {
+                    let diff = f64::from(c.raw()) - avg_confidence;
+                    diff * diff
+                })
+                .sum::<f64>()
+                / total_count;
             let uncertainty = variance.sqrt();
 
             ConfidenceInterval::from_confidence_with_uncertainty(
-                Confidence::exact(avg_confidence),
-                uncertainty,
+                Confidence::exact(clamp_probability_to_f32(avg_confidence)),
+                clamp_probability_to_f32(uncertainty),
             )
         };
 
@@ -292,6 +351,7 @@ impl ProbabilisticQueryResult {
 }
 
 // Extension trait for existing MemoryStore
+/// Adds a probabilistic recall API layered on top of deterministic retrieval.
 pub trait ProbabilisticRecall {
     /// Enhanced recall with probabilistic uncertainty propagation
     fn recall_probabilistic(&self, cue: crate::Cue) -> ProbabilisticQueryResult;
@@ -364,14 +424,14 @@ mod tests {
 
         let episode_list = vec![(episode1, Confidence::HIGH), (episode2, Confidence::MEDIUM)];
 
-        let result = ProbabilisticQueryResult::from_episodes(episode_list.clone());
+        let result = ProbabilisticQueryResult::from_episodes(episode_list);
 
         assert_eq!(result.episodes.len(), 2);
         assert!(result.is_successful());
         assert!(!result.is_empty());
 
         // Confidence interval should reflect the average
-        let expected_avg = (Confidence::HIGH.raw() + Confidence::MEDIUM.raw()) / 2.0;
+        let expected_avg = f32::midpoint(Confidence::HIGH.raw(), Confidence::MEDIUM.raw());
         assert!((result.confidence_interval.point.raw() - expected_avg).abs() < 1e-6);
     }
 

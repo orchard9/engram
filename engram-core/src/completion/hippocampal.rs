@@ -1,5 +1,6 @@
 //! Hippocampal-inspired pattern completion with CA3/CA1/DG dynamics.
 
+use super::numeric::{fraction_to_count, ratio, usize_to_f32};
 use super::{
     ActivationPathway, ActivationTrace, BiologicalDynamics, CompletedEpisode, CompletionConfig,
     CompletionError, CompletionResult, MemorySource, PartialEpisode, PatternCompleter, SourceMap,
@@ -67,7 +68,7 @@ impl HippocampalCompletion {
         let mut separated = DVector::zeros(expanded_size);
 
         // Competitive k-winner-take-all for sparsity
-        let k = (expanded_size as f32 * self.config.ca3_sparsity) as usize;
+        let k = fraction_to_count(expanded_size, self.config.ca3_sparsity);
         let mut activations: Vec<(usize, f32)> = Vec::new();
 
         // Generate expanded representation
@@ -75,25 +76,30 @@ impl HippocampalCompletion {
             let mut activation = 0.0;
             for j in 0..size {
                 // Random projection for expansion
-                let weight = ((i * size + j) as f32).sin() * 0.1;
+                let index = i
+                    .checked_mul(size)
+                    .and_then(|value| value.checked_add(j))
+                    .unwrap_or_default();
+                let weight = usize_to_f32(index).sin() * 0.1;
                 activation += input[j] * weight;
             }
             activations.push((i, activation));
         }
 
         // Select top-k neurons
-        activations.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        activations.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         for i in 0..k.min(activations.len()) {
             separated[activations[i].0] = activations[i].1;
         }
 
         // Compress back to original size
         let mut output = DVector::zeros(size);
+        let expansion_factor = usize_to_f32(self.config.dg_expansion_factor).max(1.0);
         for i in 0..size {
             for j in 0..self.config.dg_expansion_factor {
                 output[i] += separated[i * self.config.dg_expansion_factor + j];
             }
-            output[i] /= self.config.dg_expansion_factor as f32;
+            output[i] /= expansion_factor;
         }
 
         output
@@ -134,7 +140,7 @@ impl HippocampalCompletion {
     /// Apply sparsity constraint using k-winner-take-all
     #[cfg(feature = "pattern_completion")]
     fn apply_sparsity_constraint(&mut self) {
-        let k = (self.current_state.len() as f32 * self.config.ca3_sparsity) as usize;
+        let k = fraction_to_count(self.current_state.len(), self.config.ca3_sparsity);
         let mut activations: Vec<(usize, f32)> = self
             .current_state
             .iter()
@@ -142,7 +148,7 @@ impl HippocampalCompletion {
             .map(|(i, &v)| (i, v))
             .collect();
 
-        activations.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        activations.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
         // Zero out all but top-k
         for i in k..self.current_state.len() {
@@ -178,7 +184,7 @@ impl HippocampalCompletion {
         let mut best_similarity = 0.0;
 
         for episode in &self.stored_patterns {
-            let similarity = self.cosine_similarity(&episode.embedding, completed_pattern);
+            let similarity = Self::cosine_similarity(&episode.embedding, completed_pattern);
             if similarity > best_similarity {
                 best_similarity = similarity;
                 best_match = Some(episode);
@@ -193,7 +199,7 @@ impl HippocampalCompletion {
     }
 
     /// Compute cosine similarity between two vectors
-    fn cosine_similarity(&self, a: &[f32], b: &[f32]) -> f32 {
+    fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
         let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
         let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
         let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
@@ -207,49 +213,50 @@ impl HippocampalCompletion {
 
     /// Reconstruct location field from stored patterns using semantic similarity
     fn reconstruct_location_from_patterns(&self, partial: &PartialEpisode) -> Option<String> {
-        if let Some(what) = partial.known_fields.get("what") {
+        partial.known_fields.get("what").and_then(|what| {
             let mut location_counts = std::collections::HashMap::new();
-            
+
             for episode in &self.stored_patterns {
                 // Check if this episode is semantically similar
                 let what_lower = what.to_lowercase();
                 let episode_what_lower = episode.what.to_lowercase();
-                
-                let is_similar = episode_what_lower.contains(&what_lower) || 
-                                what_lower.contains(&episode_what_lower) ||
-                                self.word_level_similarity(&what_lower, &episode_what_lower) > 0.0;
-                
+
+                let is_similar = episode_what_lower.contains(&what_lower)
+                    || what_lower.contains(&episode_what_lower)
+                    || Self::word_level_similarity(&what_lower, &episode_what_lower) > 0.0;
+
                 if is_similar {
                     if let Some(ref location) = episode.where_location {
                         *location_counts.entry(location.clone()).or_insert(0) += 1;
                     }
                 }
             }
-            
+
             // Return most common location
             location_counts
                 .into_iter()
                 .max_by_key(|(_, count)| *count)
                 .map(|(location, _)| location)
-        } else {
-            None
-        }
+        })
     }
 
     /// Reconstruct participants field from stored patterns using semantic similarity
-    fn reconstruct_participants_from_patterns(&self, partial: &PartialEpisode) -> Option<Vec<String>> {
-        if let Some(what) = partial.known_fields.get("what") {
+    fn reconstruct_participants_from_patterns(
+        &self,
+        partial: &PartialEpisode,
+    ) -> Option<Vec<String>> {
+        partial.known_fields.get("what").and_then(|what| {
             let mut participant_counts = std::collections::HashMap::new();
-            
+
             for episode in &self.stored_patterns {
                 // Check if this episode is semantically similar
                 let what_lower = what.to_lowercase();
                 let episode_what_lower = episode.what.to_lowercase();
-                
-                let is_similar = episode_what_lower.contains(&what_lower) || 
-                                what_lower.contains(&episode_what_lower) ||
-                                self.word_level_similarity(&what_lower, &episode_what_lower) > 0.0;
-                
+
+                let is_similar = episode_what_lower.contains(&what_lower)
+                    || what_lower.contains(&episode_what_lower)
+                    || Self::word_level_similarity(&what_lower, &episode_what_lower) > 0.0;
+
                 if is_similar {
                     if let Some(ref participants) = episode.who {
                         for participant in participants {
@@ -258,32 +265,34 @@ impl HippocampalCompletion {
                     }
                 }
             }
-            
+
             if participant_counts.is_empty() {
                 None
             } else {
                 // Sort by frequency and take top participants
                 let mut sorted_participants: Vec<_> = participant_counts.into_iter().collect();
                 sorted_participants.sort_by(|a, b| b.1.cmp(&a.1));
-                
+
                 let participants: Vec<String> = sorted_participants
                     .into_iter()
                     .take(3) // Limit to top 3 most frequent participants
                     .map(|(name, _)| name)
                     .collect();
-                    
-                if participants.is_empty() { None } else { Some(participants) }
+
+                if participants.is_empty() {
+                    None
+                } else {
+                    Some(participants)
+                }
             }
-        } else {
-            None
-        }
+        })
     }
 
     /// Calculate word-level similarity score
-    fn word_level_similarity(&self, what1: &str, what2: &str) -> f32 {
+    fn word_level_similarity(what1: &str, what2: &str) -> f32 {
         let words1: Vec<&str> = what1.split_whitespace().collect();
         let words2: Vec<&str> = what2.split_whitespace().collect();
-        
+
         let mut matches = 0;
         for word1 in &words1 {
             for word2 in &words2 {
@@ -293,16 +302,20 @@ impl HippocampalCompletion {
                 }
             }
         }
-        
+
         if !words1.is_empty() && !words2.is_empty() {
-            matches as f32 / words1.len().max(words2.len()) as f32
+            ratio(matches, words1.len().max(words2.len()))
         } else {
             0.0
         }
     }
-    
+
     /// Prepare input vector from partial episode
-    fn prepare_input_vector(&self, partial: &PartialEpisode) -> CompletionResult<(DVector<f32>, usize)> {
+    fn prepare_input_vector(
+        &self,
+        partial: &PartialEpisode,
+    ) -> CompletionResult<(DVector<f32>, usize)> {
+        let _ = self;
         let mut input = DVector::zeros(768);
         let mut known_count = 0;
 
@@ -320,19 +333,19 @@ impl HippocampalCompletion {
         if known_count < 100 {
             return Err(CompletionError::InsufficientPattern);
         }
-        
+
         Ok((input, known_count))
     }
-    
+
     /// Apply the core pattern completion algorithm
-    fn apply_pattern_completion_algorithm(&self, input: DVector<f32>) -> CompletionResult<([f32; 768], usize)> {
+    fn apply_pattern_completion_algorithm(&self, input: &DVector<f32>) -> ([f32; 768], usize) {
         // Clone self for mutable operations
         let mut engine = Self::new(self.config.clone());
         engine.ca3_weights = self.ca3_weights.clone();
-        engine.stored_patterns = self.stored_patterns.clone();
+        engine.stored_patterns.clone_from(&self.stored_patterns);
 
         // Pattern separation
-        let separated = engine.pattern_separate(&input);
+        let separated = engine.pattern_separate(input);
 
         // CA3 attractor dynamics
         let completed = engine.ca3_dynamics(separated);
@@ -342,28 +355,27 @@ impl HippocampalCompletion {
         for i in 0..768 {
             completed_embedding[i] = completed[i];
         }
-        
-        Ok((completed_embedding, engine.iterations))
+
+        (completed_embedding, engine.iterations)
     }
-    
+
     /// Find existing episode or create new one from completed pattern
     fn find_or_create_episode(
         &self,
         partial: &PartialEpisode,
         completed_embedding: &[f32; 768],
     ) -> Episode {
-        if let Some(matched) = self.find_best_match(completed_embedding) {
-            matched.clone()
-        } else {
-            self.create_new_episode_from_pattern(partial, *completed_embedding)
-        }
+        self.find_best_match(completed_embedding).map_or_else(
+            || self.create_new_episode_from_pattern(partial, completed_embedding),
+            Clone::clone,
+        )
     }
-    
+
     /// Create a new episode from completed pattern
     fn create_new_episode_from_pattern(
         &self,
         partial: &PartialEpisode,
-        completed_embedding: [f32; 768],
+        completed_embedding: &[f32; 768],
     ) -> Episode {
         let mut episode = Episode::new(
             format!("completed_{}", chrono::Utc::now().timestamp()),
@@ -373,37 +385,34 @@ impl HippocampalCompletion {
                 .get("what")
                 .cloned()
                 .unwrap_or_else(|| "Reconstructed memory".to_string()),
-            completed_embedding,
+            *completed_embedding,
             partial.cue_strength,
         );
-        
+
         // Try to reconstruct location from stored patterns
         if let Some(where_location) = self.reconstruct_location_from_patterns(partial) {
             episode.where_location = Some(where_location);
         }
-        
+
         // Try to reconstruct participants from stored patterns
         if let Some(participants) = self.reconstruct_participants_from_patterns(partial) {
             episode.who = Some(participants);
         }
-        
+
         episode
     }
-    
+
     /// Build the final completed episode with metadata
     fn build_completed_episode(
         &self,
         episode: Episode,
         partial: &PartialEpisode,
-        known_count: usize,
-        iterations: usize,
+        completion_confidence: Confidence,
     ) -> CompletedEpisode {
-        // Calculate completion confidence based on iterations and known data
-        let completion_confidence = self.calculate_completion_confidence(known_count, iterations);
-        
+        let _ = self;
         // Build source attribution map
         let source_map = self.build_source_attribution(partial, completion_confidence);
-        
+
         // Create activation trace
         let activation_trace = ActivationTrace {
             source_memory: episode.id.clone(),
@@ -421,21 +430,26 @@ impl HippocampalCompletion {
             activation_evidence: vec![activation_trace],
         }
     }
-    
+
     /// Calculate confidence based on completion quality
-    fn calculate_completion_confidence(&self, _known_count: usize, iterations: usize) -> Confidence {
+    fn calculate_completion_confidence(
+        &self,
+        _known_count: usize,
+        iterations: usize,
+    ) -> Confidence {
         // Higher confidence when fewer iterations needed (matches original logic)
-        let iteration_ratio = iterations as f32 / self.config.max_iterations as f32;
-        
+        let iteration_ratio = ratio(iterations, self.config.max_iterations);
+
         Confidence::exact(0.9 * (1.0 - iteration_ratio))
     }
-    
+
     /// Build source attribution map for completed fields
     fn build_source_attribution(
         &self,
         partial: &PartialEpisode,
         completion_confidence: Confidence,
     ) -> SourceMap {
+        let _ = self;
         let mut source_map = SourceMap {
             field_sources: HashMap::new(),
             source_confidence: HashMap::new(),
@@ -460,7 +474,7 @@ impl HippocampalCompletion {
                 .source_confidence
                 .insert("what".to_string(), completion_confidence);
         }
-        
+
         source_map
     }
 }
@@ -471,21 +485,24 @@ impl PatternCompleter for HippocampalCompletion {
         {
             // 1. Validate and prepare input
             let (input, known_count) = self.prepare_input_vector(partial)?;
-            
+
             // 2. Apply pattern completion algorithm
-            let (completed_embedding, iterations) = self.apply_pattern_completion_algorithm(input)?;
-            
+            let (completed_embedding, iterations) = self.apply_pattern_completion_algorithm(&input);
+
             // 3. Find or create episode from completed pattern
             let episode = self.find_or_create_episode(partial, &completed_embedding);
-            
+
+            let completion_confidence =
+                self.calculate_completion_confidence(known_count, iterations);
+
+            if !self.ca1_gate(&episode.embedding, completion_confidence) {
+                return Err(CompletionError::InsufficientPattern);
+            }
+
             // 4. Build completion metadata
-            let completed_episode = self.build_completed_episode(
-                episode,
-                partial,
-                known_count,
-                iterations,
-            );
-            
+            let completed_episode =
+                self.build_completed_episode(episode, partial, completion_confidence);
+
             Ok(completed_episode)
         }
 
@@ -519,7 +536,7 @@ impl PatternCompleter for HippocampalCompletion {
             .count();
         let total = partial.partial_embedding.len();
 
-        let ratio = known_count as f32 / total as f32;
+        let ratio = ratio(known_count, total);
         Confidence::exact(ratio * partial.cue_strength.raw())
     }
 }
@@ -576,14 +593,11 @@ mod tests {
 
     #[test]
     fn test_cosine_similarity() {
-        let config = CompletionConfig::default();
-        let engine = HippocampalCompletion::new(config);
-
         let a = vec![1.0, 0.0, 0.0];
         let b = vec![1.0, 0.0, 0.0];
-        assert_eq!(engine.cosine_similarity(&a, &b), 1.0);
+        assert!((HippocampalCompletion::cosine_similarity(&a, &b) - 1.0_f32).abs() <= f32::EPSILON);
 
         let c = vec![0.0, 1.0, 0.0];
-        assert_eq!(engine.cosine_similarity(&a, &c), 0.0);
+        assert!(HippocampalCompletion::cosine_similarity(&a, &c).abs() <= f32::EPSILON);
     }
 }

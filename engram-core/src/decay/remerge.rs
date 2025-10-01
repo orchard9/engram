@@ -38,7 +38,10 @@ impl RemergeProcessor {
     /// Applies REMERGE transformation to episode confidence
     #[must_use]
     pub fn transform_episode_confidence(&self, episode: &Episode) -> Confidence {
-        let age_days = (Utc::now() - episode.when).num_days() as f32;
+        let age_days = (Utc::now() - episode.when)
+            .to_std()
+            .map(|duration| duration.as_secs_f32() / 86400.0)
+            .unwrap_or(0.0);
         let semantic_progress = self.semantic_extraction_progress(age_days);
 
         // Progressive transfer from episodic to semantic confidence

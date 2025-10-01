@@ -9,9 +9,10 @@
 // Allow unsafe code for performance-critical memory-mapped operations
 #![allow(unsafe_code)]
 
-use super::{StorageError, StorageMetrics, StorageResult, StorageTier, TierStatistics};
+use super::{StorageError, StorageMetrics, StorageResult, StorageTierBackend, TierStatistics};
 use crate::{Confidence, Cue, Episode, Memory};
 use dashmap::DashMap;
+use std::convert::TryFrom;
 use std::path::{Path, PathBuf};
 use std::sync::{
     Arc,
@@ -23,9 +24,6 @@ use std::time::SystemTime;
 use crc32c::crc32c;
 #[cfg(feature = "memory_mapped_persistence")]
 use memmap2::{Mmap, MmapMut, MmapOptions};
-
-#[cfg(all(feature = "memory_mapped_persistence", unix))]
-use super::numa::NumaTopology;
 
 /// Cache-line aligned embedding block for optimal SIMD performance  
 #[repr(C, align(64))]
@@ -52,11 +50,12 @@ pub struct EmbeddingBlock {
     pub recall_count: u32,
 
     /// Padding to complete cache line
-    pub _padding: [u8; 12],
+    padding: [u8; 12],
 }
 
 impl EmbeddingBlock {
     /// Create a new embedding block from a Memory instance
+    #[must_use]
     pub fn new(memory: &Memory) -> Self {
         Self {
             embedding: memory.embedding,
@@ -65,16 +64,20 @@ impl EmbeddingBlock {
             last_access: SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap_or_default()
-                .as_nanos() as u64,
+                .as_nanos()
+                .try_into()
+                .unwrap_or(u64::MAX),
             decay_rate: 0.2, // Default decay
             node_flags: 0,
             content_hash: Self::compute_content_hash(&memory.id),
             creation_time: SystemTime::from(memory.created_at)
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap_or_default()
-                .as_nanos() as u64,
+                .as_nanos()
+                .try_into()
+                .unwrap_or(u64::MAX),
             recall_count: 0,
-            _padding: [0; 12],
+            padding: [0; 12],
         }
     }
 
@@ -117,13 +120,15 @@ impl EmbeddingBlock {
 
     /// Prefetch only hot cache line for activation spreading (no-op on non-x86_64)
     #[cfg(not(all(feature = "memory_mapped_persistence", target_arch = "x86_64")))]
-    pub fn prefetch_for_activation(&self) {
+    pub const fn prefetch_for_activation(&self) {
+        let _ = self;
         // No-op on non-x86_64 platforms
     }
 
     /// Prefetch embedding cache lines for SIMD operations (no-op on non-x86_64)
     #[cfg(not(all(feature = "memory_mapped_persistence", target_arch = "x86_64")))]
-    pub fn prefetch_for_similarity(&self) {
+    pub const fn prefetch_for_similarity(&self) {
+        let _ = self;
         // No-op on non-x86_64 platforms
     }
 }
@@ -158,18 +163,21 @@ const CURRENT_VERSION: u32 = 1;
 
 impl MappedFileHeader {
     /// Create a new mapped file header with the specified parameters
+    #[must_use]
     pub fn new(entry_count: u32, entry_size: u32) -> Self {
         let now = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap_or_default()
-            .as_nanos() as u64;
+            .as_nanos()
+            .try_into()
+            .unwrap_or(u64::MAX);
 
         Self {
             magic: MAPPED_FILE_MAGIC,
             version: CURRENT_VERSION,
             entry_count,
             entry_size,
-            header_size: std::mem::size_of::<Self>() as u32,
+            header_size: u32::try_from(std::mem::size_of::<Self>()).unwrap_or(u32::MAX),
             created_at: now,
             last_modified: now,
             checksum: 0, // Computed separately
@@ -178,7 +186,13 @@ impl MappedFileHeader {
         }
     }
 
-    /// Validate the header for corruption and version compatibility
+    /// Validate the header for corruption and version compatibility.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the magic number, version, or checksum values are
+    /// inconsistent with the expected format.
+    #[must_use = "Header validation guards against mapped file corruption"]
     pub fn validate(&self) -> StorageResult<()> {
         if self.magic != MAPPED_FILE_MAGIC {
             return Err(StorageError::CorruptionDetected(format!(
@@ -199,6 +213,7 @@ impl MappedFileHeader {
 
     #[cfg(feature = "memory_mapped_persistence")]
     /// Compute CRC32 checksum of the provided data
+    #[must_use = "Checksum output must be written to the mapped header"]
     pub fn compute_checksum(&self, data: &[u8]) -> u32 {
         let mut combined = Vec::new();
 
@@ -219,6 +234,7 @@ impl MappedFileHeader {
     }
 
     #[cfg(not(feature = "memory_mapped_persistence"))]
+    #[must_use = "Checksum output must be written to the mapped header"]
     pub fn compute_checksum(&self, _data: &[u8]) -> u32 {
         0
     }
@@ -238,10 +254,6 @@ pub struct MappedWarmStorage {
     /// Performance metrics
     metrics: Arc<StorageMetrics>,
 
-    /// NUMA topology for optimal allocation
-    #[cfg(all(feature = "memory_mapped_persistence", unix))]
-    numa_topology: Arc<NumaTopology>,
-
     /// Statistics
     entry_count: AtomicUsize,
     total_size: AtomicU64,
@@ -249,7 +261,13 @@ pub struct MappedWarmStorage {
 }
 
 impl MappedWarmStorage {
-    /// Create new memory-mapped warm storage
+    /// Create new memory-mapped warm storage.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the backing file cannot be created or initialized
+    /// for memory mapping.
+    #[must_use = "Handle the result of mapped storage initialization"]
     pub fn new<P: AsRef<Path>>(
         file_path: P,
         initial_capacity: usize,
@@ -262,20 +280,6 @@ impl MappedWarmStorage {
             std::fs::create_dir_all(parent)?;
         }
 
-        #[cfg(all(feature = "memory_mapped_persistence", unix))]
-        let numa_topology = Arc::new(
-            super::numa::NumaTopology::detect()
-                .unwrap_or_else(|e| {
-                    tracing::warn!("Failed to detect NUMA topology: {}, using default", e);
-                    super::numa::NumaTopology::detect()
-                        .unwrap_or_else(|_| {
-                            // Fallback to single NUMA node if detection fails completely
-                            tracing::info!("NUMA detection failed completely, assuming single node");
-                            super::numa::NumaTopology::single_node()
-                        })
-                }),
-        );
-
         let mut storage = Self {
             file_path,
             #[cfg(feature = "memory_mapped_persistence")]
@@ -284,8 +288,6 @@ impl MappedWarmStorage {
             mmap_mut: None,
             memory_index: DashMap::new(),
             metrics,
-            #[cfg(all(feature = "memory_mapped_persistence", unix))]
-            numa_topology,
             entry_count: AtomicUsize::new(0),
             total_size: AtomicU64::new(0),
             last_access: AtomicU64::new(0),
@@ -301,9 +303,11 @@ impl MappedWarmStorage {
     fn initialize_file(&mut self, capacity: usize) -> StorageResult<()> {
         use std::fs::OpenOptions;
 
-        let entry_size = std::mem::size_of::<EmbeddingBlock>() as u32;
+        let entry_size_u32 =
+            u32::try_from(std::mem::size_of::<EmbeddingBlock>()).unwrap_or(u32::MAX);
+        let entry_size = usize::try_from(entry_size_u32).unwrap_or(0);
         let header_size = std::mem::size_of::<MappedFileHeader>();
-        let data_size = capacity * entry_size as usize;
+        let data_size = capacity.saturating_mul(entry_size);
         let total_size = header_size + data_size;
 
         let file = OpenOptions::new()
@@ -314,16 +318,16 @@ impl MappedWarmStorage {
             .open(&self.file_path)?;
 
         // Set file size
-        file.set_len(total_size as u64)?;
+        file.set_len(u64::try_from(total_size).unwrap_or(u64::MAX))?;
 
         // Create memory mapping
         let mut mmap_mut = unsafe { MmapOptions::new().len(total_size).map_mut(&file)? };
 
         // Initialize header
-        let header = MappedFileHeader::new(0, entry_size);
+        let header = MappedFileHeader::new(0, entry_size_u32);
         let header_bytes = unsafe {
             std::slice::from_raw_parts(
-                &header as *const _ as *const u8,
+                std::ptr::from_ref(&header).cast::<u8>(),
                 std::mem::size_of::<MappedFileHeader>(),
             )
         };
@@ -340,7 +344,7 @@ impl MappedWarmStorage {
         #[cfg(unix)]
         unsafe {
             libc::madvise(
-                mmap_mut.as_ptr() as *mut libc::c_void,
+                mmap_mut.as_mut_ptr().cast::<libc::c_void>(),
                 mmap_mut.len(),
                 libc::MADV_SEQUENTIAL,
             );
@@ -357,7 +361,16 @@ impl MappedWarmStorage {
     }
 
     /// Load existing memory-mapped file
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - The file cannot be opened
+    /// - The file is too small to contain a valid header
+    /// - The header validation fails
+    /// - The checksum doesn't match
     #[cfg(feature = "memory_mapped_persistence")]
+    #[must_use = "Opening mapped storage can fail and should be inspected"]
     pub fn load_existing<P: AsRef<Path>>(
         file_path: P,
         metrics: Arc<StorageMetrics>,
@@ -374,7 +387,7 @@ impl MappedWarmStorage {
             ));
         }
 
-        let header = unsafe { std::ptr::read(mmap.as_ptr() as *const MappedFileHeader) };
+        let header = unsafe { std::ptr::read_unaligned(mmap.as_ptr().cast::<MappedFileHeader>()) };
 
         header.validate()?;
 
@@ -400,31 +413,15 @@ impl MappedWarmStorage {
             }
         }
 
-        #[cfg(all(feature = "memory_mapped_persistence", unix))]
-        let numa_topology = Arc::new(
-            super::numa::NumaTopology::detect()
-                .unwrap_or_else(|e| {
-                    tracing::warn!("Failed to detect NUMA topology: {}, using default", e);
-                    super::numa::NumaTopology::detect()
-                        .unwrap_or_else(|_| {
-                            // Fallback to single NUMA node if detection fails completely
-                            tracing::info!("NUMA detection failed completely, assuming single node");
-                            super::numa::NumaTopology::single_node()
-                        })
-                }),
-        );
-
         Ok(Self {
             file_path,
             mmap: Some(mmap),
             mmap_mut: None,
             memory_index,
             metrics,
-            #[cfg(all(feature = "memory_mapped_persistence", unix))]
-            numa_topology,
             entry_count: AtomicUsize::new(header.entry_count as usize),
             total_size: AtomicU64::new(
-                header_size as u64 + header.entry_count as u64 * entry_size as u64,
+                header_size as u64 + u64::from(header.entry_count) * entry_size as u64,
             ),
             last_access: AtomicU64::new(0),
         })
@@ -440,19 +437,22 @@ impl MappedWarmStorage {
                 return Err(StorageError::allocation_failed("Offset exceeds file size"));
             }
 
-            let block_bytes =
-                unsafe { std::slice::from_raw_parts(block as *const _ as *const u8, block_size) };
+            let block_bytes = unsafe {
+                std::slice::from_raw_parts(std::ptr::from_ref(block).cast::<u8>(), block_size)
+            };
 
             // SAFETY: We've validated the offset bounds above
             unsafe {
-                let dst = mmap_mut.as_ptr().add(offset) as *mut u8;
+                let dst = mmap_mut.as_ptr().add(offset).cast_mut();
                 std::ptr::copy_nonoverlapping(block_bytes.as_ptr(), dst, block_size);
             }
             self.metrics.record_write(block_size as u64);
 
             Ok(())
         } else {
-            Err(StorageError::NotInitialized("MMAP not initialized".to_string()))
+            Err(StorageError::NotInitialized(
+                "MMAP not initialized".to_string(),
+            ))
         }
     }
 
@@ -469,7 +469,9 @@ impl MappedWarmStorage {
         } else if let Some(mmap_mut) = &self.mmap_mut {
             mmap_mut.as_ref()
         } else {
-            return Err(StorageError::NotInitialized("MMAP not initialized".to_string()));
+            return Err(StorageError::NotInitialized(
+                "MMAP not initialized".to_string(),
+            ));
         };
 
         let block_size = std::mem::size_of::<EmbeddingBlock>();
@@ -480,8 +482,9 @@ impl MappedWarmStorage {
             ));
         }
 
-        let block =
-            unsafe { std::ptr::read(mmap_slice[offset..].as_ptr() as *const EmbeddingBlock) };
+        let block = unsafe {
+            std::ptr::read_unaligned(mmap_slice[offset..].as_ptr().cast::<EmbeddingBlock>())
+        };
 
         self.metrics.record_read(block_size as u64);
         Ok(block)
@@ -493,6 +496,7 @@ impl MappedWarmStorage {
     }
 
     /// Find next available offset for new entry
+    #[must_use]
     fn find_next_offset(&self) -> usize {
         let header_size = std::mem::size_of::<MappedFileHeader>();
         let entry_size = std::mem::size_of::<EmbeddingBlock>();
@@ -503,7 +507,7 @@ impl MappedWarmStorage {
 }
 
 #[cfg(feature = "memory_mapped_persistence")]
-impl StorageTier for MappedWarmStorage {
+impl StorageTierBackend for MappedWarmStorage {
     type Error = StorageError;
 
     async fn store(&self, memory: Arc<Memory>) -> Result<(), Self::Error> {
@@ -522,7 +526,9 @@ impl StorageTier for MappedWarmStorage {
             SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap_or_default()
-                .as_nanos() as u64,
+                .as_nanos()
+                .try_into()
+                .unwrap_or(u64::MAX),
             Ordering::Relaxed,
         );
 
@@ -536,7 +542,9 @@ impl StorageTier for MappedWarmStorage {
         // In practice, this would use SIMD-optimized similarity search
         for entry in &self.memory_index {
             let memory_id = entry.key();
-            let offset = *entry.value() as usize;
+            let offset = usize::try_from(*entry.value()).map_err(|_| {
+                StorageError::CorruptionDetected("Offset too large for platform".to_string())
+            })?;
 
             let block = self.read_embedding_block(offset)?;
 
@@ -547,9 +555,9 @@ impl StorageTier for MappedWarmStorage {
                 let episode = crate::EpisodeBuilder::new()
                     .id(memory_id.clone())
                     .when(chrono::DateTime::from_timestamp_nanos(
-                        block.creation_time as i64,
+                        block.creation_time.try_into().unwrap_or(i64::MAX),
                     ))
-                    .what(format!("Stored memory {}", memory_id))
+                    .what(format!("Stored memory {memory_id}"))
                     .embedding(block.embedding)
                     .confidence(confidence)
                     .build();
@@ -563,14 +571,18 @@ impl StorageTier for MappedWarmStorage {
 
     async fn update_activation(&self, memory_id: &str, activation: f32) -> Result<(), Self::Error> {
         if let Some(entry) = self.memory_index.get(memory_id) {
-            let offset = *entry.value() as usize;
+            let offset = usize::try_from(*entry.value()).map_err(|_| {
+                StorageError::CorruptionDetected("Offset too large for platform".to_string())
+            })?;
             let mut block = self.read_embedding_block(offset)?;
 
             block.activation = activation;
             block.last_access = SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap_or_default()
-                .as_nanos() as u64;
+                .as_nanos()
+                .try_into()
+                .unwrap_or(u64::MAX);
 
             self.store_embedding_block(&block, offset)?;
         }
@@ -603,7 +615,7 @@ impl StorageTier for MappedWarmStorage {
 }
 
 #[cfg(not(feature = "memory_mapped_persistence"))]
-impl StorageTier for MappedWarmStorage {
+impl StorageTierBackend for MappedWarmStorage {
     type Error = StorageError;
 
     async fn store(&self, _memory: Arc<Memory>) -> Result<(), Self::Error> {
@@ -648,7 +660,39 @@ impl StorageTier for MappedWarmStorage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fmt::Debug;
     use tempfile::TempDir;
+
+    type TestResult<T = ()> = Result<T, String>;
+
+    fn ensure(condition: bool, message: impl Into<String>) -> TestResult {
+        if condition {
+            Ok(())
+        } else {
+            Err(message.into())
+        }
+    }
+
+    fn ensure_eq<T>(actual: &T, expected: &T, context: &str) -> TestResult
+    where
+        T: PartialEq + Debug,
+    {
+        if actual == expected {
+            Ok(())
+        } else {
+            Err(format!("{context}: expected {expected:?}, got {actual:?}"))
+        }
+    }
+
+    trait IntoTestResult<T> {
+        fn into_test_result(self, context: &str) -> TestResult<T>;
+    }
+
+    impl<T, E: std::fmt::Debug> IntoTestResult<T> for Result<T, E> {
+        fn into_test_result(self, context: &str) -> TestResult<T> {
+            self.map_err(|err| format!("{context}: {err:?}"))
+        }
+    }
 
     fn create_test_memory() -> Arc<Memory> {
         use crate::EpisodeBuilder;
@@ -676,23 +720,30 @@ mod tests {
         let memory = create_test_memory();
         let block = EmbeddingBlock::new(&memory);
 
-        assert_eq!(block.embedding, memory.embedding);
-        assert_eq!(block.confidence, memory.confidence.raw());
+        for (actual, expected) in block.embedding.iter().zip(memory.embedding.iter()) {
+            assert!((actual - expected).abs() < f32::EPSILON);
+        }
+        assert!((block.confidence - memory.confidence.raw()).abs() < f32::EPSILON);
         assert!(block.last_access > 0);
     }
 
     #[cfg(feature = "memory_mapped_persistence")]
     #[tokio::test]
-    async fn test_mapped_warm_storage() {
-        let temp_dir = TempDir::new().unwrap();
+    async fn test_mapped_warm_storage() -> TestResult {
+        let temp_dir =
+            TempDir::new().into_test_result("create temp dir for mapped storage tests")?;
         let file_path = temp_dir.path().join("warm_storage.dat");
         let metrics = Arc::new(StorageMetrics::new());
 
-        let storage = MappedWarmStorage::new(file_path, 1000, metrics).unwrap();
+        let storage = MappedWarmStorage::new(file_path, 1000, metrics)
+            .into_test_result("construct mapped warm storage")?;
         let memory = create_test_memory();
 
         // Test store
-        storage.store(memory.clone()).await.unwrap();
+        storage
+            .store(memory)
+            .await
+            .into_test_result("store memory in mapped storage")?;
 
         // Test recall
         let cue = Cue::semantic(
@@ -700,12 +751,20 @@ mod tests {
             "test content".to_string(),
             Confidence::MEDIUM,
         );
-        let results = storage.recall(&cue).await.unwrap();
-        assert!(!results.is_empty());
+        let results = storage
+            .recall(&cue)
+            .await
+            .into_test_result("recall from mapped storage")?;
+        ensure(
+            !results.is_empty(),
+            "mapped storage recall should return results",
+        )?;
 
         // Test statistics
         let stats = storage.statistics();
-        assert_eq!(stats.memory_count, 1);
-        assert!(stats.total_size_bytes > 0);
+        ensure_eq(&stats.memory_count, &1_usize, "mapped storage memory count")?;
+        ensure(stats.total_size_bytes > 0, "mapped storage tracks bytes")?;
+
+        Ok(())
     }
 }

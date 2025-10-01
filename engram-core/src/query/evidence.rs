@@ -8,6 +8,7 @@
 use super::{Evidence, EvidenceId, EvidenceSource, ProbabilisticError, ProbabilisticResult};
 use crate::{Activation, Confidence};
 use std::collections::{HashMap, HashSet};
+use std::convert::TryFrom;
 use std::time::{Duration, SystemTime};
 
 /// Evidence aggregator with circular dependency detection
@@ -52,6 +53,7 @@ impl EvidenceAggregator {
     }
 
     /// Add evidence with automatic ID assignment
+    #[must_use]
     pub fn add_evidence(&mut self, evidence: Evidence) -> EvidenceId {
         let id = self.next_id;
         self.next_id += 1;
@@ -70,30 +72,43 @@ impl EvidenceAggregator {
         id
     }
 
-    /// Combine multiple evidence sources using Bayesian updating
+    /// Combine multiple evidence sources using Bayesian updating.
+    ///
+    /// # Errors
+    ///
+    /// - [`ProbabilisticError::InsufficientEvidence`] if any provided identifier is
+    ///   absent from the aggregator.
+    /// - [`ProbabilisticError::CircularDependency`] when the dependency graph
+    ///   contains a cycle.
+    ///
+    /// # Panics
+    ///
+    /// This function does not panic; invalid identifiers are propagated as
+    /// [`ProbabilisticError`] values instead.
+    #[must_use = "Use the combined evidence to drive downstream probabilistic reasoning"]
     pub fn combine_evidence(
         &mut self,
-        evidence_ids: Vec<EvidenceId>,
+        evidence_ids: &[EvidenceId],
     ) -> ProbabilisticResult<CombinedEvidence> {
         // Check cache first
-        let mut sorted_ids = evidence_ids.clone();
+        let mut sorted_ids = evidence_ids.to_vec();
         sorted_ids.sort_unstable();
         if let Some(cached) = self.combination_cache.get(&sorted_ids) {
             return Ok(cached.clone());
         }
 
         // Validate evidence IDs exist
-        for &id in &evidence_ids {
+        for &id in evidence_ids {
             if !self.evidence_db.contains_key(&id) {
                 return Err(ProbabilisticError::InsufficientEvidence);
             }
         }
 
         // Check for circular dependencies
-        self.check_circular_dependencies(&evidence_ids)?;
+        self.check_circular_dependencies(evidence_ids)?;
 
         // Perform Bayesian combination
-        let result = self.bayesian_combination(&evidence_ids)?;
+        let result = self.bayesian_combination(evidence_ids)?;
 
         // Cache result
         self.combination_cache.insert(sorted_ids, result.clone());
@@ -104,7 +119,7 @@ impl EvidenceAggregator {
     /// Create evidence from spreading activation
     #[must_use]
     pub fn evidence_from_activation(
-        source_episode: String,
+        source_episode: impl Into<String>,
         activation_level: Activation,
         path_length: u16,
     ) -> Evidence {
@@ -115,7 +130,7 @@ impl EvidenceAggregator {
 
         Evidence {
             source: EvidenceSource::SpreadingActivation {
-                source_episode,
+                source_episode: source_episode.into(),
                 activation_level,
                 path_length,
             },
@@ -151,7 +166,7 @@ impl EvidenceAggregator {
     /// Create evidence from direct cue matching
     #[must_use]
     pub fn evidence_from_cue_match(
-        cue_id: String,
+        cue_id: impl Into<String>,
         similarity_score: f32,
         match_type: super::MatchType,
     ) -> Evidence {
@@ -159,7 +174,7 @@ impl EvidenceAggregator {
 
         Evidence {
             source: EvidenceSource::DirectMatch {
-                cue_id,
+                cue_id: cue_id.into(),
                 similarity_score,
                 match_type,
             },
@@ -169,7 +184,17 @@ impl EvidenceAggregator {
         }
     }
 
-    /// Check for circular dependencies in evidence chain
+    /// Check for circular dependencies in the evidence chain.
+    ///
+    /// # Errors
+    ///
+    /// - [`ProbabilisticError::CircularDependency`] if traversing the graph reveals a
+    ///   cycle.
+    ///
+    /// # Panics
+    ///
+    /// This function does not panic. Depth-first traversal is bounded by the
+    /// dependency graph depth and guards against recursion overflow.
     fn check_circular_dependencies(&self, evidence_ids: &[EvidenceId]) -> ProbabilisticResult<()> {
         let mut visited = HashSet::new();
         let mut rec_stack = HashSet::new();
@@ -213,7 +238,17 @@ impl EvidenceAggregator {
         false
     }
 
-    /// Perform Bayesian evidence combination with bias prevention
+    /// Perform Bayesian evidence combination with bias prevention.
+    ///
+    /// # Errors
+    ///
+    /// - [`ProbabilisticError::InsufficientEvidence`] when `evidence_ids` is empty.
+    ///
+    /// # Panics
+    ///
+    /// This function does not panic. When the input slice is empty a
+    /// [`ProbabilisticError::InsufficientEvidence`] is returned instead of
+    /// triggering a panic.
     fn bayesian_combination(
         &self,
         evidence_ids: &[EvidenceId],
@@ -268,16 +303,22 @@ impl EvidenceAggregator {
             .map(|(_, e)| e.strength.raw())
             .collect();
 
-        let mean = evidence_values.iter().sum::<f32>() / evidence_values.len() as f32;
+        let len_u32 = u32::try_from(evidence_values.len()).unwrap_or(u32::MAX);
+        let count = f64::from(len_u32).max(1.0);
+        let sum: f64 = evidence_values.iter().map(|value| f64::from(*value)).sum();
+        let mean = sum / count;
         let variance = evidence_values
             .iter()
-            .map(|v| (v - mean).powi(2))
-            .sum::<f32>()
-            / evidence_values.len() as f32;
+            .map(|value| {
+                let diff = f64::from(*value) - mean;
+                diff * diff
+            })
+            .sum::<f64>()
+            / count;
         let std_dev = variance.sqrt();
 
         // Conservative uncertainty bounds
-        let uncertainty_factor = std_dev * 1.96; // 95% confidence interval
+        let uncertainty_factor = super::clamp_probability_to_f32(std_dev * 1.96); // 95% interval
         let lower_bound =
             Confidence::exact((combined_confidence.raw() - uncertainty_factor).max(0.0));
         let upper_bound =
@@ -333,12 +374,14 @@ impl EvidenceAggregator {
     pub fn get_evidence_by_source_type(&self, source_type: &str) -> Vec<(EvidenceId, &Evidence)> {
         self.evidence_db
             .iter()
-            .filter(|(_, evidence)| match (&evidence.source, source_type) {
-                (EvidenceSource::SpreadingActivation { .. }, "activation") => true,
-                (EvidenceSource::TemporalDecay { .. }, "decay") => true,
-                (EvidenceSource::DirectMatch { .. }, "match") => true,
-                (EvidenceSource::VectorSimilarity { .. }, "similarity") => true,
-                _ => false,
+            .filter(|(_, evidence)| {
+                matches!(
+                    (&evidence.source, source_type),
+                    (EvidenceSource::SpreadingActivation { .. }, "activation")
+                        | (EvidenceSource::TemporalDecay { .. }, "decay")
+                        | (EvidenceSource::DirectMatch { .. }, "match")
+                        | (EvidenceSource::VectorSimilarity(_), "similarity")
+                )
             })
             .map(|(&id, evidence)| (id, evidence))
             .collect()
@@ -355,35 +398,88 @@ impl Default for EvidenceAggregator {
 mod tests {
     use super::*;
     use crate::MatchType;
+    use std::fmt::Debug;
     use std::time::Duration;
 
+    type TestResult<T = ()> = Result<T, String>;
+
+    fn ensure_eq<T>(actual: &T, expected: &T, context: &str) -> TestResult
+    where
+        T: PartialEq + Debug,
+    {
+        if actual == expected {
+            Ok(())
+        } else {
+            Err(format!("{context}: expected {expected:?}, got {actual:?}"))
+        }
+    }
+
+    fn ensure(condition: bool, message: impl Into<String>) -> TestResult {
+        if condition {
+            Ok(())
+        } else {
+            Err(message.into())
+        }
+    }
+
+    fn ensure_close_f32(actual: f32, expected: f32, context: &str) -> TestResult {
+        let diff = (actual - expected).abs();
+        if diff <= f32::EPSILON {
+            Ok(())
+        } else {
+            Err(format!(
+                "{context}: expected {expected}, got {actual} (diff {diff})"
+            ))
+        }
+    }
+
+    fn ensure_close_f64(actual: f64, expected: f64, context: &str) -> TestResult {
+        let diff = (actual - expected).abs();
+        if diff <= 1e-10 {
+            Ok(())
+        } else {
+            Err(format!(
+                "{context}: expected {expected}, got {actual} (diff {diff})"
+            ))
+        }
+    }
+
     #[test]
-    fn test_evidence_creation_from_activation() {
+    fn test_evidence_creation_from_activation() -> TestResult {
         let evidence = EvidenceAggregator::evidence_from_activation(
             "test_episode".to_string(),
             Activation::new(0.8),
             2,
         );
 
-        match evidence.source {
-            EvidenceSource::SpreadingActivation {
-                ref source_episode,
-                activation_level,
-                path_length,
-            } => {
-                assert_eq!(source_episode, "test_episode");
-                assert_eq!(activation_level.value(), 0.8);
-                assert_eq!(path_length, 2);
-            }
-            _ => panic!("Wrong evidence source type"),
+        if let EvidenceSource::SpreadingActivation {
+            source_episode,
+            activation_level,
+            path_length,
+        } = &evidence.source
+        {
+            ensure_eq(
+                source_episode,
+                &"test_episode".to_string(),
+                "activation episode",
+            )?;
+            ensure_close_f32(activation_level.value(), 0.8, "activation level")?;
+            ensure_eq(path_length, &2, "activation path length")?;
+        } else {
+            return Err("wrong evidence source type".to_string());
         }
 
         // Path degradation should reduce confidence
-        assert!(evidence.strength.raw() < 0.8);
+        ensure(
+            evidence.strength.raw() < 0.8,
+            "strength should decay with path length",
+        )?;
+
+        Ok(())
     }
 
     #[test]
-    fn test_evidence_combination() {
+    fn test_evidence_combination() -> TestResult {
         let mut aggregator = EvidenceAggregator::new();
 
         let evidence1 = EvidenceAggregator::evidence_from_activation(
@@ -401,12 +497,28 @@ mod tests {
         let id1 = aggregator.add_evidence(evidence1);
         let id2 = aggregator.add_evidence(evidence2);
 
-        let combined = aggregator.combine_evidence(vec![id1, id2]).unwrap();
+        let combined = aggregator
+            .combine_evidence(&[id1, id2])
+            .map_err(|err| format!("combine evidence should succeed: {err:?}"))?;
 
-        assert!(!combined.contributing_sources.is_empty());
-        assert!(combined.confidence.raw() > 0.0);
-        assert!(combined.lower_bound.raw() <= combined.confidence.raw());
-        assert!(combined.confidence.raw() <= combined.upper_bound.raw());
+        ensure(
+            !combined.contributing_sources.is_empty(),
+            "combined evidence should track sources",
+        )?;
+        ensure(
+            combined.confidence.raw() > 0.0,
+            "combined confidence should be positive",
+        )?;
+        ensure(
+            combined.lower_bound.raw() <= combined.confidence.raw(),
+            "lower bound should not exceed confidence",
+        )?;
+        ensure(
+            combined.confidence.raw() <= combined.upper_bound.raw(),
+            "upper bound should exceed confidence",
+        )?;
+
+        Ok(())
     }
 
     #[test]
@@ -434,7 +546,7 @@ mod tests {
         let id2 = aggregator.add_evidence(evidence2);
 
         // Should detect circular dependency
-        let result = aggregator.combine_evidence(vec![id1, id2]);
+        let result = aggregator.combine_evidence(&[id1, id2]);
         assert!(matches!(
             result,
             Err(ProbabilisticError::CircularDependency)
@@ -442,34 +554,43 @@ mod tests {
     }
 
     #[test]
-    fn test_temporal_decay_evidence() {
+    fn test_temporal_decay_evidence() -> TestResult {
         let original = Confidence::HIGH;
         let time_elapsed = Duration::from_secs(3600); // 1 hour
         let decay_rate = 0.001; // per second
 
         let evidence = EvidenceAggregator::evidence_from_decay(original, time_elapsed, decay_rate);
 
-        match evidence.source {
-            EvidenceSource::TemporalDecay {
+        if let EvidenceSource::TemporalDecay {
+            original_confidence,
+            time_elapsed: elapsed,
+            decay_rate: rate,
+        } = &evidence.source
+        {
+            ensure_eq(
                 original_confidence,
-                time_elapsed: elapsed,
-                decay_rate: rate,
-            } => {
-                assert_eq!(original_confidence, Confidence::HIGH);
-                assert_eq!(elapsed, Duration::from_secs(3600));
-                assert_eq!(rate, 0.001);
-            }
-            _ => panic!("Wrong evidence source type"),
+                &Confidence::HIGH,
+                "temporal original confidence",
+            )?;
+            ensure_eq(elapsed, &Duration::from_secs(3600), "temporal elapsed")?;
+            ensure_close_f64(f64::from(*rate), 0.001, "temporal decay rate")?;
+        } else {
+            return Err("wrong evidence source type".to_string());
         }
 
         // Should be decayed from original
-        assert!(evidence.strength.raw() < original.raw());
+        ensure(
+            evidence.strength.raw() < original.raw(),
+            "temporal decay should reduce confidence",
+        )?;
+
+        Ok(())
     }
 
     #[test]
     fn test_evidence_aggregation_empty() {
         let mut aggregator = EvidenceAggregator::new();
-        let result = aggregator.combine_evidence(vec![]);
+        let result = aggregator.combine_evidence(&[]);
         assert!(matches!(
             result,
             Err(ProbabilisticError::InsufficientEvidence)

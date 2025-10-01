@@ -13,9 +13,6 @@
 use crate::Confidence;
 use std::time::Duration;
 
-#[cfg(feature = "psychological_decay")]
-use libm::pow;
-
 /// Neocortical slow decay system implementing power-law forgetting with permastore.
 ///
 /// Models the neocortical memory system's slow forgetting characteristics following
@@ -108,8 +105,7 @@ impl NeocorticalDecayFunction {
         let schema_beta = self.beta / self.schema_strength.mul_add(0.2, 1.0);
 
         #[cfg(feature = "psychological_decay")]
-        let base_retention =
-            effective_alpha * (pow(f64::from(1.0 + days), f64::from(-schema_beta)) as f32);
+        let base_retention = effective_alpha * libm::powf(1.0 + days, -schema_beta);
         #[cfg(not(feature = "psychological_decay"))]
         let base_retention = effective_alpha * (1.0 + days).powf(-schema_beta);
 
@@ -165,13 +161,11 @@ impl NeocorticalDecayFunction {
         // Solving: α/2 = α(1 + t)^(-β) => t = 2^(1/β) - 1
 
         let schema_beta = self.beta / self.schema_strength.mul_add(0.2, 1.0);
-        let _effective_alpha =
-            self.alpha * self.individual_efficiency * self.consolidation_multiplier;
 
         // Simplified half-life calculation
         #[cfg(feature = "psychological_decay")]
         {
-            pow(2.0, f64::from(1.0 / schema_beta)) as f32 - 1.0
+            libm::powf(2.0, 1.0 / schema_beta) - 1.0
         }
         #[cfg(not(feature = "psychological_decay"))]
         {
@@ -240,27 +234,29 @@ mod tests {
     use super::*;
     use std::time::Duration;
 
+    const EPSILON: f32 = 1.0e-6;
+
     #[test]
     fn test_neocortical_decay_creation() {
         let decay = NeocorticalDecayFunction::new();
-        assert_eq!(decay.beta, 0.18); // Adjusted for slower power law decay
-        assert_eq!(decay.alpha(), 1.0);
-        assert_eq!(decay.permastore_threshold(), 0.3);
-        assert_eq!(decay.permastore_onset_days(), 1095.0);
+        assert!((decay.beta - 0.18).abs() <= EPSILON); // Adjusted for slower power law decay
+        assert!((decay.alpha() - 1.0).abs() <= EPSILON);
+        assert!((decay.permastore_threshold() - 0.3).abs() <= EPSILON);
+        assert!((decay.permastore_onset_days() - 1095.0).abs() <= EPSILON);
     }
 
     #[test]
     fn test_neocortical_decay_with_parameters() {
         let decay = NeocorticalDecayFunction::with_parameters(1.5, 1.2);
-        assert_eq!(decay.schema_strength, 1.5);
-        assert_eq!(decay.individual_efficiency, 1.2);
+        assert!((decay.schema_strength - 1.5).abs() <= EPSILON);
+        assert!((decay.individual_efficiency - 1.2).abs() <= EPSILON);
     }
 
     #[test]
     fn test_parameter_clamping() {
         let decay = NeocorticalDecayFunction::with_parameters(5.0, 0.1);
-        assert_eq!(decay.schema_strength, 3.0); // Clamped to max
-        assert_eq!(decay.individual_efficiency, 0.5); // Clamped to min
+        assert!((decay.schema_strength - 3.0).abs() <= EPSILON); // Clamped to max
+        assert!((decay.individual_efficiency - 0.5).abs() <= EPSILON); // Clamped to min
     }
 
     #[test]
@@ -273,7 +269,7 @@ mod tests {
         let retention_365d = decay.compute_retention(Duration::from_secs(365 * 86400));
         let retention_1095d = decay.compute_retention(Duration::from_secs(1095 * 86400));
 
-        assert_eq!(retention_initial, 1.0); // Perfect retention at t=0
+        assert!((retention_initial - 1.0).abs() <= EPSILON); // Perfect retention at t=0
         assert!(retention_30d > retention_365d); // Monotonic decay
         assert!(retention_365d > retention_1095d); // Continues to decay
 
@@ -317,7 +313,7 @@ mod tests {
         let partial_overlap = decay.consolidation_boost(0.5);
         let full_overlap = decay.consolidation_boost(1.0);
 
-        assert_eq!(no_overlap, 1.0); // No boost
+        assert!((no_overlap - 1.0).abs() <= EPSILON); // No boost
         assert!(partial_overlap > no_overlap);
         assert!(full_overlap > partial_overlap);
 
@@ -368,7 +364,7 @@ mod tests {
         assert!(half_life < 3650.0); // Less than 10 years for base case
 
         // Test that retention at half-life is approximately 50%
-        let half_life_duration = Duration::from_secs((half_life * 86400.0) as u64);
+        let half_life_duration = Duration::from_secs_f64(f64::from(half_life.max(0.0)) * 86_400.0);
         let retention_at_half_life = decay.compute_retention(half_life_duration);
 
         // Should be close to 50% (within 10% tolerance)
@@ -410,7 +406,7 @@ mod tests {
     #[test]
     fn test_consolidation_update() {
         let mut decay = NeocorticalDecayFunction::new();
-        assert_eq!(decay.consolidation_multiplier, 1.0);
+        assert!((decay.consolidation_multiplier - 1.0).abs() <= EPSILON);
 
         decay.update_consolidation(0.8);
         assert!(decay.consolidation_multiplier > 1.0);

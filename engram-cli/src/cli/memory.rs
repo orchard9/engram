@@ -17,7 +17,7 @@ pub fn print_memory_result(memory: &Value) {
         }
 
         if let Some(confidence) = obj.get("confidence").and_then(serde_json::Value::as_f64) {
-            let confidence_bar = "█".repeat((confidence * 10.0) as usize);
+            let confidence_bar = "█".repeat((confidence * 10.0).max(0.0).min(10.0) as usize);
             println!(
                 "🎯 Confidence: {:.1}% {}",
                 confidence * 100.0,
@@ -60,6 +60,10 @@ pub fn print_memory_result(memory: &Value) {
 }
 
 /// Create a memory through HTTP API
+///
+/// # Errors
+///
+/// Returns error if HTTP request fails or server returns an error
 pub async fn create_memory(port: u16, content: String, confidence: Option<f64>) -> Result<()> {
     let client = reqwest::Client::new();
     let url = format!("http://127.0.0.1:{port}/api/v1/memories");
@@ -96,6 +100,10 @@ pub async fn create_memory(port: u16, content: String, confidence: Option<f64>) 
 }
 
 /// Retrieve a memory by ID
+///
+/// # Errors
+///
+/// Returns error if HTTP request fails or memory not found
 pub async fn get_memory(port: u16, id: String) -> Result<()> {
     let client = reqwest::Client::new();
     let url = format!("http://127.0.0.1:{port}/api/v1/memories/{id}");
@@ -125,6 +133,10 @@ pub async fn get_memory(port: u16, id: String) -> Result<()> {
 }
 
 /// Search for memories
+///
+/// # Errors
+///
+/// Returns error if HTTP request fails or search fails
 pub async fn search_memories(port: u16, query: String, limit: Option<usize>) -> Result<()> {
     let client = reqwest::Client::new();
     let mut url = format!(
@@ -134,7 +146,8 @@ pub async fn search_memories(port: u16, query: String, limit: Option<usize>) -> 
     );
 
     if let Some(lim) = limit {
-        url.push_str(&format!("&limit={lim}"));
+        use std::fmt::Write;
+        let _ = write!(&mut url, "&limit={lim}");
     }
 
     info!("🔍 Searching memories...");
@@ -174,6 +187,10 @@ pub async fn search_memories(port: u16, query: String, limit: Option<usize>) -> 
 }
 
 /// List all memories
+///
+/// # Errors
+///
+/// Returns error if HTTP request fails or listing fails
 pub async fn list_memories(port: u16, limit: Option<usize>, offset: Option<usize>) -> Result<()> {
     let client = reqwest::Client::new();
     let mut url = format!("http://127.0.0.1:{port}/api/v1/memories");
@@ -242,6 +259,10 @@ pub async fn list_memories(port: u16, limit: Option<usize>, offset: Option<usize
 }
 
 /// Delete a memory by ID
+///
+/// # Errors
+///
+/// Returns error if HTTP request fails or deletion fails
 pub async fn delete_memory(port: u16, id: String) -> Result<()> {
     let client = reqwest::Client::new();
     let url = format!("http://127.0.0.1:{port}/api/v1/memories/{id}");

@@ -72,34 +72,25 @@ impl VectorOps for ScalarVectorOps {
     }
 
     fn dot_product_768(&self, a: &[f32; 768], b: &[f32; 768]) -> f32 {
-        let mut sum = 0.0f32;
-        for i in 0..768 {
-            sum += a[i] * b[i];
-        }
-        sum
+        a.iter().zip(b.iter()).map(|(ai, bi)| ai * bi).sum()
     }
 
     fn l2_norm_768(&self, vector: &[f32; 768]) -> f32 {
-        let mut sum = 0.0f32;
-        for i in 0..768 {
-            let v = vector[i];
-            sum += v * v;
-        }
-        sum.sqrt()
+        vector.iter().map(|v| v * v).sum::<f32>().sqrt()
     }
 
     fn vector_add_768(&self, a: &[f32; 768], b: &[f32; 768]) -> [f32; 768] {
         let mut result = [0.0f32; 768];
-        for i in 0..768 {
-            result[i] = a[i] + b[i];
+        for (out, (ai, bi)) in result.iter_mut().zip(a.iter().zip(b.iter())) {
+            *out = ai + bi;
         }
         result
     }
 
     fn vector_scale_768(&self, vector: &[f32; 768], scale: f32) -> [f32; 768] {
         let mut result = [0.0f32; 768];
-        for i in 0..768 {
-            result[i] = vector[i] * scale;
+        for (out, value) in result.iter_mut().zip(vector.iter()) {
+            *out = value * scale;
         }
         result
     }
@@ -118,12 +109,12 @@ impl VectorOps for ScalarVectorOps {
 
         let num_vectors = vectors.len().min(weights.len());
 
-        for i in 0..768 {
+        for (i, out) in result.iter_mut().enumerate() {
             let mut sum = 0.0f32;
-            for j in 0..num_vectors {
-                sum += vectors[j][i] * weights[j];
+            for (vector, weight) in vectors.iter().zip(weights.iter()).take(num_vectors) {
+                sum += vector[i] * weight;
             }
-            result[i] = sum / weight_sum;
+            *out = sum / weight_sum;
         }
 
         result

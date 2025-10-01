@@ -1,5 +1,6 @@
 //! System 2 hypothesis generation for deliberative reasoning.
 
+use super::numeric::f64_to_f32;
 use super::{CompletionConfig, PartialEpisode};
 use crate::{Confidence, Episode};
 use chrono::Utc;
@@ -136,7 +137,12 @@ impl System2Reasoner {
         }
 
         // Sort by confidence
-        hypotheses.sort_by(|a, b| b.confidence.raw().partial_cmp(&a.confidence.raw()).unwrap());
+        hypotheses.sort_by(|a, b| {
+            b.confidence
+                .raw()
+                .partial_cmp(&a.confidence.raw())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         // Take top-k hypotheses
         hypotheses.truncate(self.config.num_hypotheses);
@@ -166,7 +172,28 @@ impl System2Reasoner {
     /// Add item to working memory with capacity constraint
     fn add_to_working_memory(&mut self, item: WorkingMemoryItem) {
         if self.working_memory.len() >= self.config.working_memory_capacity {
-            self.working_memory.pop_front(); // Remove oldest/least active
+            let removal_index = self
+                .working_memory
+                .iter()
+                .enumerate()
+                .filter(|(_, existing)| existing.source == item.source)
+                .min_by(|(_, a), (_, b)| {
+                    a.activation
+                        .partial_cmp(&b.activation)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .or_else(|| {
+                    self.working_memory
+                        .iter()
+                        .enumerate()
+                        .min_by(|(_, a), (_, b)| {
+                            a.activation
+                                .partial_cmp(&b.activation)
+                                .unwrap_or(std::cmp::Ordering::Equal)
+                        })
+                })
+                .map_or(0, |(index, _)| index);
+            self.working_memory.remove(removal_index);
         }
         self.working_memory.push_back(item);
     }
@@ -306,17 +333,15 @@ impl System2Reasoner {
 
                 // Update with known fields
                 if let Some(what) = partial.known_fields.get("what") {
-                    new_episode.what = what.clone();
+                    new_episode.what.clone_from(what);
                 }
 
-                let evidence = vec![Evidence::SemanticSimilarity(
-                    analog.id.clone(),
-                    best_similarity as f32,
-                )];
+                let similarity = f64_to_f32(best_similarity);
+                let evidence = vec![Evidence::SemanticSimilarity(analog.id.clone(), similarity)];
 
                 let reasoning_chain = vec![ReasoningStep {
                     description: format!("Analogical reasoning from episode: {}", analog.id),
-                    confidence: Confidence::exact(best_similarity as f32),
+                    confidence: Confidence::exact(similarity),
                     working_memory: self
                         .working_memory
                         .iter()
@@ -327,9 +352,7 @@ impl System2Reasoner {
                 return Some(Hypothesis {
                     episode: new_episode,
                     evidence,
-                    confidence: Confidence::exact(
-                        best_similarity as f32 * partial.cue_strength.raw(),
-                    ),
+                    confidence: Confidence::exact(similarity * partial.cue_strength.raw()),
                     reasoning_chain,
                 });
             }
@@ -340,6 +363,7 @@ impl System2Reasoner {
 
     /// Check if partial matches a pattern (relaxed matching - ANY keyword can match)
     fn matches_pattern(&self, partial: &PartialEpisode, pattern: &[String]) -> bool {
+        let _ = self;
         // Return true if ANY requirement is found (instead of ALL)
         for requirement in pattern {
             let found = partial
@@ -350,7 +374,11 @@ impl System2Reasoner {
                 return true;
             }
             // Also check temporal context for matches
-            if partial.temporal_context.iter().any(|ctx| ctx.to_lowercase().contains(&requirement.to_lowercase())) {
+            if partial
+                .temporal_context
+                .iter()
+                .any(|ctx| ctx.to_lowercase().contains(&requirement.to_lowercase()))
+            {
                 return true;
             }
         }
@@ -359,6 +387,7 @@ impl System2Reasoner {
 
     /// Check if partial satisfies rule antecedents (relaxed matching)
     fn satisfies_antecedents(&self, partial: &PartialEpisode, antecedents: &[String]) -> bool {
+        let _ = self;
         // Need at least half the antecedents to match (instead of all)
         let mut matches = 0;
         for antecedent in antecedents {
@@ -366,18 +395,22 @@ impl System2Reasoner {
                 .known_fields
                 .values()
                 .any(|v| v.to_lowercase().contains(&antecedent.to_lowercase()))
-                || partial.temporal_context.iter()
+                || partial
+                    .temporal_context
+                    .iter()
                     .any(|ctx| ctx.to_lowercase().contains(&antecedent.to_lowercase()));
             if found {
                 matches += 1;
             }
         }
         // At least half the antecedents must match, or at least one if list is small
-        matches >= (antecedents.len() + 1) / 2 || matches > 0 && antecedents.len() <= 2
+        let required_matches = antecedents.len().div_ceil(2);
+        matches >= required_matches || matches > 0 && antecedents.len() <= 2
     }
 
     /// Calculate similarity between partial and episode
     fn calculate_similarity(&self, partial: &PartialEpisode, episode: &Episode) -> f64 {
+        let _ = self;
         let mut similarity = 0.0;
         let mut count = 0;
 
@@ -513,7 +546,7 @@ mod tests {
         // Add more items than capacity
         for i in 0..10 {
             reasoner.add_to_working_memory(WorkingMemoryItem {
-                content: format!("item_{}", i),
+                content: format!("item_{i}"),
                 activation: 1.0,
                 source: "test".to_string(),
             });

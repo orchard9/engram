@@ -34,7 +34,6 @@ pub mod seeding;
 pub mod simd_optimization;
 /// Configuration for similarity-based activation
 pub mod similarity_config;
-pub mod simple_parallel;
 pub mod traversal;
 
 pub use confidence_aggregation::{
@@ -42,7 +41,7 @@ pub use confidence_aggregation::{
 };
 pub use gpu_interface::{
     AdaptiveConfig, AdaptiveSpreadingEngine, BatchMetadata, CpuFallback, GPUActivationBatch,
-    GPUSpreadingInterface, GpuCapabilities, GpuLaunchFuture,
+    GPUSpreadingInterface, GpuCapabilities, GpuLaunchFuture, MockGpuInterface,
 };
 pub use multi_cue::CueAggregationStrategy;
 pub use parallel::ParallelSpreadingEngine;
@@ -53,7 +52,8 @@ pub use seeding::{
     ActivationTier, SeededActivation, SeedingError, SeedingOutcome, VectorActivationSeeder,
 };
 pub use similarity_config::SimilarityConfig;
-// pub mod memory_pool; // TODO: Implement memory pool module
+pub mod memory_pool;
+pub use memory_pool::{ActivationMemoryPool, LocalMemoryPool, PoolStats};
 
 // HNSW integration
 // #[cfg(feature = "hnsw_index")]

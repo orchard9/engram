@@ -71,7 +71,10 @@ pub trait VectorOps: Send + Sync {
     /// SIMD gather for non-contiguous memory access
     fn gather_f32(&self, base: &[f32], indices: &[usize]) -> Vec<f32> {
         // Default scalar implementation
-        indices.iter().map(|&i| base.get(i).copied().unwrap_or(0.0)).collect()
+        indices
+            .iter()
+            .map(|&i| base.get(i).copied().unwrap_or(0.0))
+            .collect()
     }
 
     /// Horizontal sum reduction across values
@@ -138,7 +141,7 @@ pub fn detect_cpu_features() -> CpuCapability {
 pub fn create_vector_ops() -> Box<dyn VectorOps> {
     #[cfg(feature = "force_scalar_compute")]
     {
-        return Box::new(scalar::ScalarVectorOps::new());
+        Box::new(scalar::ScalarVectorOps::new())
     }
 
     #[cfg(not(feature = "force_scalar_compute"))]
@@ -218,7 +221,7 @@ mod tests {
     #[test]
     fn test_cpu_feature_detection() {
         let capability = detect_cpu_features();
-        println!("Detected CPU capability: {:?}", capability);
+        println!("Detected CPU capability: {capability:?}");
         // Should detect something on any platform
         #[cfg(target_arch = "x86_64")]
         {

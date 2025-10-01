@@ -10,8 +10,15 @@
 //! - Zero-copy integration with existing `MemoryStore`
 
 use crate::{Confidence, Memory};
+use std::convert::TryFrom;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+
+const LCG_MULTIPLIER: u32 = 1_103_515_245;
+const LCG_INCREMENT: u32 = 12_345;
+const RNG_SCALE: f32 = 1.0 / 32_768.0;
+
+static LAYER_SEED: AtomicU32 = AtomicU32::new(1);
 
 pub mod cognitive_dynamics;
 pub mod confidence_metrics;
@@ -23,7 +30,7 @@ pub mod hnsw_search;
 pub use cognitive_dynamics::ActivationDynamics;
 pub use hnsw_graph::HnswGraph;
 pub use hnsw_node::{ConnectionBlock, HnswEdge, HnswNode};
-pub use hnsw_search::SearchResult;
+pub use hnsw_search::{SearchResult, SearchResults, SearchStats};
 
 /// Update types for background indexing
 #[derive(Clone)]
@@ -97,7 +104,7 @@ pub struct CognitiveHnswIndex {
 
     /// Node ID allocator
     node_counter: AtomicU32,
-    
+
     /// Cognitive dynamics tracking for adaptive parameters
     activation_dynamics: ActivationDynamics,
 }
@@ -106,26 +113,38 @@ pub struct CognitiveHnswIndex {
 pub struct CognitiveHnswParams {
     /// Standard HNSW parameters with cognitive bounds
     pub m_max: AtomicUsize, // Max connections (reduces under pressure)
-    pub m_l: AtomicUsize,             // Level 0 connections
-    pub ef_construction: AtomicUsize, // Construction beam width
-    pub ef_search: AtomicUsize,       // Search beam width
-    pub ml: f32,                      // Layer probability factor
+    /// Level 0 connections
+    pub m_l: AtomicUsize,
+    /// Construction beam width
+    pub ef_construction: AtomicUsize,
+    /// Search beam width
+    pub ef_search: AtomicUsize,
+    /// Layer probability factor
+    pub ml: f32,
 
     /// Engram-specific cognitive parameters
     pub confidence_threshold: Confidence, // Minimum confidence for indexing
-    pub activation_decay_rate: f32, // How fast activation spreads decay
-    pub temporal_boost_factor: f32, // Boost for recent memories
-    pub pressure_sensitivity: f32,  // How aggressively to reduce under pressure
-    
+    /// How fast activation spreads decay
+    pub activation_decay_rate: f32,
+    /// Boost for recent memories
+    pub temporal_boost_factor: f32,
+    /// How aggressively to reduce under pressure
+    pub pressure_sensitivity: f32,
+
     /// NEW FIELDS: Cognitive dynamics configuration (added at end for ABI compatibility)
     pub dynamics_enabled: AtomicBool,
-    pub activation_sensitivity: f32,                    // Non-atomic: set at initialization
-    pub confidence_stability_target: f32,               // Non-atomic: set at initialization
-    pub temporal_locality_window_ns: AtomicU64,         // Nanoseconds for thread safety
-    pub overconfidence_threshold: f32,                  // Non-atomic: set at initialization
-    
+    /// Non-atomic: set at initialization
+    pub activation_sensitivity: f32,
+    /// Non-atomic: set at initialization
+    pub confidence_stability_target: f32,
+    /// Nanoseconds for thread safety
+    pub temporal_locality_window_ns: AtomicU64,
+    /// Non-atomic: set at initialization
+    pub overconfidence_threshold: f32,
+
     /// Lock-free adaptation control
     pub adaptation_cycle: AtomicU64,
+    /// Last time parameters were adapted
     pub last_adaptation_time: AtomicU64,
 }
 
@@ -135,24 +154,25 @@ impl CognitiveHnswParams {
         if !self.dynamics_enabled.load(Ordering::Relaxed) {
             return;
         }
-        
+
         let current_ef = self.ef_search.load(Ordering::Relaxed);
         let activation_density = dynamics.compute_activation_density();
-        
+
         // Biological principle: Sparse activation = increase search width
         // Dense activation = interference, reduce search width
-        let target_ef = if activation_density < 0.3 {
-            // Too sparse - increase exploration
-            (current_ef as f32 * 1.2).min(512.0) as usize
+        let adjusted = if activation_density < 0.3 {
+            // Multiply by ~1.2 (6/5) with rounding up to preserve small values
+            current_ef.saturating_mul(6).saturating_add(4) / 5
         } else if activation_density > 0.7 {
-            // Too dense - reduce interference  
-            (current_ef as f32 * 0.8).max(16.0) as usize
+            // Multiply by ~0.8 (4/5)
+            current_ef.saturating_mul(4) / 5
         } else {
             current_ef // Optimal range
         };
-        
+
+        let target_ef = adjusted.clamp(16, 512);
         self.ef_search.store(target_ef, Ordering::Relaxed);
-        
+
         // Update adaptation timestamp
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -178,15 +198,45 @@ impl PressureAdapter {
 
     /// Adjust HNSW parameters based on current memory pressure
     fn adapt_params(&self, pressure: f32, params: &CognitiveHnswParams) {
-        // Exponential backoff under pressure (cognitive principle)
-        let pressure_factor = (1.0 - pressure).max(0.1); // Never go below 10%
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
 
-        // Adapt parameters to maintain performance under pressure
-        let target_m = (params.m_max.load(Ordering::Relaxed) as f32 * pressure_factor) as usize;
-        params.m_max.store(target_m.max(2), Ordering::Relaxed); // Minimum connectivity
+        let last_check = self.last_pressure_check.load(Ordering::Relaxed);
+        if now == last_check && pressure < 0.5 {
+            return;
+        }
+        self.last_pressure_check.store(now, Ordering::Relaxed);
 
-        let target_ef = (64.0 * pressure_factor) as usize; // Base ef=64
-        params.ef_search.store(target_ef.max(8), Ordering::Relaxed); // Minimum search width
+        let sensitivity = self.pressure_sensitivity.clamp(0.1, 2.0);
+        let scaled_pressure = (pressure * sensitivity).clamp(0.0, 1.0);
+
+        let current_m = params.m_max.load(Ordering::Relaxed);
+        let adjusted_m = if scaled_pressure >= 0.9 {
+            current_m.saturating_mul(3) / 4
+        } else if scaled_pressure >= 0.7 {
+            current_m.saturating_mul(4) / 5
+        } else if scaled_pressure >= 0.5 {
+            current_m.saturating_mul(9) / 10
+        } else {
+            current_m
+        };
+        params.m_max.store(adjusted_m.max(2), Ordering::Relaxed);
+
+        let base_ef = 64usize;
+        let adjusted_ef = if scaled_pressure >= 0.9 {
+            base_ef / 2
+        } else if scaled_pressure >= 0.7 {
+            (base_ef * 3) / 4
+        } else if scaled_pressure >= 0.5 {
+            (base_ef * 9) / 10
+        } else {
+            base_ef
+        };
+        params
+            .ef_search
+            .store(adjusted_ef.max(8), Ordering::Relaxed);
     }
 }
 
@@ -197,7 +247,6 @@ struct HnswMetrics {
     total_search_time_ns: AtomicU64,
     inserts_performed: AtomicU64,
     total_insert_time_ns: AtomicU64,
-    graph_compactions: AtomicU64,
 }
 
 impl CognitiveHnswIndex {
@@ -214,14 +263,14 @@ impl CognitiveHnswIndex {
             activation_decay_rate: 0.2,
             temporal_boost_factor: 1.2,
             pressure_sensitivity: 0.5,
-            
+
             // NEW FIELDS: Cognitive dynamics configuration (added at end for ABI compatibility)
             dynamics_enabled: AtomicBool::new(false),
-            activation_sensitivity: 0.15,                    // Non-atomic: set at init
-            confidence_stability_target: 0.2,               // Non-atomic: set at init
+            activation_sensitivity: 0.15,     // Non-atomic: set at init
+            confidence_stability_target: 0.2, // Non-atomic: set at init
             temporal_locality_window_ns: AtomicU64::new(500_000_000), // 500ms in nanoseconds
-            overconfidence_threshold: 0.25,                 // Non-atomic: set at init
-            
+            overconfidence_threshold: 0.25,   // Non-atomic: set at init
+
             // Lock-free adaptation control
             adaptation_cycle: AtomicU64::new(0),
             last_adaptation_time: AtomicU64::new(0),
@@ -238,7 +287,7 @@ impl CognitiveHnswIndex {
             activation_dynamics: ActivationDynamics::new(),
         }
     }
-    
+
     /// Create index with custom cognitive parameters
     #[must_use]
     pub fn with_cognitive_params(
@@ -257,7 +306,7 @@ impl CognitiveHnswIndex {
             activation_decay_rate: 0.2,
             temporal_boost_factor: 1.2,
             pressure_sensitivity: 0.5,
-            
+
             // Custom cognitive configuration
             dynamics_enabled: AtomicBool::new(false), // Start disabled
             activation_sensitivity,
@@ -281,6 +330,10 @@ impl CognitiveHnswIndex {
     }
 
     /// Insert a memory into the HNSW index
+    ///
+    /// # Errors
+    /// Returns [`HnswError`] when inserting the node into the underlying graph fails or
+    /// when the memory cannot be converted into an HNSW node.
     pub fn insert_memory(&self, memory: Arc<Memory>) -> Result<(), HnswError> {
         let start = std::time::Instant::now();
 
@@ -292,6 +345,9 @@ impl CognitiveHnswIndex {
 
         // Create HNSW node from memory
         let node = HnswNode::from_memory(node_id, memory, layer)?;
+        let generation = self.generation.fetch_add(1, Ordering::Relaxed);
+        let generation_u32 = u32::try_from(generation).unwrap_or(u32::MAX);
+        node.generation.store(generation_u32, Ordering::Relaxed);
 
         // Insert into graph using lock-free operations
         self.graph
@@ -301,9 +357,11 @@ impl CognitiveHnswIndex {
         self.metrics
             .inserts_performed
             .fetch_add(1, Ordering::Relaxed);
-        self.metrics
-            .total_insert_time_ns
-            .fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        if let Ok(elapsed) = u64::try_from(start.elapsed().as_nanos()) {
+            self.metrics
+                .total_insert_time_ns
+                .fetch_add(elapsed, Ordering::Relaxed);
+        }
 
         Ok(())
     }
@@ -315,20 +373,37 @@ impl CognitiveHnswIndex {
         k: usize,
         threshold: Confidence,
     ) -> Vec<(String, Confidence)> {
+        let results = self.search_with_details(query, k, threshold);
+        results
+            .hits
+            .into_iter()
+            .map(|hit| (hit.memory_id, hit.confidence))
+            .collect()
+    }
+
+    /// Search with detailed metrics for activation seeding
+    pub fn search_with_details(
+        &self,
+        query: &[f32; 768],
+        k: usize,
+        threshold: Confidence,
+    ) -> SearchResults {
         let start = std::time::Instant::now();
 
         let ef = self.params.ef_search.load(Ordering::Relaxed);
-        let results = self
-            .graph
-            .search(query, k, ef, threshold, self.vector_ops.as_ref());
+        let results =
+            self.graph
+                .search_with_details(query, k, ef, threshold, self.vector_ops.as_ref());
 
         // Update metrics
         self.metrics
             .searches_performed
             .fetch_add(1, Ordering::Relaxed);
-        self.metrics
-            .total_search_time_ns
-            .fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+        if let Ok(elapsed) = u64::try_from(start.elapsed().as_nanos()) {
+            self.metrics
+                .total_search_time_ns
+                .fetch_add(elapsed, Ordering::Relaxed);
+        }
 
         results
     }
@@ -344,31 +419,41 @@ impl CognitiveHnswIndex {
         self.pressure_adapter.adapt_params(pressure, &self.params);
 
         // Cognitive dynamics analysis
-        let activation_energy = 1.0 - pressure;
         let temporal_locality = self.activation_dynamics.temporal_locality_factor();
         let overconfidence_ratio = self.activation_dynamics.overconfidence_ratio();
-        
+        let variance = self.activation_dynamics.confidence_variance();
+        let variance_penalty = variance.clamp(0.0, 0.5);
+        let activation_energy = ((1.0 - pressure) * (1.0 - variance_penalty)).max(0.0);
+
         // Record activation pattern for future adaptation
         for (_, confidence) in &results {
-            self.activation_dynamics.record_activation(activation_energy, *confidence);
+            self.activation_dynamics
+                .record_activation(activation_energy, *confidence);
         }
-        
+
         // Adapt parameters based on cognitive dynamics (not ML accuracy)
         if self.should_adapt_dynamics() {
-            self.params.adapt_to_activation_patterns(&self.activation_dynamics);
+            self.params
+                .adapt_to_activation_patterns(&self.activation_dynamics);
         }
-        
+
         // Apply cognitive principles to spreading activation
-        let max_hops = self.compute_cognitive_hops(pressure, temporal_locality, overconfidence_ratio);
-        
+        let mut max_hops =
+            Self::compute_cognitive_hops(pressure, temporal_locality, overconfidence_ratio);
+        if variance > 0.2 && max_hops > 1 {
+            max_hops -= 1;
+        }
+
         // Enhanced activation spreading with confidence weighting
         for hop in 0..max_hops {
-            let hop_energy = activation_energy * (0.8_f32).powi(hop as i32); // Decay per hop
-            
+            #[allow(clippy::cast_precision_loss)]
+            let exponent = hop as f32;
+            let hop_energy = activation_energy * 0.8_f32.powf(exponent); // Decay per hop
+
             if hop_energy < 0.1 {
                 break; // Below threshold
             }
-            
+
             // Process each result for potential spreading
             let mut new_activations = Vec::new();
             for (episode, _confidence) in &results {
@@ -376,33 +461,34 @@ impl CognitiveHnswIndex {
                 let connected = self.find_connected_memories(&episode.id, hop_energy);
                 new_activations.extend(connected);
             }
-            
+
             // Merge new activations with existing results
             results = self.merge_activations(results, new_activations, hop_energy);
         }
 
         // Apply temporal boost for recent memories
         self.apply_temporal_boost(&mut results, temporal_locality);
-        
+
         results
     }
-    
+
     /// Enable cognitive dynamics adaptation with biological parameters
     pub fn enable_cognitive_adaptation(&self) {
         self.params.dynamics_enabled.store(true, Ordering::Relaxed);
     }
-    
+
     /// Circuit breaker: Disable adaptation if system becomes unstable
     pub fn disable_adaptation_on_instability(&self) -> bool {
         let overconfidence = self.activation_dynamics.overconfidence_ratio();
-        if overconfidence > 0.5 { // >50% overconfident connections
+        if overconfidence > 0.5 {
+            // >50% overconfident connections
             self.params.dynamics_enabled.store(false, Ordering::Relaxed);
             true // Signal instability detected
         } else {
             false
         }
     }
-    
+
     /// Check if dynamics adaptation should occur
     fn should_adapt_dynamics(&self) -> bool {
         // Adapt every 100 activation cycles, but not more than once per 10 seconds
@@ -412,32 +498,44 @@ impl CognitiveHnswIndex {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        
+
         cycle % 100 == 0 && now.saturating_sub(last_adaptation) >= 10
     }
-    
+
     /// Compute cognitive hops based on biological principles
-    fn compute_cognitive_hops(&self, pressure: f32, temporal_locality: f32, overconfidence: f32) -> usize {
+    fn compute_cognitive_hops(pressure: f32, temporal_locality: f32, overconfidence: f32) -> usize {
         // Biological principle: High pressure = reduce exploration
         // High temporal locality = increase local search
         // High overconfidence = reduce to prevent bias amplification
-        
-        let base_hops: i32 = if pressure > 0.8 { 1 } else if pressure > 0.5 { 2 } else { 3 };
-        
-        let locality_adjustment: i32 = if temporal_locality > 0.7 { 1 } else { 0 };
-        let confidence_adjustment: i32 = if overconfidence > 0.3 { -1 } else { 0 };
-        
-        (base_hops + locality_adjustment + confidence_adjustment).max(1).min(4) as usize
+
+        let base_hops: i32 = if pressure > 0.8 {
+            1
+        } else if pressure > 0.5 {
+            2
+        } else {
+            3
+        };
+
+        let locality_adjustment = i32::from(temporal_locality > 0.7);
+        let confidence_adjustment = -i32::from(overconfidence > 0.3);
+
+        let hops = (base_hops + locality_adjustment + confidence_adjustment).clamp(1, 4);
+        usize::try_from(hops).unwrap_or(1)
     }
-    
+
     /// Find connected memories for activation spreading
-    fn find_connected_memories(&self, memory_id: &str, energy: f32) -> Vec<(crate::Episode, Confidence)> {
+    fn find_connected_memories(
+        &self,
+        memory_id: &str,
+        energy: f32,
+    ) -> Vec<(crate::Episode, Confidence)> {
         // TODO: Implement using graph.get_neighbors() + memory lookup
         // This is a placeholder implementation
+        let _ = self.params.m_max.load(Ordering::Relaxed);
         let _ = (memory_id, energy);
         Vec::new()
     }
-    
+
     /// Merge new activations with existing results
     fn merge_activations(
         &self,
@@ -447,13 +545,14 @@ impl CognitiveHnswIndex {
     ) -> Vec<(crate::Episode, Confidence)> {
         // TODO: Implement energy decay and confidence combination
         // This is a placeholder implementation
+        let _ = self.params.pressure_sensitivity;
         let _ = (new_activations, energy);
         existing
     }
-    
+
     /// Apply temporal boost for recent memories
     fn apply_temporal_boost(&self, results: &mut [(crate::Episode, Confidence)], locality: f32) {
-        let boost_factor = 1.0 + (locality * self.params.temporal_boost_factor);
+        let boost_factor = locality.mul_add(self.params.temporal_boost_factor, 1.0);
         for (_, confidence) in results {
             let boosted = confidence.raw() * boost_factor;
             *confidence = Confidence::exact(boosted.min(1.0));
@@ -480,19 +579,25 @@ impl CognitiveHnswIndex {
         let mut layer = 0;
         let ml = self.params.ml;
 
-        // Simple linear congruential generator for deterministic but varied layer selection
-        use std::sync::atomic::{AtomicU32, Ordering};
-        static LAYER_SEED: AtomicU32 = AtomicU32::new(1);
-
         let seed = LAYER_SEED.fetch_add(1, Ordering::Relaxed);
-        let mut rng =
-            ((seed.wrapping_mul(1_103_515_245).wrapping_add(12345)) >> 16) as f32 / 32768.0;
+        #[allow(clippy::cast_precision_loss)]
+        let mut rng = (((seed
+            .wrapping_mul(LCG_MULTIPLIER)
+            .wrapping_add(LCG_INCREMENT))
+            >> 16) as f32)
+            * RNG_SCALE;
 
         while rng < ml && layer < 16 {
             layer += 1;
             let new_seed = seed.wrapping_add(u32::from(layer));
-            rng =
-                ((new_seed.wrapping_mul(1_103_515_245).wrapping_add(12345)) >> 16) as f32 / 32768.0;
+            #[allow(clippy::cast_precision_loss)]
+            {
+                rng = (((new_seed
+                    .wrapping_mul(LCG_MULTIPLIER)
+                    .wrapping_add(LCG_INCREMENT))
+                    >> 16) as f32)
+                    * RNG_SCALE;
+            }
         }
 
         layer
@@ -555,35 +660,41 @@ mod tests {
     #[test]
     fn test_cognitive_dynamics_integration() {
         let index = CognitiveHnswIndex::new();
-        
+
         // Test enabling cognitive adaptation
         assert!(!index.params.dynamics_enabled.load(Ordering::Relaxed));
         index.enable_cognitive_adaptation();
         assert!(index.params.dynamics_enabled.load(Ordering::Relaxed));
-        
+
         // Test activation dynamics tracking
         let initial_density = index.activation_dynamics.compute_activation_density();
-        assert_eq!(initial_density, 0.0); // Should start empty
-        
+        assert!(initial_density.abs() <= f32::EPSILON); // Should start empty
+
         // Record some activations
-        for i in 0..10 {
-            let energy = 0.5 + (i as f32 / 20.0);
+        for i in 0u16..10u16 {
+            let energy = 0.5 + (f32::from(i) / 20.0);
             let confidence = Confidence::exact(0.7);
-            index.activation_dynamics.record_activation(energy, confidence);
+            index
+                .activation_dynamics
+                .record_activation(energy, confidence);
         }
-        
+
         let updated_density = index.activation_dynamics.compute_activation_density();
         assert!(updated_density > 0.0); // Should have some density now
-        
+
         // Test overconfidence tracking
         let initial_ratio = index.activation_dynamics.overconfidence_ratio();
-        assert_eq!(initial_ratio, 0.0); // Should start with no overconfidence
-        
+        assert!(initial_ratio.abs() <= f32::EPSILON); // Should start with no overconfidence
+
         // Record some overconfident connections
         let threshold = index.params.overconfidence_threshold;
-        index.activation_dynamics.record_connection(Confidence::exact(threshold + 0.1), threshold);
-        index.activation_dynamics.record_connection(Confidence::exact(threshold - 0.1), threshold);
-        
+        index
+            .activation_dynamics
+            .record_connection(Confidence::exact(threshold + 0.1), threshold);
+        index
+            .activation_dynamics
+            .record_connection(Confidence::exact(threshold - 0.1), threshold);
+
         let updated_ratio = index.activation_dynamics.overconfidence_ratio();
         assert!(updated_ratio > 0.0); // Should detect some overconfidence
         assert!(updated_ratio < 1.0); // But not all connections are overconfident
@@ -593,21 +704,25 @@ mod tests {
     fn test_cognitive_parameter_adaptation() {
         let index = CognitiveHnswIndex::new();
         index.enable_cognitive_adaptation();
-        
+
         let initial_ef_search = index.params.ef_search.load(Ordering::Relaxed);
-        
+
         // Simulate sparse activation (should increase ef_search)
         for _ in 0..5 {
             let energy = 0.1; // Low energy = sparse activation
             let confidence = Confidence::exact(0.5);
-            index.activation_dynamics.record_activation(energy, confidence);
+            index
+                .activation_dynamics
+                .record_activation(energy, confidence);
         }
-        
+
         // Force parameter adaptation
-        index.params.adapt_to_activation_patterns(&index.activation_dynamics);
-        
+        index
+            .params
+            .adapt_to_activation_patterns(&index.activation_dynamics);
+
         let adapted_ef_search = index.params.ef_search.load(Ordering::Relaxed);
-        
+
         // With sparse activation (density < 0.3), ef_search should increase
         // Note: This is a simplified test - in practice activation density calculation is more complex
         assert!(adapted_ef_search >= initial_ef_search.min(400)); // Should not decrease beyond reasonable bounds
@@ -617,20 +732,26 @@ mod tests {
     fn test_circuit_breaker_functionality() {
         let index = CognitiveHnswIndex::new();
         index.enable_cognitive_adaptation();
-        
+
         // Should not trigger circuit breaker initially
         assert!(!index.disable_adaptation_on_instability());
         assert!(index.params.dynamics_enabled.load(Ordering::Relaxed));
-        
+
         // Simulate high overconfidence to trigger circuit breaker
         let threshold = index.params.overconfidence_threshold;
-        for _ in 0..60 { // Create many overconfident connections
-            index.activation_dynamics.record_connection(Confidence::exact(threshold + 0.2), threshold);
+        for _ in 0..60 {
+            // Create many overconfident connections
+            index
+                .activation_dynamics
+                .record_connection(Confidence::exact(threshold + 0.2), threshold);
         }
-        for _ in 0..10 { // Add some normal connections
-            index.activation_dynamics.record_connection(Confidence::exact(threshold - 0.1), threshold);
+        for _ in 0..10 {
+            // Add some normal connections
+            index
+                .activation_dynamics
+                .record_connection(Confidence::exact(threshold - 0.1), threshold);
         }
-        
+
         // Circuit breaker should trigger when overconfidence > 50%
         let triggered = index.disable_adaptation_on_instability();
         assert!(triggered); // Should detect instability
@@ -640,15 +761,15 @@ mod tests {
     #[test]
     fn test_custom_cognitive_params() {
         let custom_index = CognitiveHnswIndex::with_cognitive_params(0.25, 0.15, 0.3);
-        
+
         // Verify custom parameters are set correctly
-        assert_eq!(custom_index.params.activation_sensitivity, 0.25);
-        assert_eq!(custom_index.params.confidence_stability_target, 0.15);
-        assert_eq!(custom_index.params.overconfidence_threshold, 0.3);
-        
+        assert!((custom_index.params.activation_sensitivity - 0.25).abs() < f32::EPSILON);
+        assert!((custom_index.params.confidence_stability_target - 0.15).abs() < f32::EPSILON);
+        assert!((custom_index.params.overconfidence_threshold - 0.3).abs() < f32::EPSILON);
+
         // Should start with dynamics disabled
         assert!(!custom_index.params.dynamics_enabled.load(Ordering::Relaxed));
-        
+
         // Should be able to enable
         custom_index.enable_cognitive_adaptation();
         assert!(custom_index.params.dynamics_enabled.load(Ordering::Relaxed));

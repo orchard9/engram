@@ -46,6 +46,8 @@ fn export_counters(output: &mut String, registry: &MetricsRegistry) {
         ("episodes_stored_total", "Total episodes stored"),
         ("queries_executed_total", "Total queries executed"),
         ("errors_total", "Total errors encountered"),
+        ("spreading_gpu_launch_total", "Total GPU spreading launches"),
+        ("spreading_gpu_fallback_total", "Total GPU spreading fallbacks to CPU"),
     ];
 
     for (name, help) in counters {
@@ -72,6 +74,10 @@ fn export_histograms(output: &mut String, registry: &MetricsRegistry) {
         (
             "pattern_completion_iterations",
             "Pattern completion iterations",
+        ),
+        (
+            "gpu_transfer_latency_seconds",
+            "GPU transfer latency in seconds",
         ),
     ];
 
@@ -196,6 +202,8 @@ fn export_cognitive(output: &mut String, registry: &MetricsRegistry) {
 
 /// Export hardware performance metrics
 fn export_hardware(output: &mut String, registry: &MetricsRegistry) {
+    use super::hardware::CacheLevel;
+
     // SIMD utilization
     let simd_util = registry.hardware.simd_utilization();
     writeln!(
@@ -208,7 +216,6 @@ fn export_hardware(output: &mut String, registry: &MetricsRegistry) {
     writeln!(output).unwrap();
 
     // Cache hit ratios
-    use super::hardware::CacheLevel;
     for level in [CacheLevel::L1, CacheLevel::L2, CacheLevel::L3] {
         let hit_ratio = registry.hardware.cache_hit_ratio(level);
         let level_str = format!("{level:?}").to_lowercase();
@@ -277,16 +284,6 @@ fn export_health(output: &mut String, registry: &MetricsRegistry) {
         .unwrap();
     }
     writeln!(output).unwrap();
-}
-
-/// Format a duration in seconds for Prometheus
-fn format_duration_seconds(nanos: u64) -> f64 {
-    nanos as f64 / 1_000_000_000.0
-}
-
-/// Format bytes for Prometheus
-const fn format_bytes(bytes: u64) -> u64 {
-    bytes
 }
 
 #[cfg(test)]

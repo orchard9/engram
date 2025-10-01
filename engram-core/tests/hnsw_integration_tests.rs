@@ -37,25 +37,43 @@ fn test_hnsw_similarity_search() {
     // The content addressing uses the first 8 floats, so make those completely different
 
     // Similar1: start with unique pattern for first 8 floats
-    embedding1[0] = 0.9; embedding1[1] = 0.1; embedding1[2] = 0.9; embedding1[3] = 0.1;
-    embedding1[4] = 0.9; embedding1[5] = 0.1; embedding1[6] = 0.9; embedding1[7] = 0.1;
+    embedding1[0] = 0.9;
+    embedding1[1] = 0.1;
+    embedding1[2] = 0.9;
+    embedding1[3] = 0.1;
+    embedding1[4] = 0.9;
+    embedding1[5] = 0.1;
+    embedding1[6] = 0.9;
+    embedding1[7] = 0.1;
     // Fill rest with similar pattern
-    for i in 8..384 { embedding1[i] = 0.8; }
-    for i in 384..768 { embedding1[i] = 0.2; }
+    embedding1[8..384].fill(0.8);
+    embedding1[384..].fill(0.2);
 
     // Similar2: different pattern for first 8 floats but similar overall pattern
-    embedding2[0] = 0.8; embedding2[1] = 0.2; embedding2[2] = 0.8; embedding2[3] = 0.2;
-    embedding2[4] = 0.8; embedding2[5] = 0.2; embedding2[6] = 0.8; embedding2[7] = 0.2;
+    embedding2[0] = 0.8;
+    embedding2[1] = 0.2;
+    embedding2[2] = 0.8;
+    embedding2[3] = 0.2;
+    embedding2[4] = 0.8;
+    embedding2[5] = 0.2;
+    embedding2[6] = 0.8;
+    embedding2[7] = 0.2;
     // Fill rest with similar pattern to similar1
-    for i in 8..384 { embedding2[i] = 0.7; }
-    for i in 384..768 { embedding2[i] = 0.3; }
+    embedding2[8..384].fill(0.7);
+    embedding2[384..].fill(0.3);
 
     // Different: completely different pattern
-    embedding3[0] = 0.1; embedding3[1] = 0.9; embedding3[2] = 0.1; embedding3[3] = 0.9;
-    embedding3[4] = 0.1; embedding3[5] = 0.9; embedding3[6] = 0.1; embedding3[7] = 0.9;
+    embedding3[0] = 0.1;
+    embedding3[1] = 0.9;
+    embedding3[2] = 0.1;
+    embedding3[3] = 0.9;
+    embedding3[4] = 0.1;
+    embedding3[5] = 0.9;
+    embedding3[6] = 0.1;
+    embedding3[7] = 0.9;
     // Fill rest with different pattern
-    for i in 8..384 { embedding3[i] = 0.1; }
-    for i in 384..768 { embedding3[i] = 0.9; }
+    embedding3[8..384].fill(0.1);
+    embedding3[384..].fill(0.9);
 
     let episodes = vec![
         EpisodeBuilder::new()
@@ -91,15 +109,21 @@ fn test_hnsw_similarity_search() {
     // Search for similar memories - should match similar1 and similar2 (both have high values in first half)
     let mut query = [0.0f32; 768];
     // Different first 8 floats to avoid content addressing conflicts
-    query[0] = 0.85; query[1] = 0.15; query[2] = 0.85; query[3] = 0.15;
-    query[4] = 0.85; query[5] = 0.15; query[6] = 0.85; query[7] = 0.15;
+    query[0] = 0.85;
+    query[1] = 0.15;
+    query[2] = 0.85;
+    query[3] = 0.15;
+    query[4] = 0.85;
+    query[5] = 0.15;
+    query[6] = 0.85;
+    query[7] = 0.15;
     // Similar pattern to similar1 and similar2
-    for i in 8..384 { query[i] = 0.75; }  // High values like similar1 and similar2
-    for i in 384..768 { query[i] = 0.25; }  // Low values
+    query[8..384].fill(0.75); // High values like similar1 and similar2
+    query[384..].fill(0.25); // Low values
 
     let cue = Cue::embedding("test".to_string(), query, Confidence::LOW);
 
-    let results = store.recall(cue);
+    let results = store.recall(&cue);
 
     // Should find at least one similar memory
     assert!(!results.is_empty());
@@ -118,11 +142,12 @@ fn test_hnsw_confidence_filtering() {
 
     // Store episodes with varying confidence
     for i in 0..10 {
-        let confidence = Confidence::exact(i as f32 / 10.0);
+        let step = f32::from(u8::try_from(i).expect("confidence step within u8"));
+        let confidence = Confidence::exact(step / 10.0);
         let episode = EpisodeBuilder::new()
-            .id(format!("mem_{}", i))
+            .id(format!("mem_{i}"))
             .when(Utc::now())
-            .what(format!("memory {}", i))
+            .what(format!("memory {i}"))
             .embedding([0.5f32; 768])
             .confidence(confidence)
             .build();
@@ -135,7 +160,7 @@ fn test_hnsw_confidence_filtering() {
     // Search with high confidence threshold
     let cue = Cue::embedding("test".to_string(), [0.5f32; 768], Confidence::exact(0.7));
 
-    let results = store.recall(cue);
+    let results = store.recall(&cue);
 
     // Should only return high-confidence memories
     for (_, confidence) in &results {
@@ -154,16 +179,18 @@ fn test_hnsw_concurrent_operations() {
             let store = store.clone();
             thread::spawn(move || {
                 for i in 0..episodes_per_thread {
-                    let id = format!("thread_{}_mem_{}", thread_id, i);
+                    let id = format!("thread_{thread_id}_mem_{i}");
 
                     // Interleave inserts and searches
                     if i % 2 == 0 {
                         // Insert
+                        let thread_step =
+                            f32::from(u8::try_from(thread_id).expect("thread index within u8"));
                         let episode = EpisodeBuilder::new()
                             .id(id)
                             .when(Utc::now())
-                            .what(format!("memory from thread {}", thread_id))
-                            .embedding([thread_id as f32 / 10.0; 768])
+                            .what(format!("memory from thread {thread_id}"))
+                            .embedding([thread_step / 10.0; 768])
                             .confidence(Confidence::MEDIUM)
                             .build();
 
@@ -173,7 +200,7 @@ fn test_hnsw_concurrent_operations() {
                         let cue =
                             Cue::embedding("test".to_string(), [0.5f32; 768], Confidence::LOW);
 
-                        let _results = store.recall(cue);
+                        let _results = store.recall(&cue);
                     }
                 }
             })
@@ -195,11 +222,12 @@ fn test_hnsw_memory_pressure_adaptation() {
 
     // Fill store to high pressure
     for i in 0..90 {
+        let step = f32::from(u8::try_from(i).expect("memory index within u8"));
         let episode = EpisodeBuilder::new()
-            .id(format!("mem_{}", i))
+            .id(format!("mem_{i}"))
             .when(Utc::now())
-            .what(format!("memory {}", i))
-            .embedding([i as f32 / 100.0; 768])
+            .what(format!("memory {i}"))
+            .embedding([step / 100.0; 768])
             .confidence(Confidence::MEDIUM)
             .build();
 
@@ -216,7 +244,7 @@ fn test_hnsw_memory_pressure_adaptation() {
     // Search under pressure should still work
     let cue = Cue::embedding("test".to_string(), [0.5f32; 768], Confidence::LOW);
 
-    let results = store.recall(cue);
+    let results = store.recall(&cue);
     assert!(!results.is_empty());
 }
 
@@ -232,16 +260,19 @@ fn test_hnsw_vs_linear_recall_quality() {
             let mut embedding = [0.0f32; 768];
             // Create clusters in embedding space
             let cluster = i / 25;
-            let base_value = cluster as f32 * 0.25;
+            let base_value =
+                f32::from(u8::try_from(cluster).expect("cluster index within u8")) * 0.25;
             embedding.fill(base_value);
             embedding[i % 768] = 1.0; // Add some variation
 
             EpisodeBuilder::new()
-                .id(format!("mem_{}", i))
+                .id(format!("mem_{i}"))
                 .when(Utc::now())
-                .what(format!("memory {}", i))
+                .what(format!("memory {i}"))
                 .embedding(embedding)
-                .confidence(Confidence::exact((i as f32 / 100.0).max(0.3)))
+                .confidence(Confidence::exact(
+                    (f32::from(u8::try_from(i).expect("memory index within u8")) / 100.0).max(0.3),
+                ))
                 .build()
         })
         .collect();
@@ -265,8 +296,8 @@ fn test_hnsw_vs_linear_recall_quality() {
         .build();
 
     // Get results from both
-    let hnsw_results = hnsw_store.recall(cue.clone());
-    let linear_results = linear_store.recall(cue);
+    let hnsw_results = hnsw_store.recall(&cue);
+    let linear_results = linear_store.recall(&cue);
 
     // HNSW should return similar quality results
     assert!(!hnsw_results.is_empty());
@@ -277,20 +308,34 @@ fn test_hnsw_vs_linear_recall_quality() {
     let linear_ids: Vec<_> = linear_results.iter().map(|(e, _)| &e.id).collect();
 
     let overlap = hnsw_ids.iter().filter(|id| linear_ids.contains(id)).count();
+    let overlap_count = u16::try_from(overlap).expect("overlap count within u16");
 
     // Calculate recall based on the smaller result set to be fair
-    let smaller_count = hnsw_results.len().min(linear_results.len()) as f32;
-    let recall_at_k = overlap as f32 / smaller_count;
+    let smallest = hnsw_results.len().min(linear_results.len());
+    let smallest_count = u16::try_from(smallest).expect("result set size within u16");
+    let smallest_total = f32::from(smallest_count);
+    let recall_at_k = if smallest_total > 0.0 {
+        f32::from(overlap_count) / smallest_total
+    } else {
+        0.0
+    };
+
+    assert!((0.0..=1.0).contains(&recall_at_k));
 
     // HNSW should have reasonable quality - all returned results should be valid
     // This tests precision rather than recall since HNSW is approximate
-    let precision = if hnsw_results.is_empty() { 0.0 } else { overlap as f32 / hnsw_results.len() as f32 };
-    
+    let hnsw_total_usize = hnsw_results.len();
+    let hnsw_total = u16::try_from(hnsw_total_usize).expect("HNSW result size within u16");
+    let precision = if hnsw_total == 0 {
+        0.0
+    } else {
+        f32::from(overlap_count) / f32::from(hnsw_total)
+    };
+
     // HNSW should have high precision (most results should be relevant)
     assert!(
         precision >= 0.8,
-        "HNSW precision was {}, expected >= 0.8 (found {} valid results out of {} HNSW results)",
-        precision, overlap, hnsw_results.len()
+        "HNSW precision was {precision}, expected >= 0.8 (found {overlap_count} valid results out of {hnsw_total_usize} HNSW results)"
     );
 }
 
@@ -302,9 +347,15 @@ fn test_hnsw_spreading_activation() {
     let mut base_embedding = [0.0f32; 768];
 
     // Central memory - unique pattern
-    base_embedding[0] = 0.5; base_embedding[1] = 0.5; base_embedding[2] = 0.5; base_embedding[3] = 0.5;
-    base_embedding[4] = 0.5; base_embedding[5] = 0.5; base_embedding[6] = 0.5; base_embedding[7] = 0.5;
-    for i in 8..768 { base_embedding[i] = 0.5; }
+    base_embedding[0] = 0.5;
+    base_embedding[1] = 0.5;
+    base_embedding[2] = 0.5;
+    base_embedding[3] = 0.5;
+    base_embedding[4] = 0.5;
+    base_embedding[5] = 0.5;
+    base_embedding[6] = 0.5;
+    base_embedding[7] = 0.5;
+    base_embedding[8..].fill(0.5);
 
     let central = EpisodeBuilder::new()
         .id("central".to_string())
@@ -321,19 +372,20 @@ fn test_hnsw_spreading_activation() {
         let mut neighbor_embedding = [0.0f32; 768];
 
         // Make the first 8 floats completely different for each neighbor
-        for j in 0..8 {
-            neighbor_embedding[j] = (i as f32 + j as f32) * 0.1 + 0.1;
+        let neighbor_index = f32::from(u8::try_from(i).expect("neighbor index within range"));
+        for (offset, value) in neighbor_embedding.iter_mut().take(8).enumerate() {
+            let offset = f32::from(u8::try_from(offset).expect("neighbor offset within range"));
+            *value = (neighbor_index + offset).mul_add(0.1, 0.1);
         }
 
         // Make the rest similar to central but with variations
-        for j in 8..768 {
-            neighbor_embedding[j] = 0.5 + (i as f32 * 0.05);
-        }
+        let tail_value = neighbor_index.mul_add(0.05, 0.5);
+        neighbor_embedding[8..].fill(tail_value);
 
         let neighbor = EpisodeBuilder::new()
-            .id(format!("neighbor_{}", i))
+            .id(format!("neighbor_{i}"))
             .when(Utc::now())
-            .what(format!("neighbor memory {}", i))
+            .what(format!("neighbor memory {i}"))
             .embedding(neighbor_embedding)
             .confidence(Confidence::MEDIUM)
             .build();
@@ -346,7 +398,7 @@ fn test_hnsw_spreading_activation() {
     // Search should activate neighbors through spreading
     let cue = Cue::embedding("test".to_string(), base_embedding, Confidence::LOW);
 
-    let results = store.recall(cue);
+    let results = store.recall(&cue);
 
     // Should find at least the central memory
     assert!(!results.is_empty());
@@ -369,9 +421,9 @@ fn test_hnsw_graph_integrity() {
         embedding[i % 768] = 1.0;
 
         let episode = EpisodeBuilder::new()
-            .id(format!("mem_{}", i))
+            .id(format!("mem_{i}"))
             .when(Utc::now())
-            .what(format!("memory {}", i))
+            .what(format!("memory {i}"))
             .embedding(embedding)
             .confidence(Confidence::MEDIUM)
             .build();

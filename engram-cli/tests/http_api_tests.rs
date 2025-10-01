@@ -10,7 +10,7 @@ use axum::{
 };
 use chrono::Utc;
 use engram_cli::api::{ApiState, create_api_routes};
-use engram_core::graph::MemoryGraph;
+use engram_core::graph::create_concurrent_graph;
 use serde_json::{Value, json};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -18,7 +18,7 @@ use tower::ServiceExt; // for `oneshot`
 
 /// Create test router with API routes
 fn create_test_router() -> Router {
-    let graph = Arc::new(RwLock::new(MemoryGraph::new()));
+    let graph = Arc::new(RwLock::new(create_concurrent_graph()));
     let api_state = ApiState::new(graph);
 
     create_api_routes().with_state(api_state)
@@ -49,7 +49,7 @@ async fn make_request(
     let body = axum::body::to_bytes(response.into_body(), usize::MAX)
         .await
         .unwrap();
-    let json: Value = serde_json::from_slice(&body).unwrap_or(json!({}));
+    let json: Value = serde_json::from_slice(&body).unwrap_or_else(|_| json!({}));
 
     (status, json)
 }

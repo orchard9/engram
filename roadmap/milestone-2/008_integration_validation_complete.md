@@ -1,12 +1,24 @@
 # Task 008: Integration and End-to-End Validation
 
-## Status: Pending
+## Status: Partial ✅
 ## Priority: P0 - Critical Path
 ## Estimated Effort: 1 day
 ## Dependencies: Tasks 001-007 (all milestone-2 tasks)
 
 ## Objective
 Integrate all vector-native storage components and validate the complete system meets performance targets (90% recall@10, <1ms latency) with proper confidence propagation.
+
+## Current Implementation Status
+- ✅ Integration harness covers tiers, content addressing, HNSW dynamics, migrations, performance, and confidence checks (`engram-core/tests/vector_storage_integration.rs:1-739`).
+- ✅ Test runs in CI (tokio-based) and prints detailed results across subsystems (`engram-core/tests/vector_storage_integration.rs:672-739`).
+- ⚠️ Performance gates relaxed to milliseconds (5–10 ms) and do not enforce <1 ms target (`engram-core/tests/vector_storage_integration.rs:339-575`).
+- ⚠️ Confidence calibration acceptance relies on Expected Calibration Error <0.2 but does not fail when it regresses beyond documentation limits.
+- ⚠️ No automated dataset harness comparing Engram against external ANN indexes as part of integration validation.
+
+## Remaining Work for Completion
+1. Tighten performance assertions to the documented <1 ms latency / 90% recall targets once benchmarks confirm feasibility.
+2. Expand confidence validation to assert actual tier-specific calibration factors (maybe add snapshots or metric checks).
+3. (Optional but recommended) incorporate FAISS/Annoy comparison results into integration pipeline once Task 005 completes.
 
 ## Current State Analysis
 - **To Complete**: Three-tier storage architecture

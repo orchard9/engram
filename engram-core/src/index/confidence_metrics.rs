@@ -2,6 +2,20 @@
 
 use crate::Confidence;
 
+#[inline]
+fn safe_f64_to_f32(value: f64) -> f32 {
+    if value.is_finite() {
+        #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
+        {
+            value.clamp(0.0, f64::from(f32::MAX)) as f32
+        }
+    } else if value.is_sign_negative() {
+        0.0
+    } else {
+        f32::MAX
+    }
+}
+
 /// Compute confidence-weighted distance between vectors
 #[must_use]
 pub fn confidence_weighted_distance(
@@ -24,7 +38,7 @@ pub fn apply_temporal_boost(
     boost_factor: f32,
 ) -> Confidence {
     // Exponential decay with configurable boost
-    let decay = (-age_seconds / 3600.0).exp() as f32; // Decay over hours
+    let decay = safe_f64_to_f32((-age_seconds / 3600.0).exp()); // Decay over hours
     let boosted = base_confidence.raw() * boost_factor.mul_add(decay, 1.0);
 
     Confidence::exact(boosted)

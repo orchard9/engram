@@ -33,7 +33,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "#[allow(clippy::all, clippy::pedantic, clippy::nursery)]",
         )
         // Compile the proto files
-        .compile(
+        .compile_protos(
             &[
                 proto_root.join("engram/v1/memory.proto"),
                 proto_root.join("engram/v1/service.proto"),

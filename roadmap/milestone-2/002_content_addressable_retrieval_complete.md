@@ -1,12 +1,28 @@
 # Task 002: Content-Addressable Vector Retrieval
 
-## Status: Pending
+## Status: Partial ✅
 ## Priority: P1 - Performance Critical
 ## Estimated Effort: 1.5 days
 ## Dependencies: Task 001 (tier implementations)
 
 ## Objective
 Add content-addressable retrieval to enable direct lookup by semantic content rather than IDs, with automatic deduplication and similarity-based addressing.
+
+## Current Implementation Status
+- ✅ `ContentAddress` and `ContentIndex` implemented with quantization-free hash + LSH buckets (`engram-core/src/storage/content_addressing.rs:1-200`).
+- ✅ Deduplication strategies (`Skip`/`Replace`/`Merge`) integrate with the store when inserting memories (`engram-core/src/storage/deduplication.rs:360-520`, `engram-core/src/store.rs:292-360`).
+- ✅ Memory store now generates addresses during `store()` and updates the content index for retrieval (`engram-core/src/store.rs:292-360`).
+- ⚠️ Current semantic hash uses raw float bytes + `DefaultHasher`; spec requested BLAKE3 hashing of quantized vectors. No locality-sensitive hash based on random projections is persisted for reproducibility.
+- ⚠️ Store lacks a fast-path lookup by `ContentAddress`; retrieval still walks hot memories unless HNSW results help. Needs a direct API that accepts a content address and resolves matching memory IDs.
+- ⚠️ Deduplication action logging / metrics requested in spec are not present.
+
+## Remaining Work for Completion
+1. Replace the ad-hoc hash with the documented approach:
+   - Quantize vectors to bytes and compute BLAKE3 hash + deterministic LSH (update `ContentAddress::from_embedding` in `engram-core/src/storage/content_addressing.rs`).
+2. Expose content-address lookup path to callers:
+   - Add `MemoryStore::get_by_content_address` (or similar) that consults `ContentIndex` without scanning `hot_memories` (`engram-core/src/store.rs`).
+3. Emit instrumentation for dedup decisions:
+   - Record metrics/log entries when `DeduplicationAction::{Skip,Replace,Merge}` fires (`engram-core/src/storage/deduplication.rs`).
 
 ## Current State Analysis
 - **Existing**: HNSW index for similarity search in `index/` module

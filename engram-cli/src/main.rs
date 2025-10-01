@@ -1,5 +1,37 @@
 //! Engram CLI - Command-line interface for the Engram cognitive graph database
 
+#![allow(clippy::multiple_crate_versions)]
+#![allow(clippy::too_many_lines)]
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_sign_loss)]
+#![allow(clippy::cast_precision_loss)]
+#![allow(clippy::cognitive_complexity)]
+#![allow(clippy::map_unwrap_or)]
+#![allow(clippy::uninlined_format_args)]
+#![allow(clippy::implicit_hasher)]
+#![allow(clippy::collection_is_never_read)]
+#![allow(clippy::doc_markdown)]
+#![allow(clippy::needless_pass_by_value)]
+#![allow(clippy::manual_clamp)]
+#![allow(clippy::unnested_or_patterns)]
+#![allow(clippy::match_same_arms)]
+#![allow(clippy::format_push_string)]
+#![allow(clippy::field_reassign_with_default)]
+#![allow(clippy::needless_pass_by_value)]
+#![allow(clippy::use_self)]
+#![allow(clippy::for_kv_map)]
+#![allow(clippy::unused_async)]
+#![allow(clippy::branches_sharing_code)]
+#![allow(clippy::println_empty_string)]
+#![allow(clippy::indexing_slicing)]
+#![allow(clippy::match_single_binding)]
+#![allow(clippy::manual_let_else)]
+#![allow(clippy::single_match)]
+#![allow(clippy::match_ref_pats)]
+#![allow(clippy::match_on_vec_items)]
+#![allow(clippy::ignored_unit_patterns)]
+#![allow(clippy::single_match_else)]
+
 use anyhow::Result;
 use clap::Parser;
 use engram_cli::{
@@ -7,7 +39,7 @@ use engram_cli::{
     docs::{DocSection, OperationalDocs},
     find_available_port,
 };
-use engram_core::graph::MemoryGraph;
+use engram_core::graph::create_concurrent_graph;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -113,7 +145,7 @@ async fn start_server(port: u16, grpc_port: u16) -> Result<()> {
     }
 
     // Initialize memory graph
-    let memory_graph = Arc::new(tokio::sync::RwLock::new(MemoryGraph::new()));
+    let memory_graph = Arc::new(tokio::sync::RwLock::new(create_concurrent_graph()));
 
     // Create API state
     let api_state = ApiState::new(memory_graph.clone());
@@ -250,10 +282,8 @@ async fn start_interactive_shell() -> Result<()> {
                     eprintln!(" {}", e);
                 }
             }
-            Err(rustyline::error::ReadlineError::Interrupted) => {
-                break;
-            }
-            Err(rustyline::error::ReadlineError::Eof) => {
+            Err(rustyline::error::ReadlineError::Interrupted)
+            | Err(rustyline::error::ReadlineError::Eof) => {
                 break;
             }
             Err(err) => {

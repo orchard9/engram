@@ -3,9 +3,10 @@
 //! High-performance activation accumulation using SIMD vector operations
 //! from Task 001, with support for batch processing and cache optimization.
 
-use crate::activation::{ActivationRecord, NodeId};
+use crate::activation::{ActivationRecord, NodeId, storage_aware::StorageTier};
 use crate::compute::cosine_similarity_batch_768;
 use dashmap::DashMap;
+use std::convert::TryFrom;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -32,7 +33,11 @@ impl SimdActivationAccumulator {
         let record = self
             .activation_records
             .entry(node_id.clone())
-            .or_insert_with(|| Arc::new(ActivationRecord::new(node_id.clone(), 0.1)))
+            .or_insert_with(|| {
+                let mut base = ActivationRecord::new(node_id.clone(), 0.1);
+                base.set_storage_tier(StorageTier::Hot);
+                Arc::new(base)
+            })
             .clone();
 
         self.operations_count.fetch_add(1, Ordering::Relaxed);
@@ -59,7 +64,11 @@ impl SimdActivationAccumulator {
                 let record = self
                     .activation_records
                     .entry(node_id.clone())
-                    .or_insert_with(|| Arc::new(ActivationRecord::new(node_id.clone(), 0.1)))
+                    .or_insert_with(|| {
+                        let mut base = ActivationRecord::new(node_id.clone(), 0.1);
+                        base.set_storage_tier(StorageTier::Hot);
+                        Arc::new(base)
+                    })
                     .clone();
 
                 node_refs.push((record, *contribution));
@@ -80,7 +89,7 @@ impl SimdActivationAccumulator {
 
     /// SIMD processing of activation chunks
     #[allow(dead_code)]
-    fn simd_process_chunk(&self, values: &[f32]) -> Vec<f32> {
+    fn simd_process_chunk(values: &[f32]) -> Vec<f32> {
         if values.len() < 768 {
             return values.to_vec();
         }
@@ -151,7 +160,11 @@ impl SimdActivationAccumulator {
             // Add some spreading pattern for higher dimensions
             for (i, item) in vector[1..].iter_mut().enumerate() {
                 let index = i + 1;
-                *item = activation * (0.1 / (index as f32).sqrt()).min(0.01);
+                let index_f32 =
+                    u16::try_from(index).map_or_else(|_| f32::from(u16::MAX), f32::from);
+
+                let scale = (0.1 / index_f32.sqrt()).min(0.01);
+                *item = activation * scale;
             }
 
             vector
@@ -231,18 +244,24 @@ impl SimdActivationAccumulator {
 /// Specialized accumulator for biological decay models
 pub struct BiologicalAccumulator {
     simd_accumulator: SimdActivationAccumulator,
-    decay_rates: DashMap<NodeId, f32>,
     refractory_periods: DashMap<NodeId, u64>, // Timestamp when node can fire again
     synaptic_fatigue: DashMap<NodeId, f32>,   // Fatigue factor [0, 1]
 }
 
 impl BiologicalAccumulator {
+    fn current_time_nanos() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()
+            .and_then(|duration| u64::try_from(duration.as_nanos()).ok())
+            .unwrap_or(u64::MAX)
+    }
+
     /// Create new biological accumulator
     #[must_use]
     pub fn new(batch_size: usize) -> Self {
         Self {
             simd_accumulator: SimdActivationAccumulator::new(batch_size),
-            decay_rates: DashMap::new(),
             refractory_periods: DashMap::new(),
             synaptic_fatigue: DashMap::new(),
         }
@@ -306,10 +325,6 @@ impl BiologicalAccumulator {
     }
 
     /// Get biological state information
-    ///
-    /// # Panics
-    ///
-    /// Panics if system time is before UNIX epoch
     pub fn get_biological_state(&self, node_id: &NodeId) -> (f32, f32, bool) {
         let activation = self
             .simd_accumulator
@@ -319,15 +334,10 @@ impl BiologicalAccumulator {
 
         let fatigue = self.synaptic_fatigue.get(node_id).map_or(1.0, |f| *f);
 
-        let in_refractory = self.refractory_periods.get(node_id).is_some_and(|r| {
-            let current_time = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("System time before UNIX EPOCH")
-                .as_nanos()
-                .try_into()
-                .unwrap_or(u64::MAX);
-            current_time < *r
-        });
+        let in_refractory = self
+            .refractory_periods
+            .get(node_id)
+            .is_some_and(|r| Self::current_time_nanos() < *r);
 
         (activation, fatigue, in_refractory)
     }
@@ -335,6 +345,7 @@ impl BiologicalAccumulator {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used)]
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -404,9 +415,9 @@ mod tests {
         let mut different_candidate = [0.3f32; 768];
         different_candidate[0] = 0.1f32; // Make it actually different direction
         let candidates = vec![
-            [0.5f32; 768],      // Identical
+            [0.5f32; 768],       // Identical
             different_candidate, // Different direction
-            [-0.5f32; 768],     // Opposite
+            [-0.5f32; 768],      // Opposite
         ];
 
         let weights = SimdActivationAccumulator::compute_similarity_weights(&query, &candidates);
@@ -421,7 +432,8 @@ mod tests {
         let current_time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("System time before UNIX EPOCH")
-            .as_nanos() as u64;
+            .as_nanos();
+        let current_time = u64::try_from(current_time).unwrap_or(u64::MAX);
 
         let node_id = "bio_node".to_string();
 
@@ -440,7 +452,7 @@ mod tests {
 
         // Wait for the actual refractory period to pass
         std::thread::sleep(std::time::Duration::from_millis(3));
-        
+
         let (activation, fatigue, in_refractory) = bio_accumulator.get_biological_state(&node_id);
         assert!(activation > 0.0);
         assert!(fatigue < 1.0); // Should have some fatigue
@@ -454,7 +466,8 @@ mod tests {
         let current_time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("System time before UNIX EPOCH")
-            .as_nanos() as u64;
+            .as_nanos();
+        let current_time = u64::try_from(current_time).unwrap_or(u64::MAX);
 
         let node_id = "decay_node".to_string();
         bio_accumulator.accumulate_biological(&node_id, 1.0, current_time);

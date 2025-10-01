@@ -12,9 +12,7 @@ use axum::{
     routing::{get, post},
 };
 use chrono::{DateTime, Utc};
-use engram_proto::{
-    Confidence, ConfidenceCategory, ConsolidationState, Cue, Episode, Memory, MemoryType,
-};
+use engram_proto::{Confidence, ConfidenceCategory, ConsolidationState, Cue, Memory, MemoryType};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
@@ -26,20 +24,27 @@ use utoipa::{IntoParams, ToSchema};
 
 use crate::grpc::MemoryService;
 use crate::openapi::create_swagger_ui;
-use engram_core::graph::MemoryGraph;
+use engram_core::{
+    Confidence as CoreConfidence,
+    graph::{DashMapBackend, UnifiedMemoryGraph},
+    memory::{EpisodeBuilder as CoreEpisodeBuilder, Memory as CoreMemory},
+};
+
+/// Shared graph type for concurrent access
+pub type SharedGraph = UnifiedMemoryGraph<DashMapBackend>;
 
 /// Shared application state
 #[derive(Clone)]
 pub struct ApiState {
     /// In-memory graph for cognitive operations
-    pub graph: Arc<RwLock<MemoryGraph>>,
+    pub graph: Arc<RwLock<SharedGraph>>,
     /// gRPC memory service for complex operations
     pub memory_service: Arc<MemoryService>,
 }
 
 impl ApiState {
     /// Create new API state with shared graph
-    pub fn new(graph: Arc<RwLock<MemoryGraph>>) -> Self {
+    pub fn new(graph: Arc<RwLock<SharedGraph>>) -> Self {
         let memory_service = Arc::new(MemoryService::new(graph.clone()));
         Self {
             graph,
@@ -398,6 +403,9 @@ pub struct SimilarPattern {
         (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
+/// # Errors
+///
+/// Returns `ApiError` if memory storage fails or graph operations fail
 pub async fn remember_memory(
     State(state): State<ApiState>,
     Json(request): Json<RememberMemoryRequest>,
@@ -426,10 +434,12 @@ pub async fn remember_memory(
         .unwrap_or_else(|| format!("mem_{}", &uuid::Uuid::new_v4().to_string()[..8]));
 
     // Create embedding if not provided (placeholder - would use actual embedding service)
-    let embedding = request.embedding.unwrap_or_else(|| {
+    let embedding_vec = request.embedding.unwrap_or_else(|| {
         // Simple content-based embedding placeholder
         vec![0.5; 768] // Standard embedding dimension
     });
+
+    let embedding_array = embedding_to_array(&embedding_vec)?;
 
     // Create confidence with reasoning
     let confidence_value = request.confidence.unwrap_or(0.7);
@@ -439,16 +449,17 @@ pub async fn remember_memory(
             .unwrap_or_else(|| "Default confidence for user-provided memory".to_string()),
     );
 
+    let core_confidence = CoreConfidence::exact(confidence_value);
+
     // Determine memory type
     let memory_type = match request.memory_type.as_deref() {
-        Some("semantic") => MemoryType::Semantic,
         Some("episodic") => MemoryType::Episodic,
         Some("procedural") => MemoryType::Procedural,
-        _ => MemoryType::Semantic, // Default
+        _ => MemoryType::Semantic, // Default for "semantic" and unknown types
     };
 
     // Create memory object
-    let memory = Memory::new(memory_id.clone(), embedding)
+    let memory = Memory::new(memory_id.clone(), embedding_vec.clone())
         .with_content(&request.content)
         .with_confidence(confidence.clone())
         .with_type(memory_type);
@@ -461,17 +472,14 @@ pub async fn remember_memory(
     };
 
     // Store in graph (simplified - would use full gRPC service)
-    let node = engram_core::MemoryNode::new_unvalidated(
-        memory_id.clone(),
-        request.content.clone().into_bytes(),
-    )
-    .validate()
-    .map_err(|e| ApiError::ValidationError(format!("Memory validation failed: {e}")))?
-    .activate();
+    let mut core_memory = CoreMemory::new(memory_id.clone(), embedding_array, core_confidence);
+    core_memory.content = Some(request.content.clone());
 
     {
-        let mut graph = state.graph.write().await;
-        graph.store(node);
+        let graph = state.graph.write().await;
+        graph
+            .store_memory(core_memory)
+            .map_err(|err| ApiError::SystemError(format!("Failed to store memory: {err}")))?;
     }
 
     // Create auto-links if enabled
@@ -528,6 +536,9 @@ pub async fn remember_memory(
         (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
+/// # Errors
+///
+/// Returns `ApiError` if episode storage fails or graph operations fail
 pub async fn remember_episode(
     State(state): State<ApiState>,
     Json(request): Json<RememberEpisodeRequest>,
@@ -547,27 +558,38 @@ pub async fn remember_episode(
         .unwrap_or_else(|| format!("ep_{}", &uuid::Uuid::new_v4().to_string()[..8]));
 
     // Create embedding if not provided
-    let embedding = request.embedding.unwrap_or_else(|| vec![0.6; 768]);
+    let embedding_vec = request.embedding.unwrap_or_else(|| vec![0.6; 768]);
+    let embedding_array = embedding_to_array(&embedding_vec)?;
 
-    // Create episode
-    let _episode = Episode::new(episode_id.clone(), request.when, &request.what, embedding)
-        .at_location(request.where_location.unwrap_or_default())
-        .with_people(request.who.unwrap_or_default())
-        .with_emotion(request.emotional_valence.unwrap_or(0.0))
-        .with_importance(request.importance.unwrap_or(0.5));
+    let encoding_confidence =
+        CoreConfidence::exact(request.importance.unwrap_or(0.5).clamp(0.0, 1.0));
 
-    // Store episode as a memory node (simplified)
-    let node = engram_core::MemoryNode::new_unvalidated(
-        episode_id.clone(),
-        request.what.clone().into_bytes(),
-    )
-    .validate()
-    .map_err(|e| ApiError::ValidationError(format!("Episode validation failed: {e}")))?
-    .activate();
+    let builder = CoreEpisodeBuilder::new()
+        .id(episode_id.clone())
+        .when(request.when)
+        .what(request.what.clone())
+        .embedding(embedding_array)
+        .confidence(encoding_confidence);
+
+    let builder = if let Some(location) = request.where_location.clone() {
+        builder.where_location(location)
+    } else {
+        builder
+    };
+
+    let builder = if let Some(participants) = request.who.clone() {
+        builder.who(participants)
+    } else {
+        builder
+    };
+
+    let core_episode = builder.build();
 
     {
-        let mut graph = state.graph.write().await;
-        graph.store(node);
+        let graph = state.graph.write().await;
+        graph
+            .store_episode(core_episode)
+            .map_err(|err| ApiError::SystemError(format!("Failed to store episode: {err}")))?;
     }
 
     let response = RememberResponse {
@@ -601,6 +623,9 @@ pub async fn remember_episode(
         (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
+/// # Errors
+///
+/// Returns `ApiError` if memory recall fails or graph operations fail
 pub async fn recall_memories(
     State(state): State<ApiState>,
     Query(params): Query<RecallQuery>,
@@ -642,8 +667,10 @@ pub async fn recall_memories(
     };
 
     // Perform search (simplified - would use full spreading activation)
-    let graph = state.graph.read().await;
-    let total_memories = graph.len();
+    let total_memories = {
+        let graph = state.graph.read().await;
+        graph.count()
+    };
 
     // Placeholder search results - would implement actual spreading activation
     let vivid_results = vec![MemoryResult {
@@ -680,7 +707,7 @@ pub async fn recall_memories(
         relevance_explanation: "Connected through shared conceptual patterns".to_string(),
     }];
 
-    let processing_time = start_time.elapsed().as_millis() as u64;
+    let processing_time = u64::try_from(start_time.elapsed().as_millis()).unwrap_or(u64::MAX);
 
     let response = RecallResponse {
         memories: RecallResults {
@@ -697,7 +724,7 @@ pub async fn recall_memories(
             understood_intent: params
                 .query
                 .clone()
-                .unwrap_or("Embedding-based search".to_string()),
+                .unwrap_or_else(|| "Embedding-based search".to_string()),
             search_strategy: "Spreading activation with similarity threshold".to_string(),
             cognitive_load: "Medium".to_string(),
             suggestions: vec![
@@ -741,6 +768,9 @@ pub async fn recall_memories(
         (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
+/// # Errors
+///
+/// Returns `ApiError` if pattern recognition fails
 pub async fn recognize_pattern(
     State(_state): State<ApiState>,
     Json(request): Json<RecognizeRequest>,
@@ -801,6 +831,9 @@ pub async fn recognize_pattern(
         (status = 500, description = "Health check failed", body = ErrorResponse)
     )
 )]
+/// # Errors
+///
+/// Returns `ApiError` if health check fails
 pub async fn simple_health() -> Result<impl IntoResponse, ApiError> {
     let health_data = json!({
         "status": "healthy",
@@ -822,9 +855,14 @@ pub async fn simple_health() -> Result<impl IntoResponse, ApiError> {
         (status = 500, description = "System health check failed", body = ErrorResponse)
     )
 )]
+/// # Errors
+///
+/// Returns `ApiError` if system health check fails
 pub async fn system_health(State(state): State<ApiState>) -> Result<impl IntoResponse, ApiError> {
-    let graph = state.graph.read().await;
-    let memory_count = graph.len();
+    let memory_count = {
+        let graph = state.graph.read().await;
+        graph.count()
+    };
 
     let health_data = json!({
         "status": "healthy",
@@ -858,18 +896,24 @@ pub async fn system_health(State(state): State<ApiState>) -> Result<impl IntoRes
         (status = 500, description = "Introspection failed", body = ErrorResponse)
     )
 )]
+/// # Errors
+///
+/// Returns `ApiError` if introspection fails
 pub async fn system_introspect(
     State(state): State<ApiState>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let graph = state.graph.read().await;
+    let memory_count = {
+        let graph = state.graph.read().await;
+        graph.count()
+    };
 
     let introspection_data = json!({
         "memory_statistics": {
-            "total_nodes": graph.len(),
+            "total_nodes": memory_count,
             "average_activation": 0.5,
             "consolidation_states": {
                 "recent": 0,
-                "consolidated": graph.len(),
+                "consolidated": memory_count,
                 "archived": 0
             }
         },
@@ -906,6 +950,9 @@ pub async fn system_introspect(
         (status = 500, description = "Internal server error", body = ErrorResponse)
     )
 )]
+/// # Errors
+///
+/// Returns `ApiError` if episode replay fails
 pub async fn replay_episodes(
     State(_state): State<ApiState>,
     Query(params): Query<HashMap<String, String>>,
@@ -996,6 +1043,19 @@ impl IntoResponse for ApiError {
     }
 }
 
+fn embedding_to_array(embedding: &[f32]) -> Result<[f32; 768], ApiError> {
+    if embedding.len() != 768 {
+        return Err(ApiError::InvalidInput(format!(
+            "Embedding must contain exactly 768 dimensions, received {}",
+            embedding.len()
+        )));
+    }
+
+    let mut array = [0.0f32; 768];
+    array.copy_from_slice(embedding);
+    Ok(array)
+}
+
 // Add uuid dependency for ID generation
 use uuid;
 
@@ -1029,15 +1089,8 @@ pub async fn stream_activities(
     let min_importance = params.min_importance.unwrap_or(0.1).clamp(0.0, 1.0);
 
     // Parse event types (default to all if not specified)
-    let event_types = params
-        .event_types
-        .map(|types| {
-            types
-                .split(',')
-                .map(|t| t.trim().to_lowercase())
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_else(|| {
+    let event_types = params.event_types.map_or_else(
+        || {
             vec![
                 "activation".to_string(),
                 "storage".to_string(),
@@ -1046,7 +1099,14 @@ pub async fn stream_activities(
                 "association".to_string(),
                 "decay".to_string(),
             ]
-        });
+        },
+        |types| {
+            types
+                .split(',')
+                .map(|t| t.trim().to_lowercase())
+                .collect::<Vec<_>>()
+        },
+    );
 
     // Create activity stream
     let stream = create_activity_stream(session_id, event_types, min_importance, buffer_size);
@@ -1082,21 +1142,21 @@ pub async fn stream_memories(
     let include_completion = params.include_completion.unwrap_or(false);
 
     // Parse memory types
-    let memory_types = params
-        .memory_types
-        .map(|types| {
-            types
-                .split(',')
-                .map(|t| t.trim().to_lowercase())
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_else(|| {
+    let memory_types = params.memory_types.map_or_else(
+        || {
             vec![
                 "semantic".to_string(),
                 "episodic".to_string(),
                 "procedural".to_string(),
             ]
-        });
+        },
+        |types| {
+            types
+                .split(',')
+                .map(|t| t.trim().to_lowercase())
+                .collect::<Vec<_>>()
+        },
+    );
 
     let stream = create_memory_stream(
         session_id,
@@ -1213,7 +1273,7 @@ fn create_activity_stream(
                 }
 
                 // Cognitive-friendly pacing: 200ms to 2s intervals based on importance
-                let delay_ms = importance.mul_add(-1800.0, 2000.0) as u64;
+                let delay_ms = importance.mul_add(-1800.0, 2000.0).max(0.0) as u64;
                 tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
             }
         }
@@ -1627,10 +1687,10 @@ fn create_activation_monitoring_stream(
                 continue;
             }
 
-            let node_id = match &node_pattern {
-                Some(pattern) => format!("{}_{}", pattern, rand::random::<u32>() % 1000),
-                None => format!("node_{}", rand::random::<u32>() % 10000),
-            };
+            let node_id = node_pattern.as_ref().map_or_else(
+                || format!("node_{}", rand::random::<u32>() % 10000),
+                |pattern| format!("{}_{}", pattern, rand::random::<u32>() % 1000),
+            );
 
             let mut event_data = json!({
                 "node_id": node_id, "activation_level": activation_level,
@@ -1699,7 +1759,8 @@ fn create_causality_monitoring_stream(
             }
 
             let operation_id = format!("{operation}_{event_id}");
-            let chain_length = std::cmp::min(max_chain_length, (confidence * 8.0) as usize + 1);
+            let chain_length =
+                std::cmp::min(max_chain_length, (confidence * 8.0).max(0.0) as usize + 1);
             let causal_chain = (0..chain_length).map(|i| json!({
                 "operation_id": format!("cause_{}_{}", operation, event_id.saturating_sub(i as u64 + 1)),
                 "confidence": confidence * rand::random::<f32>(),
@@ -1758,6 +1819,8 @@ fn create_causality_monitoring_stream(
 
 /// Create cognitive-friendly API router
 pub fn create_api_routes() -> Router<ApiState> {
+    let swagger_router = create_swagger_ui().with_state::<ApiState>(());
+
     Router::new()
         // Simple health endpoint for status checks
         .route("/health", get(simple_health))
@@ -1780,5 +1843,5 @@ pub fn create_api_routes() -> Router<ApiState> {
         .route("/api/v1/monitor/activations", get(monitor_activations))
         .route("/api/v1/monitor/causality", get(monitor_causality))
         // Swagger UI documentation
-        .merge(create_swagger_ui())
+        .merge(swagger_router)
 }

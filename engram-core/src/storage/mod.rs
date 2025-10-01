@@ -10,6 +10,8 @@
 //! - Adaptive tier migration based on cognitive access patterns
 //! - Zero-copy reads with hardware-accelerated checksums
 
+#![allow(async_fn_in_trait)]
+
 use crate::{Confidence, Cue, Episode, Memory};
 use std::sync::Arc;
 use thiserror::Error;
@@ -18,9 +20,9 @@ use thiserror::Error;
 pub mod access_tracking;
 #[cfg(feature = "memory_mapped_persistence")]
 pub mod cache;
+pub mod cold_tier;
 #[cfg(feature = "memory_mapped_persistence")]
 pub mod compact;
-pub mod cold_tier;
 pub mod confidence;
 pub mod content_addressing;
 pub mod deduplication;
@@ -41,35 +43,39 @@ pub mod warm_tier;
 pub mod numa;
 
 // Re-exports for public API
+pub use crate::activation::storage_aware::StorageTier;
 pub use access_tracking::{
-    AccessTracker, AccessStats, GlobalAccessStats, AccessPredictor,
-    AccessEvent, PredictedAccess, PredictorStats,
+    AccessEvent, AccessPredictor, AccessStats, AccessTracker, GlobalAccessStats, PredictedAccess,
+    PredictorStats,
 };
 #[cfg(feature = "memory_mapped_persistence")]
 pub use cache::{CacheOptimalMemoryNode, CognitiveIndex};
 pub use cold_tier::{ColdTier, ColdTierConfig, CompactionResult};
 pub use confidence::{
-    StorageConfidenceCalibrator, ConfidenceTier, TierConfidenceFactors, CalibrationStats,
+    CalibrationStats, ConfidenceTier, StorageConfidenceCalibrator, TierConfidenceFactors,
 };
 pub use content_addressing::{ContentAddress, ContentIndex, ContentIndexStats};
 pub use deduplication::{
-    DeduplicationAction, DeduplicationResult, DeduplicationStats,
-    MergeStrategy, SemanticDeduplicator,
+    DeduplicationAction, DeduplicationResult, DeduplicationStats, MergeStrategy,
+    SemanticDeduplicator,
 };
 pub use hot_tier::HotTier;
 #[cfg(feature = "memory_mapped_persistence")]
 pub use mapped::MappedWarmStorage;
 #[cfg(feature = "memory_mapped_persistence")]
 pub use tiers::{
-    CognitiveTierArchitecture, MigrationCandidate, MigrationReport, MemoryPressure,
+    CognitiveTierArchitecture, MemoryPressure, MigrationCandidate, MigrationReport,
     TierArchitectureStats, TierCoordinator,
 };
 #[cfg(feature = "memory_mapped_persistence")]
 pub use wal::{WalEntry, WalWriter};
-pub use warm_tier::{WarmTier, WarmTierConfig, CompactionStats, MemoryUsage};
+pub use warm_tier::{CompactionStats, MemoryUsage, WarmTier, WarmTierConfig};
+
+const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_992; // 2^53
 
 /// Core storage traits for pluggable backends
-pub trait StorageTier: Send + Sync {
+pub trait StorageTierBackend: Send + Sync {
+    /// Error type produced by the backend implementation.
     type Error: std::error::Error + Send + Sync + 'static;
 
     /// Store a memory with specified activation level
@@ -94,16 +100,23 @@ pub trait StorageTier: Send + Sync {
 /// Statistics about a storage tier's state
 #[derive(Debug, Clone)]
 pub struct TierStatistics {
+    /// Number of memories currently housed in the tier.
     pub memory_count: usize,
+    /// Total bytes occupied by the tier.
     pub total_size_bytes: u64,
+    /// Average activation score across stored memories.
     pub average_activation: f32,
+    /// Time of the most recent access touching the tier.
     pub last_access_time: std::time::SystemTime,
+    /// Cache hit ratio observed for lookups.
     pub cache_hit_rate: f32,
+    /// Ratio of reclaimed space achieved through compaction.
     pub compaction_ratio: f32,
 }
 
 /// Persistent storage backend interface
 pub trait PersistentBackend: Send + Sync {
+    /// Error type produced by the persistent backend implementation.
     type Error: std::error::Error + Send + Sync + 'static;
 
     /// Initialize the backend with the given configuration
@@ -125,13 +138,21 @@ pub trait PersistentBackend: Send + Sync {
 /// Configuration for storage backend
 #[derive(Debug, Clone)]
 pub struct StorageConfig {
+    /// Filesystem directory where persisted data lives.
     pub data_directory: std::path::PathBuf,
+    /// Maximum in-memory working set measured in MiB.
     pub max_memory_mb: usize,
+    /// Whether to enable NUMA-aware scheduling and allocation.
     pub enable_numa_awareness: bool,
+    /// Size of the write-ahead log buffer in MiB.
     pub wal_buffer_size_mb: usize,
+    /// Compaction trigger threshold expressed as a ratio.
     pub compaction_threshold: f32,
+    /// Cache capacity dedicated to hot reads in MiB.
     pub cache_size_mb: usize,
+    /// Use huge pages for reduced TLB pressure.
     pub enable_huge_pages: bool,
+    /// File synchronization strategy used by the backend.
     pub fsync_mode: FsyncMode,
 }
 
@@ -279,21 +300,25 @@ pub enum StorageError {
 
 impl StorageError {
     /// Create a memory mapping failure error
+    #[must_use]
     pub fn mmap_failed(msg: &str) -> Self {
         Self::MmapFailed(msg.to_string())
     }
 
     /// Create a memory allocation failure error
+    #[must_use]
     pub fn allocation_failed(msg: &str) -> Self {
         Self::AllocationFailed(msg.to_string())
     }
 
     /// Create a data corruption detection error
+    #[must_use]
     pub fn corruption_detected(msg: &str) -> Self {
         Self::CorruptionDetected(msg.to_string())
     }
 
     /// Create a WAL operation failure error
+    #[must_use]
     pub fn wal_failed(msg: &str) -> Self {
         Self::WalFailed(msg.to_string())
     }
@@ -326,7 +351,8 @@ pub struct StorageMetrics {
 }
 
 impl StorageMetrics {
-    /// Create a new StorageMetrics instance with zero counters
+    /// Create a new `StorageMetrics` instance with zero counters
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -373,7 +399,14 @@ impl StorageMetrics {
         if hits + misses == 0 {
             0.0
         } else {
-            hits as f32 / (hits + misses) as f32
+            let total = hits.saturating_add(misses).clamp(1, MAX_SAFE_INTEGER);
+            let numerator = hits.clamp(0, MAX_SAFE_INTEGER);
+            #[allow(clippy::cast_precision_loss)]
+            let ratio = (numerator as f64) / (total as f64);
+            #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+            {
+                ratio.clamp(0.0, 1.0) as f32
+            }
         }
     }
 }
@@ -393,7 +426,7 @@ mod tests {
     #[test]
     fn test_cognitive_eviction_policy_defaults() {
         let policy = CognitiveEvictionPolicy::default();
-        assert_eq!(policy.hot_activation_threshold, 0.7);
+        assert!((policy.hot_activation_threshold - 0.7).abs() < f32::EPSILON);
         assert_eq!(policy.warm_access_window.as_secs(), 3600);
         assert_eq!(policy.cold_migration_age.as_secs(), 86400);
     }

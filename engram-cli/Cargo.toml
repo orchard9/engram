@@ -27,7 +27,7 @@ path = "src/error_reviewer.rs"
 engram-core = { path = "../engram-core" }
 engram-storage = { path = "../engram-storage" }
 engram-proto = { path = "../engram-proto" }
-tonic = "0.10"
+tonic = "0.13"
 tokio-stream = "0.1"
 clap = { workspace = true }
 thiserror = { workspace = true }
@@ -38,15 +38,15 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 indicatif = "0.17"
-axum = "0.7"
+axum = "0.8"
 tower = "0.5"
-tower-http = { version = "0.5", features = ["fs", "trace", "cors"] }
+tower-http = { version = "0.6", features = ["fs", "trace", "cors"] }
 rand = "0.8"
 chrono = { workspace = true }
 reqwest = { version = "0.12", features = ["json", "blocking"] }
 toml = "0.8"
 dirs = "5.0"
-uuid = { version = "1.0", features = ["v4", "serde"] }
+uuid = { version = "1.6.1", features = ["v4", "serde"] }
 urlencoding = "2.1"
 num_cpus = "1.16"
 sys-info = "0.9"
@@ -70,7 +70,7 @@ reqwest = { version = "0.12", features = ["json"] }
 tokio = { workspace = true, features = ["process", "io-util"] }
 portpicker = "0.1"
 engram-proto = { path = "../engram-proto" }
-tonic = "0.10"
+tonic = "0.13"
 urlencoding = "2.1"
 tower = "0.5"
 

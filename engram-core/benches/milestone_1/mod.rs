@@ -27,7 +27,7 @@ use hardware_variation::HardwareVariationTester;
 use performance_fuzzing::PerformanceFuzzer;
 use regression_detection::RegressionDetector;
 use report_generation::BenchmarkReportGenerator;
-use statistical_framework::StatisticalBenchmarkFramework;
+use statistical_framework::{RegressionAnalysis, StatisticalBenchmarkFramework};
 
 #[derive(Debug, Clone)]
 pub struct ComprehensiveBenchmarkResults {
@@ -41,7 +41,7 @@ pub struct ComprehensiveBenchmarkResults {
 }
 
 impl ComprehensiveBenchmarkResults {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             verification_results: None,
             hardware_results: None,
@@ -110,24 +110,27 @@ impl ComprehensiveBenchmarkSuite {
 
         // Phase 1: Formal verification (must pass before performance testing)
         println!("Phase 1: Formal verification of algorithmic correctness...");
+        let property_catalog = self.verification_suite.property_names();
+        println!(
+            "Properties under evaluation: {}",
+            property_catalog.join(", ")
+        );
         let verification_results = self.verification_suite.verify_all_properties();
-        if !verification_results.all_properties_verified() {
-            panic!(
-                "Formal verification failed: {:?}",
-                verification_results.violations()
-            );
-        }
+        assert!(
+            verification_results.all_properties_verified(),
+            "Formal verification failed: {:?}",
+            verification_results.violation_messages()
+        );
         results.set_verification_results(verification_results);
 
         // Phase 2: Hardware variation testing for correctness
         println!("Phase 2: Cross-architecture correctness validation...");
         let hardware_results = self.hardware_tester.test_all_architectures();
-        if !hardware_results.all_architectures_correct() {
-            panic!(
-                "Hardware variation testing failed: {:?}",
-                hardware_results.discrepancies()
-            );
-        }
+        assert!(
+            hardware_results.all_architectures_correct(),
+            "Hardware variation testing failed: {}",
+            hardware_results.summary()
+        );
         results.set_hardware_results(hardware_results);
 
         // Phase 3: Performance fuzzing to find worst cases
@@ -138,6 +141,11 @@ impl ComprehensiveBenchmarkSuite {
         // Phase 4: Differential testing against baselines
         println!("Phase 4: Differential testing against baseline implementations...");
         let differential_results = self.differential_testing.run_comprehensive_tests();
+        if let Some((total_relations, passing_relations)) =
+            differential_results.metamorphic_summary()
+        {
+            println!("Metamorphic checks: {passing_relations}/{total_relations} relations passed");
+        }
         results.set_differential_results(differential_results);
 
         // Phase 5: Statistical benchmarking with regression detection
@@ -200,6 +208,18 @@ impl ComprehensiveBenchmarkSuite {
         let integration_results = integration_benchmarks.run_comprehensive_benchmarks();
         results.add_task_results("integration_scenarios", integration_results);
 
+        if let Some(batch_results) = results.task_results().get("008_batch_operations") {
+            let regression_signal = self.statistical_framework.detect_regression(
+                &batch_results.samples,
+                &batch_results.samples,
+                "batch_operations",
+            );
+
+            if let RegressionAnalysis::Detected { recommendation, .. } = regression_signal {
+                println!("Batch operations regression policy: {recommendation}");
+            }
+        }
+
         results
     }
 }
@@ -225,8 +245,8 @@ pub fn benchmark_milestone_1(c: &mut Criterion) {
 
     group.bench_function("full_comprehensive_suite", |b| {
         b.iter(|| {
-            let _results = suite.execute_comprehensive_benchmarks();
-            black_box(_results)
+            let results = suite.execute_comprehensive_benchmarks();
+            black_box(results)
         });
     });
 

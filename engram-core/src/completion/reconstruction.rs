@@ -1,5 +1,6 @@
 //! Pattern reconstruction engine for missing information recovery.
 
+use super::numeric::{one_over_usize, ratio, safe_divide, usize_to_f32};
 use super::{
     ActivationPathway, ActivationTrace, CompletedEpisode, CompletionConfig, CompletionError,
     CompletionResult, MemorySource, PartialEpisode, PatternCompleter, SourceMap,
@@ -8,6 +9,7 @@ use super::{
 use crate::{Confidence, Episode, Memory};
 use chrono::Utc;
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 /// Pattern reconstruction engine combining multiple strategies
 pub struct PatternReconstructor {
@@ -24,7 +26,7 @@ pub struct PatternReconstructor {
     config: CompletionConfig,
 
     /// Cache of reconstruction patterns
-    pattern_cache: HashMap<String, Vec<f32>>,
+    pattern_cache: Mutex<HashMap<String, [f32; 768]>>,
 }
 
 impl PatternReconstructor {
@@ -36,7 +38,7 @@ impl PatternReconstructor {
             memory_store: Vec::new(),
             episode_store: Vec::new(),
             config,
-            pattern_cache: HashMap::new(),
+            pattern_cache: Mutex::new(HashMap::new()),
         }
     }
 
@@ -46,9 +48,9 @@ impl PatternReconstructor {
     }
 
     /// Add episodes for temporal pattern learning
-    pub fn add_episodes(&mut self, episodes: Vec<Episode>) {
-        self.episode_store.extend(episodes.clone());
-        self.hippocampal.update(&episodes);
+    pub fn add_episodes(&mut self, episodes: &[Episode]) {
+        self.episode_store.extend(episodes.iter().cloned());
+        self.hippocampal.update(episodes);
     }
 
     /// Reconstruct missing fields using semantic similarity
@@ -92,29 +94,32 @@ impl PatternReconstructor {
             if let Some(what) = partial.known_fields.get("what") {
                 let what_lower = what.to_lowercase();
                 let episode_what_lower = episode.what.to_lowercase();
-                
+
                 // Check both directions for partial matches
-                if episode_what_lower.contains(&what_lower) || what_lower.contains(&episode_what_lower) {
+                if episode_what_lower.contains(&what_lower)
+                    || what_lower.contains(&episode_what_lower)
+                {
                     score += 1.0;
                 } else {
                     // Check for word-level matches
                     let what_words: Vec<&str> = what_lower.split_whitespace().collect();
                     let episode_words: Vec<&str> = episode_what_lower.split_whitespace().collect();
-                    
+
                     let mut word_matches = 0;
                     for what_word in &what_words {
                         for episode_word in &episode_words {
-                            if what_word == episode_word || 
-                               what_word.contains(episode_word) || 
-                               episode_word.contains(what_word) {
+                            if what_word == episode_word
+                                || what_word.contains(episode_word)
+                                || episode_word.contains(what_word)
+                            {
                                 word_matches += 1;
                                 break;
                             }
                         }
                     }
-                    
+
                     if word_matches > 0 {
-                        score += word_matches as f32 / what_words.len().max(episode_words.len()) as f32;
+                        score += ratio(word_matches, what_words.len().max(episode_words.len()));
                     }
                 }
                 count += 1;
@@ -124,8 +129,10 @@ impl PatternReconstructor {
                 if let Some(ref ep_where) = episode.where_location {
                     let where_lower = where_loc.to_lowercase();
                     let ep_where_lower = ep_where.to_lowercase();
-                    
-                    if ep_where_lower.contains(&where_lower) || where_lower.contains(&ep_where_lower) {
+
+                    if ep_where_lower.contains(&where_lower)
+                        || where_lower.contains(&ep_where_lower)
+                    {
                         score += 1.0;
                     }
                 }
@@ -141,22 +148,28 @@ impl PatternReconstructor {
 
             // Always include episodes with non-zero scores
             if score > 0.0 {
-                let normalized_score = if count > 0 { score / count as f32 } else { score };
+                let normalized_score = if count > 0 {
+                    safe_divide(score, count)
+                } else {
+                    score
+                };
                 scored_episodes.push((episode, normalized_score));
             }
         }
 
         // Sort by score and take top-k, but lower the threshold
-        scored_episodes.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        scored_episodes.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        let limit = self.config.working_memory_capacity.max(3);
         scored_episodes
             .into_iter()
-            .take(10) // Increased from 5 to 10 to get more candidates
+            .take(limit)
             .map(|(ep, _)| ep)
             .collect()
     }
 
     /// Aggregate a field from similar episodes
     fn aggregate_field(&self, episodes: &[&Episode], field: &str) -> Option<String> {
+        let _ = self;
         if episodes.is_empty() {
             return None;
         }
@@ -181,7 +194,7 @@ impl PatternReconstructor {
                         *counts.entry(loc.clone()).or_insert(0) += 1;
                     }
                 }
-                
+
                 if counts.is_empty() {
                     None
                 } else {
@@ -202,20 +215,20 @@ impl PatternReconstructor {
                         }
                     }
                 }
-                
+
                 if participant_counts.is_empty() {
                     None
                 } else {
                     // Sort by frequency and take top participants
                     let mut sorted_participants: Vec<_> = participant_counts.into_iter().collect();
                     sorted_participants.sort_by(|a, b| b.1.cmp(&a.1));
-                    
+
                     let participants: Vec<String> = sorted_participants
                         .into_iter()
                         .take(3) // Limit to top 3 most frequent participants
                         .map(|(name, _)| name)
                         .collect();
-                        
+
                     Some(participants.join(", "))
                 }
             }
@@ -229,6 +242,13 @@ impl PatternReconstructor {
         partial: &PartialEpisode,
         similar_episodes: &[&Episode],
     ) -> [f32; 768] {
+        let cache_key = Self::cache_key(partial);
+        if let Ok(cache) = self.pattern_cache.lock() {
+            if let Some(cached) = cache.get(&cache_key) {
+                return *cached;
+            }
+        }
+
         let mut embedding = [0.0f32; 768];
         let mut weights = [0.0f32; 768];
 
@@ -251,29 +271,31 @@ impl PatternReconstructor {
                     for ep in similar_episodes {
                         sum += ep.embedding[i];
                     }
-                    embedding[i] = sum / similar_episodes.len() as f32;
+                    embedding[i] = safe_divide(sum, similar_episodes.len());
                 }
             }
         }
 
-        embedding
+        let result = embedding;
+
+        if let Ok(mut cache) = self.pattern_cache.lock() {
+            cache.insert(cache_key, result);
+        }
+
+        result
     }
 
     /// Calculate reconstruction confidence
-    fn calculate_confidence(
-        &self,
-        partial: &PartialEpisode,
-        reconstructed_fields: usize,
-    ) -> Confidence {
-        let known_ratio = partial.known_fields.len() as f32 / 4.0; // 4 main fields
-        let reconstructed_ratio = reconstructed_fields as f32 / 4.0;
+    fn calculate_confidence(partial: &PartialEpisode, reconstructed_fields: usize) -> Confidence {
+        let known_ratio = ratio(partial.known_fields.len(), 4); // 4 main fields
+        let reconstructed_ratio = ratio(reconstructed_fields, 4);
         let base_confidence = reconstructed_ratio.mul_add(0.5, known_ratio).min(1.0);
 
         Confidence::exact(base_confidence * partial.cue_strength.raw())
     }
 
     /// Build activation evidence from reconstruction process
-    fn build_activation_evidence(&self, similar_episodes: &[&Episode]) -> Vec<ActivationTrace> {
+    fn build_activation_evidence(similar_episodes: &[&Episode]) -> Vec<ActivationTrace> {
         let mut traces = Vec::new();
 
         for (i, episode) in similar_episodes.iter().enumerate() {
@@ -287,9 +309,9 @@ impl PatternReconstructor {
 
             traces.push(ActivationTrace {
                 source_memory: episode.id.clone(),
-                activation_strength: 1.0 / (i + 1) as f32,
+                activation_strength: one_over_usize(i + 1),
                 pathway,
-                decay_factor: 0.1 * (i + 1) as f32,
+                decay_factor: 0.1 * usize_to_f32(i + 1),
             });
         }
 
@@ -322,7 +344,7 @@ impl PatternCompleter for PatternReconstructor {
             let embedding = self.reconstruct_embedding(partial, &similar_episodes);
 
             // Calculate confidence
-            let confidence = self.calculate_confidence(partial, reconstructed_fields.len());
+            let confidence = Self::calculate_confidence(partial, reconstructed_fields.len());
 
             // Create episode
             let episode = Episode {
@@ -368,7 +390,7 @@ impl PatternCompleter for PatternReconstructor {
             }
 
             // Build activation evidence
-            let activation_evidence = self.build_activation_evidence(&similar_episodes);
+            let activation_evidence = Self::build_activation_evidence(&similar_episodes);
 
             Ok(CompletedEpisode {
                 episode,
@@ -384,11 +406,32 @@ impl PatternCompleter for PatternReconstructor {
     }
 
     fn update(&mut self, episodes: &[Episode]) {
-        self.add_episodes(episodes.to_vec());
+        self.add_episodes(episodes);
     }
 
     fn estimate_confidence(&self, partial: &PartialEpisode) -> Confidence {
         self.hippocampal.estimate_confidence(partial)
+    }
+}
+
+impl PatternReconstructor {
+    fn cache_key(partial: &PartialEpisode) -> String {
+        let mut parts: Vec<String> = partial
+            .known_fields
+            .iter()
+            .map(|(key, value)| format!("{key}:{value}"))
+            .collect();
+        parts.sort();
+
+        let mut contexts: Vec<String> = partial
+            .temporal_context
+            .iter()
+            .map(|ctx| format!("context:{ctx}"))
+            .collect();
+        contexts.sort();
+        parts.extend(contexts);
+
+        parts.join("|")
     }
 }
 
@@ -406,9 +449,6 @@ mod tests {
 
     #[test]
     fn test_calculate_confidence() {
-        let config = CompletionConfig::default();
-        let reconstructor = PatternReconstructor::new(config);
-
         let partial = PartialEpisode {
             known_fields: HashMap::from([
                 ("what".to_string(), "test".to_string()),
@@ -419,7 +459,7 @@ mod tests {
             temporal_context: Vec::new(),
         };
 
-        let confidence = reconstructor.calculate_confidence(&partial, 1);
+        let confidence = PatternReconstructor::calculate_confidence(&partial, 1);
         assert!(confidence.raw() > 0.0);
         assert!(confidence.raw() <= 1.0);
     }

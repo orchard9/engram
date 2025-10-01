@@ -19,13 +19,15 @@ use tempfile::TempDir;
 fn create_test_episode(id: &str, content: &str) -> Episode {
     // Generate unique embedding based on ID to prevent deduplication
     let mut embedding = [0.0f32; 768];
-    let seed = id.bytes().fold(1.0f32, |acc, b| acc + b as f32 / 256.0);
-    
-    for i in 0..768 {
-        embedding[i] = ((i as f32 * seed).sin() + 
-                       (i as f32 * seed * 2.0).cos() * 0.5) / 1.5;
+    let seed = id.bytes().fold(1.0f32, |acc, b| acc + f32::from(b) / 256.0);
+
+    for (i, value) in embedding.iter_mut().enumerate() {
+        let idx = f32::from(u16::try_from(i).expect("embedding index within range"));
+        let scaled = idx * seed;
+        let combined = (scaled * 2.0).cos().mul_add(0.5, scaled.sin());
+        *value = combined / 1.5;
     }
-    
+
     // Normalize to unit vector
     let norm = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
     if norm > 0.0 {
@@ -33,7 +35,7 @@ fn create_test_episode(id: &str, content: &str) -> Episode {
             *val /= norm;
         }
     }
-    
+
     EpisodeBuilder::new()
         .id(id.to_string())
         .when(Utc::now())
@@ -70,7 +72,7 @@ async fn test_basic_persistence_integration() {
         "test memory".to_string(),
         Confidence::MEDIUM,
     );
-    let results = store.recall(cue);
+    let results = store.recall(&cue);
 
     assert_eq!(results.len(), 2);
     assert!(results.iter().any(|(ep, _)| ep.id == "test1"));
@@ -100,14 +102,18 @@ async fn test_tier_migration() {
     store.initialize_persistence().unwrap();
 
     // Store memories that should trigger tier migrations
-    let mut episodes = Vec::new();
     for i in 0..15 {
-        let episode = create_test_episode(&format!("mem_{}", i), &format!("memory content {}", i));
-        episodes.push(episode.clone());
+        let episode = create_test_episode(&format!("mem_{i}"), &format!("memory content {i}"));
 
         let activation = store.store(episode);
-        if i < 15 {  // Early stores should succeed with larger capacity
-            assert!(activation.value() > 0.3, "Activation {} too low for episode {}", activation.value(), i);
+        if i < 15 {
+            // Early stores should succeed with larger capacity
+            assert!(
+                activation.value() > 0.3,
+                "Activation {} too low for episode {}",
+                activation.value(),
+                i
+            );
         } else {
             // Later stores might be degraded due to capacity pressure
             assert!(activation.value() > 0.0);
@@ -115,12 +121,12 @@ async fn test_tier_migration() {
     }
 
     // Trigger maintenance to ensure migrations happen
-    store.maintenance().unwrap();
+    store.maintenance();
 
     // Check that memories were stored successfully
     let stored_count = store.count();
-    println!("Total memories stored: {}", stored_count);
-    
+    println!("Total memories stored: {stored_count}");
+
     // Check tier statistics (if available)
     if let Some(stats) = store.tier_statistics() {
         println!(
@@ -150,7 +156,7 @@ async fn test_crash_consistency() {
         store.initialize_persistence().unwrap();
 
         for i in 0..5 {
-            let episode = create_test_episode(&format!("crash_test_{}", i), "crash test data");
+            let episode = create_test_episode(&format!("crash_test_{i}"), "crash test data");
             store.store(episode);
         }
 
@@ -174,12 +180,13 @@ async fn test_crash_consistency() {
             "crash test".to_string(),
             Confidence::LOW,
         );
-        let results = store.recall(cue);
+        let results = store.recall(&cue);
 
         // Note: This test might not find results immediately as recovery
         // implementation is simplified. In a full implementation,
         // WAL replay would restore the data.
-        println!("Recovered {} memories after simulated crash", results.len());
+        let recovered = results.len();
+        println!("Recovered {recovered} memories after simulated crash");
 
         store.shutdown().unwrap();
     }
@@ -203,12 +210,12 @@ async fn test_cognitive_workload_pattern() {
         "research",
     ];
 
-    for (_topic_idx, topic) in topics.iter().enumerate() {
+    for &topic in &topics {
         // Burst of related memories
         for i in 0..25 {
             let episode = create_test_episode(
-                &format!("{}_{}", topic, i),
-                &format!("{} content item {}", topic, i),
+                &format!("{topic}_{i}"),
+                &format!("{topic} content item {i}"),
             );
 
             let activation = store.store(episode);
@@ -216,7 +223,11 @@ async fn test_cognitive_workload_pattern() {
 
             // Activation should be positive (no longer expecting >0.8 due to unique embeddings)
             // With unique embeddings, pressure builds and activations may be lower
-            assert!(activation.value() > 0.0, "Activation for {}_{} was {}", topic, i, activation.value());
+            let activation_value = activation.value();
+            assert!(
+                activation_value > 0.0,
+                "Activation for {topic}_{i} was {activation_value}"
+            );
         }
 
         // Brief pause between topics (simulating real cognitive patterns)
@@ -224,24 +235,24 @@ async fn test_cognitive_workload_pattern() {
     }
 
     // Verify we can recall by topic
-    for topic in &topics {
+    for &topic in &topics {
         let cue = Cue::semantic(
             topic.to_string(),
-            format!("{} content", topic),
+            format!("{topic} content"),
             Confidence::MEDIUM,
         );
-        let results = store.recall(cue);
+        let results = store.recall(&cue);
 
         // Should find memories related to this topic
-        assert!(results.len() > 0);
+        assert!(!results.is_empty());
         // Note: May find matches across topics due to semantic similarity
         // This is expected behavior for a cognitive memory system
     }
 
     // Check that system pressure adapted appropriately
     let pressure = store.pressure();
-    println!("Final system pressure: {}", pressure);
-    assert!(pressure >= 0.0 && pressure <= 1.0);
+    println!("Final system pressure: {pressure}");
+    assert!((0.0..=1.0).contains(&pressure));
 
     // Verify storage metrics show realistic performance
     let metrics = store.storage_metrics();
@@ -254,8 +265,12 @@ async fn test_cognitive_workload_pattern() {
 
     // With unique embeddings, we should have stored most episodes
     // Some may be deduplicated or evicted due to pressure
-    assert!(store.count() >= 80, "Expected at least 80 stored memories, got {}", store.count());
-    assert!(reads >= 4, "Expected at least 4 reads, got {}", reads); // Should have recorded recall operations
+    let stored = store.count();
+    assert!(
+        stored >= 80,
+        "Expected at least 80 stored memories, got {stored}"
+    );
+    assert!(reads >= 4, "Expected at least 4 reads, got {reads}"); // Should have recorded recall operations
 
     println!(
         "Performance: {} writes, {} reads, {:.1}% cache hit rate",
@@ -300,7 +315,7 @@ fn test_storage_metrics_accuracy() {
 fn test_tier_statistics() {
     let stats = TierStatistics {
         memory_count: 100,
-        total_size_bytes: 1024000,
+        total_size_bytes: 1_024_000,
         average_activation: 0.75,
         last_access_time: std::time::SystemTime::now(),
         cache_hit_rate: 0.95,
@@ -308,8 +323,8 @@ fn test_tier_statistics() {
     };
 
     assert_eq!(stats.memory_count, 100);
-    assert_eq!(stats.total_size_bytes, 1024000);
-    assert_eq!(stats.average_activation, 0.75);
+    assert_eq!(stats.total_size_bytes, 1_024_000);
+    assert!((stats.average_activation - 0.75).abs() < f32::EPSILON);
     assert!(stats.cache_hit_rate > 0.9);
     assert!(stats.compaction_ratio > 0.8);
 }
@@ -328,7 +343,7 @@ async fn test_graceful_degradation_under_errors() {
     // Store beyond capacity
     let mut degraded_count = 0;
     for i in 0..10 {
-        let episode = create_test_episode(&format!("pressure_test_{}", i), "pressure test");
+        let episode = create_test_episode(&format!("pressure_test_{i}"), "pressure test");
         let activation = store.store(episode);
 
         if activation.is_degraded() {
@@ -338,7 +353,7 @@ async fn test_graceful_degradation_under_errors() {
 
     // Should have some degraded activations due to pressure
     assert!(degraded_count > 0);
-    println!("Degraded activations under pressure: {}/10", degraded_count);
+    println!("Degraded activations under pressure: {degraded_count}/10");
 
     // System should still be functional
     let cue = Cue::semantic(
@@ -346,10 +361,10 @@ async fn test_graceful_degradation_under_errors() {
         "pressure test".to_string(),
         Confidence::LOW,
     );
-    let results = store.recall(cue);
+    let results = store.recall(&cue);
 
     // Should still be able to recall some memories
-    assert!(results.len() > 0);
+    assert!(!results.is_empty());
 
     store.shutdown().unwrap();
 }
@@ -371,8 +386,8 @@ async fn test_numa_awareness() {
     );
 
     // Test socket suggestion for temporal clustering
-    let timestamp1 = 1000000000u64;
-    let timestamp2 = 2000000000u64;
+    let timestamp1 = 1_000_000_000_u64;
+    let timestamp2 = 2_000_000_000_u64;
 
     let socket1 = topology.suggest_socket_for_timestamp(timestamp1);
     let socket2 = topology.suggest_socket_for_timestamp(timestamp2);
@@ -383,8 +398,7 @@ async fn test_numa_awareness() {
     // Different timestamps should potentially map to different sockets
     // (though not guaranteed due to hashing)
     println!(
-        "Timestamp {} -> socket {}, timestamp {} -> socket {}",
-        timestamp1, socket1, timestamp2, socket2
+        "Timestamp {timestamp1} -> socket {socket1}, timestamp {timestamp2} -> socket {socket2}"
     );
 }
 
@@ -415,8 +429,8 @@ async fn test_concurrent_access_patterns() {
 
                 // Concurrent stores
                 let episode = create_test_episode(
-                    &format!("concurrent_{}_{}", task_id, i),
-                    &format!("concurrent data from task {}", task_id),
+                    &format!("concurrent_{task_id}_{i}"),
+                    &format!("concurrent data from task {task_id}"),
                 );
 
                 let activation = store_guard.store(episode);
@@ -424,12 +438,12 @@ async fn test_concurrent_access_patterns() {
 
                 // Concurrent recalls
                 let cue = Cue::semantic(
-                    format!("task_{}", task_id),
+                    format!("task_{task_id}"),
                     "concurrent data".to_string(),
                     Confidence::LOW,
                 );
 
-                let _results = store_guard.recall(cue);
+                let _results = store_guard.recall(&cue);
 
                 drop(store_guard); // Release lock
                 tokio::time::sleep(std::time::Duration::from_millis(1)).await;
@@ -447,10 +461,7 @@ async fn test_concurrent_access_patterns() {
     // Verify final state
     let store_guard = store.lock().await;
     let final_count = store_guard.count();
-    println!(
-        "Final memory count after concurrent operations: {}",
-        final_count
-    );
+    println!("Final memory count after concurrent operations: {final_count}");
 
     assert!(final_count > 0);
     assert!(final_count <= 50); // 5 tasks * 10 operations each, but some may be evicted
@@ -461,8 +472,9 @@ async fn test_concurrent_access_patterns() {
         "concurrent data".to_string(),
         Confidence::LOW,
     );
-    let results = store_guard.recall(cue);
-    println!("Final recall found {} memories", results.len());
+    let results = store_guard.recall(&cue);
+    let recall_count = results.len();
+    println!("Final recall found {recall_count} memories");
 
     drop(store_guard);
 

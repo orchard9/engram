@@ -1,10 +1,15 @@
+//! Smoke tests for the benchmarking support utilities.
+
 #[test]
 fn test_benchmark_framework_compiles() {
-    // This test verifies that the comprehensive benchmarking framework compiles correctly
-    // The actual benchmarks are in benches/comprehensive.rs
+    use std::path::Path;
 
-    // This is a simple smoke test to ensure the framework is properly structured
-    assert!(true, "Benchmark framework should compile");
+    // This test verifies that the comprehensive benchmarking framework compiles correctly
+    // by asserting that the canonical benchmark entry point exists.
+    assert!(
+        Path::new("benches/comprehensive.rs").exists(),
+        "Benchmark entry point should exist"
+    );
 }
 
 #[test]
@@ -13,28 +18,33 @@ fn test_statistical_power_calculation() {
     // For 99.5% power to detect 5% effect size
 
     // Using Cohen's formulation: n = 2 * (z_alpha + z_beta)^2 / effect_size^2
-    // z_alpha(0.001) ≈ 3.291, z_beta(0.005) ≈ 2.576
-    // n = 2 * (3.291 + 2.576)^2 / 0.05^2 ≈ 246
+    // z_alpha(0.05) ≈ 1.96, z_beta(0.005) ≈ 2.576
+    // n = 2 * (1.96 + 2.576)^2 / 0.05^2 ≈ 16460
 
-    let expected_sample_size = 246;
-    let _tolerance = 10; // Allow some tolerance for rounding
+    let expected_sample_size = 16460;
+    let z_alpha = 1.96_f64;
+    let z_beta = 2.576_f64;
+    let effect_size = 0.05_f64;
+    let computed = 2.0 * (z_alpha + z_beta).powi(2) / effect_size.powi(2);
+    let rounded = computed.round();
+    let tolerance = 10.0;
 
     assert!(
-        expected_sample_size > 200 && expected_sample_size < 300,
-        "Sample size should be approximately 246 for 99.5% power"
+        (rounded - f64::from(expected_sample_size)).abs() <= tolerance,
+        "Sample size should be approximately 16460 for 99.5% power, but got {rounded}"
     );
 }
 
 #[test]
 fn test_metamorphic_relations() {
     // Test basic metamorphic relations for cosine similarity
-    let a = vec![1.0, 0.0, 0.0];
-    let b = vec![0.0, 1.0, 0.0];
+    let a = [1.0_f32, 0.0, 0.0];
+    let b = [0.0_f32, 1.0, 0.0];
 
     // Orthogonal vectors should have cosine similarity of 0
-    let dot_product: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
-    assert_eq!(
-        dot_product, 0.0,
+    let dot_product: f32 = a.iter().zip(&b).map(|(x, y)| x * y).sum();
+    assert!(
+        dot_product.abs() < f32::EPSILON,
         "Orthogonal vectors should have dot product of 0"
     );
 
@@ -50,7 +60,7 @@ fn test_metamorphic_relations() {
 #[test]
 fn test_differential_testing_structure() {
     // Verify that differential testing baselines are properly structured
-    let baseline_names = vec!["Pinecone", "Weaviate", "FAISS", "ScaNN", "Neo4j"];
+    let baseline_names = ["Pinecone", "Weaviate", "FAISS", "ScaNN", "Neo4j"];
 
     assert!(
         baseline_names.len() >= 5,
@@ -73,14 +83,14 @@ fn test_cognitive_accuracy_ranges() {
     // DRM false memory rate should be 40-60% to match human data
     let drm_false_memory_rate = 0.47; // Example value
     assert!(
-        drm_false_memory_rate >= 0.40 && drm_false_memory_rate <= 0.60,
+        (0.40..=0.60).contains(&drm_false_memory_rate),
         "DRM false memory rate should match human range (40-60%)"
     );
 
     // Boundary extension rate should be 15-30%
     let boundary_extension_rate = 0.225; // Example value
     assert!(
-        boundary_extension_rate >= 0.15 && boundary_extension_rate <= 0.30,
+        (0.15..=0.30).contains(&boundary_extension_rate),
         "Boundary extension rate should match human range (15-30%)"
     );
 }

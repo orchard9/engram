@@ -183,6 +183,7 @@ impl AlignedVectorBuffer {
 mod tests {
     use super::*;
     use crate::batch::BatchOperation;
+    use crate::numeric::saturating_f32_from_f64;
     use crate::{Confidence, EpisodeBuilder};
     use chrono::Utc;
 
@@ -193,7 +194,7 @@ mod tests {
         // Fill buffer to capacity
         for i in 0..10 {
             let episode = EpisodeBuilder::new()
-                .id(format!("ep{}", i))
+                .id(format!("ep{i}"))
                 .when(Utc::now())
                 .what("test".to_string())
                 .embedding([0.1; 768])
@@ -232,7 +233,7 @@ mod tests {
             .build();
 
         let op = BatchOperation::Store(episode);
-        buffer.push(op).unwrap();
+        assert!(buffer.push(op).is_ok());
 
         assert!(buffer.memory_usage() > 0);
 
@@ -249,9 +250,9 @@ mod tests {
         let mut buffer = AlignedVectorBuffer::new(5);
 
         // Add vectors
-        for i in 0..5 {
+        for index in 0_u32..5 {
             let mut vector = [0.0; 768];
-            vector[0] = i as f32;
+            vector[0] = saturating_f32_from_f64(f64::from(index));
             assert!(buffer.push(&vector).is_ok());
         }
 
@@ -261,8 +262,8 @@ mod tests {
         // Verify data
         let slice = buffer.as_slice();
         assert_eq!(slice.len(), 5);
-        assert_eq!(slice[0][0], 0.0);
-        assert_eq!(slice[4][0], 4.0);
+        assert!(slice[0][0].abs() < f32::EPSILON);
+        assert!((slice[4][0] - 4.0).abs() < f32::EPSILON);
 
         // Test capacity exceeded
         let vector = [0.0; 768];

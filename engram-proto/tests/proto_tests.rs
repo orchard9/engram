@@ -242,8 +242,7 @@ fn test_confidence_categories() {
         assert_eq!(
             conf.semantic_category(),
             expected_category,
-            "Failed for value {}",
-            value
+            "Failed for value {value}"
         );
     }
 }

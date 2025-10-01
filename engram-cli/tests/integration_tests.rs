@@ -1,5 +1,16 @@
 //! Integration tests for the Engram CLI
 
+#![allow(clippy::redundant_closure_for_method_calls)]
+#![allow(clippy::too_many_lines)]
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_sign_loss)]
+#![allow(clippy::uninlined_format_args)]
+#![allow(clippy::cognitive_complexity)]
+#![allow(clippy::needless_borrows_for_generic_args)]
+#![allow(clippy::manual_is_variant_and)]
+#![allow(clippy::or_fun_call)]
+#![allow(clippy::len_zero)]
+
 use assert_cmd::Command;
 use engram_cli::{find_available_port, is_port_available};
 use predicates::prelude::*;

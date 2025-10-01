@@ -31,9 +31,13 @@ impl SpacedRepetitionOptimizer {
     #[must_use]
     pub fn optimal_spacing_interval(&self, current_interval: Duration, success: bool) -> Duration {
         if success {
-            Duration::from_secs(
-                (current_interval.as_secs() as f32 * self.spacing_multiplier) as u64,
-            )
+            let multiplier = self.spacing_multiplier.max(0.1);
+            let scaled_seconds = current_interval.as_secs_f32() * multiplier;
+            if scaled_seconds.is_finite() {
+                Duration::from_secs_f32(scaled_seconds.max(1.0))
+            } else {
+                Duration::from_secs(u64::MAX)
+            }
         } else {
             Duration::from_secs(86400) // Reset to 1 day on failure
         }

@@ -3,7 +3,7 @@
 //! Provides cognitive-friendly service interface with natural language method names
 //! and educational error messages that teach memory system concepts.
 
-use engram_core::graph::MemoryGraph;
+use crate::api::SharedGraph;
 use engram_proto::engram_service_server::{EngramService, EngramServiceServer};
 use engram_proto::{
     AssociateRequest, AssociateResponse, CompleteRequest, CompleteResponse, Confidence,
@@ -16,6 +16,7 @@ use engram_proto::{
     StreamEventType, StreamRequest, StreamResponse, dream_response, flow_control, flow_status,
     memory_flow_request, memory_flow_response, remember_request,
 };
+use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -29,16 +30,19 @@ use tonic::{Request, Response, Status, transport::Server};
 /// rather than generic database operations (store/query/search) to improve
 /// API discovery through semantic priming.
 pub struct MemoryService {
-    graph: Arc<RwLock<MemoryGraph>>,
+    graph: Arc<RwLock<SharedGraph>>,
 }
 
 impl MemoryService {
     /// Create a new memory service with the given graph.
-    pub const fn new(graph: Arc<RwLock<MemoryGraph>>) -> Self {
+    pub const fn new(graph: Arc<RwLock<SharedGraph>>) -> Self {
         Self { graph }
     }
 
     /// Start the gRPC server on the specified port.
+    ///
+    /// # Errors
+    /// Returns an error if the server fails to start or bind to the port.
     pub async fn serve(self, port: u16) -> Result<(), Box<dyn std::error::Error>> {
         let addr = format!("0.0.0.0:{port}").parse()?;
 
@@ -265,7 +269,7 @@ impl EngramService for MemoryService {
             recall_vividness: Some(
                 Confidence::new(0.4).with_reasoning("No matching episodes in current memory state"),
             ),
-            emotional_summary: Default::default(),
+            emotional_summary: HashMap::default(),
             memory_themes: vec![],
         };
 
@@ -287,7 +291,7 @@ impl EngramService for MemoryService {
         let response = ConsolidateResponse {
             memories_consolidated: 0,
             new_associations: 0,
-            state_changes: Default::default(),
+            state_changes: HashMap::default(),
             next_consolidation: None,
         };
 
@@ -305,7 +309,7 @@ impl EngramService for MemoryService {
         request: Request<DreamRequest>,
     ) -> Result<Response<Self::DreamStream>, Status> {
         let req = request.into_inner();
-        let replay_cycles = req.replay_cycles.max(1).min(100);
+        let replay_cycles = req.replay_cycles.clamp(1, 100);
 
         // Create channel for streaming responses
         let (tx, rx) = tokio::sync::mpsc::channel(32);
@@ -381,7 +385,7 @@ impl EngramService for MemoryService {
             completion_confidence: Some(
                 Confidence::new(0.4).with_reasoning("No patterns match the partial cue"),
             ),
-            field_confidences: Default::default(),
+            field_confidences: HashMap::default(),
         };
 
         Ok(Response::new(response))
@@ -424,15 +428,15 @@ impl EngramService for MemoryService {
         let _req = request.into_inner();
 
         let response = IntrospectResponse {
-            metrics: Default::default(),
+            metrics: HashMap::default(),
             health: Some(HealthStatus {
                 healthy: true,
-                components: Default::default(),
+                components: HashMap::default(),
                 summary: "All memory systems operational".to_string(),
             }),
             statistics: Some(MemoryStatistics {
                 total_memories: 0,
-                by_type: Default::default(),
+                by_type: HashMap::default(),
                 avg_activation: 0.0,
                 avg_confidence: 0.0,
                 total_associations: 0,
@@ -476,7 +480,7 @@ impl EngramService for MemoryService {
                     event_type: *event_type as i32,
                     timestamp: Some(engram_proto::datetime_to_timestamp(chrono::Utc::now())),
                     description: format!("Memory event: {event_type:?}"),
-                    metadata: Default::default(),
+                    metadata: HashMap::default(),
                     importance: 0.5,
                 };
 
@@ -664,7 +668,8 @@ impl EngramService for MemoryService {
                                         remember_result,
                                     )),
                                     session_id: session_id.clone(),
-                                    sequence_number: global_sequence as i64,
+                                    sequence_number: i64::try_from(global_sequence)
+                                        .unwrap_or(i64::MAX),
                                     timestamp: Some(engram_proto::datetime_to_timestamp(
                                         chrono::Utc::now(),
                                     )),
@@ -693,7 +698,8 @@ impl EngramService for MemoryService {
                                         recall_result,
                                     )),
                                     session_id: session_id.clone(),
-                                    sequence_number: global_sequence as i64,
+                                    sequence_number: i64::try_from(global_sequence)
+                                        .unwrap_or(i64::MAX),
                                     timestamp: Some(engram_proto::datetime_to_timestamp(
                                         chrono::Utc::now(),
                                     )),
@@ -715,7 +721,8 @@ impl EngramService for MemoryService {
                                 MemoryFlowResponse {
                                     response: Some(memory_flow_response::Response::Status(status)),
                                     session_id: session_id.clone(),
-                                    sequence_number: global_sequence as i64,
+                                    sequence_number: i64::try_from(global_sequence)
+                                        .unwrap_or(i64::MAX),
                                     timestamp: Some(engram_proto::datetime_to_timestamp(
                                         chrono::Utc::now(),
                                     )),
@@ -729,7 +736,6 @@ impl EngramService for MemoryService {
                                 let status = FlowStatus {
                                     state: match action {
                                         flow_control::Action::Pause => flow_status::State::Paused,
-                                        flow_control::Action::Resume => flow_status::State::Active,
                                         _ => flow_status::State::Active,
                                     } as i32,
                                     message: format!("Flow control: {action:?}"),
@@ -742,7 +748,8 @@ impl EngramService for MemoryService {
                                 MemoryFlowResponse {
                                     response: Some(memory_flow_response::Response::Status(status)),
                                     session_id: session_id.clone(),
-                                    sequence_number: global_sequence as i64,
+                                    sequence_number: i64::try_from(global_sequence)
+                                        .unwrap_or(i64::MAX),
                                     timestamp: Some(engram_proto::datetime_to_timestamp(
                                         chrono::Utc::now(),
                                     )),

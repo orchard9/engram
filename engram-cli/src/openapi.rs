@@ -3,11 +3,19 @@
 //! This module provides complete `OpenAPI` 3.0 documentation with cognitive-friendly
 //! organization and educational examples that follow progressive complexity patterns.
 
+use axum::{
+    Extension, Json, Router,
+    extract::Path,
+    http::{StatusCode, header},
+    response::{IntoResponse, Redirect},
+    routing::get,
+};
+use std::sync::Arc;
 use utoipa::{
     Modify, OpenApi, ToSchema,
     openapi::security::{ApiKey, ApiKeyValue, SecurityScheme},
 };
-use utoipa_swagger_ui::SwaggerUi;
+use utoipa_swagger_ui::{self, Config, Url};
 
 use crate::api::{
     ActivationMonitoringQuery, AutoLink, CausalityMonitoringQuery, ConfidenceInfo, MemoryResult,
@@ -318,35 +326,92 @@ pub struct PerformanceMetrics {
 }
 
 /// Create Swagger UI router with cognitive-friendly customization
-#[must_use]
-pub fn create_swagger_ui() -> SwaggerUi {
-    SwaggerUi::new("/docs")
-        .url("/api-docs/openapi.json", ApiDoc::openapi())
-        .config(
-            utoipa_swagger_ui::Config::from("/api-docs/openapi.json")
-                .try_it_out_enabled(true)
-                .filter(true)
-                .doc_expansion("list")
-                .default_models_expand_depth(1)
-                .show_extensions(true)
-                .show_common_extensions(true)
-                .display_request_duration(true)
-                .request_snippets_enabled(true)
-                .deep_linking(true)
-                .persist_authorization(true),
+pub fn create_swagger_ui() -> Router<()> {
+    let config: Config<'static> = Config::new([Url::new("Engram API", "/api-docs/openapi.json")])
+        .try_it_out_enabled(true)
+        .filter(true)
+        .doc_expansion("list")
+        .default_models_expand_depth(1)
+        .show_extensions(true)
+        .show_common_extensions(true)
+        .display_request_duration(true)
+        .request_snippets_enabled(true)
+        .deep_linking(true)
+        .persist_authorization(true);
+
+    let shared_config = Arc::new(config);
+    let assets_config = Arc::clone(&shared_config);
+
+    Router::new()
+        .route("/docs", get(|| async { Redirect::temporary("/docs/") }))
+        .route(
+            "/docs/",
+            get(swagger_ui_root).layer(Extension(Arc::clone(&shared_config))),
         )
+        .route(
+            "/docs/{*path}",
+            get(swagger_ui_asset).layer(Extension(assets_config)),
+        )
+        .route("/api-docs/openapi.json", get(openapi_json))
+        .route("/api-docs/openapi.yaml", get(openapi_yaml))
 }
 
 /// Generate `OpenAPI` JSON specification
+///
+/// # Panics
+///
+/// Panics if OpenAPI spec cannot be serialized to JSON
 #[must_use]
 pub fn generate_openapi_json() -> String {
-    ApiDoc::openapi().to_pretty_json().unwrap()
+    ApiDoc::openapi()
+        .to_pretty_json()
+        .expect("OpenAPI spec should serialize to JSON")
 }
 
 /// Generate `OpenAPI` YAML specification
+///
+/// # Panics
+///
+/// Panics if OpenAPI spec cannot be serialized to YAML
 #[must_use]
 pub fn generate_openapi_yaml() -> String {
-    serde_yaml::to_string(&ApiDoc::openapi()).unwrap()
+    serde_yaml::to_string(&ApiDoc::openapi()).expect("OpenAPI spec should serialize to YAML")
+}
+
+async fn swagger_ui_root(Extension(config): Extension<Arc<Config<'static>>>) -> impl IntoResponse {
+    render_swagger(String::new(), config)
+}
+
+async fn swagger_ui_asset(
+    Path(path): Path<String>,
+    Extension(config): Extension<Arc<Config<'static>>>,
+) -> impl IntoResponse {
+    render_swagger(path, config)
+}
+
+fn render_swagger(path: String, config: Arc<Config<'static>>) -> impl IntoResponse {
+    match utoipa_swagger_ui::serve(&path, config) {
+        Ok(Some(file)) => (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, file.content_type)],
+            file.bytes.into_owned(),
+        )
+            .into_response(),
+        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+    }
+}
+
+async fn openapi_json() -> impl IntoResponse {
+    Json(ApiDoc::openapi())
+}
+
+async fn openapi_yaml() -> impl IntoResponse {
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "application/yaml")],
+        generate_openapi_yaml(),
+    )
 }
 
 #[cfg(test)]

@@ -13,6 +13,7 @@
 use super::{FsyncMode, StorageError, StorageMetrics, StorageResult};
 use crate::{Episode, Memory};
 use crossbeam_queue::SegQueue;
+use std::convert::TryFrom;
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -43,7 +44,7 @@ pub struct WalEntryHeader {
     pub header_crc: u32,
     /// CRC32C checksum of payload data
     pub payload_crc: u32,
-    /// Reserved for future extensions - pad to exactly 64 bytes  
+    /// Reserved for future extensions - pad to exactly 64 bytes
     pub reserved: [u8; 20], // Account for alignment padding
 }
 
@@ -52,13 +53,23 @@ const HEADER_SIZE: usize = std::mem::size_of::<WalEntryHeader>();
 
 impl WalEntryHeader {
     /// Create a new header with computed checksums
-    pub fn new(entry_type: WalEntryType, payload: &[u8], sequence: u64) -> Self {
-        let timestamp = SystemTime::now()
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the payload exceeds the addressable size for the
+    /// header format.
+    #[must_use = "Inspect WAL header creation failures to avoid accepting invalid entries"]
+    pub fn new(entry_type: WalEntryType, payload: &[u8], sequence: u64) -> StorageResult<Self> {
+        let raw_timestamp = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap_or_default()
-            .as_nanos() as u64;
+            .as_nanos();
+        let capped_timestamp = raw_timestamp.min(u128::from(u64::MAX));
+        let timestamp = u64::try_from(capped_timestamp).unwrap_or(u64::MAX);
 
-        let payload_size = payload.len() as u32;
+        let payload_size = u32::try_from(payload.len()).map_err(|_| {
+            StorageError::Configuration("WAL payload exceeds 4GiB limit".to_string())
+        })?;
 
         let mut header = Self {
             magic: WAL_MAGIC,
@@ -77,11 +88,12 @@ impl WalEntryHeader {
             header.header_crc = header.compute_header_crc();
         }
 
-        header
+        Ok(header)
     }
 
-    /// Compute CRC32C of header fields (excluding header_crc itself)
+    /// Compute CRC32C of header fields (excluding `header_crc` itself)
     #[cfg(feature = "memory_mapped_persistence")]
+    #[must_use]
     fn compute_header_crc(&self) -> u32 {
         let mut bytes = Vec::with_capacity(HEADER_SIZE - 4);
 
@@ -97,6 +109,11 @@ impl WalEntryHeader {
     }
 
     /// Validate header integrity
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the magic value is corrupted or the stored
+    /// checksum does not match the computed checksum.
     #[cfg(feature = "memory_mapped_persistence")]
     pub fn validate(&self) -> StorageResult<()> {
         if self.magic != WAL_MAGIC {
@@ -118,6 +135,11 @@ impl WalEntryHeader {
     }
 
     /// Validate payload checksum
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the payload size differs from the header-specified
+    /// size or the payload checksum mismatches.
     #[cfg(feature = "memory_mapped_persistence")]
     pub fn validate_payload(&self, payload: &[u8]) -> StorageResult<()> {
         if payload.len() != self.payload_size as usize {
@@ -148,12 +170,13 @@ impl WalEntryHeader {
     pub fn validate_payload(&self, _payload: &[u8]) -> StorageResult<()> {
         Ok(())
     }
-    
+
     /// Serialize header to bytes in little-endian format
-    pub fn to_bytes(&self) -> [u8; HEADER_SIZE] {
+    #[must_use]
+    pub fn as_bytes(&self) -> [u8; HEADER_SIZE] {
         let mut bytes = [0u8; HEADER_SIZE];
         let mut offset = 0;
-        
+
         // Write each field in little-endian format
         bytes[offset..offset + 4].copy_from_slice(&self.magic.to_le_bytes());
         offset += 4;
@@ -171,52 +194,90 @@ impl WalEntryHeader {
         offset += 4;
         // Write reserved bytes
         bytes[offset..offset + 20].copy_from_slice(&self.reserved);
-        
+
         bytes
     }
-    
+
     /// Deserialize header from bytes in little-endian format
+    #[must_use]
     pub fn from_bytes(bytes: &[u8; HEADER_SIZE]) -> Self {
         let mut offset = 0;
-        
-        let magic = u32::from_le_bytes([bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]]);
+
+        let magic = u32::from_le_bytes([
+            bytes[offset],
+            bytes[offset + 1],
+            bytes[offset + 2],
+            bytes[offset + 3],
+        ]);
         offset += 4;
-        
+
         let sequence = u64::from_le_bytes([
-            bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3],
-            bytes[offset + 4], bytes[offset + 5], bytes[offset + 6], bytes[offset + 7],
+            bytes[offset],
+            bytes[offset + 1],
+            bytes[offset + 2],
+            bytes[offset + 3],
+            bytes[offset + 4],
+            bytes[offset + 5],
+            bytes[offset + 6],
+            bytes[offset + 7],
         ]);
         offset += 8;
-        
+
         let timestamp = u64::from_le_bytes([
-            bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3],
-            bytes[offset + 4], bytes[offset + 5], bytes[offset + 6], bytes[offset + 7],
+            bytes[offset],
+            bytes[offset + 1],
+            bytes[offset + 2],
+            bytes[offset + 3],
+            bytes[offset + 4],
+            bytes[offset + 5],
+            bytes[offset + 6],
+            bytes[offset + 7],
         ]);
         offset += 8;
-        
-        let entry_type = u32::from_le_bytes([bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]]);
+
+        let entry_type = u32::from_le_bytes([
+            bytes[offset],
+            bytes[offset + 1],
+            bytes[offset + 2],
+            bytes[offset + 3],
+        ]);
         offset += 4;
-        
-        let payload_size = u32::from_le_bytes([bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]]);
+
+        let payload_size = u32::from_le_bytes([
+            bytes[offset],
+            bytes[offset + 1],
+            bytes[offset + 2],
+            bytes[offset + 3],
+        ]);
         offset += 4;
-        
-        let payload_crc = u32::from_le_bytes([bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]]);
+
+        let payload_crc = u32::from_le_bytes([
+            bytes[offset],
+            bytes[offset + 1],
+            bytes[offset + 2],
+            bytes[offset + 3],
+        ]);
         offset += 4;
-        
-        let header_crc = u32::from_le_bytes([bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]]);
+
+        let header_crc = u32::from_le_bytes([
+            bytes[offset],
+            bytes[offset + 1],
+            bytes[offset + 2],
+            bytes[offset + 3],
+        ]);
         offset += 4;
-        
+
         let mut reserved = [0u8; 20];
         reserved.copy_from_slice(&bytes[offset..offset + 20]);
-        
+
         Self {
             magic,
             sequence,
             timestamp,
             entry_type,
             payload_size,
-            payload_crc,
             header_crc,
+            payload_crc,
             reserved,
         }
     }
@@ -243,7 +304,6 @@ pub enum WalEntryType {
 impl From<u32> for WalEntryType {
     fn from(value: u32) -> Self {
         match value {
-            1 => Self::EpisodeStore,
             2 => Self::MemoryUpdate,
             3 => Self::MemoryDelete,
             4 => Self::Consolidation,
@@ -265,55 +325,76 @@ pub struct WalEntry {
 
 impl WalEntry {
     /// Create entry for episode storage
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the episode cannot be serialized or the payload
+    /// exceeds the WAL header limits.
+    #[must_use = "Handle WAL episode serialization errors before continuing"]
     pub fn new_episode(episode: &Episode) -> StorageResult<Self> {
-        let payload = bincode::serialize(episode).map_err(|e| {
-            StorageError::CorruptionDetected(format!("Serialization failed: {}", e))
-        })?;
+        let payload = bincode::serialize(episode)
+            .map_err(|e| StorageError::CorruptionDetected(format!("Serialization failed: {e}")))?;
 
-        Ok(Self {
-            header: WalEntryHeader::new(WalEntryType::EpisodeStore, &payload, 0), // sequence filled later
-            payload,
-        })
+        let header = WalEntryHeader::new(WalEntryType::EpisodeStore, &payload, 0)?; // sequence filled later
+
+        Ok(Self { header, payload })
     }
 
     /// Create entry for memory update
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the memory cannot be serialized or the payload
+    /// exceeds the WAL header limits.
+    #[must_use = "Handle WAL memory update serialization errors before continuing"]
     pub fn new_memory_update(memory: &Memory) -> StorageResult<Self> {
-        let payload = bincode::serialize(memory).map_err(|e| {
-            StorageError::CorruptionDetected(format!("Serialization failed: {}", e))
-        })?;
+        let payload = bincode::serialize(memory)
+            .map_err(|e| StorageError::CorruptionDetected(format!("Serialization failed: {e}")))?;
 
-        Ok(Self {
-            header: WalEntryHeader::new(WalEntryType::MemoryUpdate, &payload, 0),
-            payload,
-        })
+        let header = WalEntryHeader::new(WalEntryType::MemoryUpdate, &payload, 0)?;
+
+        Ok(Self { header, payload })
     }
 
     /// Create entry for memory deletion
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the payload exceeds the WAL header limits.
+    #[must_use = "Check WAL memory deletion serialization failures before discarding results"]
     pub fn new_memory_delete(memory_id: &str) -> StorageResult<Self> {
         let payload = memory_id.as_bytes().to_vec();
 
-        Ok(Self {
-            header: WalEntryHeader::new(WalEntryType::MemoryDelete, &payload, 0),
-            payload,
-        })
+        let header = WalEntryHeader::new(WalEntryType::MemoryDelete, &payload, 0)?;
+
+        Ok(Self { header, payload })
     }
 
     /// Create checkpoint entry
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the payload exceeds the WAL header limits.
+    #[must_use = "Inspect WAL checkpoint creation failures to maintain durability"]
     pub fn new_checkpoint(sequence: u64) -> StorageResult<Self> {
         let payload = sequence.to_le_bytes().to_vec();
 
-        Ok(Self {
-            header: WalEntryHeader::new(WalEntryType::Checkpoint, &payload, 0),
-            payload,
-        })
+        let header = WalEntryHeader::new(WalEntryType::Checkpoint, &payload, 0)?;
+
+        Ok(Self { header, payload })
     }
 
     /// Get total serialized size
-    pub fn serialized_size(&self) -> usize {
+    #[must_use]
+    pub const fn serialized_size(&self) -> usize {
         HEADER_SIZE + self.payload.len()
     }
 
     /// Validate entry integrity
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when header or payload verification fails.
     pub fn validate(&self) -> StorageResult<()> {
         self.header.validate()?;
         self.header.validate_payload(&self.payload)?;
@@ -334,6 +415,7 @@ pub struct WalBatch {
 
 impl WalBatch {
     /// Create a new empty WAL batch
+    #[must_use]
     pub fn new() -> Self {
         Self {
             entries: Vec::new(),
@@ -350,13 +432,21 @@ impl WalBatch {
     }
 
     /// Check if the batch is empty
-    pub fn is_empty(&self) -> bool {
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
     /// Get the number of entries in the batch
-    pub fn len(&self) -> usize {
+    #[must_use]
+    pub const fn len(&self) -> usize {
         self.entries.len()
+    }
+}
+
+impl Default for WalBatch {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -364,12 +454,6 @@ impl WalBatch {
 pub struct WalWriter {
     /// File handle for WAL
     file: Arc<parking_lot::Mutex<BufWriter<File>>>,
-
-    /// Current WAL file path
-    current_file: PathBuf,
-
-    /// Directory for WAL files
-    wal_dir: PathBuf,
 
     /// Global sequence counter
     sequence_counter: AtomicU64,
@@ -394,6 +478,12 @@ pub struct WalWriter {
 
 impl WalWriter {
     /// Create a new WAL writer
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the WAL directory cannot be created or the log file
+    /// fails to open with the requested permissions.
+    #[must_use = "Handle WAL writer initialization errors to preserve durability"]
     pub fn new<P: AsRef<Path>>(
         wal_dir: P,
         fsync_mode: FsyncMode,
@@ -410,7 +500,7 @@ impl WalWriter {
             .unwrap_or_default()
             .as_secs();
 
-        let wal_filename = format!("wal-{:016x}.log", timestamp);
+        let wal_filename = format!("wal-{timestamp:016x}.log");
         let current_file = wal_dir.join(wal_filename);
 
         // Open WAL file with appropriate flags
@@ -432,8 +522,6 @@ impl WalWriter {
 
         Ok(Self {
             file: Arc::new(parking_lot::Mutex::new(buf_writer)),
-            current_file,
-            wal_dir,
             sequence_counter: AtomicU64::new(0),
             entry_queue: Arc::new(SegQueue::new()),
             fsync_mode,
@@ -446,6 +534,10 @@ impl WalWriter {
     }
 
     /// Start background writer thread
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if spawning the writer thread fails.
     pub fn start(&mut self) -> StorageResult<()> {
         if self.writer_thread.is_some() {
             return Ok(()); // Already started
@@ -463,17 +555,17 @@ impl WalWriter {
             .name("wal-writer".to_string())
             .spawn(move || {
                 Self::writer_loop(
-                    entry_queue,
-                    file,
-                    metrics,
-                    shutdown,
+                    &entry_queue,
+                    &file,
+                    &metrics,
+                    &shutdown,
                     fsync_mode,
                     max_batch_size,
                     max_batch_delay,
                 );
             })
             .map_err(|e| {
-                StorageError::wal_failed(&format!("Failed to start writer thread: {}", e))
+                StorageError::wal_failed(&format!("Failed to start writer thread: {e}"))
             })?;
 
         self.writer_thread = Some(handle);
@@ -481,16 +573,20 @@ impl WalWriter {
     }
 
     /// Write entry asynchronously
-    pub fn write_async(&self, entry: WalEntry) -> StorageResult<()> {
+    pub fn write_async(&self, entry: WalEntry) {
         self.entry_queue.push(entry);
-        Ok(())
     }
 
     /// Write entry synchronously with immediate fsync
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when any write, flush, or fsync operation fails.
+    #[must_use = "Propagate WAL write failures to trigger recovery"]
     pub fn write_sync(&self, mut entry: WalEntry) -> StorageResult<u64> {
         let sequence = self.sequence_counter.fetch_add(1, Ordering::SeqCst);
         entry.header.sequence = sequence;
-        
+
         // Recompute header CRC after updating sequence
         #[cfg(feature = "memory_mapped_persistence")]
         {
@@ -500,7 +596,7 @@ impl WalWriter {
         let mut file = self.file.lock();
 
         // Write header using proper serialization
-        let header_bytes = entry.header.to_bytes();
+        let header_bytes = entry.header.as_bytes();
         file.write_all(&header_bytes)?;
 
         // Write payload
@@ -509,6 +605,7 @@ impl WalWriter {
         // Fsync for durability
         file.flush()?;
         file.get_mut().sync_all()?;
+        drop(file);
 
         self.metrics
             .record_write((HEADER_SIZE + entry.payload.len()) as u64);
@@ -519,10 +616,10 @@ impl WalWriter {
 
     /// Background writer loop
     fn writer_loop(
-        entry_queue: Arc<SegQueue<WalEntry>>,
-        file: Arc<parking_lot::Mutex<BufWriter<File>>>,
-        metrics: Arc<StorageMetrics>,
-        shutdown: Arc<std::sync::atomic::AtomicBool>,
+        entry_queue: &Arc<SegQueue<WalEntry>>,
+        file: &Arc<parking_lot::Mutex<BufWriter<File>>>,
+        metrics: &Arc<StorageMetrics>,
+        shutdown: &Arc<std::sync::atomic::AtomicBool>,
         fsync_mode: FsyncMode,
         max_batch_size: usize,
         max_batch_delay: std::time::Duration,
@@ -552,7 +649,7 @@ impl WalWriter {
             }
 
             // Write batch
-            if let Err(e) = Self::write_batch(&file, &batch, &metrics, fsync_mode) {
+            if let Err(e) = Self::write_batch(file, &batch, metrics, fsync_mode) {
                 tracing::error!("WAL batch write failed: {}", e);
                 // Could implement retry logic here
             }
@@ -568,11 +665,16 @@ impl WalWriter {
         }
 
         if !batch.is_empty() {
-            let _ = Self::write_batch(&file, &batch, &metrics, fsync_mode);
+            let _ = Self::write_batch(file, &batch, metrics, fsync_mode);
         }
     }
 
     /// Write a batch of entries
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if writing any entry or flushing the backing file
+    /// fails.
     fn write_batch(
         file: &Arc<parking_lot::Mutex<BufWriter<File>>>,
         batch: &WalBatch,
@@ -584,7 +686,7 @@ impl WalWriter {
 
         for entry in &batch.entries {
             // Write header using proper serialization
-            let header_bytes = entry.header.to_bytes();
+            let header_bytes = entry.header.as_bytes();
             file.write_all(&header_bytes)?;
 
             // Write payload
@@ -600,14 +702,12 @@ impl WalWriter {
                 file.get_mut().sync_all()?;
                 metrics.record_fsync();
             }
-            FsyncMode::Timer(_) => {
-                // Fsync will be handled by timer
-            }
-            FsyncMode::None => {
-                // No fsync for testing
+            FsyncMode::Timer(_) | FsyncMode::None => {
+                // Deferred or disabled fsync handling
             }
         }
 
+        drop(file);
         metrics.record_write(batch.total_size as u64);
 
         let duration = start.elapsed();
@@ -622,15 +722,24 @@ impl WalWriter {
     }
 
     /// Forcefully sync all pending writes
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if flushing or syncing the file fails.
     pub fn fsync(&self) -> StorageResult<()> {
         let mut file = self.file.lock();
         file.flush()?;
         file.get_mut().sync_all()?;
+        drop(file);
         self.metrics.record_fsync();
         Ok(())
     }
 
     /// Shutdown writer and ensure all entries are flushed
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the writer thread panics or final fsync fails.
     pub fn shutdown(&mut self) -> StorageResult<()> {
         self.shutdown.store(true, Ordering::SeqCst);
 
@@ -646,49 +755,66 @@ impl WalWriter {
         Ok(())
     }
 
-    /// Enhanced WAL operations with proper error recovery
-    /// These methods replace unsafe unwrap() calls with recovery strategies
-    pub fn write_entry_with_recovery(&mut self, entry: WalEntry) -> crate::error::Result<u64> {
+    /// Enhanced WAL operations with proper error recovery.
+    /// These methods replace unsafe `unwrap()` calls with recovery strategies.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the write-ahead log cannot persist the entry even
+    /// after applying the configured recovery strategy.
+    #[must_use = "Propagate WAL write failures to trigger recovery"]
+    pub fn write_entry_with_recovery(&self, entry: WalEntry) -> crate::error::Result<u64> {
         use crate::error::{EngramError, RecoveryStrategy};
-        
-        self.write_sync(entry).map_err(|e| EngramError::WriteAheadLog {
-            operation: "write_entry".to_string(),
-            source: match e {
-                StorageError::Io(io_err) => io_err,
-                _ => std::io::Error::new(std::io::ErrorKind::Other, e.to_string()),
-            },
-            recovery: RecoveryStrategy::Retry {
-                max_attempts: 3,
-                backoff_ms: 100,
-            },
-            can_continue: false,
-        })
-    }
-    
-    /// Write episode with proper error handling instead of unwrap()
-    pub fn write_episode_with_recovery(&mut self, episode: &Episode) -> crate::error::Result<u64> {
-        use crate::error::{EngramError, RecoveryStrategy};
-        
-        let entry = WalEntry::new_episode(episode).map_err(|e| {
-            EngramError::WriteAheadLog {
-                operation: "serialize_episode".to_string(),
-                source: std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()),
-                recovery: RecoveryStrategy::RequiresIntervention {
-                    action: "Check episode data validity".to_string(),
+
+        self.write_sync(entry)
+            .map_err(|e| EngramError::WriteAheadLog {
+                operation: "write_entry".to_string(),
+                source: match e {
+                    StorageError::Io(io_err) => io_err,
+                    _ => std::io::Error::other(e.to_string()),
                 },
-                can_continue: true,
-            }
+                recovery: RecoveryStrategy::Retry {
+                    max_attempts: 3,
+                    backoff_ms: 100,
+                },
+                can_continue: false,
+            })
+    }
+
+    /// Write episode with proper error handling instead of `unwrap()`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the episode fails serialization or the entry
+    /// cannot be persisted to the write-ahead log.
+    #[must_use = "Propagate WAL write failures to trigger recovery"]
+    pub fn write_episode_with_recovery(&self, episode: &Episode) -> crate::error::Result<u64> {
+        use crate::error::{EngramError, RecoveryStrategy};
+
+        let entry = WalEntry::new_episode(episode).map_err(|e| EngramError::WriteAheadLog {
+            operation: "serialize_episode".to_string(),
+            source: std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()),
+            recovery: RecoveryStrategy::RequiresIntervention {
+                action: "Check episode data validity".to_string(),
+            },
+            can_continue: true,
         })?;
-        
+
         self.write_entry_with_recovery(entry)
     }
-    
-    /// Batch write with recovery handling
-    pub fn write_batch_with_recovery(&mut self, batch: WalBatch) -> crate::error::Result<Vec<u64>> {
+
+    /// Batch write with recovery handling.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any entry write fails and recovery strategies cannot
+    /// continue the batch safely.
+    #[must_use = "Propagate WAL write failures to trigger recovery"]
+    pub fn write_batch_with_recovery(&self, batch: WalBatch) -> crate::error::Result<Vec<u64>> {
         use crate::error::{EngramError, RecoveryStrategy};
-        
+
         let mut sequences = Vec::new();
-        
+
         for entry in batch.entries {
             match self.write_entry_with_recovery(entry) {
                 Ok(seq) => sequences.push(seq),
@@ -706,7 +832,7 @@ impl WalWriter {
                 Err(e) => return Err(e),
             }
         }
-        
+
         if sequences.is_empty() {
             Err(EngramError::WriteAheadLog {
                 operation: "write_batch".to_string(),
@@ -743,7 +869,12 @@ impl WalReader {
         }
     }
 
-    /// Scan all WAL files and return entries in sequence order
+    /// Scan all WAL files and return entries in sequence order.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if directory iteration or WAL file deserialization
+    /// fails for reasons other than expected end-of-file conditions.
     pub fn scan_all(&self) -> StorageResult<Vec<WalEntry>> {
         let mut all_entries = Vec::new();
 
@@ -753,10 +884,10 @@ impl WalReader {
             let entry = entry?;
             let path = entry.path();
 
-            if path.extension().map_or(false, |ext| ext == "log")
-                && path.file_name().map_or(false, |name| {
-                    name.to_str().unwrap_or("").starts_with("wal-")
-                })
+            if path.extension().is_some_and(|ext| ext == "log")
+                && path
+                    .file_name()
+                    .is_some_and(|name| name.to_str().unwrap_or("").starts_with("wal-"))
             {
                 wal_files.push(path);
             }
@@ -788,7 +919,7 @@ impl WalReader {
             // Read header
             let mut header_bytes = [0u8; HEADER_SIZE];
             match file.read_exact(&mut header_bytes) {
-                Ok(_) => {}
+                Ok(()) => {}
                 Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
                 Err(e) => return Err(e.into()),
             }
@@ -799,7 +930,7 @@ impl WalReader {
             // Validate header
             if let Err(e) = header.validate() {
                 tracing::warn!("Corrupted header in {}: {}", path.display(), e);
-                println!("Header validation failed: {}", e);
+                println!("Header validation failed: {e}");
                 break; // Skip rest of file
             }
 
@@ -810,7 +941,7 @@ impl WalReader {
             // Validate payload
             if let Err(e) = header.validate_payload(&payload) {
                 tracing::warn!("Corrupted payload in {}: {}", path.display(), e);
-                println!("Payload validation failed: {}", e);
+                println!("Payload validation failed: {e}");
                 continue; // Skip this entry but continue reading
             }
 
@@ -827,7 +958,39 @@ impl WalReader {
 mod tests {
     use super::*;
     use crate::Confidence;
+    use std::fmt::Debug;
     use tempfile::TempDir;
+
+    type TestResult<T = ()> = Result<T, String>;
+
+    fn ensure(condition: bool, message: impl Into<String>) -> TestResult {
+        if condition {
+            Ok(())
+        } else {
+            Err(message.into())
+        }
+    }
+
+    fn ensure_eq<T>(actual: &T, expected: &T, context: &str) -> TestResult
+    where
+        T: PartialEq + Debug,
+    {
+        if actual == expected {
+            Ok(())
+        } else {
+            Err(format!("{context}: expected {expected:?}, got {actual:?}"))
+        }
+    }
+
+    trait IntoTestResult<T> {
+        fn into_test_result(self, context: &str) -> TestResult<T>;
+    }
+
+    impl<T, E: std::fmt::Debug> IntoTestResult<T> for Result<T, E> {
+        fn into_test_result(self, context: &str) -> TestResult<T> {
+            self.map_err(|err| format!("{context}: {err:?}"))
+        }
+    }
 
     fn create_test_episode() -> Episode {
         use crate::EpisodeBuilder;
@@ -850,70 +1013,91 @@ mod tests {
     }
 
     #[test]
-    fn test_wal_entry_creation() {
+    fn test_wal_entry_creation() -> TestResult {
         let episode = create_test_episode();
-        let entry = WalEntry::new_episode(&episode).unwrap();
+        let entry = WalEntry::new_episode(&episode).into_test_result("create wal entry")?;
 
-        assert_eq!(entry.header.magic, WAL_MAGIC);
-        assert_eq!(entry.header.entry_type, WalEntryType::EpisodeStore as u32);
-        assert!(entry.payload.len() > 0);
+        ensure_eq(&entry.header.magic, &WAL_MAGIC, "wal header magic")?;
+        ensure_eq(
+            &entry.header.entry_type,
+            &(WalEntryType::EpisodeStore as u32),
+            "wal entry type",
+        )?;
+        ensure(
+            !entry.payload.is_empty(),
+            "wal entry payload should not be empty",
+        )?;
+
+        Ok(())
     }
 
     #[test]
-    fn test_wal_writer_sync() {
-        let temp_dir = TempDir::new().unwrap();
+    fn test_wal_writer_sync() -> TestResult {
+        let temp_dir = TempDir::new().into_test_result("create temp dir for wal writer sync")?;
         let metrics = Arc::new(StorageMetrics::new());
-        let wal = WalWriter::new(temp_dir.path(), FsyncMode::PerWrite, metrics).unwrap();
+        let wal = WalWriter::new(temp_dir.path(), FsyncMode::PerWrite, metrics)
+            .into_test_result("construct wal writer")?;
 
         let episode = create_test_episode();
-        let entry = WalEntry::new_episode(&episode).unwrap();
+        let entry = WalEntry::new_episode(&episode).into_test_result("create wal entry")?;
 
-        let sequence = wal.write_sync(entry).unwrap();
-        assert_eq!(sequence, 0);
+        let sequence = wal
+            .write_sync(entry)
+            .into_test_result("write wal entry synchronously")?;
+        ensure_eq(&sequence, &0_u64, "wal sequence")?;
+
+        Ok(())
     }
 
     #[test]
-    fn test_wal_reader_recovery() {
-        let temp_dir = TempDir::new().unwrap();
+    fn test_wal_reader_recovery() -> TestResult {
+        let temp_dir = TempDir::new().into_test_result("create temp dir for wal reader")?;
         let metrics = Arc::new(StorageMetrics::new());
 
         // Write some entries
-        let mut wal = WalWriter::new(temp_dir.path(), FsyncMode::PerWrite, metrics.clone()).unwrap();
+        let mut wal = WalWriter::new(temp_dir.path(), FsyncMode::PerWrite, metrics.clone())
+            .into_test_result("construct wal writer for recovery test")?;
 
         for _i in 0..5 {
             let episode = create_test_episode();
-            let entry = WalEntry::new_episode(&episode).unwrap();
-            wal.write_sync(entry).unwrap();
+            let entry = WalEntry::new_episode(&episode).into_test_result("create wal entry")?;
+            wal.write_sync(entry)
+                .into_test_result("write wal entry during recovery test")?;
         }
-        
+
         // Explicitly drop to ensure all data is flushed
-        wal.shutdown().unwrap();
+        wal.shutdown()
+            .into_test_result("shutdown wal writer during recovery test")?;
         drop(wal);
 
         // Read them back
         let reader = WalReader::new(temp_dir.path(), metrics);
-        
+
         // Debug: List files in the directory
         println!("Files in WAL directory:");
         if let Ok(dir_entries) = std::fs::read_dir(temp_dir.path()) {
-            for entry in dir_entries {
-                if let Ok(entry) = entry {
-                    let path = entry.path();
-                    println!("  - {}", path.display());
-                    if let Ok(metadata) = std::fs::metadata(&path) {
-                        println!("    Size: {} bytes", metadata.len());
-                    }
+            for entry in dir_entries.flatten() {
+                let path = entry.path();
+                println!("  - {}", path.display());
+                if let Ok(metadata) = std::fs::metadata(&path) {
+                    println!("    Size: {} bytes", metadata.len());
                 }
             }
         }
-        
-        let entries = reader.scan_all().unwrap();
+
+        let entries = reader.scan_all().into_test_result("scan wal entries")?;
         println!("Found {} entries, expected 5", entries.len());
-        assert_eq!(entries.len(), 5);
+        ensure_eq(&entries.len(), &5_usize, "wal entry count")?;
         for (i, entry) in entries.iter().enumerate() {
-            assert_eq!(entry.header.sequence, i as u64);
-            assert_eq!(entry.header.entry_type, WalEntryType::EpisodeStore as u32);
-            entry.validate().unwrap();
+            ensure_eq(&entry.header.sequence, &(i as u64), "wal entry sequence")?;
+            ensure_eq(
+                &entry.header.entry_type,
+                &(WalEntryType::EpisodeStore as u32),
+                "wal entry type",
+            )?;
+            entry.validate().into_test_result("validate wal entry")?;
         }
+
+        Ok(())
     }
 }

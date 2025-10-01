@@ -5,6 +5,8 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::convert::TryFrom;
+use std::fmt::Write;
 use std::fs;
 use std::path::Path;
 use syn::{ExprMacro, Macro, parse_file, visit::Visit};
@@ -159,11 +161,18 @@ impl ErrorReviewer {
         }
     }
 
-    /// Review all errors in a directory
+    /// Review all errors in a directory.
+    ///
+    /// # Errors
+    /// - Returns an error if the directory cannot be traversed or read.
+    /// - Returns an error when a Rust source file cannot be read or fails syntax parsing.
+    ///
+    /// # Panics
+    /// - Never panics.
     pub fn review_directory(&mut self, dir: &Path) -> Result<ErrorReviewReport, String> {
         self.scan_directory(dir)?;
         self.validate_all_errors();
-        self.generate_report()
+        Ok(self.generate_report())
     }
 
     /// Scan directory for error definitions
@@ -275,7 +284,7 @@ impl ErrorReviewer {
         }
 
         // Calculate cognitive load
-        let cognitive_load_score = self.calculate_cognitive_load(error_def);
+        let cognitive_load_score = Self::calculate_cognitive_load(error_def);
         if cognitive_load_score > self.config.max_cognitive_load {
             quality_issues.push(QualityIssue {
                 issue_type: IssueType::HighCognitiveLoad,
@@ -287,7 +296,7 @@ impl ErrorReviewer {
 
         // Generate improvement suggestions
         let improvement_suggestions =
-            self.generate_improvement_suggestions(error_def, &quality_issues);
+            Self::generate_improvement_suggestions(error_def, &quality_issues);
 
         // Determine pass/fail
         let has_required_fields = missing_fields.is_empty();
@@ -310,7 +319,7 @@ impl ErrorReviewer {
     }
 
     /// Calculate cognitive load score for an error
-    fn calculate_cognitive_load(&self, error_def: &ErrorDefinition) -> u8 {
+    fn calculate_cognitive_load(error_def: &ErrorDefinition) -> u8 {
         let mut score = 0u8;
 
         // Length factors
@@ -359,7 +368,6 @@ impl ErrorReviewer {
 
     /// Generate improvement suggestions
     fn generate_improvement_suggestions(
-        &self,
         error_def: &ErrorDefinition,
         issues: &[QualityIssue],
     ) -> Vec<String> {
@@ -411,7 +419,7 @@ impl ErrorReviewer {
     }
 
     /// Generate final report
-    fn generate_report(&self) -> Result<ErrorReviewReport, String> {
+    fn generate_report(&self) -> ErrorReviewReport {
         let total_errors = self.results.len();
         let passing_errors = self.results.iter().filter(|r| r.passes_review).count();
         let failing_errors = total_errors - passing_errors;
@@ -419,16 +427,18 @@ impl ErrorReviewer {
         let errors_by_severity = self.categorize_by_severity();
         let common_issues = self.find_common_issues();
 
-        Ok(ErrorReviewReport {
+        let pass_rate = calculate_pass_rate(passing_errors, total_errors);
+
+        ErrorReviewReport {
             total_errors,
             passing_errors,
             failing_errors,
-            pass_rate: (passing_errors as f64 / total_errors.max(1) as f64) * 100.0,
+            pass_rate,
             errors_by_severity,
             common_issues,
             detailed_results: self.results.clone(),
             error_catalog: self.error_catalog.clone(),
-        })
+        }
     }
 
     /// Categorize errors by severity
@@ -496,48 +506,48 @@ impl ErrorReviewReport {
         let mut md = String::new();
 
         md.push_str("# Error Message Review Report\n\n");
-        md.push_str(&format!(
-            "**Date**: {}\n\n",
-            chrono::Utc::now().to_rfc3339()
-        ));
+        let _ = writeln!(&mut md, "**Date**: {}\n", chrono::Utc::now().to_rfc3339());
 
         md.push_str("## Summary\n\n");
-        md.push_str(&format!("- Total Errors: {}\n", self.total_errors));
-        md.push_str(&format!(
-            "- Passing: {} ({:.1}%)\n",
+        let _ = writeln!(&mut md, "- Total Errors: {}", self.total_errors);
+        let _ = writeln!(
+            &mut md,
+            "- Passing: {} ({:.1}%)",
             self.passing_errors, self.pass_rate
-        ));
-        md.push_str(&format!("- Failing: {}\n\n", self.failing_errors));
+        );
+        let _ = writeln!(&mut md, "- Failing: {}\n", self.failing_errors);
 
         md.push_str("## Common Issues\n\n");
         for (issue_type, count) in &self.common_issues {
-            md.push_str(&format!("- {issue_type:?}: {count} occurrences\n"));
+            let _ = writeln!(&mut md, "- {issue_type:?}: {count} occurrences");
         }
 
         md.push_str("\n## Failed Errors\n\n");
         for result in self.detailed_results.iter().filter(|r| !r.passes_review) {
-            md.push_str(&format!(
-                "### {} (Line {})\n\n",
+            let _ = writeln!(
+                &mut md,
+                "### {} (Line {})\n",
                 result.file_path, result.line_number
-            ));
-            md.push_str(&format!("**Summary**: {}\n\n", result.error_summary));
+            );
+            let _ = writeln!(&mut md, "**Summary**: {}\n", result.error_summary);
 
             if !result.missing_fields.is_empty() {
-                md.push_str(&format!(
-                    "**Missing Fields**: {}\n\n",
+                let _ = writeln!(
+                    &mut md,
+                    "**Missing Fields**: {}\n",
                     result.missing_fields.join(", ")
-                ));
+                );
             }
 
             md.push_str("**Issues**:\n");
             for issue in &result.quality_issues {
-                md.push_str(&format!("- [{:?}] {}\n", issue.severity, issue.description));
+                let _ = writeln!(&mut md, "- [{:?}] {}", issue.severity, issue.description);
             }
 
             if !result.improvement_suggestions.is_empty() {
                 md.push_str("\n**Suggestions**:\n");
                 for suggestion in &result.improvement_suggestions {
-                    md.push_str(&format!("- {suggestion}\n"));
+                    let _ = writeln!(&mut md, "- {suggestion}");
                 }
             }
 
@@ -591,7 +601,8 @@ impl ErrorReviewReport {
 
         for result in &self.detailed_results {
             let status_class = if result.passes_review { "pass" } else { "fail" };
-            html.push_str(&format!(
+            let _ = write!(
+                &mut html,
                 r#"<div class="error">
                     <h3 class="{}">{} - Line {}</h3>
                     <p><strong>Summary:</strong> {}</p>
@@ -602,12 +613,12 @@ impl ErrorReviewReport {
                 result.line_number,
                 result.error_summary,
                 result.cognitive_load_score
-            ));
+            );
 
             if !result.quality_issues.is_empty() {
                 html.push_str("<h4>Issues:</h4><ul>");
                 for issue in &result.quality_issues {
-                    html.push_str(&format!("<li>{}</li>", issue.description));
+                    let _ = write!(&mut html, "<li>{}</li>", issue.description);
                 }
                 html.push_str("</ul>");
             }
@@ -689,6 +700,39 @@ fn count_technical_terms(text: &str) -> usize {
         .count()
 }
 
+fn calculate_pass_rate(passing: usize, total: usize) -> f64 {
+    if total == 0 {
+        return 0.0;
+    }
+
+    let passing_f64 = usize_to_f64(passing);
+    let total_f64 = usize_to_f64(total);
+
+    if total_f64 == 0.0 {
+        0.0
+    } else {
+        (passing_f64 / total_f64) * 100.0
+    }
+}
+
+fn usize_to_f64(value: usize) -> f64 {
+    let capped = u64::try_from(value).unwrap_or(u64::MAX);
+    u64_to_f64(capped)
+}
+
+fn u64_to_f64(value: u64) -> f64 {
+    const SHIFT: u32 = 32;
+    const FACTOR: f64 = 4_294_967_296.0; // 2^32
+
+    let high = value >> SHIFT;
+    let low = value & 0xFFFF_FFFF;
+
+    let high_part = u32::try_from(high).map_or_else(|_| f64::from(u32::MAX), f64::from);
+    let low_part = u32::try_from(low).map_or_else(|_| f64::from(u32::MAX), f64::from);
+
+    high_part.mul_add(FACTOR, low_part)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -703,8 +747,6 @@ mod tests {
 
     #[test]
     fn test_cognitive_load_calculation() {
-        let reviewer = ErrorReviewer::new(ErrorReviewConfig::default());
-
         let simple_error = ErrorDefinition {
             id: "test:1".to_string(),
             file_path: "test.rs".to_string(),
@@ -719,7 +761,7 @@ mod tests {
             similar: vec![],
         };
 
-        let load = reviewer.calculate_cognitive_load(&simple_error);
+        let load = ErrorReviewer::calculate_cognitive_load(&simple_error);
         assert!(load <= 5, "Simple error should have low cognitive load");
 
         let complex_error = ErrorDefinition {
@@ -736,7 +778,7 @@ mod tests {
             similar: vec!["item1".to_string(), "item2".to_string(), "item3".to_string(), "item4".to_string()],
         };
 
-        let high_load = reviewer.calculate_cognitive_load(&complex_error);
+        let high_load = ErrorReviewer::calculate_cognitive_load(&complex_error);
         assert!(
             high_load >= 6,
             "Complex error should have high cognitive load, got: {high_load}"

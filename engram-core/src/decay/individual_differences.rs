@@ -96,17 +96,19 @@ impl IndividualDifferenceProfile {
     /// standard deviation, matching empirical findings of cognitive variation.
     #[cfg(all(feature = "psychological_decay", feature = "testing"))]
     pub fn sample_from_population<R: rand::Rng>(rng: &mut R) -> Self {
-        let normal = Normal::new(1.0, 0.2).unwrap();
+        let Ok(normal) = Normal::<f32>::new(1.0, 0.2) else {
+            return Self::default();
+        };
 
         Self {
-            wm_capacity: (normal.sample(rng) as f32).clamp(0.5, 2.0),
-            processing_speed: (normal.sample(rng) as f32).clamp(0.5, 2.0),
-            attention_control: (normal.sample(rng) as f32).clamp(0.5, 2.0),
-            flexibility: (normal.sample(rng) as f32).clamp(0.5, 2.0),
-            hippocampal_efficiency: (normal.sample(rng) as f32).clamp(0.5, 2.0),
-            neocortical_efficiency: (normal.sample(rng) as f32).clamp(0.5, 2.0),
-            sleep_quality: (normal.sample(rng) as f32).clamp(0.5, 2.0),
-            age_factor: (normal.sample(rng) as f32).clamp(0.5, 1.5), // Age only reduces efficiency
+            wm_capacity: normal.sample(rng).clamp(0.5, 2.0),
+            processing_speed: normal.sample(rng).clamp(0.5, 2.0),
+            attention_control: normal.sample(rng).clamp(0.5, 2.0),
+            flexibility: normal.sample(rng).clamp(0.5, 2.0),
+            hippocampal_efficiency: normal.sample(rng).clamp(0.5, 2.0),
+            neocortical_efficiency: normal.sample(rng).clamp(0.5, 2.0),
+            sleep_quality: normal.sample(rng).clamp(0.5, 2.0),
+            age_factor: normal.sample(rng).clamp(0.5, 1.5), // Age only reduces efficiency
         }
     }
 
@@ -117,12 +119,12 @@ impl IndividualDifferenceProfile {
 
         // Age-related decline in processing speed and working memory
         let age_decline = (age_years / 100.0).min(0.5); // Max 50% decline
-        profile.processing_speed *= 1.0 - age_decline * 0.3;
-        profile.wm_capacity *= 1.0 - age_decline * 0.2;
-        profile.attention_control *= 1.0 - age_decline * 0.15;
+        profile.processing_speed *= age_decline.mul_add(-0.3, 1.0);
+        profile.wm_capacity *= age_decline.mul_add(-0.2, 1.0);
+        profile.attention_control *= age_decline.mul_add(-0.15, 1.0);
 
         // Sleep quality may decline with age
-        profile.sleep_quality *= 1.0 - age_decline * 0.25;
+        profile.sleep_quality *= age_decline.mul_add(-0.25, 1.0);
 
         // Overall age factor
         profile.age_factor = (1.0 - age_decline).clamp(0.5, 1.0);
@@ -133,6 +135,7 @@ impl IndividualDifferenceProfile {
     }
 
     /// Clamps all factors to valid ranges
+    #[cfg(all(feature = "psychological_decay", feature = "testing"))]
     const fn clamp_all_factors(&mut self) {
         self.wm_capacity = self.wm_capacity.clamp(0.5, 2.0);
         self.processing_speed = self.processing_speed.clamp(0.5, 2.0);
@@ -261,16 +264,22 @@ impl IndividualDifferenceProfile {
     /// Weighted combination of all factors providing general memory performance.
     #[must_use]
     pub fn overall_memory_efficiency(&self) -> f32 {
-        let efficiency = self.sleep_quality.mul_add(0.10, self.neocortical_efficiency.mul_add(0.125, self.hippocampal_efficiency.mul_add(
-            0.125,
-            self.flexibility.mul_add(
-                0.15,
-                self.attention_control.mul_add(
-                    0.20,
-                    self.wm_capacity.mul_add(0.20, self.processing_speed * 0.20),
+        let efficiency = self.sleep_quality.mul_add(
+            0.10,
+            self.neocortical_efficiency.mul_add(
+                0.125,
+                self.hippocampal_efficiency.mul_add(
+                    0.125,
+                    self.flexibility.mul_add(
+                        0.15,
+                        self.attention_control.mul_add(
+                            0.20,
+                            self.wm_capacity.mul_add(0.20, self.processing_speed * 0.20),
+                        ),
+                    ),
                 ),
             ),
-        )));
+        );
 
         (efficiency * self.age_factor).clamp(0.4, 1.8)
     }
@@ -292,7 +301,7 @@ impl IndividualDifferenceProfile {
             // calibration_factor ranges from ~0.4 to ~1.8
             // For low ability (0.875), reduce more: raw * ~0.85
             // For high ability (1.55), reduce less: raw * ~0.95
-            let reduction_factor = 0.8 + 0.15 * calibration_factor.min(1.33);
+            let reduction_factor = 0.15f32.mul_add(calibration_factor.min(1.33), 0.8);
             raw * reduction_factor
         } else {
             // Low confidence may get slight boost from good cognitive abilities
@@ -341,31 +350,33 @@ impl IndividualDifferenceProfile {
 mod tests {
     use super::*;
 
+    const EPSILON: f32 = 1.0e-6;
+
     #[test]
     fn test_individual_profile_creation() {
         let profile = IndividualDifferenceProfile::new();
-        assert_eq!(profile.wm_capacity, 1.0);
-        assert_eq!(profile.processing_speed, 1.0);
-        assert_eq!(profile.attention_control, 1.0);
-        assert_eq!(profile.flexibility, 1.0);
+        assert!((profile.wm_capacity - 1.0).abs() <= EPSILON);
+        assert!((profile.processing_speed - 1.0).abs() <= EPSILON);
+        assert!((profile.attention_control - 1.0).abs() <= EPSILON);
+        assert!((profile.flexibility - 1.0).abs() <= EPSILON);
     }
 
     #[test]
     fn test_profile_with_factors() {
         let profile = IndividualDifferenceProfile::with_factors(1.5, 0.8, 1.2, 0.9);
-        assert_eq!(profile.wm_capacity, 1.5);
-        assert_eq!(profile.processing_speed, 0.8);
-        assert_eq!(profile.attention_control, 1.2);
-        assert_eq!(profile.flexibility, 0.9);
+        assert!((profile.wm_capacity - 1.5).abs() <= EPSILON);
+        assert!((profile.processing_speed - 0.8).abs() <= EPSILON);
+        assert!((profile.attention_control - 1.2).abs() <= EPSILON);
+        assert!((profile.flexibility - 0.9).abs() <= EPSILON);
     }
 
     #[test]
     fn test_factor_clamping() {
         let profile = IndividualDifferenceProfile::with_factors(3.0, 0.1, 2.5, -0.5);
-        assert_eq!(profile.wm_capacity, 2.0); // Clamped to max
-        assert_eq!(profile.processing_speed, 0.5); // Clamped to min
-        assert_eq!(profile.attention_control, 2.0); // Clamped to max
-        assert_eq!(profile.flexibility, 0.5); // Clamped to min
+        assert!((profile.wm_capacity - 2.0).abs() <= EPSILON); // Clamped to max
+        assert!((profile.processing_speed - 0.5).abs() <= EPSILON); // Clamped to min
+        assert!((profile.attention_control - 2.0).abs() <= EPSILON); // Clamped to max
+        assert!((profile.flexibility - 0.5).abs() <= EPSILON); // Clamped to min
     }
 
     #[cfg(all(feature = "psychological_decay", feature = "testing"))]
@@ -375,10 +386,10 @@ mod tests {
         let profile = IndividualDifferenceProfile::sample_from_population(&mut rng);
 
         // All factors should be within valid ranges
-        assert!(profile.wm_capacity >= 0.5 && profile.wm_capacity <= 2.0);
-        assert!(profile.processing_speed >= 0.5 && profile.processing_speed <= 2.0);
-        assert!(profile.attention_control >= 0.5 && profile.attention_control <= 2.0);
-        assert!(profile.flexibility >= 0.5 && profile.flexibility <= 2.0);
+        assert!((0.5..=2.0).contains(&profile.wm_capacity));
+        assert!((0.5..=2.0).contains(&profile.processing_speed));
+        assert!((0.5..=2.0).contains(&profile.attention_control));
+        assert!((0.5..=2.0).contains(&profile.flexibility));
 
         // Sample multiple profiles to check variation
         let mut profiles = Vec::new();
@@ -401,39 +412,42 @@ mod tests {
     fn test_age_adjusted_sampling() {
         use rand::SeedableRng;
         use rand::rngs::StdRng;
-        
+
         // Use seeded RNG for deterministic test results
         let mut rng = StdRng::seed_from_u64(12345);
-        
+
         // Sample multiple times to get average behavior
         let mut young_processing_total = 0.0;
         let mut old_processing_total = 0.0;
         let mut young_wm_total = 0.0;
         let mut old_wm_total = 0.0;
-        
-        let samples = 50;
+
+        let samples = 50_u32;
         for _ in 0..samples {
             let young_profile = IndividualDifferenceProfile::sample_with_age(&mut rng, 25.0);
             let old_profile = IndividualDifferenceProfile::sample_with_age(&mut rng, 75.0);
-            
+
             young_processing_total += young_profile.processing_speed;
             old_processing_total += old_profile.processing_speed;
             young_wm_total += young_profile.wm_capacity;
             old_wm_total += old_profile.wm_capacity;
         }
-        
-        let young_processing_avg = young_processing_total / samples as f32;
-        let old_processing_avg = old_processing_total / samples as f32;
-        let young_wm_avg = young_wm_total / samples as f32;
-        let old_wm_avg = old_wm_total / samples as f32;
-        
+
+        let divisor = crate::numeric::saturating_f32_from_f64(f64::from(samples));
+        let young_processing_avg = young_processing_total / divisor;
+        let old_processing_avg = old_processing_total / divisor;
+        let young_wm_avg = young_wm_total / divisor;
+        let old_wm_avg = old_wm_total / divisor;
+
         // Older profile should generally have lower efficiency on average
-        assert!(old_processing_avg <= young_processing_avg * 1.05, 
-               "Expected older processing speed ({:.3}) <= young processing speed ({:.3}) * 1.05", 
-               old_processing_avg, young_processing_avg);
-        assert!(old_wm_avg <= young_wm_avg * 1.05,
-               "Expected older WM capacity ({:.3}) <= young WM capacity ({:.3}) * 1.05", 
-               old_wm_avg, young_wm_avg);
+        assert!(
+            old_processing_avg <= young_processing_avg * 1.05,
+            "Expected older processing speed ({old_processing_avg:.3}) <= young processing speed ({young_processing_avg:.3}) * 1.05"
+        );
+        assert!(
+            old_wm_avg <= young_wm_avg * 1.05,
+            "Expected older WM capacity ({old_wm_avg:.3}) <= young WM capacity ({young_wm_avg:.3}) * 1.05"
+        );
     }
 
     #[test]
@@ -474,8 +488,8 @@ mod tests {
 
         // Higher flexibility should improve schema integration
         assert!(high_efficiency > low_efficiency);
-        assert!(high_efficiency >= 0.2 && high_efficiency <= 1.8);
-        assert!(low_efficiency >= 0.2 && low_efficiency <= 1.8);
+        assert!((0.2..=1.8).contains(&high_efficiency));
+        assert!((0.2..=1.8).contains(&low_efficiency));
     }
 
     #[test]
@@ -488,7 +502,7 @@ mod tests {
 
         // Higher WM capacity should improve pattern completion
         assert!(high_completion > low_completion);
-        assert!(high_completion >= 0.3 && high_completion <= 1.7);
+        assert!((0.3..=1.7).contains(&high_completion));
     }
 
     #[test]
@@ -501,16 +515,20 @@ mod tests {
 
         // Higher processing speed should increase retrieval speed
         assert!(fast_speed > slow_speed);
-        assert!(fast_speed >= 0.4 && fast_speed <= 2.0);
+        assert!((0.4..=2.0).contains(&fast_speed));
     }
 
     #[test]
     fn test_consolidation_effectiveness() {
-        let mut good_sleeper = IndividualDifferenceProfile::default();
-        good_sleeper.sleep_quality = 1.6;
+        let good_sleeper = IndividualDifferenceProfile {
+            sleep_quality: 1.6,
+            ..IndividualDifferenceProfile::default()
+        };
 
-        let mut poor_sleeper = IndividualDifferenceProfile::default();
-        poor_sleeper.sleep_quality = 0.6;
+        let poor_sleeper = IndividualDifferenceProfile {
+            sleep_quality: 0.6,
+            ..IndividualDifferenceProfile::default()
+        };
 
         let good_consolidation = good_sleeper.consolidation_effectiveness();
         let poor_consolidation = poor_sleeper.consolidation_effectiveness();
@@ -529,7 +547,7 @@ mod tests {
 
         // Better attention control should increase interference resistance
         assert!(focused_resistance > distractible_resistance);
-        assert!(focused_resistance >= 0.3 && focused_resistance <= 1.9);
+        assert!((0.3..=1.9).contains(&focused_resistance));
     }
 
     #[test]
@@ -542,8 +560,8 @@ mod tests {
 
         // Higher abilities should give higher overall efficiency
         assert!(high_efficiency > low_efficiency);
-        assert!(high_efficiency >= 0.4 && high_efficiency <= 1.8);
-        assert!(low_efficiency >= 0.4 && low_efficiency <= 1.8);
+        assert!((0.4..=1.8).contains(&high_efficiency));
+        assert!((0.4..=1.8).contains(&low_efficiency));
     }
 
     #[test]
@@ -570,7 +588,7 @@ mod tests {
         assert!(decline_profile.processing_speed < 1.0);
         assert!(decline_profile.wm_capacity >= 0.5);
         assert!(decline_profile.processing_speed >= 0.5);
-        assert!(decline_profile.age_factor == 0.5);
+        assert!((decline_profile.age_factor - 0.5).abs() <= EPSILON);
 
         // Processing speed should be most affected
         assert!(decline_profile.processing_speed <= decline_profile.wm_capacity);
@@ -585,7 +603,7 @@ mod tests {
         assert!(enhancement_profile.processing_speed > 1.0);
         assert!(enhancement_profile.wm_capacity <= 2.0);
         assert!(enhancement_profile.processing_speed <= 2.0);
-        assert!(enhancement_profile.age_factor == 1.0); // Age not affected by enhancement
+        assert!((enhancement_profile.age_factor - 1.0).abs() <= EPSILON); // Age not affected by enhancement
     }
 
     #[test]

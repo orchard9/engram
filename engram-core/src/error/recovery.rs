@@ -14,18 +14,24 @@ pub struct ErrorRecovery;
 
 impl ErrorRecovery {
     /// Execute operation with automatic retry on recoverable errors
-    pub async fn with_retry<T, F, Fut>(
-        operation: F,
-        strategy: RecoveryStrategy,
-    ) -> Result<T>
+    ///
+    /// # Errors
+    ///
+    /// Returns the final error if all retry attempts fail or the provided strategy
+    /// does not specify retry behavior.
+    pub async fn with_retry<T, F, Fut>(operation: F, strategy: RecoveryStrategy) -> Result<T>
     where
         F: Fn() -> Fut,
         Fut: Future<Output = Result<T>>,
     {
-        if let RecoveryStrategy::Retry { max_attempts, backoff_ms } = strategy {
+        if let RecoveryStrategy::Retry {
+            max_attempts,
+            backoff_ms,
+        } = strategy
+        {
             let mut attempts = 0;
             let mut backoff = Duration::from_millis(backoff_ms);
-            
+
             loop {
                 match operation().await {
                     Ok(result) => return Ok(result),
@@ -41,7 +47,8 @@ impl ErrorRecovery {
                     Err(e) => {
                         error!(
                             "Operation failed permanently after {} attempts: {}",
-                            attempts + 1, e
+                            attempts + 1,
+                            e
                         );
                         return Err(e);
                     }
@@ -51,12 +58,14 @@ impl ErrorRecovery {
             operation().await
         }
     }
-    
+
     /// Execute with fallback on error
-    pub fn with_fallback<T, F, G>(
-        primary: F,
-        fallback: G,
-    ) -> Result<T>
+    ///
+    /// # Errors
+    ///
+    /// Returns the error from the primary operation when it is non-recoverable or
+    /// from the fallback when it also fails.
+    pub fn with_fallback<T, F, G>(primary: F, fallback: G) -> Result<T>
     where
         F: FnOnce() -> Result<T>,
         G: FnOnce() -> Result<T>,
@@ -70,13 +79,18 @@ impl ErrorRecovery {
             Err(e) => Err(e),
         }
     }
-    
+
     /// Execute with multiple fallback strategies
+    ///
+    /// # Errors
+    ///
+    /// Returns the last error produced by the provided strategies or an error
+    /// indicating that no strategies were supplied.
     pub fn with_cascading_fallbacks<T>(
         strategies: Vec<Box<dyn FnOnce() -> Result<T>>>,
     ) -> Result<T> {
         let mut last_error = None;
-        
+
         for (i, strategy) in strategies.into_iter().enumerate() {
             match strategy() {
                 Ok(result) => {
@@ -91,7 +105,7 @@ impl ErrorRecovery {
                 }
             }
         }
-        
+
         Err(last_error.unwrap_or_else(|| {
             EngramError::pattern_match_error(
                 "No strategies provided",
@@ -106,17 +120,40 @@ impl ErrorRecovery {
 /// Extension trait for Result types to add recovery methods
 pub trait ResultExt<T> {
     /// Apply recovery strategy based on error type
-    fn or_recover(self) -> Result<T>;
+    ///
+    /// # Errors
+    ///
+    /// Returns the original error when the configured recovery strategy cannot
+    /// recover from it.
+    #[must_use]
+    fn or_recover(self) -> Self;
     /// Return partial result if available
-    fn or_partial(self, partial: T) -> Result<T>;
+    ///
+    /// # Errors
+    ///
+    /// Returns the original error when the recovery strategy does not permit
+    /// partial results.
+    #[must_use]
+    fn or_partial(self, partial: T) -> Self;
     /// Log error with appropriate level
-    fn log_error(self) -> Result<T>;
+    ///
+    /// # Errors
+    ///
+    /// Returns the original error when the operation fails.
+    #[must_use]
+    fn log_error(self) -> Self;
     /// Continue without feature on certain error types
-    fn or_continue_without_feature(self, default: T) -> Result<T>;
+    ///
+    /// # Errors
+    ///
+    /// Returns the original error when the recovery strategy does not allow
+    /// continuing without the failed feature.
+    #[must_use]
+    fn or_continue_without_feature(self, default: T) -> Self;
 }
 
 impl<T> ResultExt<T> for Result<T> {
-    fn or_recover(self) -> Result<T> {
+    fn or_recover(self) -> Self {
         match self {
             Ok(val) => Ok(val),
             Err(e) => {
@@ -131,8 +168,8 @@ impl<T> ResultExt<T> for Result<T> {
             }
         }
     }
-    
-    fn or_partial(self, partial: T) -> Result<T> {
+
+    fn or_partial(self, partial: T) -> Self {
         match self {
             Ok(val) => Ok(val),
             Err(e) => match e.recovery_strategy() {
@@ -141,29 +178,18 @@ impl<T> ResultExt<T> for Result<T> {
                     Ok(partial)
                 }
                 _ => Err(e),
-            }
+            },
         }
     }
-    
-    fn log_error(self) -> Result<T> {
-        if let Err(ref e) = self {
-            match e.recovery_strategy() {
-                RecoveryStrategy::RequiresIntervention { action } => {
-                    error!("Operation failed, manual intervention required: {}", e);
-                    error!("Required action: {}", action);
-                }
-                RecoveryStrategy::Retry { .. } => {
-                    warn!("Retryable operation failed: {}", e);
-                }
-                _ => {
-                    info!("Operation failed but recoverable: {}", e);
-                }
-            }
+
+    fn log_error(self) -> Self {
+        if let Err(ref error) = self {
+            log_recovery_outcome(error);
         }
         self
     }
-    
-    fn or_continue_without_feature(self, default: T) -> Result<T> {
+
+    fn or_continue_without_feature(self, default: T) -> Self {
         match self {
             Ok(val) => Ok(val),
             Err(e) => match e.recovery_strategy() {
@@ -172,9 +198,32 @@ impl<T> ResultExt<T> for Result<T> {
                     Ok(default)
                 }
                 _ => Err(e),
-            }
+            },
         }
     }
+}
+
+fn log_recovery_outcome(error: &EngramError) {
+    match error.recovery_strategy() {
+        RecoveryStrategy::RequiresIntervention { action } => {
+            log_requires_intervention(error, action);
+        }
+        RecoveryStrategy::Retry { .. } => log_retryable_failure(error),
+        _ => log_recoverable_failure(error),
+    }
+}
+
+fn log_requires_intervention(error: &EngramError, action: &str) {
+    error!("Operation failed, manual intervention required: {}", error);
+    error!("Required action: {}", action);
+}
+
+fn log_retryable_failure(error: &EngramError) {
+    warn!("Retryable operation failed: {}", error);
+}
+
+fn log_recoverable_failure(error: &EngramError) {
+    info!("Operation failed but recoverable: {}", error);
 }
 
 /// Macro to help migrate unwrap calls gradually
@@ -216,11 +265,15 @@ macro_rules! try_expect {
 }
 
 /// Helper function to replace panic! in match arms
+///
+/// # Errors
+///
+/// Always returns an error describing the unexpected pattern.
 pub fn unreachable_pattern<T>(pattern: &str) -> Result<T> {
     Err(EngramError::pattern_match_error(
-        format!("Unexpected pattern: {}", pattern),
+        format!("Unexpected pattern: {pattern}"),
         RecoveryStrategy::RequiresIntervention {
-            action: format!("Fix pattern matching for: {}", pattern),
+            action: format!("Fix pattern matching for: {pattern}"),
         },
     ))
 }
@@ -228,14 +281,28 @@ pub fn unreachable_pattern<T>(pattern: &str) -> Result<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::fmt::Debug;
     use std::sync::Arc;
-    
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    type TestResult<T = ()> = std::result::Result<T, String>;
+
+    fn ensure_eq<T>(actual: &T, expected: &T, context: &str) -> TestResult
+    where
+        T: PartialEq + Debug,
+    {
+        if actual == expected {
+            Ok(())
+        } else {
+            Err(format!("{context}: expected {expected:?}, got {actual:?}"))
+        }
+    }
+
     #[tokio::test]
-    async fn test_retry_on_transient_failure() {
+    async fn test_retry_on_transient_failure() -> TestResult {
         let attempts = Arc::new(AtomicU32::new(0));
         let attempts_clone = attempts.clone();
-        
+
         let result = ErrorRecovery::with_retry(
             || async {
                 let current = attempts_clone.fetch_add(1, Ordering::SeqCst);
@@ -256,20 +323,23 @@ mod tests {
                 max_attempts: 3,
                 backoff_ms: 10,
             },
-        ).await;
-        
-        assert_eq!(result.unwrap(), 42);
-        assert_eq!(attempts.load(Ordering::SeqCst), 3);
+        )
+        .await;
+
+        let value = result.map_err(|err| format!("retry should eventually succeed: {err:?}"))?;
+        ensure_eq(&value, &42, "retry result value")?;
+        ensure_eq(&attempts.load(Ordering::SeqCst), &3, "retry attempt count")?;
+        Ok(())
     }
-    
+
     #[test]
-    fn test_fallback_on_index_failure() {
+    fn test_fallback_on_index_failure() -> TestResult {
         let result = ErrorRecovery::with_fallback(
             || {
                 Err(EngramError::Index {
                     source: Box::new(std::io::Error::new(
                         std::io::ErrorKind::NotFound,
-                        "Index file missing"
+                        "Index file missing",
                     )),
                     fallback_available: true,
                     recovery: RecoveryStrategy::Fallback {
@@ -282,12 +352,13 @@ mod tests {
                 Ok(vec![1, 2, 3])
             },
         );
-        
-        assert_eq!(result.unwrap(), vec![1, 2, 3]);
+
+        let values = result.map_err(|err| format!("fallback should succeed: {err:?}"))?;
+        ensure_eq(&values, &vec![1, 2, 3], "fallback return value")
     }
-    
+
     #[test]
-    fn test_cascading_fallbacks() {
+    fn test_cascading_fallbacks() -> TestResult {
         let strategies: Vec<Box<dyn FnOnce() -> Result<i32>>> = vec![
             Box::new(|| {
                 Err(EngramError::storage_error(
@@ -300,7 +371,7 @@ mod tests {
             }),
             Box::new(|| {
                 Err(EngramError::storage_error(
-                    "fallback 1 failed", 
+                    "fallback 1 failed",
                     std::io::Error::new(std::io::ErrorKind::PermissionDenied, ""),
                     RecoveryStrategy::Fallback {
                         description: "Try next fallback".to_string(),
@@ -309,19 +380,22 @@ mod tests {
             }),
             Box::new(|| Ok(42)),
         ];
-        
+
         let result = ErrorRecovery::with_cascading_fallbacks(strategies);
-        assert_eq!(result.unwrap(), 42);
+        let value = result.map_err(|err| format!("cascading fallback should recover: {err:?}"))?;
+        ensure_eq(&value, &42, "cascading fallback result")
     }
-    
+
     #[test]
-    fn test_partial_results_extension() {
+    fn test_partial_results_extension() -> TestResult {
         use crate::Memory;
-        
-        let partial_memories = vec![
-            Memory::new("partial1".to_string(), [0.1; 768], crate::Confidence::LOW),
-        ];
-        
+
+        let partial_memories = vec![Memory::new(
+            "partial1".to_string(),
+            [0.1; 768],
+            crate::Confidence::LOW,
+        )];
+
         let result: Result<Vec<Memory>> = Err(EngramError::query_error(
             "Timeout during search",
             Some(partial_memories.clone()),
@@ -329,25 +403,32 @@ mod tests {
                 description: "Returning results found before timeout".to_string(),
             },
         ));
-        
-        let recovered = result.or_partial(partial_memories.clone());
-        assert!(recovered.is_ok());
-        assert_eq!(recovered.unwrap().len(), 1);
+
+        let recovered = result
+            .or_partial(partial_memories)
+            .map_err(|err| format!("partial results should be returned: {err:?}"))?;
+        ensure_eq(&recovered.len(), &1_usize, "partial result count")
     }
-    
+
     #[test]
-    fn test_continue_without_feature() {
+    fn test_continue_without_feature() -> TestResult {
         let result: Result<Vec<i32>> = Err(EngramError::Index {
             source: Box::new(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
-                "Feature unavailable"
+                "Feature unavailable",
             )),
             fallback_available: false,
             recovery: RecoveryStrategy::ContinueWithoutFeature,
         });
-        
+
         let default_value = vec![1, 2, 3];
-        let recovered = result.or_continue_without_feature(default_value.clone());
-        assert_eq!(recovered.unwrap(), default_value);
+        let recovered = result
+            .or_continue_without_feature(default_value.clone())
+            .map_err(|err| format!("should continue without feature: {err:?}"))?;
+        ensure_eq(
+            &recovered,
+            &default_value,
+            "continue without feature result",
+        )
     }
 }

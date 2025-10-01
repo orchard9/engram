@@ -1,6 +1,7 @@
 //! Lock-free construction algorithms for HNSW
 
 use crate::Confidence;
+use std::sync::Arc;
 
 /// Builder for HNSW index with cognitive parameters
 pub struct HnswBuilder {
@@ -55,10 +56,26 @@ impl HnswBuilder {
     /// Build the HNSW index
     #[must_use]
     pub fn build(self) -> super::CognitiveHnswIndex {
-        // Apply builder parameters (these are Arc'd so we can't mutate them after creation)
-        // The parameters would need to be applied during construction in a more sophisticated implementation
+        let mut index = super::CognitiveHnswIndex::new();
 
-        super::CognitiveHnswIndex::new()
+        index
+            .params
+            .m_max
+            .store(self.m_max.max(2), std::sync::atomic::Ordering::Relaxed);
+        index
+            .params
+            .m_l
+            .store(self.m_l.max(1), std::sync::atomic::Ordering::Relaxed);
+        index.params.ef_construction.store(
+            self.ef_construction.max(1),
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        if let Some(params) = Arc::get_mut(&mut index.params) {
+            params.ml = self.ml;
+            params.confidence_threshold = self.confidence_threshold;
+        }
+
+        index
     }
 }
 

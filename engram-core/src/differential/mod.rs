@@ -288,14 +288,17 @@ impl DifferentialOperation {
     #[must_use]
     pub const fn cognitive_complexity(&self) -> CognitiveComplexity {
         match self {
-            Self::ConfidenceNot { .. } => CognitiveComplexity::Simple,
-            Self::ConfidenceFromPercent { .. } => CognitiveComplexity::Simple,
-            Self::ConfidenceAnd { .. } | Self::ConfidenceOr { .. } => CognitiveComplexity::Moderate,
-            Self::ConfidenceFromSuccesses { .. } => CognitiveComplexity::Moderate,
-            Self::ConfidenceCalibration { .. } => CognitiveComplexity::Complex,
-            Self::ConfidenceCombineWeighted { .. } => CognitiveComplexity::Complex,
-            Self::MemoryStore { .. } | Self::MemoryRecall { .. } => CognitiveComplexity::Moderate,
-            Self::GraphSpreadingActivation { .. } => CognitiveComplexity::Complex,
+            Self::ConfidenceNot { .. } | Self::ConfidenceFromPercent { .. } => {
+                CognitiveComplexity::Simple
+            }
+            Self::ConfidenceAnd { .. }
+            | Self::ConfidenceOr { .. }
+            | Self::ConfidenceFromSuccesses { .. }
+            | Self::MemoryStore { .. }
+            | Self::MemoryRecall { .. } => CognitiveComplexity::Moderate,
+            Self::ConfidenceCalibration { .. }
+            | Self::ConfidenceCombineWeighted { .. }
+            | Self::GraphSpreadingActivation { .. } => CognitiveComplexity::Complex,
         }
     }
 
@@ -314,10 +317,16 @@ impl DifferentialOperation {
             }
             Self::ConfidenceFromSuccesses { successes, total } => {
                 if *total > 10 {
-                    // Simplify to smaller numbers
-                    let ratio = f64::from(*successes) / f64::from(*total);
                     let new_total = 10u32;
-                    let new_successes = (ratio * f64::from(new_total)).round() as u32;
+                    let numerator = u64::from(*successes) * u64::from(new_total);
+                    let denominator = u64::from(*total);
+                    let rounded = if denominator == 0 {
+                        0
+                    } else {
+                        (numerator + (denominator / 2)) / denominator
+                    };
+                    let clamped = rounded.min(u64::from(new_total));
+                    let new_successes = u32::try_from(clamped).unwrap_or(new_total);
                     Some(Self::ConfidenceFromSuccesses {
                         successes: new_successes,
                         total: new_total,

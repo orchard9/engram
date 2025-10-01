@@ -10,11 +10,8 @@ use tracing::{info, warn};
 /// Get the path to the PID file
 #[must_use]
 pub fn pid_file_path() -> PathBuf {
-    if let Ok(path) = std::env::var("ENGRAM_PID_PATH") {
-        PathBuf::from(path)
-    } else {
-        std::env::temp_dir().join("engram.pid")
-    }
+    std::env::var("ENGRAM_PID_PATH")
+        .map_or_else(|_| std::env::temp_dir().join("engram.pid"), PathBuf::from)
 }
 
 /// Get the path to the state file  
@@ -24,6 +21,10 @@ pub fn _state_file_path() -> PathBuf {
 }
 
 /// Check if Engram server is running and get connection details
+///
+/// # Errors
+///
+/// Returns error if server is not running or PID file cannot be read
 pub async fn get_server_connection() -> Result<(u16, u16)> {
     let pid_path = pid_file_path();
     if !pid_path.exists() {
@@ -69,20 +70,28 @@ pub async fn get_server_connection() -> Result<(u16, u16)> {
 }
 
 /// Write PID and port information to file
+///
+/// # Errors
+///
+/// Returns error if PID file cannot be written
 pub fn write_pid_file(port: u16) -> Result<()> {
     let pid_path = pid_file_path();
     let content = format!("{}:{}", std::process::id(), port);
     fs::write(&pid_path, content)
-        .with_context(|| format!("Failed to write PID file: {pid_path:?}"))?;
+        .with_context(|| format!("Failed to write PID file: {}", pid_path.display()))?;
     info!(" Server info written to {:?}", pid_path);
     Ok(())
 }
 
 /// Read PID and port from file
+///
+/// # Errors
+///
+/// Returns error if PID file cannot be read or parsed
 pub fn read_pid_file() -> Result<(u32, u16)> {
     let pid_path = pid_file_path();
     let content = fs::read_to_string(&pid_path)
-        .with_context(|| format!("Failed to read PID file: {pid_path:?}"))?;
+        .with_context(|| format!("Failed to read PID file: {}", pid_path.display()))?;
 
     let parts: Vec<&str> = content.trim().split(':').collect();
     if parts.len() != 2 {
@@ -96,11 +105,15 @@ pub fn read_pid_file() -> Result<(u32, u16)> {
 }
 
 /// Remove PID file
+///
+/// # Errors
+///
+/// Returns error if PID file cannot be removed
 pub fn remove_pid_file() -> Result<()> {
     let pid_path = pid_file_path();
     if pid_path.exists() {
         fs::remove_file(&pid_path)
-            .with_context(|| format!("Failed to remove PID file: {pid_path:?}"))?;
+            .with_context(|| format!("Failed to remove PID file: {}", pid_path.display()))?;
         info!("  Removed server info file");
     }
     Ok(())
@@ -129,6 +142,10 @@ pub fn is_process_running(pid: u32) -> bool {
 }
 
 /// Stop the Engram server
+///
+/// # Errors
+///
+/// Returns error if server cannot be stopped or is not running
 pub async fn stop_server() -> Result<()> {
     let pid_path = pid_file_path();
 

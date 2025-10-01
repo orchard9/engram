@@ -97,7 +97,7 @@ impl HippocampalDecayFunction {
 
         #[cfg(feature = "psychological_decay")]
         {
-            libm::exp(f64::from(-hours / effective_tau)) as f32
+            libm::expf(-hours / effective_tau)
         }
         #[cfg(not(feature = "psychological_decay"))]
         {
@@ -137,7 +137,7 @@ impl HippocampalDecayFunction {
         // Individual differences affect completion efficiency
         let efficiency_factor = (self.individual_factor - 0.5).mul_add(0.2, 1.0);
 
-        (base_threshold * efficiency_factor).max(0.1).min(0.9)
+        (base_threshold * efficiency_factor).clamp(0.1, 0.9)
     }
 
     /// Records a consolidation event (strengthens memory)
@@ -199,7 +199,9 @@ impl HippocampalDecayFunction {
         let base_strength = self.tau_base * self.individual_factor;
 
         // Consolidation events increase strength
-        let consolidation_boost = 1.0 + (self.consolidation_count as f32 * 0.1).min(0.5);
+        #[allow(clippy::cast_precision_loss)]
+        #[allow(clippy::cast_possible_truncation)]
+        let consolidation_boost = 1.0 + (f64::from(self.consolidation_count) * 0.1).min(0.5) as f32;
 
         base_strength * consolidation_boost * self.salience_factor
     }
@@ -230,26 +232,28 @@ mod tests {
     use super::*;
     use std::time::Duration;
 
+    const EPSILON: f32 = 1.0e-6;
+
     #[test]
     fn test_hippocampal_decay_creation() {
         let decay = HippocampalDecayFunction::new();
-        assert_eq!(decay.tau_base(), 1.96); // ~2 hours for 60% retention at 1 hour (2015 replication)
-        assert_eq!(decay.individual_factor, 1.0);
-        assert_eq!(decay.salience_factor, 1.0);
+        assert!((decay.tau_base() - 1.96).abs() <= EPSILON); // ~2 hours for 60% retention at 1 hour (2015 replication)
+        assert!((decay.individual_factor - 1.0).abs() <= EPSILON);
+        assert!((decay.salience_factor - 1.0).abs() <= EPSILON);
     }
 
     #[test]
     fn test_hippocampal_decay_with_factors() {
         let decay = HippocampalDecayFunction::with_factors(0.8, 1.5);
-        assert_eq!(decay.individual_factor, 0.8);
-        assert_eq!(decay.salience_factor, 1.5);
+        assert!((decay.individual_factor - 0.8).abs() <= EPSILON);
+        assert!((decay.salience_factor - 1.5).abs() <= EPSILON);
     }
 
     #[test]
     fn test_factor_clamping() {
         let decay = HippocampalDecayFunction::with_factors(0.1, 3.0);
-        assert_eq!(decay.individual_factor, 0.5); // Clamped to min
-        assert_eq!(decay.salience_factor, 2.0); // Clamped to max
+        assert!((decay.individual_factor - 0.5).abs() <= EPSILON); // Clamped to min
+        assert!((decay.salience_factor - 2.0).abs() <= EPSILON); // Clamped to max
     }
 
     #[test]
@@ -261,7 +265,7 @@ mod tests {
         let retention_1h = decay.compute_retention(Duration::from_secs(3600));
         let retention_24h = decay.compute_retention(Duration::from_secs(86400));
 
-        assert_eq!(retention_0h, 1.0); // Perfect retention at t=0
+        assert!((retention_0h - 1.0).abs() <= EPSILON); // Perfect retention at t=0
         assert!(retention_1h > retention_24h); // Monotonic decay
         assert!(retention_1h < 1.0); // Some decay after 1 hour
         assert!(retention_24h > 0.0); // Still some retention after 24 hours
@@ -305,10 +309,10 @@ mod tests {
         // For high activation, should be around 30% of base activation (CA3 requirement)
         // With individual_factor=1.0, efficiency_factor=1.1, so 0.8 * 0.3 * 1.1 = 0.264
         assert!((high_threshold / high_activation - 0.33).abs() < 0.1);
-        
+
         // For low activation, the minimum clamp (0.1) takes effect
         // 0.2 * 0.3 * 1.1 = 0.066 < 0.1, so threshold = 0.1
-        assert_eq!(low_threshold, 0.1);
+        assert!((low_threshold - 0.1).abs() <= EPSILON);
 
         // Always within reasonable bounds
         assert!(high_threshold >= 0.1);
@@ -319,11 +323,11 @@ mod tests {
     fn test_theta_phase_updates() {
         let mut decay = HippocampalDecayFunction::new();
 
-        assert_eq!(decay.theta_phase(), 0.0);
+        assert!((decay.theta_phase() - 0.0).abs() <= EPSILON);
 
         // Fast response should reset to optimal phase
         decay.update_theta_phase(500.0);
-        assert_eq!(decay.theta_phase(), 0.25);
+        assert!((decay.theta_phase() - 0.25).abs() <= EPSILON);
 
         // Slow response should advance phase
         decay.update_theta_phase(2000.0);

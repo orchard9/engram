@@ -3,6 +3,13 @@
 //! Tests Server-Sent Events endpoints for hierarchical monitoring, causality tracking,
 //! and cognitive-friendly event streaming with working memory constraints.
 
+#![allow(clippy::uninlined_format_args)]
+#![allow(clippy::too_many_lines)]
+#![allow(clippy::cast_possible_truncation)]
+#![allow(clippy::cast_sign_loss)]
+#![allow(clippy::needless_borrows_for_generic_args)]
+#![allow(clippy::needless_borrow)]
+
 use axum::{
     Router,
     body::Body,
@@ -10,14 +17,14 @@ use axum::{
     response::Response,
 };
 use engram_cli::api::{ApiState, create_api_routes};
-use engram_core::graph::MemoryGraph;
+use engram_core::graph::create_concurrent_graph;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tower::ServiceExt;
 
 /// Create test router for monitoring tests
 fn create_test_router() -> Router {
-    let graph = Arc::new(RwLock::new(MemoryGraph::new()));
+    let graph = Arc::new(RwLock::new(create_concurrent_graph()));
     let api_state = ApiState::new(graph);
 
     create_api_routes().with_state(api_state)

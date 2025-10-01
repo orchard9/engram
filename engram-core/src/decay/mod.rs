@@ -33,6 +33,7 @@
 
 use crate::{Confidence, Episode, Memory};
 use chrono::{DateTime, Duration, Utc};
+use std::convert::TryFrom;
 use std::time::Duration as StdDuration;
 
 pub mod calibration;
@@ -175,7 +176,7 @@ impl BiologicalDecaySystem {
 
     /// Predicts retention probability at given future time
     pub fn predict_retention(&self, memory: &Memory, future_time: Duration) -> f32 {
-        let age_days = (Utc::now() - memory.created_at + future_time).num_days() as f32;
+        let age_days = Self::duration_days(Utc::now() - memory.created_at + future_time);
 
         // Weight based on systems consolidation timeline
         let neocortical_weight = (age_days / 365.0).min(1.0);
@@ -192,6 +193,22 @@ impl BiologicalDecaySystem {
             hippocampal_weight,
             neocortical_retention * neocortical_weight,
         )
+    }
+
+    fn len_to_f32(len: usize) -> Option<f32> {
+        u32::try_from(len).ok().map(|value| {
+            let value_f64 = f64::from(value);
+            #[allow(clippy::cast_possible_truncation)]
+            {
+                value_f64 as f32
+            }
+        })
+    }
+
+    fn duration_days(duration: Duration) -> f32 {
+        duration
+            .to_std()
+            .map_or(0.0, |value| value.as_secs_f32() / 86400.0)
     }
 }
 
@@ -214,7 +231,7 @@ impl DecayIntegration for BiologicalDecaySystem {
         );
 
         // Weight based on systems consolidation timeline
-        let age_days = (Utc::now() - memory.created_at).num_days() as f32;
+        let age_days = Self::duration_days(Utc::now() - memory.created_at);
         let neocortical_weight = (age_days / 365.0).min(1.0);
         let hippocampal_weight = 1.0 - neocortical_weight;
 
@@ -247,7 +264,7 @@ impl DecayIntegration for BiologicalDecaySystem {
         );
 
         // Combine with transfer progress
-        let age_days = elapsed_time.num_days() as f32;
+        let age_days = Self::duration_days(elapsed_time);
         let transfer_progress = (age_days / 1095.0).min(1.0); // 3-year timeline
 
         let final_confidence = Confidence::exact(hippocampal_retention).combine_weighted(
@@ -281,8 +298,12 @@ impl DecayIntegration for BiologicalDecaySystem {
                 .record_consolidation_event(response_time.as_millis() < 1000);
 
             // Update theta phase for oscillatory gating
-            self.hippocampal
-                .update_theta_phase(response_time.as_millis() as f32);
+            let sub_micros = response_time.subsec_micros();
+            #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
+            let response_time_ms = response_time
+                .as_secs_f32()
+                .mul_add(1000.0, (sub_micros as f32) / 1000.0);
+            self.hippocampal.update_theta_phase(response_time_ms);
         }
 
         // High-confidence retrievals trigger consolidation
@@ -297,13 +318,15 @@ impl DecayIntegration for BiologicalDecaySystem {
             return false;
         }
 
-        let mean_activation =
-            activation_pattern.iter().sum::<f32>() / activation_pattern.len() as f32;
+        let Some(len) = Self::len_to_f32(activation_pattern.len()) else {
+            return false;
+        };
+        let mean_activation = activation_pattern.iter().sum::<f32>() / len;
         let variance = activation_pattern
             .iter()
             .map(|&x| (x - mean_activation).powi(2))
             .sum::<f32>()
-            / activation_pattern.len() as f32;
+            / len;
 
         // Sharp-wave ripple pattern: moderate mean with high variance
         mean_activation > self.consolidation_threshold && variance > 0.1 && mean_activation < 0.7 // Not during active processing

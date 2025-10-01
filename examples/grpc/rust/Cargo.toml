@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-tonic = "0.10"
-prost = "0.12"
+tonic = "0.13"
+prost = "0.13"
 tokio = { version = "1.35", features = ["full"] }
 tokio-stream = "0.1"
 engram-proto = { path = "../../../engram-proto" }
@@ -13,7 +13,7 @@ anyhow = "1.0"
 chrono = "0.4"
 tracing = "0.1"
 tracing-subscriber = "0.3"
-uuid = { version = "1.6", features = ["v4"] }
+uuid = { version = "1.6.1", features = ["v4"] }
 
 [build-dependencies]
-tonic-build = "0.10"
+tonic-build = "0.13"

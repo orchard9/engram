@@ -1,7 +1,5 @@
 //! Empirical validation infrastructure.
 
-use crate::decay::DecayResult;
-
 /// Empirical validator for decay functions
 #[derive(Debug, Clone)]
 pub struct EmpiricalValidator {
@@ -25,14 +23,25 @@ impl EmpiricalValidator {
     }
 
     /// Validate predicted values against Ebbinghaus forgetting curve data
-    pub fn validate_ebbinghaus_curve(&self, predicted: f32, empirical: f32) -> DecayResult<bool> {
+    #[must_use]
+    pub fn validate_ebbinghaus_curve(&self, predicted: f32, empirical: f32) -> bool {
+        if empirical == 0.0 {
+            return false;
+        }
+        let tolerance = (1.0 - self.accuracy_threshold).max(0.05);
         let error = (predicted - empirical).abs() / empirical;
-        Ok(error < 0.05) // 5% error tolerance
+        error < tolerance
     }
 
     /// Validate predicted values against Bahrick permastore data
-    pub fn validate_bahrick_permastore(&self, predicted: f32, empirical: f32) -> DecayResult<bool> {
+    #[must_use]
+    pub fn validate_bahrick_permastore(&self, predicted: f32, empirical: f32) -> bool {
+        if empirical == 0.0 {
+            return false;
+        }
+        let base_tolerance = (1.0 - self.accuracy_threshold).max(0.05);
+        let tolerance = (base_tolerance * 2.0).min(0.2);
         let error = (predicted - empirical).abs() / empirical;
-        Ok(error < 0.1) // 10% error tolerance for long-term data
+        error < tolerance
     }
 }

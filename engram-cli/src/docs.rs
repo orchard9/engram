@@ -7,7 +7,7 @@
 use indoc::indoc;
 
 /// Documentation sections organized by cognitive load and operational context
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum DocSection {
     /// Emergency procedures (Cognitive Load: LOW) - 2-5 minute fixes
     Emergency,

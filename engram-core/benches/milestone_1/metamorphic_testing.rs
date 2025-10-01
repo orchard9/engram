@@ -1,6 +1,8 @@
+use rand::{Rng, thread_rng};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct MetamorphicRelation {
     pub name: String,
     pub description: String,
@@ -36,6 +38,7 @@ pub struct GraphData {
     pub edges: Vec<(usize, usize, f32)>,
 }
 
+#[allow(dead_code)]
 pub trait SIMDImplementation {
     fn cosine_similarity(&self, a: &[f32], b: &[f32]) -> f32;
     fn dot_product(&self, a: &[f32], b: &[f32]) -> f32;
@@ -43,18 +46,19 @@ pub trait SIMDImplementation {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct MetamorphicTestingEngine {
-    vector_relations: Vec<MetamorphicRelation>,
-    graph_relations: Vec<MetamorphicRelation>,
-    cognitive_relations: Vec<MetamorphicRelation>,
+    vector_cases: Vec<MetamorphicRelation>,
+    graph_patterns: Vec<MetamorphicRelation>,
+    cognitive_checks: Vec<MetamorphicRelation>,
 }
 
 impl MetamorphicTestingEngine {
     pub fn new() -> Self {
         Self {
-            vector_relations: Self::create_vector_relations(),
-            graph_relations: Self::create_graph_relations(),
-            cognitive_relations: Self::create_cognitive_relations(),
+            vector_cases: Self::create_vector_relations(),
+            graph_patterns: Self::create_graph_relations(),
+            cognitive_checks: Self::create_cognitive_relations(),
         }
     }
 
@@ -191,7 +195,7 @@ impl MetamorphicTestingEngine {
                         orig_act.iter().all(|(node, val)| {
                             trans_act
                                 .get(node)
-                                .map_or(false, |trans_val| (val - trans_val).abs() < 1e-6)
+                                .is_some_and(|trans_val| (val - trans_val).abs() < 1e-6)
                         })
                     } else {
                         true
@@ -257,8 +261,8 @@ impl MetamorphicTestingEngine {
     ) -> MetamorphicTestResults {
         let mut results = MetamorphicTestResults::new();
 
-        for relation in &self.vector_relations {
-            let test_result = self.execute_metamorphic_relation(implementation, relation);
+        for relation in &self.vector_cases {
+            let test_result = Self::execute_metamorphic_relation(implementation, relation);
             results.add_relation_result(&relation.name, test_result);
         }
 
@@ -266,18 +270,17 @@ impl MetamorphicTestingEngine {
     }
 
     fn execute_metamorphic_relation(
-        &self,
         implementation: &impl SIMDImplementation,
         relation: &MetamorphicRelation,
     ) -> MetamorphicTestResult {
-        let test_inputs = self.generate_test_inputs();
+        let test_inputs = Self::generate_test_inputs();
         let mut violations = Vec::new();
         let mut total_tests = 0;
 
         for input in test_inputs {
-            let original_output = self.execute_test(implementation, &input);
+            let original_output = Self::execute_test(implementation, &input);
             let transformed_input = (relation.input_transformation)(&input);
-            let transformed_output = self.execute_test(implementation, &transformed_input);
+            let transformed_output = Self::execute_test(implementation, &transformed_input);
 
             if !(relation.output_relation)(&original_output, &transformed_output) {
                 violations.push(MetamorphicViolation {
@@ -293,19 +296,17 @@ impl MetamorphicTestingEngine {
             total_tests += 1;
         }
 
+        let passed = violations.is_empty();
+
         MetamorphicTestResult {
             relation_name: relation.name.clone(),
             total_tests,
             violations,
-            passed: violations.is_empty(),
+            passed,
         }
     }
 
-    fn execute_test(
-        &self,
-        implementation: &impl SIMDImplementation,
-        input: &TestInput,
-    ) -> TestOutput {
+    fn execute_test(implementation: &impl SIMDImplementation, input: &TestInput) -> TestOutput {
         let similarity = implementation.cosine_similarity(&input.vector_a, &input.vector_b);
 
         TestOutput {
@@ -315,8 +316,7 @@ impl MetamorphicTestingEngine {
         }
     }
 
-    fn generate_test_inputs(&self) -> Vec<TestInput> {
-        use rand::prelude::*;
+    fn generate_test_inputs() -> Vec<TestInput> {
         let mut rng = thread_rng();
         let mut inputs = Vec::new();
 
@@ -333,11 +333,15 @@ impl MetamorphicTestingEngine {
         for _ in 0..5 {
             let mut vector_a = vec![0.0; 768];
             let mut vector_b = vec![0.0; 768];
-            for i in 0..77 {
-                // 10% non-zero
-                vector_a[i * 10] = rng.r#gen::<f32>() - 0.5;
-                vector_b[i * 10] = rng.r#gen::<f32>() - 0.5;
-            }
+            vector_a
+                .iter_mut()
+                .step_by(10)
+                .take(77)
+                .zip(vector_b.iter_mut().step_by(10))
+                .for_each(|(slot_a, slot_b)| {
+                    *slot_a = rng.r#gen::<f32>() - 0.5;
+                    *slot_b = rng.r#gen::<f32>() - 0.5;
+                });
             inputs.push(TestInput {
                 vector_a,
                 vector_b,
@@ -361,48 +365,53 @@ impl MetamorphicTestingEngine {
         inputs
     }
 
-    pub fn generate_orthogonal_vector(&self, a: &[f32], b: &[f32]) -> Vec<f32> {
-        // Generate a vector orthogonal to both a and b
+    #[allow(dead_code)]
+    pub fn generate_orthogonal_vector(a: &[f32], b: &[f32]) -> Vec<f32> {
         if a.len() < 3 {
             return vec![0.0; a.len()];
         }
 
-        // Use Gram-Schmidt process
         let mut orthogonal = vec![0.0; a.len()];
-
-        // Start with a random vector
-        use rand::prelude::*;
         let mut rng = thread_rng();
-        for i in 0..a.len() {
-            orthogonal[i] = rng.r#gen::<f32>() - 0.5;
-        }
+        orthogonal
+            .iter_mut()
+            .for_each(|component| *component = rng.r#gen::<f32>() - 0.5);
 
-        // Project out component along a
-        let dot_a: f32 = orthogonal.iter().zip(a.iter()).map(|(o, a)| o * a).sum();
+        let dot_a: f32 = orthogonal
+            .iter()
+            .zip(a.iter())
+            .map(|(o, a_val)| o * a_val)
+            .sum();
         let norm_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
 
         if norm_a > 1e-10 {
-            for i in 0..orthogonal.len() {
-                orthogonal[i] -= (dot_a / (norm_a * norm_a)) * a[i];
-            }
+            let scale = dot_a / (norm_a * norm_a);
+            orthogonal
+                .iter_mut()
+                .zip(a.iter())
+                .for_each(|(component, a_val)| *component -= scale * a_val);
         }
 
-        // Project out component along b
-        let dot_b: f32 = orthogonal.iter().zip(b.iter()).map(|(o, b)| o * b).sum();
+        let dot_b: f32 = orthogonal
+            .iter()
+            .zip(b.iter())
+            .map(|(o, b_val)| o * b_val)
+            .sum();
         let norm_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
 
         if norm_b > 1e-10 {
-            for i in 0..orthogonal.len() {
-                orthogonal[i] -= (dot_b / (norm_b * norm_b)) * b[i];
-            }
+            let scale = dot_b / (norm_b * norm_b);
+            orthogonal
+                .iter_mut()
+                .zip(b.iter())
+                .for_each(|(component, b_val)| *component -= scale * b_val);
         }
 
-        // Normalize
         let norm: f32 = orthogonal.iter().map(|x| x * x).sum::<f32>().sqrt();
         if norm > 1e-10 {
-            for x in &mut orthogonal {
-                *x /= norm;
-            }
+            orthogonal
+                .iter_mut()
+                .for_each(|component| *component /= norm);
         }
 
         orthogonal
@@ -425,10 +434,12 @@ impl MetamorphicTestResults {
         self.results.insert(name.to_string(), result);
     }
 
+    #[allow(dead_code)]
     pub fn all_passed(&self) -> bool {
         self.results.values().all(|r| r.passed)
     }
 
+    #[allow(dead_code)]
     pub fn critical_violations(&self) -> Vec<&MetamorphicViolation> {
         self.results
             .values()
@@ -436,9 +447,18 @@ impl MetamorphicTestResults {
             .filter(|v| matches!(v.severity, ViolationSeverity::Critical))
             .collect()
     }
+
+    pub fn len(&self) -> usize {
+        self.results.len()
+    }
+
+    pub fn passing_relations(&self) -> usize {
+        self.results.values().filter(|result| result.passed).count()
+    }
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct MetamorphicTestResult {
     pub relation_name: String,
     pub total_tests: usize,
@@ -447,6 +467,7 @@ pub struct MetamorphicTestResult {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct MetamorphicViolation {
     pub relation_name: String,
     pub original_input: TestInput,

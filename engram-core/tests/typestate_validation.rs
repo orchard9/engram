@@ -15,6 +15,7 @@ fn typestate_compile_fail_tests() {
     let test = trybuild::TestCases::new();
 
     // Set environment for better error output
+    #[allow(unsafe_code)]
     unsafe {
         env::set_var("TRYBUILD", "overwrite");
     }

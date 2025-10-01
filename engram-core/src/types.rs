@@ -3,8 +3,8 @@
 //! Follows cognitive guidance principles: every error includes context, suggestion, and example
 //! to help developers resolve issues quickly, even when tired or under stress.
 
-use crate::{cognitive_error, error::CognitiveError};
 use crate::Confidence;
+use crate::{cognitive_error, error::CognitiveError};
 use thiserror::Error;
 
 /// Core error types for the engram system (legacy compatibility)
@@ -30,7 +30,7 @@ pub enum CoreError {
     /// Invalid activation level (must be in range [0.0, 1.0])
     InvalidActivation {
         /// The invalid activation value
-        value: f64
+        value: f64,
     },
 
     #[error(
@@ -41,7 +41,7 @@ pub enum CoreError {
         /// Current activation level
         level: f64,
         /// Required activation threshold
-        threshold: f64
+        threshold: f64,
     },
 
     #[error(
@@ -54,7 +54,7 @@ pub enum CoreError {
         /// Lower bound of confidence interval
         lower: f64,
         /// Upper bound of confidence interval
-        upper: f64
+        upper: f64,
     },
 
     #[error(
@@ -204,12 +204,16 @@ impl CoreError {
     }
 
     /// Helper to create `NodeNotFound` with similar suggestions
-    pub fn node_not_found(id: impl Into<String>, similar: Vec<String>) -> Self {
+    pub fn node_not_found(
+        id: impl Into<String>,
+        similar: impl IntoIterator<Item = String>,
+    ) -> Self {
         let id = id.into();
-        let similar = if similar.is_empty() {
+        let suggestions: Vec<String> = similar.into_iter().collect();
+        let similar = if suggestions.is_empty() {
             String::new()
         } else {
-            format!(", or did you mean: {}?", similar.join(", "))
+            format!(", or did you mean: {}?", suggestions.join(", "))
         };
         Self::NodeNotFound { id, similar }
     }

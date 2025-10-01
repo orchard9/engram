@@ -6,7 +6,16 @@ use crate::{Confidence, Cue, Episode};
 pub struct QueryVerifier;
 
 impl QueryVerifier {
-    /// Verify that query results meet the specified confidence threshold
+    /// Verify that query results meet the specified confidence threshold.
+    ///
+    /// # Errors
+    ///
+    /// This function does not return errors; it simply evaluates the provided inputs.
+    ///
+    /// # Panics
+    ///
+    /// This function does not panic.
+    #[must_use = "Use the verification outcome to enforce confidence constraints"]
     pub fn verify_confidence_threshold(
         results: &[(Episode, Confidence)],
         threshold: Confidence,
@@ -16,12 +25,30 @@ impl QueryVerifier {
             .all(|(_, confidence)| *confidence >= threshold)
     }
 
-    /// Verify that query results are properly ordered by confidence
+    /// Verify that query results are properly ordered by confidence.
+    ///
+    /// # Errors
+    ///
+    /// This function does not return errors; it only inspects the supplied slice.
+    ///
+    /// # Panics
+    ///
+    /// This function does not panic.
+    #[must_use = "Propagate ordering checks to maintain deterministic recall"]
     pub fn verify_confidence_ordering(results: &[(Episode, Confidence)]) -> bool {
         results.windows(2).all(|pair| pair[0].1 >= pair[1].1)
     }
 
-    /// Verify that cue constraints are satisfied
+    /// Verify that cue constraints are satisfied.
+    ///
+    /// # Errors
+    ///
+    /// This function does not return errors; it validates constraints in place.
+    ///
+    /// # Panics
+    ///
+    /// This function does not panic.
+    #[must_use = "Ensure cue constraints gate downstream recall logic"]
     pub fn verify_cue_constraints(cue: &Cue, results: &[(Episode, Confidence)]) -> bool {
         // Check result count limits
         if results.len() > cue.max_results {

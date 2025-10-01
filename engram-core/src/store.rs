@@ -4,18 +4,21 @@
 //! degrade gracefully under pressure, returning activation levels that
 //! indicate store quality.
 
-use crate::{Confidence, Cue, CueType, Episode, Memory, TemporalPattern};
-use crate::memory_graph::{UnifiedMemoryGraph, InfallibleBackend, GraphConfig};
+use crate::memory_graph::{GraphConfig, InfallibleBackend, UnifiedMemoryGraph};
+use crate::numeric::{u64_to_f64, unit_ratio_to_f32};
 use crate::storage::{
-    ContentAddress, ContentIndex, 
-    DeduplicationAction, MergeStrategy, SemanticDeduplicator,
+    ContentAddress, ContentIndex, DeduplicationAction, MergeStrategy, SemanticDeduplicator,
 };
+use crate::{Confidence, Cue, CueType, Episode, Memory, TemporalPattern};
 use chrono::Utc;
 use dashmap::DashMap;
 use parking_lot::RwLock;
 use std::collections::BTreeMap;
+use std::convert::TryFrom;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+
+const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_992; // 2^53
 
 #[cfg(feature = "monitoring")]
 use std::time::Instant;
@@ -51,19 +54,19 @@ impl Activation {
 
     /// Get the raw activation value
     #[must_use]
-    pub const fn value(&self) -> f32 {
+    pub const fn value(self) -> f32 {
         self.0
     }
 
     /// Check if activation indicates successful store
     #[must_use]
-    pub fn is_successful(&self) -> bool {
+    pub fn is_successful(self) -> bool {
         self.0 > 0.5
     }
 
     /// Check if activation indicates degraded store
     #[must_use]
-    pub fn is_degraded(&self) -> bool {
+    pub fn is_degraded(self) -> bool {
         self.0 < 0.8
     }
 }
@@ -80,22 +83,22 @@ impl Activation {
 pub struct MemoryStore {
     /// Unified memory graph with infallible backend
     graph: UnifiedMemoryGraph<InfallibleBackend>,
-    
+
     /// Legacy compatibility: hot memories reference
     pub(crate) hot_memories: DashMap<String, Arc<Memory>>,
 
     /// Write-ahead log for durability (non-blocking)
     pub(crate) wal_buffer: Arc<DashMap<String, Episode>>,
-    
+
     /// Maximum number of memories before eviction
     max_memories: usize,
-    
+
     /// Current memory count
     memory_count: AtomicUsize,
-    
+
     /// System pressure indicator
     pressure: RwLock<f32>,
-    
+
     /// Eviction queue for least-recently-used memories
     eviction_queue: RwLock<BTreeMap<(OrderedFloat, String), Arc<Memory>>>,
 
@@ -122,10 +125,10 @@ pub struct MemoryStore {
     /// Pattern completion engine
     #[cfg(feature = "pattern_completion")]
     pattern_reconstructor: Option<Arc<RwLock<PatternReconstructor>>>,
-    
+
     /// Content-addressable index for deduplication
     content_index: Arc<ContentIndex>,
-    
+
     /// Semantic deduplicator for preventing near-duplicates
     deduplicator: Arc<RwLock<SemanticDeduplicator>>,
 }
@@ -144,17 +147,66 @@ impl Eq for OrderedFloat {}
 
 impl PartialOrd for OrderedFloat {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.0.partial_cmp(&other.0)
+        Some(self.cmp(other))
     }
 }
 
 impl Ord for OrderedFloat {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.partial_cmp(other).unwrap_or(std::cmp::Ordering::Equal)
+        self.0
+            .partial_cmp(&other.0)
+            .unwrap_or(std::cmp::Ordering::Equal)
     }
 }
 
 impl MemoryStore {
+    fn update_pressure_metric(&self, value: f32) {
+        let mut pressure = self.pressure.write();
+        *pressure = value;
+    }
+
+    fn pressure_ratio(current_count: usize, max_memories: usize) -> f32 {
+        if max_memories == 0 {
+            return 0.0;
+        }
+
+        let current_u64 = u64::try_from(current_count).unwrap_or(u64::MAX);
+        let max_u64 = u64::try_from(max_memories).unwrap_or(u64::MAX);
+
+        let capped_current = current_u64.clamp(0_u64, MAX_SAFE_INTEGER);
+        let capped_max = max_u64.clamp(1, MAX_SAFE_INTEGER);
+
+        unit_ratio_to_f32(capped_current, capped_max)
+    }
+
+    #[cfg(feature = "memory_mapped_persistence")]
+    fn persist_episode(&self, memory_arc: &Arc<Memory>, episode: &Episode) {
+        use std::convert::TryFrom;
+
+        if let Some(ref wal_writer) = self.wal_writer {
+            if let Ok(wal_entry) = crate::storage::wal::WalEntry::new_episode(episode) {
+                wal_writer.write_async(wal_entry);
+                let episode_size = std::mem::size_of::<Episode>() as u64
+                    + u64::try_from(episode.id.len()).unwrap_or(0)
+                    + u64::try_from(episode.what.len()).unwrap_or(0);
+                self.storage_metrics.record_write(episode_size);
+            }
+        }
+
+        if let Some(ref backend) = self.persistent_backend {
+            let backend = Arc::clone(backend);
+            let memory = Arc::clone(memory_arc);
+            if let Err(e) = std::thread::spawn(move || {
+                let _backend = backend;
+                tracing::info!("Would persist memory {} in background", memory.id);
+            })
+            .join()
+            {
+                tracing::warn!("Background persistence thread failed: {:?}", e);
+            }
+        }
+    }
+
     /// Create a new memory store with specified capacity
     #[must_use]
     pub fn new(max_memories: usize) -> Self {
@@ -165,10 +217,10 @@ impl MemoryStore {
             max_depth: 3,
             activation_threshold: 0.01,
         };
-        
+
         let backend = InfallibleBackend::new(max_memories);
         let graph = UnifiedMemoryGraph::new(backend, config);
-        
+
         Self {
             graph,
             hot_memories: DashMap::new(),
@@ -203,9 +255,20 @@ impl MemoryStore {
         self
     }
 
+    /// Access the HNSW index when enabled
+    #[cfg(feature = "hnsw_index")]
+    #[must_use]
+    pub(crate) fn hnsw_index(&self) -> Option<&CognitiveHnswIndex> {
+        self.hnsw_index.as_deref()
+    }
+
     /// Create a memory store with persistent backend enabled
     #[cfg(feature = "memory_mapped_persistence")]
-    #[must_use]
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the tiered storage backend or WAL writer cannot be
+    /// initialised at the provided data directory.
     pub fn with_persistence<P: AsRef<std::path::Path>>(
         mut self,
         data_dir: P,
@@ -218,7 +281,7 @@ impl MemoryStore {
             self.max_memories,       // hot capacity
             self.max_memories * 10,  // warm capacity
             self.max_memories * 100, // cold capacity
-            storage_metrics.clone(),
+            Arc::clone(&storage_metrics),
         )?);
 
         // Create WAL writer
@@ -226,7 +289,7 @@ impl MemoryStore {
         let wal_writer = Arc::new(WalWriter::new(
             wal_dir,
             FsyncMode::PerBatch,
-            storage_metrics.clone(),
+            storage_metrics,
         )?);
 
         self.persistent_backend = Some(persistent_backend);
@@ -237,11 +300,23 @@ impl MemoryStore {
 
     /// Initialize the persistent backend (start background workers)
     #[cfg(feature = "memory_mapped_persistence")]
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the WAL writer is still shared elsewhere or if
+    /// the underlying writer fails to start.
     pub fn initialize_persistence(
         &mut self,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        use crate::storage::StorageError;
+
         if let Some(ref mut wal_writer) = self.wal_writer {
-            Arc::get_mut(wal_writer).unwrap().start()?;
+            let writer = Arc::get_mut(wal_writer).ok_or_else(|| {
+                StorageError::wal_failed("WAL writer already in use; cannot start")
+            })?;
+            writer
+                .start()
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
         }
         Ok(())
     }
@@ -266,190 +341,171 @@ impl MemoryStore {
         #[cfg(feature = "monitoring")]
         let start = Instant::now();
 
-        // Calculate system pressure
         let current_count = self.memory_count.load(Ordering::Relaxed);
-        let pressure = (current_count as f32 / self.max_memories as f32).min(1.0);
+        let pressure = Self::pressure_ratio(current_count, self.max_memories);
+        self.update_pressure_metric(pressure);
 
-        // Update system pressure
-        {
-            let mut p = self.pressure.write();
-            *p = pressure;
-        }
-
-        // Calculate base activation from episode encoding confidence and pressure
         let base_activation = episode.encoding_confidence.raw() * pressure.mul_add(-0.5, 1.0);
 
-        // Check if we need to evict
         if current_count >= self.max_memories {
             self.evict_lowest_activation();
         }
 
-        // Convert episode to memory
-        let memory = Memory::from_episode(episode.clone(), base_activation);
-        
-        // Generate content address for deduplication
+        let wal_episode = episode.clone();
+        let graph_penalty = match self.graph.store_episode(wal_episode.clone()) {
+            Ok(_) => 0.0,
+            Err(error) => {
+                tracing::warn!(?error, "failed to record episode in unified memory graph");
+                0.1
+            }
+        };
+
+        let activation = (base_activation * (1.0 - graph_penalty)).clamp(0.0, 1.0);
+        let memory = Memory::from_episode(episode, activation);
         let content_address = ContentAddress::from_embedding(&memory.embedding);
-        
-        // Check for duplicates
-        let existing_memories: Vec<Arc<Memory>> = self.hot_memories.iter()
-            .map(|entry| entry.value().clone())
+
+        let existing_memories: Vec<Arc<Memory>> = self
+            .hot_memories
+            .iter()
+            .map(|entry| Arc::clone(entry.value()))
             .collect();
-        
+
         let dedup_result = {
             let mut dedup = self.deduplicator.write();
             dedup.check_duplicate(&memory, &existing_memories)
         };
-        
-        // Handle deduplication based on result
-        let memory_id = match dedup_result.action {
+
+        let mut memory_id = memory.id.clone();
+        match dedup_result.action {
             DeduplicationAction::Skip => {
-                // Duplicate found, return existing activation
-                if let Some(_existing_id) = dedup_result.existing_id {
-                    return Activation(base_activation * 0.9); // Slightly degraded for duplicate
+                if dedup_result.existing_id.is_some() {
+                    return Activation::new(activation * 0.9);
                 }
-                memory.id.clone()
             }
             DeduplicationAction::Replace(existing_id) => {
-                // Replace existing memory
                 self.hot_memories.remove(&existing_id);
-                self.content_index.remove(&content_address);
-                memory.id.clone()
+                let _ = self.content_index.remove(&content_address);
             }
             DeduplicationAction::Merge(existing_id) => {
-                // Merge with existing memory
                 if let Some(existing) = self.hot_memories.get(&existing_id) {
-                    let dedup = self.deduplicator.read();
-                    let merged = dedup.merge_memories(&memory, &existing);
+                    let merged = {
+                        let dedup = self.deduplicator.read();
+                        dedup.merge_memories(&memory, existing.value())
+                    };
                     let merged_arc = Arc::new(merged);
-                    self.hot_memories.insert(existing_id.clone(), merged_arc.clone());
-                    return Activation(base_activation * 0.95);
+                    self.hot_memories
+                        .insert(existing_id.clone(), Arc::clone(&merged_arc));
+                    return Activation::new(activation * 0.95);
                 }
-                memory.id.clone()
+                memory_id = existing_id;
             }
-            _ => memory.id.clone(),
-        };
-        
+            _ => {}
+        }
+
         let memory_arc = Arc::new(memory);
-        
-        // Store content address mapping
-        self.content_index.insert(content_address, memory_id.clone());
 
-        // Store in hot tier (lock-free)
+        let _ = self
+            .content_index
+            .insert(content_address, memory_id.clone());
         self.hot_memories
-            .insert(memory_id.clone(), memory_arc.clone());
+            .insert(memory_id.clone(), Arc::clone(&memory_arc));
 
-        // Add to eviction queue
         {
             let mut queue = self.eviction_queue.write();
             queue.insert(
-                (OrderedFloat(base_activation), memory_id.clone()),
-                memory_arc.clone(),
+                (OrderedFloat(activation), memory_id.clone()),
+                Arc::clone(&memory_arc),
             );
         }
 
-        // Store in WAL buffer (non-blocking)
-        self.wal_buffer.insert(memory_id.clone(), episode.clone());
-
-        // Persist to storage backend with graceful degradation
         #[cfg(feature = "memory_mapped_persistence")]
-        {
-            if let Some(ref wal_writer) = self.wal_writer {
-                if let Ok(wal_entry) = crate::storage::wal::WalEntry::new_episode(&episode) {
-                    if let Err(e) = wal_writer.write_async(wal_entry) {
-                        tracing::warn!("WAL write failed: {}, continuing with in-memory only", e);
-                        // Graceful degradation: reduce activation to indicate storage issues
-                        return Activation::new(base_activation * 0.9);
-                    }
-                    // Record successful write to storage metrics
-                    let episode_size = std::mem::size_of::<Episode>() as u64 + 
-                                       episode.id.len() as u64 + 
-                                       episode.what.len() as u64;
-                    self.storage_metrics.record_write(episode_size);
-                }
-            }
+        self.persist_episode(&memory_arc, &wal_episode);
 
-            if let Some(ref backend) = self.persistent_backend {
-                // Try to store in persistent backend asynchronously
-                // Note: In production this would be async, simplified for now
-                if let Err(e) = std::thread::spawn({
-                    let _backend_clone = Arc::clone(backend);
-                    let memory_clone = Arc::clone(&memory_arc);
-                    move || {
-                        // Simplified synchronous persistence
-                        tracing::info!("Would persist memory {} in background", memory_clone.id);
-                    }
-                })
-                .join()
-                {
-                    tracing::warn!("Background persistence thread failed: {:?}", e);
-                }
-            }
-        }
+        self.wal_buffer.insert(memory_id.clone(), wal_episode);
 
-        // Queue for HNSW indexing
         #[cfg(feature = "hnsw_index")]
         {
             if let Some(ref queue) = self.index_update_queue {
                 queue.push(IndexUpdate::Insert {
                     memory_id,
-                    memory: memory_arc.clone(),
+                    memory: Arc::clone(&memory_arc),
                     generation: 0,
                     priority: UpdatePriority::Normal,
                 });
             }
 
-            // Try to insert immediately if index is available
             if let Some(ref hnsw) = self.hnsw_index {
-                let _ = hnsw.insert_memory(memory_arc);
+                let _ = hnsw.insert_memory(Arc::clone(&memory_arc));
             }
         }
 
-        // Increment count
         self.memory_count.fetch_add(1, Ordering::Relaxed);
 
         #[cfg(feature = "monitoring")]
         {
             use crate::metrics;
-            // Record store operation metrics
             metrics::increment_counter("memories_created_total", 1);
-            metrics::observe_histogram("store_activation", f64::from(base_activation));
+            metrics::observe_histogram("store_activation", f64::from(activation));
             metrics::observe_histogram("store_duration_seconds", start.elapsed().as_secs_f64());
 
-            // Record cognitive metrics
-            metrics::record_cognitive(CognitiveMetric::CLSContribution {
-                hippocampal: 1.0 - pressure, // More hippocampal when less pressure
-                neocortical: pressure,       // More neocortical under pressure
-            });
+            let metric = CognitiveMetric::CLSContribution {
+                hippocampal: 1.0 - pressure,
+                neocortical: pressure,
+            };
+            metrics::record_cognitive(&metric);
         }
 
-        // Return activation adjusted for any degradation
-        Activation::new(base_activation)
+        Activation::new(activation)
     }
 
     /// Evict the memory with lowest activation
     fn evict_lowest_activation(&self) {
-        let mut queue = self.eviction_queue.write();
+        let candidate = {
+            let mut queue = self.eviction_queue.write();
+            let next_id = queue.iter().next().map(|((_, id), _)| id.clone());
+            if let Some(ref id) = next_id {
+                queue.retain(|k, _| k.1 != *id);
+            }
+            next_id
+        };
 
-        if let Some(((_, id), _)) = queue.iter().next() {
-            let id = id.clone();
-
-            // Remove from hot memories
+        if let Some(id) = candidate {
             self.hot_memories.remove(&id);
-
-            // Remove from eviction queue
-            queue.retain(|k, _| k.1 != id);
-
-            // Remove from WAL buffer
             self.wal_buffer.remove(&id);
-
-            // Decrement count
             self.memory_count.fetch_sub(1, Ordering::Relaxed);
         }
     }
 
     /// Get a memory by ID
     pub fn get(&self, id: &str) -> Option<Arc<Memory>> {
-        self.hot_memories.get(id).map(|entry| entry.clone())
+        self.hot_memories
+            .get(id)
+            .map(|entry| Arc::clone(entry.value()))
+    }
+
+    /// Get an episode by ID
+    pub fn get_episode(&self, id: &str) -> Option<Episode> {
+        // First check WAL buffer
+        if let Some(episode) = self.wal_buffer.get(id) {
+            return Some(episode.clone());
+        }
+
+        // If not in WAL buffer, try converting from hot_memories
+        if let Some(memory) = self.hot_memories.get(id) {
+            let episode = Episode::new(
+                memory.id.clone(),
+                memory.created_at,
+                memory
+                    .content
+                    .clone()
+                    .unwrap_or_else(|| "No content".to_string()),
+                memory.embedding,
+                memory.confidence,
+            );
+            return Some(episode);
+        }
+
+        None
     }
 
     /// Get current system pressure
@@ -473,30 +529,27 @@ impl MemoryStore {
 
     /// Perform maintenance on storage tiers
     #[cfg(feature = "memory_mapped_persistence")]
-    pub fn maintenance(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub fn maintenance(&self) {
         // Perform basic maintenance operations
-        if let Some(ref _backend) = self.persistent_backend {
-            // For now, just check memory pressure and potentially trigger eviction
+        if self.persistent_backend.is_some() {
             let current_count = self.memory_count.load(Ordering::Relaxed);
-            let pressure = (current_count as f32 / self.max_memories as f32).min(1.0);
-            
-            // Update pressure measurement
-            {
-                let mut p = self.pressure.write();
-                *p = pressure;
-            }
-            
-            // If under high pressure, perform maintenance eviction
+            let pressure = Self::pressure_ratio(current_count, self.max_memories);
+            self.update_pressure_metric(pressure);
+
             if pressure > 0.8 {
-                // Could trigger background tier migrations here
-                tracing::info!("High memory pressure detected ({}), maintenance recommended", pressure);
+                tracing::info!(
+                    "High memory pressure detected ({pressure}), maintenance recommended"
+                );
             }
         }
-        Ok(())
     }
 
     /// Gracefully shutdown storage backend
     #[cfg(feature = "memory_mapped_persistence")]
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the WAL writer fails to shut down cleanly.
     pub fn shutdown(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if let Some(ref mut wal_writer) = self.wal_writer {
             if let Some(writer) = Arc::get_mut(wal_writer) {
@@ -514,6 +567,11 @@ impl MemoryStore {
     /// Get the number of memories (alias for count)
     pub fn len(&self) -> usize {
         self.count()
+    }
+
+    /// Check if the store currently holds no memories
+    pub fn is_empty(&self) -> bool {
+        self.count() == 0
     }
 
     /// Check if store can accept more memories without eviction
@@ -534,7 +592,7 @@ impl MemoryStore {
     ///
     /// Never returns errors because human recall doesn't "fail" - it returns
     /// nothing, partial matches, or reconstructed memories with varying confidence.
-    pub fn recall(&self, cue: Cue) -> Vec<(Episode, Confidence)> {
+    pub fn recall(&self, cue: &Cue) -> Vec<(Episode, Confidence)> {
         #[cfg(feature = "monitoring")]
         let start = Instant::now();
 
@@ -545,11 +603,14 @@ impl MemoryStore {
                 let results = self.recall_with_persistence(cue, backend);
 
                 // Record read operation in storage metrics
-                let bytes_read = results.iter().map(|(ep, _)| {
-                    std::mem::size_of::<Episode>() as u64 + 
-                    ep.id.len() as u64 + 
-                    ep.what.len() as u64
-                }).sum::<u64>();
+                let bytes_read = results
+                    .iter()
+                    .map(|(ep, _)| {
+                        std::mem::size_of::<Episode>() as u64
+                            + ep.id.len() as u64
+                            + ep.what.len() as u64
+                    })
+                    .sum::<u64>();
                 self.storage_metrics.record_read(bytes_read);
 
                 // TODO: Add metrics when monitoring feature is properly integrated
@@ -572,7 +633,9 @@ impl MemoryStore {
             use crate::metrics;
             metrics::increment_counter("queries_executed_total", 1);
             metrics::observe_histogram("query_duration_seconds", start.elapsed().as_secs_f64());
-            metrics::observe_histogram("query_result_count", results.len() as f64);
+            if let Ok(result_len) = u64::try_from(results.len()) {
+                metrics::observe_histogram("query_result_count", u64_to_f64(result_len));
+            }
         }
 
         results
@@ -582,7 +645,7 @@ impl MemoryStore {
     #[cfg(feature = "memory_mapped_persistence")]
     fn recall_with_persistence(
         &self,
-        cue: Cue,
+        cue: &Cue,
         _backend: &Arc<CognitiveTierArchitecture>,
     ) -> Vec<(Episode, Confidence)> {
         // For now, use the WAL buffer as a simple persistent store
@@ -592,9 +655,10 @@ impl MemoryStore {
         // Search in WAL buffer (which contains persisted episodes)
         for entry in self.wal_buffer.iter() {
             let episode = entry.value();
-            let confidence = self.calculate_episode_confidence(episode, &cue);
-            
-            if confidence.raw() > 0.1 {  // Basic threshold
+            let confidence = Self::calculate_episode_confidence(episode, cue);
+
+            if confidence.raw() > 0.1 {
+                // Basic threshold
                 results.push((episode.clone(), confidence));
             }
         }
@@ -606,7 +670,7 @@ impl MemoryStore {
         // If persistent backend returned insufficient results, supplement with in-memory
         if results.len() < cue.max_results {
             let mut combined = results;
-            let mut in_memory = self.recall_in_memory(cue.clone());
+            let mut in_memory = self.recall_in_memory(cue);
 
             // Remove duplicates and merge
             in_memory.retain(|(episode, _)| {
@@ -625,31 +689,44 @@ impl MemoryStore {
 
     /// Calculate confidence score for an episode matching a cue
     #[cfg(feature = "memory_mapped_persistence")]
-    fn calculate_episode_confidence(&self, episode: &Episode, cue: &Cue) -> Confidence {
+    fn calculate_episode_confidence(episode: &Episode, cue: &Cue) -> Confidence {
         match &cue.cue_type {
-            CueType::Embedding { vector, threshold: _ } => {
+            CueType::Embedding {
+                vector,
+                threshold: _,
+            } => {
                 let similarity = cosine_similarity(&episode.embedding, vector);
                 Confidence::exact(similarity)
             }
-            CueType::Context { confidence_threshold, .. } => {
+            CueType::Context {
+                confidence_threshold,
+                ..
+            } => {
                 // Simple context matching based on text similarity
                 *confidence_threshold
             }
-            CueType::Semantic { 
-                content, 
-                fuzzy_threshold: threshold 
+            CueType::Semantic {
+                content,
+                fuzzy_threshold: threshold,
             } => {
                 // Simple text matching
                 let content_similarity = if episode.what.contains(content) {
                     0.9
-                } else if episode.what.to_lowercase().contains(&content.to_lowercase()) {
+                } else if episode
+                    .what
+                    .to_lowercase()
+                    .contains(&content.to_lowercase())
+                {
                     0.7
                 } else {
-                    threshold.raw() / 2.0  // Below threshold but non-zero
+                    threshold.raw() / 2.0 // Below threshold but non-zero
                 };
                 Confidence::exact(content_similarity)
             }
-            CueType::Temporal { confidence_threshold, .. } => {
+            CueType::Temporal {
+                confidence_threshold,
+                ..
+            } => {
                 // Basic temporal confidence
                 *confidence_threshold
             }
@@ -657,47 +734,50 @@ impl MemoryStore {
     }
 
     /// In-memory recall implementation
-    fn recall_in_memory(&self, cue: Cue) -> Vec<(Episode, Confidence)> {
+    fn recall_in_memory(&self, cue: &Cue) -> Vec<(Episode, Confidence)> {
         // Main orchestration method - delegates to focused methods
-        
+
         // 1. Try HNSW index for embedding cues if available
         #[cfg(feature = "hnsw_index")]
         {
             if let CueType::Embedding { vector, threshold } = &cue.cue_type {
                 if let Some(ref hnsw) = self.hnsw_index {
-                    return self.recall_with_hnsw(cue.clone(), hnsw, vector, *threshold);
+                    return self.recall_with_hnsw(cue, hnsw, vector, *threshold);
                 }
             }
         }
 
         // 2. Get episodes and apply cue-specific filtering
         let episodes = self.get_episodes_from_buffer();
-        let mut results = self.apply_cue_filtering(episodes, &cue);
-        
+        let mut results = Self::apply_cue_filtering(episodes, cue);
+
         // 3. Apply spreading activation
-        results = self.apply_spreading_activation(results, &cue);
-        
+        results = self.apply_spreading_activation(results, cue);
+
         // 4. Sort and limit results
-        self.finalize_results(results, cue.max_results)
+        Self::finalize_results(results, cue.max_results)
     }
-    
+
     /// Extract all episodes from the WAL buffer and hot memories
     fn get_episodes_from_buffer(&self) -> Vec<(String, Episode)> {
         let mut episodes = Vec::new();
-        
+
         // Get episodes from WAL buffer
         for entry in self.wal_buffer.iter() {
             episodes.push((entry.key().clone(), entry.value().clone()));
         }
-        
+
         // Also convert hot memories to episodes for recall
         // This ensures deduplication doesn't prevent recall
-        for entry in self.hot_memories.iter() {
+        for entry in &self.hot_memories {
             let memory = entry.value();
             let episode = Episode::new(
                 memory.id.clone(),
                 memory.created_at,
-                memory.content.clone().unwrap_or_else(|| format!("Memory {}", memory.id)),
+                memory
+                    .content
+                    .clone()
+                    .unwrap_or_else(|| format!("Memory {}", memory.id)),
                 memory.embedding,
                 memory.confidence,
             );
@@ -706,37 +786,48 @@ impl MemoryStore {
                 episodes.push((memory.id.clone(), episode));
             }
         }
-        
+
         episodes
     }
-    
+
     /// Apply cue-specific filtering to episodes
-    fn apply_cue_filtering(&self, episodes: Vec<(String, Episode)>, cue: &Cue) -> Vec<(Episode, Confidence)> {
+    fn apply_cue_filtering(
+        episodes: Vec<(String, Episode)>,
+        cue: &Cue,
+    ) -> Vec<(Episode, Confidence)> {
         match &cue.cue_type {
             CueType::Embedding { vector, threshold } => {
-                self.filter_by_embedding(episodes, vector, threshold)
+                Self::filter_by_embedding(episodes, vector, *threshold)
             }
-            CueType::Context { time_range, location, confidence_threshold } => {
-                self.filter_by_context(episodes, time_range, location, confidence_threshold)
-            }
-            CueType::Semantic { content, fuzzy_threshold } => {
-                self.filter_by_semantic(episodes, content, fuzzy_threshold)
-            }
-            CueType::Temporal { pattern, confidence_threshold } => {
-                self.filter_by_temporal(episodes, pattern, confidence_threshold)
-            }
+            CueType::Context {
+                time_range,
+                location,
+                confidence_threshold,
+            } => Self::filter_by_context(
+                episodes,
+                time_range.as_ref(),
+                location.as_deref(),
+                *confidence_threshold,
+            ),
+            CueType::Semantic {
+                content,
+                fuzzy_threshold,
+            } => Self::filter_by_semantic(episodes, content, *fuzzy_threshold),
+            CueType::Temporal {
+                pattern,
+                confidence_threshold,
+            } => Self::filter_by_temporal(episodes, pattern, *confidence_threshold),
         }
     }
-    
+
     /// Filter episodes by embedding similarity
     fn filter_by_embedding(
-        &self,
         episodes: Vec<(String, Episode)>,
         vector: &[f32; 768],
-        threshold: &Confidence,
+        threshold: Confidence,
     ) -> Vec<(Episode, Confidence)> {
         let mut results = Vec::new();
-        
+
         for (_id, episode) in episodes {
             let similarity = cosine_similarity(&episode.embedding, vector);
             let confidence = Confidence::exact(similarity);
@@ -745,23 +836,23 @@ impl MemoryStore {
                 results.push((episode, confidence));
             }
         }
-        
+
         results
     }
-    
+
     /// Filter episodes by context (time range and location)
     fn filter_by_context(
-        &self,
         episodes: Vec<(String, Episode)>,
-        time_range: &Option<(chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>)>,
-        location: &Option<String>,
-        confidence_threshold: &Confidence,
+        time_range: Option<&(chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>)>,
+        location: Option<&str>,
+        confidence_threshold: Confidence,
     ) -> Vec<(Episode, Confidence)> {
         let mut results = Vec::new();
-        
+
         for (_id, episode) in episodes {
-            let (match_score, max_score) = self.calculate_context_score(&episode, time_range, location);
-            
+            let (match_score, max_score) =
+                Self::calculate_context_score(&episode, time_range, location);
+
             if max_score > 0.0 {
                 let confidence_value = match_score / max_score;
                 let confidence = Confidence::exact(confidence_value);
@@ -771,16 +862,15 @@ impl MemoryStore {
                 }
             }
         }
-        
+
         results
     }
-    
+
     /// Calculate context matching score for an episode
     fn calculate_context_score(
-        &self,
         episode: &Episode,
-        time_range: &Option<(chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>)>,
-        location: &Option<String>,
+        time_range: Option<&(chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>)>,
+        location: Option<&str>,
     ) -> (f32, f32) {
         let mut match_score = 0.0;
         let mut max_score = 0.0;
@@ -802,22 +892,21 @@ impl MemoryStore {
                 }
             }
         }
-        
+
         (match_score, max_score)
     }
-    
+
     /// Filter episodes by semantic content
     fn filter_by_semantic(
-        &self,
         episodes: Vec<(String, Episode)>,
         content: &str,
-        fuzzy_threshold: &Confidence,
+        fuzzy_threshold: Confidence,
     ) -> Vec<(Episode, Confidence)> {
         let mut results = Vec::new();
-        
+
         for (_id, episode) in episodes {
-            let match_score = self.calculate_semantic_similarity(&episode.what, content);
-            
+            let match_score = Self::calculate_semantic_similarity(&episode.what, content);
+
             if match_score > 0.0 {
                 let confidence = Confidence::exact(match_score);
 
@@ -826,70 +915,81 @@ impl MemoryStore {
                 }
             }
         }
-        
+
         results
     }
-    
+
     /// Calculate semantic similarity between episode content and query
-    fn calculate_semantic_similarity(&self, episode_content: &str, query: &str) -> f32 {
+    fn calculate_semantic_similarity(episode_content: &str, query: &str) -> f32 {
         // Exact substring match
-        if episode_content.to_lowercase().contains(&query.to_lowercase()) {
+        if episode_content
+            .to_lowercase()
+            .contains(&query.to_lowercase())
+        {
             return 1.0;
         }
-        
+
         // Reverse substring match
-        if query.to_lowercase().contains(&episode_content.to_lowercase()) {
+        if query
+            .to_lowercase()
+            .contains(&episode_content.to_lowercase())
+        {
             return 0.7;
         }
-        
+
         // Word overlap calculation
         let query_words: Vec<&str> = query.split_whitespace().collect();
         let episode_words: Vec<&str> = episode_content.split_whitespace().collect();
-        let matches = query_words.iter().filter(|w| episode_words.contains(w)).count();
+        let matches = query_words
+            .iter()
+            .filter(|w| episode_words.contains(w))
+            .count();
 
         if matches > 0 {
-            (matches as f32 / query_words.len().max(1) as f32) * 0.5
+            let matches_u64 = u64::try_from(matches).unwrap_or(u64::MAX);
+            let denominator_u64 = u64::try_from(query_words.len().max(1)).unwrap_or(u64::MAX);
+            let overlap_ratio = unit_ratio_to_f32(matches_u64, denominator_u64);
+            overlap_ratio * 0.5
         } else {
             0.0
         }
     }
-    
+
     /// Filter episodes by temporal pattern
     fn filter_by_temporal(
-        &self,
         episodes: Vec<(String, Episode)>,
         pattern: &TemporalPattern,
-        confidence_threshold: &Confidence,
+        confidence_threshold: Confidence,
     ) -> Vec<(Episode, Confidence)> {
         let mut results = Vec::new();
-        
+
         for (_id, episode) in episodes {
-            if self.matches_temporal_pattern(&episode, pattern) {
-                let confidence = *confidence_threshold;
-                results.push((episode, confidence));
+            if Self::matches_temporal_pattern(&episode, pattern) {
+                results.push((episode, confidence_threshold));
             }
         }
-        
+
         results
     }
-    
+
     /// Check if episode matches temporal pattern
-    fn matches_temporal_pattern(&self, episode: &Episode, pattern: &TemporalPattern) -> bool {
+    fn matches_temporal_pattern(episode: &Episode, pattern: &TemporalPattern) -> bool {
         match pattern {
             TemporalPattern::Before(time) => episode.when < *time,
             TemporalPattern::After(time) => episode.when > *time,
-            TemporalPattern::Between(start, end) => {
-                episode.when >= *start && episode.when <= *end
-            }
+            TemporalPattern::Between(start, end) => episode.when >= *start && episode.when <= *end,
             TemporalPattern::Recent(duration) => {
                 let now = Utc::now();
                 episode.when > now - *duration
             }
         }
     }
-    
+
     /// Sort and limit results to requested max
-    fn finalize_results(&self, mut results: Vec<(Episode, Confidence)>, max_results: usize) -> Vec<(Episode, Confidence)> {
+    fn finalize_results(
+        mut results: Vec<(Episode, Confidence)>,
+        max_results: usize,
+    ) -> Vec<(Episode, Confidence)> {
         // Sort by confidence (highest first)
         results.sort_by(|a, b| {
             b.1.raw()
@@ -899,87 +999,80 @@ impl MemoryStore {
 
         // Limit results
         results.truncate(max_results);
-        
+
         results
     }
 
     /// Complete a partial episode using pattern completion
     #[cfg(feature = "pattern_completion")]
-    pub fn complete_pattern(&self, partial: PartialEpisode) -> CompletedEpisode {
+    pub fn complete_pattern(&self, partial: &PartialEpisode) -> CompletedEpisode {
         #[cfg(feature = "monitoring")]
         let start = Instant::now();
 
-        if let Some(ref reconstructor) = self.pattern_reconstructor {
-            // Get episodes for context
-            let episodes: Vec<Episode> = self
-                .wal_buffer
-                .iter()
-                .map(|entry| entry.value().clone())
-                .collect();
-
-            // Update reconstructor with current episodes
-            let mut reconstructor = reconstructor.write();
-            reconstructor.update(&episodes);
-
-            // Perform completion
-            match reconstructor.complete(&partial) {
-                Ok(completed) => {
-                    #[cfg(feature = "monitoring")]
-                    {
-                        use crate::metrics;
-                        metrics::increment_counter("pattern_completions_total", 1);
-                        metrics::observe_histogram(
-                            "pattern_completion_duration_seconds",
-                            start.elapsed().as_secs_f64(),
-                        );
-                        // Note: completed doesn't have confidence field directly
-
-                        // Record cognitive metrics
-                        metrics::record_cognitive(CognitiveMetric::PatternCompletion {
-                            plausibility: 0.8, // Default plausibility
-                            is_false_memory: false,
-                        });
-                    }
-
-                    completed
-                }
-                Err(e) => {
-                    tracing::warn!("Pattern completion failed: {:?}", e);
-                    // Return a degraded completion
-                    use crate::completion::SourceMap;
-                    CompletedEpisode {
-                        episode: Episode::new(
-                            format!("failed_{}", chrono::Utc::now().timestamp()),
-                            chrono::Utc::now(),
-                            "Failed pattern completion".to_string(),
-                            [0.0; 768],
-                            Confidence::exact(0.1),
-                        ),
-                        completion_confidence: Confidence::exact(0.1),
-                        source_attribution: SourceMap::default(),
-                        alternative_hypotheses: Vec::new(),
-                        metacognitive_confidence: Confidence::exact(0.1),
-                        activation_evidence: Vec::new(),
-                    }
-                }
-            }
-        } else {
-            // No pattern completion available, return minimal completion
-            use crate::completion::SourceMap;
-            CompletedEpisode {
-                episode: Episode::new(
-                    format!("unavailable_{}", chrono::Utc::now().timestamp()),
-                    chrono::Utc::now(),
-                    "Pattern completion not available".to_string(),
-                    [0.0; 768],
+        self.pattern_reconstructor.as_ref().map_or_else(
+            || {
+                Self::fallback_completion(
+                    "Pattern completion not available",
+                    "unavailable",
                     Confidence::exact(0.0),
-                ),
-                completion_confidence: Confidence::exact(0.0),
-                source_attribution: SourceMap::default(),
-                alternative_hypotheses: Vec::new(),
-                metacognitive_confidence: Confidence::exact(0.0),
-                activation_evidence: Vec::new(),
-            }
+                )
+            },
+            |reconstructor| {
+                let episodes: Vec<Episode> = self
+                    .wal_buffer
+                    .iter()
+                    .map(|entry| entry.value().clone())
+                    .collect();
+
+                let mut reconstructor = reconstructor.write();
+                reconstructor.update(&episodes);
+
+                match reconstructor.complete(partial) {
+                    Ok(completed) => {
+                        #[cfg(feature = "monitoring")]
+                        {
+                            use crate::metrics;
+                            metrics::increment_counter("pattern_completions_total", 1);
+                            metrics::observe_histogram(
+                                "pattern_completion_duration_seconds",
+                                start.elapsed().as_secs_f64(),
+                            );
+                            metrics::record_cognitive(&CognitiveMetric::PatternCompletion {
+                                plausibility: 0.8,
+                                is_false_memory: false,
+                            });
+                        }
+
+                        completed
+                    }
+                    Err(error) => {
+                        tracing::warn!("Pattern completion failed: {:?}", error);
+                        Self::fallback_completion(
+                            "Failed pattern completion",
+                            "failed",
+                            Confidence::exact(0.1),
+                        )
+                    }
+                }
+            },
+        )
+    }
+
+    #[cfg(feature = "pattern_completion")]
+    fn fallback_completion(
+        message: &str,
+        prefix: &str,
+        confidence: Confidence,
+    ) -> CompletedEpisode {
+        let now = chrono::Utc::now();
+        let identifier = format!("{prefix}_{}", now.timestamp());
+        CompletedEpisode {
+            episode: Episode::new(identifier, now, message.to_string(), [0.0; 768], confidence),
+            completion_confidence: confidence,
+            source_attribution: crate::completion::SourceMap::default(),
+            alternative_hypotheses: Vec::new(),
+            metacognitive_confidence: confidence,
+            activation_evidence: Vec::new(),
         }
     }
 
@@ -1025,9 +1118,11 @@ impl MemoryStore {
                 let related_ep = entry.value();
                 if related_ep.id != ep.id && related_ep.when >= start && related_ep.when <= end {
                     // Calculate activation boost based on temporal proximity
-                    let time_diff = (ep.when - related_ep.when).num_seconds().abs() as f32;
-                    let max_diff = time_window.num_seconds() as f32;
-                    let proximity = 1.0 - (time_diff / max_diff);
+                    let time_diff = (ep.when - related_ep.when).num_seconds().unsigned_abs();
+                    let max_diff_seconds =
+                        std::cmp::max(time_window.num_seconds().unsigned_abs(), 1);
+                    let ratio = unit_ratio_to_f32(time_diff, max_diff_seconds);
+                    let proximity = (1.0_f32 - ratio).clamp(0.0, 1.0);
                     let boost = proximity * base_conf.raw() * spread_factor * 0.3;
 
                     // Check if already in results
@@ -1055,7 +1150,7 @@ impl MemoryStore {
     #[cfg(feature = "hnsw_index")]
     fn recall_with_hnsw(
         &self,
-        cue: Cue,
+        cue: &Cue,
         hnsw: &CognitiveHnswIndex,
         vector: &[f32; 768],
         threshold: Confidence,
@@ -1078,7 +1173,10 @@ impl MemoryStore {
                 let episode = Episode::new(
                     memory.id.clone(),
                     memory.created_at,
-                    memory.content.clone().unwrap_or_else(|| format!("Memory {}", memory.id)),
+                    memory
+                        .content
+                        .clone()
+                        .unwrap_or_else(|| format!("Memory {}", memory.id)),
                     memory.embedding,
                     memory.confidence,
                 );
@@ -1088,7 +1186,7 @@ impl MemoryStore {
 
         // Apply spreading activation using HNSW graph structure
         let pressure = *self.pressure.read();
-        results = hnsw.apply_spreading_activation(results, &cue, pressure);
+        results = hnsw.apply_spreading_activation(results, cue, pressure);
 
         // Sort and limit results
         results.sort_by(|a, b| {
@@ -1100,11 +1198,11 @@ impl MemoryStore {
         results.truncate(cue.max_results);
         results
     }
-    
+
     /// Recall memory by content address
     pub fn recall_by_content(&self, embedding: &[f32; 768]) -> Option<Episode> {
         let content_address = ContentAddress::from_embedding(embedding);
-        
+
         // Look up memory ID from content index
         if let Some(memory_id) = self.content_index.get(&content_address) {
             // Retrieve memory from hot tier
@@ -1113,73 +1211,84 @@ impl MemoryStore {
                 let episode = Episode::new(
                     memory.id.clone(),
                     memory.created_at,
-                    memory.content.clone().unwrap_or_else(|| format!("Memory {}", memory.id)),
+                    memory
+                        .content
+                        .clone()
+                        .unwrap_or_else(|| format!("Memory {}", memory.id)),
                     memory.embedding,
                     memory.confidence,
                 );
                 return Some(episode);
             }
         }
-        
+
         None
     }
-    
+
     /// Find similar content using LSH buckets
-    pub fn find_similar_content(&self, embedding: &[f32; 768], max_results: usize) -> Vec<(Episode, Confidence)> {
+    pub fn find_similar_content(
+        &self,
+        embedding: &[f32; 768],
+        max_results: usize,
+    ) -> Vec<(Episode, Confidence)> {
         let content_address = ContentAddress::from_embedding(embedding);
-        
+
         // Find similar content addresses in same or nearby buckets
         let similar_addresses = self.content_index.find_nearby(&content_address, 5);
-        
+
         let mut results = Vec::new();
-        
+
         for addr in similar_addresses {
             if let Some(memory_id) = self.content_index.get(&addr) {
                 if let Some(memory) = self.hot_memories.get(&memory_id) {
                     // Calculate actual similarity
-                    let similarity = crate::compute::cosine_similarity_768(embedding, &memory.embedding);
-                    
+                    let similarity =
+                        crate::compute::cosine_similarity_768(embedding, &memory.embedding);
+
                     if similarity > 0.8 {
                         let episode = Episode::new(
                             memory.id.clone(),
                             memory.created_at,
-                            memory.content.clone().unwrap_or_else(|| format!("Memory {}", memory.id)),
+                            memory
+                                .content
+                                .clone()
+                                .unwrap_or_else(|| format!("Memory {}", memory.id)),
                             memory.embedding,
                             memory.confidence,
                         );
-                        
+
                         results.push((episode, Confidence::exact(similarity)));
                     }
                 }
             }
         }
-        
+
         // Sort by confidence
         results.sort_by(|a, b| {
             b.1.raw()
                 .partial_cmp(&a.1.raw())
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
-        
+
         results.truncate(max_results);
         results
     }
-    
+
     /// Get deduplication statistics
     pub fn deduplication_stats(&self) -> crate::storage::DeduplicationStats {
         self.deduplicator.read().stats()
     }
-    
+
     /// Get content index statistics
     pub fn content_index_stats(&self) -> crate::storage::ContentIndexStats {
         self.content_index.stats()
     }
-    
+
     /// Configure deduplication threshold
     pub fn set_deduplication_threshold(&self, threshold: f32) {
         self.deduplicator.write().set_threshold(threshold);
     }
-    
+
     /// Configure deduplication merge strategy
     pub fn set_deduplication_strategy(&self, strategy: MergeStrategy) {
         self.deduplicator.write().set_strategy(strategy);
@@ -1191,49 +1300,66 @@ fn cosine_similarity(a: &[f32; 768], b: &[f32; 768]) -> f32 {
     crate::compute::cosine_similarity_768(a, b)
 }
 
-/// Extension trait to convert Episode to Memory
-trait EpisodeToMemory {
-    fn from_episode(episode: Episode, activation: f32) -> Self;
-}
-
-impl EpisodeToMemory for Memory {
-    fn from_episode(episode: Episode, activation: f32) -> Self {
-        let memory = Self::new(
-            format!("mem_{}", episode.id),
-            episode.embedding,
-            episode.encoding_confidence,
-        );
-
-        memory.set_activation(activation);
-        memory
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Confidence, Cue, EpisodeBuilder};
+    use crate::{Confidence, Cue, EpisodeBuilder, numeric};
     use chrono::Utc;
-    
+    use std::convert::TryFrom;
+    use std::fmt::Debug;
+
+    type TestResult<T = ()> = Result<T, String>;
+
+    fn ensure(condition: bool, message: impl Into<String>) -> TestResult {
+        if condition {
+            Ok(())
+        } else {
+            Err(message.into())
+        }
+    }
+
+    fn ensure_eq<T>(actual: &T, expected: &T, context: &str) -> TestResult
+    where
+        T: PartialEq + Debug,
+    {
+        if actual == expected {
+            Ok(())
+        } else {
+            Err(format!("{context}: expected {expected:?}, got {actual:?}"))
+        }
+    }
+
+    fn usize_to_f32(value: usize) -> f32 {
+        debug_assert!(value < (1 << 24));
+        let value_u64 = u64::try_from(value).unwrap_or(u64::MAX);
+        numeric::saturating_f32_from_f64(numeric::u64_to_f64(value_u64))
+    }
+
+    fn usize_to_u64(value: usize) -> u64 {
+        u64::try_from(value).unwrap_or(u64::MAX)
+    }
+
     // Helper to create unique embeddings for tests
     fn create_test_embedding(seed: f32) -> [f32; 768] {
         use std::f32::consts::PI;
+
         let mut embedding = [0.0f32; 768];
-        
+        let freq = seed.mul_add(10.0, 1.0);
+        let phase = seed * PI * 2.0;
+        let amplitude_scale = (1.0 + seed).sqrt();
+
         // Create orthogonal basis vectors based on seed
         // Each seed creates a different direction in high-dimensional space
-        for i in 0..768 {
-            // Use different frequencies and phases based on seed
-            let freq = 1.0 + seed * 10.0;
-            let phase = seed * PI * 2.0;
-            
-            // Mix multiple sinusoids to create unique patterns
-            embedding[i] = ((i as f32 * freq / 768.0 + phase).sin() * 0.5 +
-                           (i as f32 * freq * 2.0 / 768.0 + phase * 1.5).cos() * 0.3 +
-                           (i as f32 * freq * 3.0 / 768.0 + phase * 2.0).sin() * 0.2) * 
-                           (1.0 + seed).sqrt();
+        for (idx, value) in embedding.iter_mut().enumerate() {
+            let idx_f = usize_to_f32(idx);
+            let base = phase.mul_add(1.0, idx_f * freq / 768.0);
+            let first = base.sin();
+            let second = phase.mul_add(1.5, idx_f * freq * 2.0 / 768.0).cos();
+            let third = phase.mul_add(2.0, idx_f * freq * 3.0 / 768.0).sin();
+            let mixed = third.mul_add(0.2, first.mul_add(0.5, second * 0.3));
+            *value = mixed * amplitude_scale;
         }
-        
+
         // Normalize to unit vector for consistent cosine similarity
         let norm = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
         if norm > 0.0 {
@@ -1241,7 +1367,7 @@ mod tests {
                 *val /= norm;
             }
         }
-        
+
         embedding
     }
 
@@ -1268,7 +1394,7 @@ mod tests {
     // The eviction behavior is already tested more thoroughly in the dedicated eviction test
 
     #[test]
-    fn test_concurrent_stores_dont_block() {
+    fn test_concurrent_stores_dont_block() -> TestResult {
         use std::sync::Arc;
         use std::thread;
         use std::time::{SystemTime, UNIX_EPOCH};
@@ -1281,19 +1407,25 @@ mod tests {
             let store_clone = Arc::clone(&store);
             let handle = thread::spawn(move || {
                 // Small delay to ensure unique timestamps
-                thread::sleep(std::time::Duration::from_millis(i as u64));
-                
+                let delay = usize_to_u64(i);
+                thread::sleep(std::time::Duration::from_millis(delay));
+
                 // Use thread ID + timestamp for truly unique embedding
-                let timestamp = SystemTime::now()
+                let elapsed = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_nanos() as f32;
-                let unique_seed = (i as f32 * 1000.0) + (timestamp / 1e9);
-                
+                    .unwrap_or_else(|_| std::time::Duration::from_secs(0));
+                let timestamp_secs = {
+                    let secs = elapsed.as_secs_f64();
+                    let nanos = f64::from(elapsed.subsec_nanos());
+                    numeric::saturating_f32_from_f64(secs + nanos / 1_000_000_000.0)
+                };
+                let idx_f = usize_to_f32(i);
+                let unique_seed = idx_f.mul_add(1000.0, timestamp_secs);
+
                 let episode = EpisodeBuilder::new()
                     .id(format!("ep_thread_{i}"))
                     .when(Utc::now())
-                    .what(format!("concurrent episode {}", i))
+                    .what(format!("concurrent episode {i}"))
                     .embedding(create_test_embedding(unique_seed))
                     .confidence(Confidence::HIGH)
                     .build();
@@ -1305,12 +1437,16 @@ mod tests {
 
         // All stores should complete without blocking
         for handle in handles {
-            let activation = handle.join().unwrap();
-            assert!(activation.value() > 0.0);
+            let activation = handle
+                .join()
+                .map_err(|err| format!("store thread panicked: {err:?}"))?;
+            ensure(activation.value() > 0.0, "activation should be positive")?;
         }
 
         // Should have stored 10 unique memories
-        assert_eq!(store.count(), 10);
+        ensure_eq(&store.count(), &10_usize, "stored memory count")?;
+
+        Ok(())
     }
 
     #[test]
@@ -1319,19 +1455,24 @@ mod tests {
 
         // Fill store to capacity with unique memories
         for i in 0..5 {
+            let seed = usize_to_f32(i);
             let episode = EpisodeBuilder::new()
                 .id(format!("ep{i}"))
                 .when(Utc::now())
-                .what(format!("episode {}", i))
-                .embedding(create_test_embedding(i as f32))  // Use i directly for better separation
+                .what(format!("episode {i}"))
+                .embedding(create_test_embedding(seed)) // Use seed derived from loop index for separation
                 .confidence(Confidence::MEDIUM)
                 .build();
             store.store(episode);
         }
 
         // Verify pressure is high
-        assert!(store.pressure() > 0.6, "Pressure should be high when at capacity, got {}", store.pressure());
-        
+        assert!(
+            store.pressure() > 0.6,
+            "Pressure should be high when at capacity, got {}",
+            store.pressure()
+        );
+
         // Store under pressure should still work but with degraded activation
         let high_pressure_episode = EpisodeBuilder::new()
             .id("pressure_ep".to_string())
@@ -1342,9 +1483,13 @@ mod tests {
             .build();
 
         let activation = store.store(high_pressure_episode);
-        
+
         // Activation should be degraded due to pressure
-        assert!(activation.value() < 0.5, "Activation should be degraded under pressure, got {}", activation.value());
+        assert!(
+            activation.value() < 0.5,
+            "Activation should be degraded under pressure, got {}",
+            activation.value()
+        );
     }
 
     #[test]
@@ -1369,7 +1514,7 @@ mod tests {
             Confidence::HIGH,
         );
 
-        let results = store.recall(cue);
+        let results = store.recall(&cue);
 
         // Should return empty vector, not error
         assert_eq!(results.len(), 0);
@@ -1408,7 +1553,7 @@ mod tests {
         // Search with embedding similar to first
         let cue = Cue::embedding("cue1".to_string(), embedding1, Confidence::exact(0.9));
 
-        let results = store.recall(cue);
+        let results = store.recall(&cue);
 
         // Should find the matching episode
         assert!(!results.is_empty());
@@ -1454,12 +1599,12 @@ mod tests {
             Confidence::MEDIUM,
         );
 
-        let results = store.recall(cue);
+        let results = store.recall(&cue);
 
         // Should find only today's office memory
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].0.id, "ep1");
-        assert!(results[0].1.raw() == 1.0); // Perfect match on both criteria
+        assert!((results[0].1.raw() - 1.0).abs() < 1e-6); // Perfect match on both criteria
     }
 
     #[test]
@@ -1499,7 +1644,7 @@ mod tests {
         // Search for "meeting" should find ep1 and ep3
         let cue = Cue::semantic("cue1".to_string(), "meeting".to_string(), Confidence::LOW);
 
-        let results = store.recall(cue);
+        let results = store.recall(&cue);
 
         // Should find both meeting-related episodes
         assert_eq!(results.len(), 2, "Should find both meeting episodes");
@@ -1527,8 +1672,8 @@ mod tests {
         let stored_embedding = create_test_embedding(5.0);
         let mut partial_embedding = stored_embedding;
         // Modify it slightly to create partial match
-        for i in 0..100 {
-            partial_embedding[i] *= 0.9;
+        for value in partial_embedding.iter_mut().take(100) {
+            *value *= 0.9;
         }
         // Renormalize
         let norm = partial_embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
@@ -1540,7 +1685,7 @@ mod tests {
 
         let cue = Cue::embedding("cue1".to_string(), partial_embedding, Confidence::LOW);
 
-        let results = store.recall(cue);
+        let results = store.recall(&cue);
 
         // Should return with confidence in valid range
         assert!(!results.is_empty());
@@ -1551,18 +1696,19 @@ mod tests {
     }
 
     #[test]
-    fn test_concurrent_recall_doesnt_block() {
+    fn test_concurrent_recall_doesnt_block() -> TestResult {
         use std::thread;
 
         let store = Arc::new(MemoryStore::new(100));
 
         // Store some episodes first
         for i in 0..20 {
+            let factor = usize_to_f32(i) * 0.01;
             let episode = EpisodeBuilder::new()
                 .id(format!("ep{i}"))
                 .when(Utc::now())
                 .what(format!("memory {i}"))
-                .embedding([i as f32 * 0.01; 768])
+                .embedding([factor; 768])
                 .confidence(Confidence::HIGH)
                 .build();
 
@@ -1577,17 +1723,21 @@ mod tests {
             let handle = thread::spawn(move || {
                 let cue = Cue::semantic(format!("cue{i}"), format!("memory {i}"), Confidence::LOW);
 
-                store_clone.recall(cue)
+                store_clone.recall(&cue)
             });
             handles.push(handle);
         }
 
         // All recalls should complete without blocking
         for handle in handles {
-            let results = handle.join().unwrap();
+            let results = handle
+                .join()
+                .map_err(|err| format!("recall thread panicked: {err:?}"))?;
             // Each should find at least one match
-            assert!(!results.is_empty());
+            ensure(!results.is_empty(), "recall results should not be empty")?;
         }
+
+        Ok(())
     }
 
     #[test]
@@ -1628,7 +1778,7 @@ mod tests {
         // Search for meeting - should also pull in related discussion
         let cue = Cue::semantic("cue1".to_string(), "meeting".to_string(), Confidence::LOW);
 
-        let results = store.recall(cue);
+        let results = store.recall(&cue);
 
         // Should find meeting directly and possibly discussion through spreading
         assert!(!results.is_empty());

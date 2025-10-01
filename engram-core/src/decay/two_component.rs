@@ -13,10 +13,8 @@
 //! - Roediger & Butler (2011): Testing effect and retrieval practice benefits
 
 use crate::Confidence;
+use std::convert::TryFrom;
 use std::time::Duration;
-
-#[cfg(feature = "psychological_decay")]
-use libm::pow;
 
 /// `SuperMemo` SM-18 two-component model with biological substrate mapping.
 ///
@@ -125,13 +123,19 @@ impl TwoComponentModel {
     /// Implements the core SM-18 algorithm updating both retrievability and
     /// stability based on retrieval performance, response time, and confidence.
     pub fn update_on_retrieval(&mut self, success: bool, response_time: Duration, confidence: f32) {
-        let response_ms = response_time.as_millis() as u64;
+        let response_ms = u64::try_from(response_time.as_millis()).unwrap_or(u64::MAX);
         self.last_response_time = response_ms;
         self.last_retrieval_success = success;
 
+        let sub_micros = response_time.subsec_micros();
+        let response_time_ms = response_time
+            .as_secs_f64()
+            .mul_add(1000.0, f64::from(sub_micros) / 1000.0);
+        let response_time_ms_f32 = clamped_f64_to_f32(response_time_ms, f32::MAX);
+
         if success {
             self.success_count += 1;
-            self.update_on_success(response_ms, confidence);
+            self.update_on_success(response_time_ms_f32, confidence);
         } else {
             self.failure_count += 1;
             if self.success_count > 0 {
@@ -145,9 +149,13 @@ impl TwoComponentModel {
     }
 
     /// Updates parameters on successful retrieval
-    fn update_on_success(&mut self, response_time_ms: u64, confidence: f32) {
+    fn update_on_success(&mut self, response_time_ms: f32, confidence: f32) {
         // Fast responses with high confidence suggest strong memory trace
-        let response_factor = (2000.0 / response_time_ms as f32).min(2.0).max(0.5);
+        let response_factor = if response_time_ms > 0.0 {
+            (2000.0 / response_time_ms).clamp(0.5, 2.0)
+        } else {
+            2.0
+        };
         let retrieval_strength = confidence * response_factor;
 
         // Successful retrieval increases stability (key SM-18 insight)
@@ -163,9 +171,9 @@ impl TwoComponentModel {
         self.retrievability = (0.95 * retrieval_strength).min(0.98);
 
         // Update difficulty based on performance (easier if fast/confident)
-        if response_time_ms < 2000 && confidence > 0.8 {
+        if response_time_ms < 2000.0 && confidence > 0.8 {
             self.difficulty *= 0.96; // Item became easier
-        } else if response_time_ms > 5000 || confidence < 0.6 {
+        } else if response_time_ms > 5000.0 || confidence < 0.6 {
             self.difficulty *= 1.02; // Item is more difficult
         }
     }
@@ -205,7 +213,7 @@ impl TwoComponentModel {
         let interval_days = self.stability * ln_ratio.abs();
         let interval_days = interval_days.clamp(0.1, 365.0); // 2.4 hours to 1 year
 
-        Duration::from_secs((interval_days * 86400.0) as u64)
+        Duration::from_secs_f32(interval_days * 86400.0)
     }
 
     /// Predicts retention probability at given time (SM-18 forgetting function)
@@ -221,10 +229,7 @@ impl TwoComponentModel {
         let days = elapsed_time.as_secs_f32() / 86400.0;
 
         #[cfg(feature = "psychological_decay")]
-        let retention = pow(
-            f64::from(self.retrievability),
-            f64::from(days / self.stability),
-        ) as f32;
+        let retention = libm::powf(self.retrievability, days / self.stability);
         #[cfg(not(feature = "psychological_decay"))]
         let retention = self.retrievability.powf(days / self.stability);
 
@@ -234,11 +239,7 @@ impl TwoComponentModel {
     /// Computes memory strength based on stability and success rate
     #[must_use]
     pub fn memory_strength(&self) -> f32 {
-        let success_rate = if self.success_count + self.failure_count > 0 {
-            self.success_count as f32 / (self.success_count + self.failure_count) as f32
-        } else {
-            0.5 // Unknown success rate
-        };
+        let success_rate = self.success_rate().unwrap_or(0.5);
 
         // Combine stability and performance
         let base_strength = (self.stability / 10.0).min(10.0); // Normalize stability
@@ -255,12 +256,19 @@ impl TwoComponentModel {
             failure_count: self.failure_count,
             lapse_count: self.lapse_count,
             last_response_time: self.last_response_time,
-            success_rate: if self.success_count + self.failure_count > 0 {
-                self.success_count as f32 / (self.success_count + self.failure_count) as f32
-            } else {
-                0.0
-            },
+            success_rate: self.success_rate().unwrap_or(0.0),
         }
+    }
+
+    fn success_rate(&self) -> Option<f32> {
+        let total = self.success_count + self.failure_count;
+        if total == 0 {
+            return None;
+        }
+
+        let total_f64 = f64::from(total);
+        let ratio = f64::from(self.success_count) / total_f64;
+        Some(clamped_f64_to_f32(ratio, 0.0))
     }
 
     /// Resets model for new learning (keeps individual factors)
@@ -319,27 +327,64 @@ pub fn map_to_confidence(model: &TwoComponentModel, elapsed_time: Duration) -> C
     Confidence::exact(confidence_raw)
 }
 
+fn clamped_f64_to_f32(value: f64, default: f32) -> f32 {
+    if !value.is_finite() {
+        return default;
+    }
+
+    let clamped = value.clamp(-f64::from(f32::MAX), f64::from(f32::MAX));
+    let sign_bit = if clamped.is_sign_negative() {
+        1_u32 << 31
+    } else {
+        0
+    };
+    let abs = clamped.abs();
+
+    if abs == 0.0 {
+        return f32::from_bits(sign_bit);
+    }
+
+    let bits = abs.to_bits();
+    let exponent_bits = (bits >> 52) & 0x7FF;
+    let exponent = i32::try_from(exponent_bits).unwrap_or(0);
+    let mut exponent_adjusted = exponent - 1023 + 127;
+    if exponent_adjusted <= 0 {
+        return f32::from_bits(sign_bit);
+    }
+    if exponent_adjusted >= 0xFF {
+        exponent_adjusted = 0xFE;
+    }
+
+    let mantissa = bits & ((1_u64 << 52) - 1);
+    let mantissa32 = u32::try_from(mantissa >> (52 - 23)).unwrap_or(0x007F_FFFF);
+    let exponent_field = u32::try_from(exponent_adjusted).unwrap_or(0);
+    let bits32 = sign_bit | (exponent_field << 23) | mantissa32;
+    f32::from_bits(bits32)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::time::Duration;
 
+    const EPSILON: f32 = 1.0e-6;
+
     #[test]
     fn test_two_component_creation() {
         let model = TwoComponentModel::new();
-        assert_eq!(model.retrievability(), 0.9);
-        assert_eq!(model.stability(), 2.0);
-        assert_eq!(model.difficulty(), 2.5);
-        assert_eq!(model.learning_rate_factor(), 1.0);
+        assert!((model.retrievability() - 0.9).abs() <= EPSILON);
+        assert!((model.stability() - 2.0).abs() <= EPSILON);
+        assert!((model.difficulty() - 2.5).abs() <= EPSILON);
+        assert!((model.learning_rate_factor() - 1.0).abs() <= EPSILON);
     }
 
     #[test]
     fn test_custom_parameters() {
         let model = TwoComponentModel::with_parameters(0.8, 5.0, 1.2, 3.0);
-        assert_eq!(model.retrievability(), 0.8);
-        assert_eq!(model.stability(), 5.0);
-        assert_eq!(model.difficulty(), 3.0);
-        assert_eq!(model.learning_rate_factor(), 1.2);
+        assert!((model.retrievability() - 0.8).abs() <= EPSILON);
+        assert!((model.stability() - 5.0).abs() <= EPSILON);
+        assert!((model.difficulty() - 3.0).abs() <= EPSILON);
+        assert!((model.learning_rate_factor() - 1.2).abs() <= EPSILON);
     }
 
     #[test]
@@ -374,7 +419,7 @@ mod tests {
         model.update_on_retrieval(false, Duration::from_millis(5000), 0.2);
 
         assert!(model.stability() < initial_stability);
-        assert_eq!(model.retrievability(), 0.1); // Reset to low
+        assert!((model.retrievability() - 0.1).abs() <= EPSILON); // Reset to low
         assert!(model.difficulty() > initial_difficulty);
         assert_eq!(model.success_count, 0);
         assert_eq!(model.failure_count, 1);
@@ -404,7 +449,7 @@ mod tests {
         let one_week = model.predict_retention(Duration::from_secs(7 * 86400));
 
         // Retention should decrease over time
-        assert_eq!(immediate, 0.99); // Clamped to max retention (x^0 = 1.0 -> 0.99)
+        assert!((immediate - 0.99).abs() <= EPSILON); // Clamped to max retention (x^0 = 1.0 -> 0.99)
         assert!(one_day < immediate);
         assert!(one_week < one_day);
         assert!(one_week > 0.0); // Still some retention
@@ -438,7 +483,7 @@ mod tests {
         assert_eq!(stats.success_count, 3);
         assert_eq!(stats.failure_count, 1);
         assert_eq!(stats.lapse_count, 1); // One failure after successes
-        assert_eq!(stats.success_rate, 0.75); // 3/4
+        assert!((stats.success_rate - 0.75).abs() <= EPSILON); // 3/4
         assert_eq!(stats.last_response_time, 1200);
     }
 
@@ -504,12 +549,12 @@ mod tests {
         let learning_rate = model.learning_rate_factor();
         model.reset_for_new_item();
 
-        assert_eq!(model.retrievability(), 0.9);
-        assert_eq!(model.stability(), 2.0);
-        assert_eq!(model.difficulty(), 2.5);
+        assert!((model.retrievability() - 0.9).abs() <= EPSILON);
+        assert!((model.stability() - 2.0).abs() <= EPSILON);
+        assert!((model.difficulty() - 2.5).abs() <= EPSILON);
         assert_eq!(model.success_count, 0);
         assert_eq!(model.failure_count, 0);
-        assert_eq!(model.learning_rate_factor(), learning_rate);
+        assert!((model.learning_rate_factor() - learning_rate).abs() <= EPSILON);
     }
 
     #[test]

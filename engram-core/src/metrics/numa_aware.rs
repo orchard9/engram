@@ -2,16 +2,13 @@
 
 use crossbeam_utils::CachePadded;
 use hwloc::{CpuSet, ObjectType, Topology};
-use std::sync::Arc;
+use std::convert::TryFrom;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// NUMA-aware metric collectors
 pub struct NumaCollectors {
     /// Per-socket collectors
     socket_collectors: Vec<SocketCollector>,
-
-    /// NUMA topology information
-    topology: Arc<Topology>,
 
     /// Cross-socket communication metrics
     cross_socket_accesses: CachePadded<AtomicU64>,
@@ -36,25 +33,30 @@ impl NumaCollectors {
             .enumerate()
             .map(|(id, node)| {
                 let cpuset = node.cpuset().unwrap_or_else(CpuSet::new);
-                SocketCollector::new(id, cpuset)
+                SocketCollector::new(id, &cpuset)
             })
             .collect();
 
         Some(Self {
             socket_collectors,
-            topology: Arc::new(topology),
             cross_socket_accesses: CachePadded::new(AtomicU64::new(0)),
             local_accesses: CachePadded::new(AtomicU64::new(0)),
         })
     }
 
-    /// Get the collector for the current CPU
+    /// Get the collector for the current CPU.
+    #[must_use]
     pub fn current_collector(&self) -> &SocketCollector {
-        let cpu_id = self.current_cpu_id();
+        let cpu_id = Self::current_cpu_id();
         self.collector_for_cpu(cpu_id)
     }
 
-    /// Get the collector for a specific CPU
+    /// Get the collector for a specific CPU.
+    ///
+    /// # Panics
+    /// Panics if the collector list is empty, which can only occur when the
+    /// type is constructed manually without using `NumaCollectors::new`.
+    #[must_use]
     pub fn collector_for_cpu(&self, cpu_id: usize) -> &SocketCollector {
         // Find which socket this CPU belongs to
         if cpu_id < 64 {
@@ -70,7 +72,6 @@ impl NumaCollectors {
     }
 
     /// Record a memory access
-    #[inline(always)]
     pub fn record_memory_access(&self, is_local: bool) {
         if is_local {
             self.local_accesses.fetch_add(1, Ordering::Relaxed);
@@ -79,31 +80,30 @@ impl NumaCollectors {
         }
     }
 
-    /// Get NUMA locality ratio
+    /// Get NUMA locality ratio.
+    #[must_use]
     pub fn locality_ratio(&self) -> f32 {
-        let local = self.local_accesses.load(Ordering::Acquire) as f32;
-        let remote = self.cross_socket_accesses.load(Ordering::Acquire) as f32;
+        let local = self.local_accesses.load(Ordering::Acquire);
+        let remote = self.cross_socket_accesses.load(Ordering::Acquire);
+        let total = local.saturating_add(remote);
 
-        let total = local + remote;
-        if total > 0.0 {
-            local / total
-        } else {
-            1.0 // Assume perfect locality if no data
-        }
+        ratio_as_f32(local, total, 1.0)
     }
 
     /// Get current CPU ID
     #[cfg(target_os = "linux")]
-    fn current_cpu_id(&self) -> usize {
-        unsafe { libc::sched_getcpu() as usize }
+    fn current_cpu_id() -> usize {
+        let cpu = unsafe { libc::sched_getcpu() };
+        usize::try_from(cpu).unwrap_or(0)
     }
 
     #[cfg(not(target_os = "linux"))]
-    const fn current_cpu_id(&self) -> usize {
+    const fn current_cpu_id() -> usize {
         0 // Fallback for non-Linux systems
     }
 
-    /// Aggregate metrics from all sockets
+    /// Aggregate metrics from all sockets.
+    #[must_use]
     pub fn aggregate_metrics(&self) -> NumaMetrics {
         let mut total_operations = 0u64;
         let mut total_cache_hits = 0u64;
@@ -134,19 +134,23 @@ pub struct SocketCollector {
     pub cpu_mask: u64,
 
     /// Socket-local metrics (cache-aligned)
+    /// Total number of operations recorded on this socket.
     pub operations: CachePadded<AtomicU64>,
+    /// Cache hits observed for this socket.
     pub cache_hits: CachePadded<AtomicU64>,
+    /// Cache misses observed for this socket.
     pub cache_misses: CachePadded<AtomicU64>,
+    /// Accumulated memory bandwidth usage in bytes.
     pub memory_bandwidth: CachePadded<AtomicU64>,
 }
 
 impl SocketCollector {
-    fn new(socket_id: usize, cpuset: CpuSet) -> Self {
+    fn new(socket_id: usize, cpuset: &CpuSet) -> Self {
         // Convert CpuSet to a simple bit mask (supports up to 64 CPUs)
         let mut cpu_mask = 0u64;
         for i in 0..64 {
-            if cpuset.is_set(i as u32) {
-                cpu_mask |= 1 << i;
+            if cpuset.is_set(u32::try_from(i).unwrap_or(u32::MAX)) {
+                cpu_mask |= 1_u64 << i;
             }
         }
 
@@ -161,13 +165,11 @@ impl SocketCollector {
     }
 
     /// Record an operation on this socket
-    #[inline(always)]
     pub fn record_operation(&self) {
         self.operations.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Record cache access
-    #[inline(always)]
     pub fn record_cache_access(&self, hit: bool) {
         if hit {
             self.cache_hits.fetch_add(1, Ordering::Relaxed);
@@ -177,28 +179,33 @@ impl SocketCollector {
     }
 
     /// Record memory bandwidth usage
-    #[inline(always)]
     pub fn record_bandwidth(&self, bytes: u64) {
         self.memory_bandwidth.fetch_add(bytes, Ordering::Relaxed);
     }
 
-    /// Get cache hit ratio for this socket
+    /// Get cache hit ratio for this socket.
+    #[must_use]
     pub fn cache_hit_ratio(&self) -> f32 {
-        let hits = self.cache_hits.load(Ordering::Acquire) as f32;
-        let misses = self.cache_misses.load(Ordering::Acquire) as f32;
+        let hits = self.cache_hits.load(Ordering::Acquire);
+        let misses = self.cache_misses.load(Ordering::Acquire);
+        let total = hits.saturating_add(misses);
 
-        let total = hits + misses;
-        if total > 0.0 { hits / total } else { 0.0 }
+        ratio_as_f32(hits, total, 0.0)
     }
 }
 
 /// Aggregated NUMA metrics
 #[derive(Debug, Clone)]
 pub struct NumaMetrics {
+    /// Total operations observed across all sockets.
     pub total_operations: u64,
+    /// Aggregate count of cache hits.
     pub total_cache_hits: u64,
+    /// Aggregate count of cache misses.
     pub total_cache_misses: u64,
+    /// Ratio of accesses served from local sockets.
     pub locality_ratio: f32,
+    /// Number of sockets included in the aggregation.
     pub socket_count: usize,
 }
 
@@ -218,10 +225,14 @@ pub enum NumaPolicy {
 /// NUMA-aware memory allocator wrapper
 pub struct NumaAllocator {
     policy: NumaPolicy,
+    #[cfg(target_os = "linux")]
     collectors: Option<Arc<NumaCollectors>>,
 }
 
 impl NumaAllocator {
+    #[cfg(target_os = "linux")]
+    /// Create a NUMA-aware allocator using the specified policy.
+    #[must_use]
     pub fn new(policy: NumaPolicy) -> Self {
         Self {
             policy,
@@ -229,8 +240,20 @@ impl NumaAllocator {
         }
     }
 
+    #[cfg(not(target_os = "linux"))]
+    /// Create a NUMA-aware allocator using the specified policy when NUMA is unsupported.
+    #[must_use]
+    pub const fn new(policy: NumaPolicy) -> Self {
+        Self { policy }
+    }
+
     /// Allocate memory with NUMA awareness
     #[cfg(target_os = "linux")]
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`std::io::Error`] when the underlying `mmap` call fails or the
+    /// requested NUMA policy cannot be applied to the newly allocated region.
     pub fn allocate(&self, size: usize) -> Result<*mut u8, std::io::Error> {
         use libc::{MAP_ANONYMOUS, MAP_PRIVATE, PROT_READ, PROT_WRITE, mmap};
 
@@ -252,14 +275,29 @@ impl NumaAllocator {
         // Apply NUMA policy
         self.apply_numa_policy(ptr, size)?;
 
-        Ok(ptr as *mut u8)
+        if let Some(collectors) = &self.collectors {
+            collectors.record_memory_access(true);
+        }
+
+        Ok(ptr.cast::<u8>())
     }
 
     #[cfg(not(target_os = "linux"))]
     #[allow(unsafe_code)]
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`std::io::Error`] if the requested memory layout is
+    /// invalid or if the allocator fails to reserve memory from the operating
+    /// system.
     pub fn allocate(&self, size: usize) -> Result<*mut u8, std::io::Error> {
-        // Fallback to standard allocation on non-Linux
-        let layout = std::alloc::Layout::from_size_align(size, 64)
+        // Fallback to standard allocation on non-Linux with policy-guided alignment
+        let alignment = match self.policy {
+            NumaPolicy::Interleaved => 128,
+            NumaPolicy::Bind(_) | NumaPolicy::Local | NumaPolicy::Preferred => 64,
+        };
+
+        let layout = std::alloc::Layout::from_size_align(size, alignment)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
 
         let ptr = unsafe { std::alloc::alloc(layout) };
@@ -290,8 +328,9 @@ impl NumaAllocator {
                 ptr,
                 size,
                 mode,
-                &nodemask as *const _ as *const libc::c_ulong,
-                std::mem::size_of::<libc::c_ulong>() as libc::c_ulong * 8,
+                std::ptr::addr_of!(nodemask) as *const libc::c_ulong,
+                libc::c_ulong::try_from(std::mem::size_of::<libc::c_ulong>() * 8)
+                    .unwrap_or(libc::c_ulong::MAX),
                 0,
             )
         };
@@ -302,15 +341,60 @@ impl NumaAllocator {
             Ok(())
         }
     }
+}
 
-    #[cfg(not(target_os = "linux"))]
-    const fn apply_numa_policy(
-        &self,
-        _ptr: *mut std::ffi::c_void,
-        _size: usize,
-    ) -> Result<(), std::io::Error> {
-        Ok(()) // No-op on non-Linux
+fn ratio_as_f32(numerator: u64, denominator: u64, default: f32) -> f32 {
+    if denominator == 0 {
+        return default;
     }
+
+    let ratio = u64_to_f64(numerator) / u64_to_f64(denominator);
+    if !ratio.is_finite() {
+        return default;
+    }
+
+    clamped_f64_to_f32(ratio, default).clamp(0.0, f32::MAX)
+}
+
+fn u64_to_f64(value: u64) -> f64 {
+    let high_part = u32::try_from(value >> 32).unwrap_or(u32::MAX);
+    let low_part = u32::try_from(value & 0xFFFF_FFFF).unwrap_or(u32::MAX);
+    f64::from(high_part).mul_add(4_294_967_296.0, f64::from(low_part))
+}
+
+fn clamped_f64_to_f32(value: f64, default: f32) -> f32 {
+    if !value.is_finite() {
+        return default;
+    }
+
+    let clamped = value.clamp(-f64::from(f32::MAX), f64::from(f32::MAX));
+    let sign_bit = if clamped.is_sign_negative() {
+        1_u32 << 31
+    } else {
+        0
+    };
+    let abs = clamped.abs();
+
+    if abs == 0.0 {
+        return f32::from_bits(sign_bit);
+    }
+
+    let bits = abs.to_bits();
+    let exponent_bits = (bits >> 52) & 0x7FF;
+    let exponent = i32::try_from(exponent_bits).unwrap_or(0);
+    let mut exponent_adjusted = exponent - 1023 + 127;
+    if exponent_adjusted <= 0 {
+        return f32::from_bits(sign_bit);
+    }
+    if exponent_adjusted >= 0xFF {
+        exponent_adjusted = 0xFE;
+    }
+
+    let mantissa = bits & ((1_u64 << 52) - 1);
+    let mantissa32 = u32::try_from(mantissa >> (52 - 23)).unwrap_or(0x007F_FFFF);
+    let exponent_field = u32::try_from(exponent_adjusted).unwrap_or(0);
+    let bits32 = sign_bit | (exponent_field << 23) | mantissa32;
+    f32::from_bits(bits32)
 }
 
 #[cfg(test)]
@@ -330,7 +414,7 @@ mod tests {
             numa.record_memory_access(false);
 
             let ratio = numa.locality_ratio();
-            assert!(ratio >= 0.0 && ratio <= 1.0);
+            assert!((0.0..=1.0).contains(&ratio));
         }
     }
 
@@ -338,7 +422,7 @@ mod tests {
     fn test_socket_collector() {
         // Create a simple cpuset for testing
         let cpuset = CpuSet::new();
-        let collector = SocketCollector::new(0, cpuset);
+        let collector = SocketCollector::new(0, &cpuset);
 
         collector.record_operation();
         collector.record_cache_access(true);
@@ -351,6 +435,6 @@ mod tests {
         assert_eq!(collector.memory_bandwidth.load(Ordering::Acquire), 1024);
 
         let hit_ratio = collector.cache_hit_ratio();
-        assert_eq!(hit_ratio, 0.5);
+        assert!((hit_ratio - 0.5).abs() < f32::EPSILON);
     }
 }

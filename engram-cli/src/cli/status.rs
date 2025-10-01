@@ -7,6 +7,10 @@ use serde_json::Value;
 use std::time::{Duration, Instant};
 
 /// Show comprehensive server status
+///
+/// # Errors
+///
+/// Returns error if status check fails
 pub async fn show_status() -> Result<()> {
     println!("Engram Server Health Check");
     println!("═══════════════════════════════════════");

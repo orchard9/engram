@@ -1,8 +1,9 @@
 //! Cognitive architecture specific metrics for biological plausibility tracking
 
-use crate::Confidence;
+use crate::{Confidence, numeric::saturating_f32_from_f64};
 use atomic_float::AtomicF32;
 use crossbeam_utils::CachePadded;
+use std::convert::TryFrom;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Cognitive architecture metrics collector
@@ -49,25 +50,24 @@ impl CognitiveMetrics {
     }
 
     /// Record a cognitive metric
-    #[inline(always)]
-    pub fn record(&self, metric: CognitiveMetric) {
+    pub fn record(&self, metric: &CognitiveMetric) {
         match metric {
             CognitiveMetric::CLSContribution {
                 hippocampal,
                 neocortical,
             } => {
                 self.cls_hippocampal_weight
-                    .store(hippocampal, Ordering::Relaxed);
+                    .store(*hippocampal, Ordering::Relaxed);
                 self.cls_neocortical_weight
-                    .store(neocortical, Ordering::Relaxed);
+                    .store(*neocortical, Ordering::Relaxed);
             }
             CognitiveMetric::PatternCompletion {
                 plausibility,
                 is_false_memory,
             } => {
                 self.pattern_completion_plausibility
-                    .store(plausibility, Ordering::Relaxed);
-                if is_false_memory {
+                    .store(*plausibility, Ordering::Relaxed);
+                if *is_false_memory {
                     let current = self.false_memory_generation_rate.load(Ordering::Acquire);
                     // Exponential moving average
                     let new_rate = current.mul_add(0.95, 0.05);
@@ -78,20 +78,23 @@ impl CognitiveMetrics {
             CognitiveMetric::ConsolidationTransition { from: _, to } => {
                 self.consolidation_transitions
                     .fetch_add(1, Ordering::Relaxed);
+                #[allow(clippy::cast_possible_truncation)]
+                let state = u8::from(*to);
                 self.current_consolidation_state
-                    .store(to as u64, Ordering::Release);
+                    .store(u64::from(state), Ordering::Release);
             }
             CognitiveMetric::SpreadingActivation {
                 depth,
                 branching_factor,
             } => {
+                let depth_u64 = u64::try_from(*depth).unwrap_or(u64::MAX);
                 self.activation_depth_sum
-                    .fetch_add(depth as u64, Ordering::Relaxed);
+                    .fetch_add(depth_u64, Ordering::Relaxed);
                 self.activation_depth_count.fetch_add(1, Ordering::Relaxed);
                 self.activation_branching_factor
-                    .store(branching_factor, Ordering::Relaxed);
+                    .store(*branching_factor, Ordering::Relaxed);
             }
-            CognitiveMetric::ConfidenceCalibration { correction_type } => match correction_type {
+            CognitiveMetric::ConfidenceCalibration { correction_type } => match *correction_type {
                 CalibrationCorrection::Overconfidence => {
                     self.overconfidence_corrections
                         .fetch_add(1, Ordering::Relaxed);
@@ -124,11 +127,14 @@ impl CognitiveMetrics {
         let sum = self.activation_depth_sum.load(Ordering::Acquire);
         let count = self.activation_depth_count.load(Ordering::Acquire);
 
-        if count > 0 {
-            sum as f32 / count as f32
-        } else {
-            0.0
+        if count == 0 {
+            return 0.0;
         }
+
+        #[allow(clippy::cast_precision_loss)]
+        let average = (sum as f64) / (count as f64);
+
+        saturating_f32_from_f64(average)
     }
 
     /// Get confidence calibration statistics
@@ -173,6 +179,7 @@ pub enum CognitiveMetric {
     },
     /// Confidence calibration event
     ConfidenceCalibration {
+        /// The type of calibration correction being applied
         correction_type: CalibrationCorrection,
     },
 }
@@ -198,37 +205,57 @@ pub enum CalibrationCorrection {
     BaseRate,
 }
 
+impl From<ConsolidationState> for u8 {
+    fn from(state: ConsolidationState) -> Self {
+        state as Self
+    }
+}
+
 /// Pattern completion statistics
 #[derive(Debug, Clone)]
 pub struct PatternCompletionStats {
+    /// Most recent plausibility score recorded for pattern completion events.
     pub plausibility: f32,
+    /// Exponential moving average of observed false memory production.
     pub false_memory_rate: f32,
 }
 
 /// Confidence calibration statistics
 #[derive(Debug, Clone)]
 pub struct CalibrationStats {
+    /// Total corrections applied when the system was too confident.
     pub overconfidence_corrections: u64,
+    /// Count of base rate adjustments introduced during calibration.
     pub base_rate_updates: u64,
 }
 
 /// Cognitive insight derived from metrics analysis
 #[derive(Debug, Clone)]
 pub struct CognitiveInsight {
+    /// Categorization used to route the insight to the right subsystem.
     pub insight_type: InsightType,
+    /// Human-readable narrative describing the observation.
     pub description: String,
+    /// Confidence score expressing how trustworthy the insight is.
     pub confidence: Confidence,
+    /// Explanation of how the insight maps to biological plausibility.
     pub biological_relevance: String,
+    /// Suggested action an operator or automated agent can take.
     pub actionable_recommendation: String,
 }
 
 /// Types of cognitive insights
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InsightType {
+    /// Highlights imbalances or issues inside memory subsystems.
     MemorySystem,
+    /// Focuses on throughput or latency regressions in cognition.
     Performance,
+    /// Describes consolidation pipeline behavior and transitions.
     Consolidation,
+    /// Surfaces notable pattern completion successes or risks.
     PatternCompletion,
+    /// Calls out calibration or trustworthiness concerns.
     Confidence,
 }
 
@@ -242,18 +269,26 @@ impl Default for CognitiveMetrics {
 mod tests {
     use super::*;
 
+    fn assert_close(actual: f32, expected: f32) {
+        let diff = (actual - expected).abs();
+        assert!(
+            diff <= f32::EPSILON,
+            "expected {expected}, got {actual} (diff {diff})"
+        );
+    }
+
     #[test]
     fn test_cls_contribution_recording() {
         let metrics = CognitiveMetrics::new();
 
-        metrics.record(CognitiveMetric::CLSContribution {
+        metrics.record(&CognitiveMetric::CLSContribution {
             hippocampal: 0.7,
             neocortical: 0.3,
         });
 
         let (hippo, neo) = metrics.get_cls_balance();
-        assert_eq!(hippo, 0.7);
-        assert_eq!(neo, 0.3);
+        assert_close(hippo, 0.7);
+        assert_close(neo, 0.3);
     }
 
     #[test]
@@ -262,7 +297,7 @@ mod tests {
 
         // Record some pattern completions
         for i in 0..10 {
-            metrics.record(CognitiveMetric::PatternCompletion {
+            metrics.record(&CognitiveMetric::PatternCompletion {
                 plausibility: 0.8,
                 is_false_memory: i % 3 == 0, // Every 3rd is false memory
             });
@@ -277,17 +312,17 @@ mod tests {
     fn test_activation_depth_averaging() {
         let metrics = CognitiveMetrics::new();
 
-        metrics.record(CognitiveMetric::SpreadingActivation {
+        metrics.record(&CognitiveMetric::SpreadingActivation {
             depth: 3,
             branching_factor: 2.5,
         });
 
-        metrics.record(CognitiveMetric::SpreadingActivation {
+        metrics.record(&CognitiveMetric::SpreadingActivation {
             depth: 5,
             branching_factor: 3.0,
         });
 
         let avg_depth = metrics.get_average_activation_depth();
-        assert_eq!(avg_depth, 4.0); // (3 + 5) / 2
+        assert_close(avg_depth, 4.0); // (3 + 5) / 2
     }
 }

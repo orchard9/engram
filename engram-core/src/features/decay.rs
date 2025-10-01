@@ -12,9 +12,11 @@ use thiserror::Error;
 /// Errors that can occur during decay operations
 #[derive(Debug, Error)]
 pub enum DecayError {
+    /// The decay function failed to evaluate for the supplied input.
     #[error("Decay calculation failed: {0}")]
     CalculationFailed(String),
-    
+
+    /// The provided parameters are outside the accepted range.
     #[error("Invalid parameters: {0}")]
     InvalidParameters(String),
 }
@@ -25,15 +27,21 @@ pub type DecayResult<T> = Result<T, DecayError>;
 /// Trait for decay operations
 pub trait Decay: Send + Sync {
     /// Calculate decay factor for a given time delta
+    #[must_use]
     fn calculate_decay(&self, elapsed: Duration) -> f32;
-    
+
     /// Apply decay to an episode
     fn apply_decay(&self, episode: &mut Episode, elapsed: Duration);
-    
+
     /// Get decay parameters
+    #[must_use]
     fn get_parameters(&self) -> DecayParameters;
-    
+
     /// Update decay parameters
+    ///
+    /// # Errors
+    /// Returns [`DecayError::InvalidParameters`] when the provided configuration is rejected
+    /// by the decay backend.
     fn set_parameters(&mut self, params: DecayParameters) -> DecayResult<()>;
 }
 
@@ -64,9 +72,11 @@ impl Default for DecayParameters {
 /// Provider trait for decay implementations
 pub trait DecayProvider: FeatureProvider {
     /// Create a new decay instance
+    #[must_use]
     fn create_decay(&self) -> Box<dyn Decay>;
-    
+
     /// Get decay configuration
+    #[must_use]
     fn get_config(&self) -> DecayConfig;
 }
 
@@ -112,14 +122,25 @@ pub struct PsychologicalDecayProvider {
 
 #[cfg(feature = "psychological_decay")]
 impl PsychologicalDecayProvider {
+    /// Create a provider with default decay configuration.
+    #[must_use]
     pub fn new() -> Self {
         Self {
             config: DecayConfig::default(),
         }
     }
-    
-    pub fn with_config(config: DecayConfig) -> Self {
+
+    /// Create a provider using a caller-specified configuration.
+    #[must_use]
+    pub const fn with_config(config: DecayConfig) -> Self {
         Self { config }
+    }
+}
+
+#[cfg(feature = "psychological_decay")]
+impl Default for PsychologicalDecayProvider {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -128,15 +149,15 @@ impl FeatureProvider for PsychologicalDecayProvider {
     fn is_enabled(&self) -> bool {
         true
     }
-    
+
     fn name(&self) -> &'static str {
         "psychological_decay"
     }
-    
+
     fn description(&self) -> &'static str {
         "Psychological decay functions based on memory research"
     }
-    
+
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -146,13 +167,19 @@ impl FeatureProvider for PsychologicalDecayProvider {
 impl DecayProvider for PsychologicalDecayProvider {
     fn create_decay(&self) -> Box<dyn Decay> {
         match self.config.decay_type {
-            DecayType::Ebbinghaus => Box::new(EbbinghausDecay::new(self.config.default_params.clone())),
+            DecayType::Ebbinghaus => {
+                Box::new(EbbinghausDecay::new(self.config.default_params.clone()))
+            }
             DecayType::PowerLaw => Box::new(PowerLawDecay::new(self.config.default_params.clone())),
-            DecayType::Exponential => Box::new(ExponentialDecay::new(self.config.default_params.clone())),
-            DecayType::TwoComponent => Box::new(TwoComponentDecay::new(self.config.default_params.clone())),
+            DecayType::Exponential => {
+                Box::new(ExponentialDecay::new(self.config.default_params.clone()))
+            }
+            DecayType::TwoComponent => {
+                Box::new(TwoComponentDecay::new(self.config.default_params.clone()))
+            }
         }
     }
-    
+
     fn get_config(&self) -> DecayConfig {
         self.config.clone()
     }
@@ -166,7 +193,7 @@ struct EbbinghausDecay {
 
 #[cfg(feature = "psychological_decay")]
 impl EbbinghausDecay {
-    fn new(params: DecayParameters) -> Self {
+    const fn new(params: DecayParameters) -> Self {
         Self { params }
     }
 }
@@ -178,20 +205,20 @@ impl Decay for EbbinghausDecay {
         let hours = elapsed.as_secs_f32() / 3600.0;
         (-hours / self.params.strength_factor).exp()
     }
-    
+
     fn apply_decay(&self, episode: &mut Episode, elapsed: Duration) {
         let decay_factor = self.calculate_decay(elapsed);
         episode.decay_rate = decay_factor;
-        
+
         // Update confidence based on decay
         let current_confidence = episode.encoding_confidence.raw();
         episode.encoding_confidence = Confidence::exact(current_confidence * decay_factor);
     }
-    
+
     fn get_parameters(&self) -> DecayParameters {
         self.params.clone()
     }
-    
+
     fn set_parameters(&mut self, params: DecayParameters) -> DecayResult<()> {
         self.params = params;
         Ok(())
@@ -206,7 +233,7 @@ struct PowerLawDecay {
 
 #[cfg(feature = "psychological_decay")]
 impl PowerLawDecay {
-    fn new(params: DecayParameters) -> Self {
+    const fn new(params: DecayParameters) -> Self {
         Self { params }
     }
 }
@@ -215,21 +242,24 @@ impl PowerLawDecay {
 impl Decay for PowerLawDecay {
     fn calculate_decay(&self, elapsed: Duration) -> f32 {
         let hours = elapsed.as_secs_f32() / 3600.0;
-        (1.0 + self.params.base_rate * hours).powf(-self.params.exponent)
+        self.params
+            .base_rate
+            .mul_add(hours, 1.0)
+            .powf(-self.params.exponent)
     }
-    
+
     fn apply_decay(&self, episode: &mut Episode, elapsed: Duration) {
         let decay_factor = self.calculate_decay(elapsed);
         episode.decay_rate = decay_factor;
-        
+
         let current_confidence = episode.encoding_confidence.raw();
         episode.encoding_confidence = Confidence::exact(current_confidence * decay_factor);
     }
-    
+
     fn get_parameters(&self) -> DecayParameters {
         self.params.clone()
     }
-    
+
     fn set_parameters(&mut self, params: DecayParameters) -> DecayResult<()> {
         self.params = params;
         Ok(())
@@ -244,7 +274,7 @@ struct ExponentialDecay {
 
 #[cfg(feature = "psychological_decay")]
 impl ExponentialDecay {
-    fn new(params: DecayParameters) -> Self {
+    const fn new(params: DecayParameters) -> Self {
         Self { params }
     }
 }
@@ -255,19 +285,19 @@ impl Decay for ExponentialDecay {
         let hours = elapsed.as_secs_f32() / 3600.0;
         (-self.params.base_rate * hours).exp()
     }
-    
+
     fn apply_decay(&self, episode: &mut Episode, elapsed: Duration) {
         let decay_factor = self.calculate_decay(elapsed);
         episode.decay_rate = decay_factor;
-        
+
         let current_confidence = episode.encoding_confidence.raw();
         episode.encoding_confidence = Confidence::exact(current_confidence * decay_factor);
     }
-    
+
     fn get_parameters(&self) -> DecayParameters {
         self.params.clone()
     }
-    
+
     fn set_parameters(&mut self, params: DecayParameters) -> DecayResult<()> {
         self.params = params;
         Ok(())
@@ -282,7 +312,7 @@ struct TwoComponentDecay {
 
 #[cfg(feature = "psychological_decay")]
 impl TwoComponentDecay {
-    fn new(params: DecayParameters) -> Self {
+    const fn new(params: DecayParameters) -> Self {
         Self { params }
     }
 }
@@ -296,19 +326,19 @@ impl Decay for TwoComponentDecay {
         let slow_decay = 0.4 * (-hours / (24.0 * 30.0)).exp(); // Slow component (30 day half-life)
         fast_decay + slow_decay
     }
-    
+
     fn apply_decay(&self, episode: &mut Episode, elapsed: Duration) {
         let decay_factor = self.calculate_decay(elapsed);
         episode.decay_rate = decay_factor;
-        
+
         let current_confidence = episode.encoding_confidence.raw();
         episode.encoding_confidence = Confidence::exact(current_confidence * decay_factor);
     }
-    
+
     fn get_parameters(&self) -> DecayParameters {
         self.params.clone()
     }
-    
+
     fn set_parameters(&mut self, params: DecayParameters) -> DecayResult<()> {
         self.params = params;
         Ok(())

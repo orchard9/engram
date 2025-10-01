@@ -96,6 +96,14 @@ indoc = "2.0"
 utoipa = { version = "4", features = ["axum_extras"] }
 utoipa-swagger-ui = { version = "6", features = ["axum"] }
 
+[patch.crates-io]
+statrs = { path = "third_party/statrs" }
+jobserver = { path = "third_party/jobserver" }
+tonic = { path = "third_party/tonic" }
+hwloc = { path = "third_party/hwloc" }
+dashmap = { path = "third_party/dashmap" }
+metrics-util = { path = "third_party/metrics-util" }
+
 [workspace.lints.rust]
 unsafe_code = "warn"
 missing_docs = "warn"
@@ -115,4 +123,3 @@ strip = true
 [profile.bench]
 inherits = "release"
 debug = true
-

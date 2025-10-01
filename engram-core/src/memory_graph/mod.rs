@@ -17,7 +17,7 @@ pub use traits::{GraphBackend, MemoryBackend, MemoryError};
 // Re-export backend implementations
 pub use backends::{DashMapBackend, HashMapBackend, InfallibleBackend};
 
-// Configuration for memory graph operations
+/// Configuration for memory graph operations
 #[derive(Debug, Clone)]
 pub struct GraphConfig {
     /// Maximum number of results to return from queries

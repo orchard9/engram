@@ -1,3 +1,5 @@
+#![allow(clippy::multiple_crate_versions)]
+
 //! Protocol buffer definitions for Engram cognitive graph database.
 //!
 //! This module provides type-safe gRPC communication with cognitive-friendly
@@ -41,7 +43,8 @@ pub fn datetime_to_timestamp(dt: DateTime<Utc>) -> Timestamp {
 
 /// Convert protobuf Timestamp to chrono `DateTime`
 pub fn timestamp_to_datetime(ts: &Timestamp) -> DateTime<Utc> {
-    DateTime::from_timestamp(ts.seconds, u32::try_from(ts.nanos).unwrap_or(0)).unwrap_or_else(Utc::now)
+    DateTime::from_timestamp(ts.seconds, u32::try_from(ts.nanos).unwrap_or(0))
+        .unwrap_or_else(Utc::now)
 }
 
 impl Confidence {

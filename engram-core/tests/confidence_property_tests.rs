@@ -3,6 +3,9 @@
 //! These tests verify invariants that developers naturally expect when working with
 //! probabilistic confidence values, following cognitive-friendly property specifications.
 
+#![allow(missing_docs)]
+#![allow(clippy::float_cmp)]
+
 use engram_core::Confidence;
 use proptest::prelude::*;
 
@@ -57,10 +60,11 @@ proptest! {
     #[test]
     fn frequency_construction_matches_intuitive_probability((successes, total) in frequency_strategy()) {
         let confidence = Confidence::from_successes(successes, total);
+        #[allow(clippy::cast_precision_loss)]
         let expected = successes as f32 / total as f32;
 
         // Cognitive expectation: "The math should work out like I expect"
-        prop_assert_eq!(confidence.raw(), expected);
+        prop_assert!((confidence.raw() - expected).abs() < 1e-6);
         prop_assert!(confidence.raw() >= 0.0);
         prop_assert!(confidence.raw() <= 1.0);
     }
@@ -70,7 +74,7 @@ proptest! {
     #[test]
     fn zero_total_gives_zero_confidence(successes in 0u32..1000u32) {
         let confidence = Confidence::from_successes(successes, 0);
-        prop_assert_eq!(confidence.raw(), 0.0, "Zero total should always give zero confidence");
+        prop_assert!((confidence.raw() - 0.0).abs() < 1e-6, "Zero total should always give zero confidence");
     }
 
     /// Property: "Percentage construction works like developers expect"
@@ -82,7 +86,7 @@ proptest! {
         let expected = f32::from(percent.min(100)) / 100.0;
 
         // Cognitive expectation: "Percentages should convert naturally to decimals"
-        prop_assert_eq!(confidence.raw(), expected);
+        prop_assert!((confidence.raw() - expected).abs() < 1e-6);
         prop_assert!(confidence.raw() >= 0.0);
         prop_assert!(confidence.raw() <= 1.0);
     }
@@ -210,7 +214,7 @@ proptest! {
         let combined = conf_a.combine_weighted(conf_b, 0.0, 0.0);
 
         // Cognitive expectation: "No evidence means middle-ground confidence"
-        prop_assert_eq!(combined.raw(), Confidence::MEDIUM.raw());
+        prop_assert!((combined.raw() - Confidence::MEDIUM.raw()).abs() < 1e-6);
     }
 
     /// Property: "Overconfidence calibration reduces high confidence appropriately"
@@ -308,11 +312,11 @@ proptest! {
     #[test]
     fn confidence_constants_are_valid_and_meaningful(_unit in Just(())) {
         // Test that all constants are valid probabilities
-        prop_assert_eq!(Confidence::NONE.raw(), 0.0);
-        prop_assert_eq!(Confidence::LOW.raw(), 0.1);
-        prop_assert_eq!(Confidence::MEDIUM.raw(), 0.5);
-        prop_assert_eq!(Confidence::HIGH.raw(), 0.9);
-        prop_assert_eq!(Confidence::CERTAIN.raw(), 1.0);
+        prop_assert!((Confidence::NONE.raw() - 0.0).abs() < 1e-6);
+        prop_assert!((Confidence::LOW.raw() - 0.1).abs() < 1e-6);
+        prop_assert!((Confidence::MEDIUM.raw() - 0.5).abs() < 1e-6);
+        prop_assert!((Confidence::HIGH.raw() - 0.9).abs() < 1e-6);
+        prop_assert!((Confidence::CERTAIN.raw() - 1.0).abs() < 1e-6);
 
         // Test cognitive ordering matches mathematical ordering
         prop_assert!(Confidence::NONE.raw() < Confidence::LOW.raw());

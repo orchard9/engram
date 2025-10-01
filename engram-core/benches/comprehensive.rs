@@ -1,4 +1,8 @@
-use criterion::{Criterion, criterion_group, criterion_main};
+//! Comprehensive benchmarking entry point for Engram milestone 1.
+
+#![allow(missing_docs)]
+
+use criterion::{criterion_group, criterion_main};
 
 mod milestone_1;
 

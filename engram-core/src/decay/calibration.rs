@@ -26,7 +26,9 @@ impl ConfidenceCalibrator {
 
     /// Calibrate confidence to reduce overconfidence bias
     #[must_use]
-    pub const fn calibrate_overconfidence(&self, confidence: Confidence) -> Confidence {
-        confidence.calibrate_overconfidence()
+    pub fn calibrate_overconfidence(&self, confidence: Confidence) -> Confidence {
+        let calibrated = confidence.calibrate_overconfidence();
+        let strength = self.calibration_strength.clamp(0.0, 1.0);
+        calibrated.combine_weighted(confidence, strength, 1.0 - strength)
     }
 }

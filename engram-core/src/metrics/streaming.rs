@@ -4,6 +4,7 @@ use crossbeam_queue::ArrayQueue;
 use crossbeam_utils::CachePadded;
 use parking_lot::RwLock;
 use std::collections::VecDeque;
+use std::convert::TryFrom;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
@@ -22,11 +23,13 @@ pub struct StreamingAggregator {
 }
 
 impl StreamingAggregator {
+    /// Create a streaming aggregation pipeline with the default buffer size.
     #[must_use]
     pub fn new() -> Self {
         Self::with_capacity(65536) // 64K updates buffer
     }
 
+    /// Create a streaming aggregator sized for the expected update volume.
     #[must_use]
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
@@ -39,7 +42,6 @@ impl StreamingAggregator {
     }
 
     /// Queue a metric update for aggregation
-    #[inline(always)]
     pub fn queue_update(&self, update: MetricUpdate) {
         if !self.export_enabled.load(Ordering::Acquire) {
             return;
@@ -71,7 +73,7 @@ impl StreamingAggregator {
 
         // Aggregate updates
         let mut windows = self.windows.write();
-        for update in updates {
+        for update in &updates {
             windows.add_update(update);
             self.exported_count.fetch_add(1, Ordering::Relaxed);
         }
@@ -97,24 +99,40 @@ impl StreamingAggregator {
 /// Metric update types
 #[derive(Debug, Clone)]
 pub enum MetricUpdate {
+    /// Discrete counter increment emitted by producers.
     Counter {
+        /// Counter identifier used in registries and dashboards.
         name: &'static str,
+        /// Increment amount contributed by this update.
         value: u64,
+        /// Capture time so aggregators can maintain order.
         timestamp: Instant,
     },
+    /// Scalar gauge reading such as temperature or queue depth.
     Gauge {
+        /// Gauge identifier.
         name: &'static str,
+        /// Recorded value for the gauge.
         value: f64,
+        /// When the gauge value was captured.
         timestamp: Instant,
     },
+    /// Single observation fed into a histogram distribution.
     Histogram {
+        /// Histogram identifier.
         name: &'static str,
+        /// Observation magnitude.
         value: f64,
+        /// Capture time of the sample.
         timestamp: Instant,
     },
+    /// Observation destined for percentile/summary calculations.
     Summary {
+        /// Summary series identifier.
         name: &'static str,
+        /// Sample value recorded for the summary.
         value: f64,
+        /// Capture time associated with the sample.
         timestamp: Instant,
     },
 }
@@ -144,11 +162,11 @@ impl AggregationWindows {
         }
     }
 
-    fn add_update(&mut self, update: MetricUpdate) {
-        self.one_second.add_update(&update);
-        self.ten_seconds.add_update(&update);
-        self.one_minute.add_update(&update);
-        self.five_minutes.add_update(&update);
+    fn add_update(&mut self, update: &MetricUpdate) {
+        self.one_second.add_update(update);
+        self.ten_seconds.add_update(update);
+        self.one_minute.add_update(update);
+        self.five_minutes.add_update(update);
     }
 
     fn compute_aggregates(&mut self) -> AggregatedMetrics {
@@ -192,7 +210,8 @@ impl TimeWindow {
                 timestamp,
             } => {
                 *self.counter_sums.entry(name).or_insert(0) += value;
-                self.data.push_back((*timestamp, *value as f64));
+                let value_f64 = u64_to_f64(*value);
+                self.data.push_back((*timestamp, value_f64));
             }
             MetricUpdate::Gauge {
                 name: _,
@@ -215,7 +234,9 @@ impl TimeWindow {
     }
 
     fn clean_expired(&mut self, now: Instant) {
-        let cutoff = now.checked_sub(self.duration).unwrap();
+        let Some(cutoff) = now.checked_sub(self.duration) else {
+            return;
+        };
         while let Some((timestamp, _)) = self.data.front() {
             if *timestamp < cutoff {
                 self.data.pop_front();
@@ -232,12 +253,16 @@ impl TimeWindow {
 
         let values: Vec<f64> = self.data.iter().map(|(_, v)| *v).collect();
         let mut sorted = values.clone();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        sorted.sort_by(f64::total_cmp);
+
+        let count = values.len();
+        let sum: f64 = values.iter().sum();
+        let mean = sum / usize_to_f64(count);
 
         WindowAggregate {
-            count: values.len(),
-            sum: values.iter().sum(),
-            mean: values.iter().sum::<f64>() / values.len() as f64,
+            count,
+            sum,
+            mean,
             min: sorted.first().copied().unwrap_or(0.0),
             max: sorted.last().copied().unwrap_or(0.0),
             p50: percentile(&sorted, 0.5),
@@ -253,20 +278,33 @@ fn percentile(sorted: &[f64], p: f64) -> f64 {
         return 0.0;
     }
 
-    let index = ((sorted.len() - 1) as f64 * p) as usize;
+    let len = sorted.len();
+    let clamped = p.clamp(0.0, 1.0);
+    let max_index = len.saturating_sub(1);
+    let scaled = usize_to_f64(max_index) * clamped;
+    let index = round_f64_to_usize(scaled, max_index);
+
     sorted[index]
 }
 
 /// Aggregated metrics for a time window
 #[derive(Debug, Clone)]
 pub struct WindowAggregate {
+    /// Number of samples included in this window.
     pub count: usize,
+    /// Sum of all sample values to assist with rate calculations.
     pub sum: f64,
+    /// Arithmetic mean of the observed values.
     pub mean: f64,
+    /// Minimum value recorded during the window.
     pub min: f64,
+    /// Maximum value recorded during the window.
     pub max: f64,
+    /// 50th percentile (median) estimate.
     pub p50: f64,
+    /// 90th percentile estimate.
     pub p90: f64,
+    /// 99th percentile estimate.
     pub p99: f64,
 }
 
@@ -288,9 +326,13 @@ impl WindowAggregate {
 /// Aggregated metrics across all windows
 #[derive(Debug, Clone)]
 pub struct AggregatedMetrics {
+    /// 1-second rolling aggregate for real-time monitoring.
     pub one_second: WindowAggregate,
+    /// 10-second aggregate for short trend analysis.
     pub ten_seconds: WindowAggregate,
+    /// 1-minute aggregate for medium-term trend detection.
     pub one_minute: WindowAggregate,
+    /// 5-minute aggregate for stability assessment.
     pub five_minutes: WindowAggregate,
 }
 
@@ -305,11 +347,58 @@ impl AggregatedMetrics {
     }
 }
 
+fn round_f64_to_usize(value: f64, max: usize) -> usize {
+    if max == 0 {
+        return 0;
+    }
+
+    if !value.is_finite() {
+        return 0;
+    }
+
+    let clamped = value.clamp(0.0, usize_to_f64(max));
+    let rounded = clamped.round();
+    if rounded == 0.0 {
+        return 0;
+    }
+
+    let bits = rounded.to_bits();
+    let exponent_bits = (bits >> 52) & 0x7FF;
+    let exponent = i32::try_from(exponent_bits).unwrap_or(0);
+    if exponent < 1023 {
+        return 0;
+    }
+
+    let mantissa = bits & 0x000F_FFFF_FFFF_FFFF;
+    let mut value_int = u128::from(mantissa | (1_u64 << 52));
+    let shift = exponent - 1023 - 52;
+    match shift.cmp(&0) {
+        std::cmp::Ordering::Greater => value_int <<= shift.unsigned_abs(),
+        std::cmp::Ordering::Less => value_int >>= shift.unsigned_abs(),
+        std::cmp::Ordering::Equal => {}
+    }
+
+    usize::try_from(value_int).unwrap_or(max).min(max)
+}
+
+fn usize_to_f64(value: usize) -> f64 {
+    u64::try_from(value).map_or_else(|_| u64_to_f64(u64::MAX), u64_to_f64)
+}
+
+fn u64_to_f64(value: u64) -> f64 {
+    let high_part = u32::try_from(value >> 32).unwrap_or(u32::MAX);
+    let low_part = u32::try_from(value & 0xFFFF_FFFF).unwrap_or(u32::MAX);
+    f64::from(high_part).mul_add(4_294_967_296.0, f64::from(low_part))
+}
+
 /// Export statistics
 #[derive(Debug, Clone)]
 pub struct ExportStats {
+    /// Total updates successfully exported since startup.
     pub exported: u64,
+    /// Number of updates dropped due to backpressure.
     pub dropped: u64,
+    /// Current depth of the streaming queue.
     pub queue_depth: usize,
 }
 
@@ -322,6 +411,14 @@ impl Default for StreamingAggregator {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn assert_close(actual: f64, expected: f64) {
+        let diff = (actual - expected).abs();
+        assert!(
+            diff <= f64::EPSILON,
+            "expected {expected}, got {actual} (diff {diff})"
+        );
+    }
     use std::time::Duration;
 
     #[test]
@@ -369,8 +466,8 @@ mod tests {
 
         let aggregate = window.aggregate();
         assert_eq!(aggregate.count, 10);
-        assert_eq!(aggregate.min, 0.0);
-        assert_eq!(aggregate.max, 9.0);
-        assert_eq!(aggregate.mean, 4.5);
+        assert_close(aggregate.min, 0.0);
+        assert_close(aggregate.max, 9.0);
+        assert_close(aggregate.mean, 4.5);
     }
 }

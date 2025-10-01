@@ -1,7 +1,7 @@
 # Task 010: Spreading Performance Optimization
 
 ## Objective
-Optimize spreading performance to meet latency targets with cache-aware algorithms and memory pool management.
+Hit the <10 ms P95 latency target by tightening allocation, cache behavior, batching, and latency prediction in the spreading engine.
 
 ## Priority
 P1 (Performance Critical)
@@ -14,220 +14,51 @@ P1 (Performance Critical)
 
 ## Technical Approach
 
+### Current Baseline
+- `ActivationMemoryPool` (`engram-core/src/activation/memory_pool.rs`) exposes arena allocation but is not wired into the parallel engine; `process_task` still allocates vectors per hop.
+- `BreadthFirstTraversal` and `parallel.rs` rely on `DashMap`/`VecDeque` without cache-aligned node representations.
+- `LatencyBudgetManager` (`activation/latency_budget.rs`) provides tier budgets but no predictive tuning.
+
 ### Implementation Details
-- Implement lock-free memory pool for activation records
-- Add cache-aware node layout minimizing cache misses during traversal
-- Create adaptive batching based on CPU topology and memory bandwidth
-- Implement spreading latency prediction for timeout management
+1. **Lock-Free Activation Pool**
+   - Add `ActivationRecordPool` wrapping `crossbeam_epoch::Stack<NonNull<ActivationRecord>>` with per-thread caches (`thread_local!`).
+   - Replace `ActivationRecord::new` allocations in `parallel.rs::process_task` with `ActivationRecordPool::acquire`. On recycle, call `record.reset()` and push back into the stack.
+   - Expose metrics: `activation_pool_hit_rate`, `pool_high_water_mark` via `ActivationMetrics`.
 
-### Files to Create/Modify
-- `engram-core/src/activation/performance.rs` - New file for performance optimizations
-- `engram-core/src/activation/memory_pool.rs` - Memory pool implementation
-- `engram-core/src/activation/cache_optimization.rs` - Cache-aware algorithms
+2. **Cache-Optimized Node Layout**
+   - Introduce `#[repr(C, align(64))] struct CacheOptimizedNode` storing hot fields (ID, activation, confidence, tier) in first cache line; move metadata into a companion struct. Update `MemoryGraph::get_neighbors` to hand out references to the hot struct for spreading loops.
+   - In `parallel.rs`, prefetch upcoming nodes using `_mm_prefetch` with distance from `ParallelSpreadingConfig::prefetch_distance`.
 
-### Integration Points
-- Optimizes integrated recall from Task 008
-- Uses SIMD operations from Task 007
-- Connects to tier-aware scheduling from Task 003
-- Integrates with existing memory management
+3. **Adaptive Batching**
+   - Implement `AdaptiveBatcher` that consumes CPU topology (via `std::thread::available_parallelism`, optional `numa` crate) and historical metrics. Compute recommended batch size using geometric mean of cache capacity, memory bandwidth, and logical cores.
+   - Store the batch size in `ActivationMetrics::parallel_efficiency` and feed into `ParallelSpreadingConfig::batch_size` at runtime.
 
-## Implementation Details
+4. **Latency Prediction Loop**
+   - Create `LatencyPredictor` that records `(batch_size, hop_count, tier_mix, observed)` tuples and fits a simple linear model. Integrate with `LatencyBudgetManager::within_budget` before launching another hop; if predicted latency would exceed budget, truncate spreading and flag partial results.
 
-### Lock-Free Memory Pool
-```rust
-pub struct ActivationRecordPool {
-    free_list: lockfree::stack::Stack<*mut ActivationRecord>,
-    chunk_allocator: ChunkAllocator,
-    pool_size: AtomicUsize,
-    high_water_mark: usize,
-}
+5. **Metrics + Observability**
+   - Publish new Prometheus metrics (`engram_spreading_latency_prediction_error`, `engram_spreading_cache_miss_rate`, `engram_spreading_pool_utilization`). Gather cache miss rate by sampling hardware counters via `metrics::hardware::HardwareMetrics::last_cache_stats()`.
 
-impl ActivationRecordPool {
-    pub fn acquire(&self) -> Option<Box<ActivationRecord>> {
-        // Fast path: pop from free list
-        if let Some(ptr) = self.free_list.pop() {
-            return Some(unsafe { Box::from_raw(ptr) });
-        }
+### Acceptance Criteria
+- [ ] `ActivationRecordPool` reduces allocator calls by ≥50 % (measure `activation_pool_hit_rate`)
+- [ ] Cache-aligned nodes improve L2 miss rate to <5 % on synthetic workload (perf counter test)
+- [ ] Adaptive batching converges within 3 iterations and stabilizes `batch_size` per topology
+- [ ] Latency prediction error <20 % for 95 % of requests
+- [ ] Recall P95 latency <10 ms on 10 k warm-tier dataset with spreading enabled
+- [ ] Metrics exported for pool utilization, cache miss rate, latency prediction error
 
-        // Slow path: allocate new record
-        self.allocate_new()
-    }
-
-    pub fn release(&self, record: Box<ActivationRecord>) {
-        record.reset();
-        let ptr = Box::into_raw(record);
-        self.free_list.push(ptr);
-    }
-}
-```
-
-### Cache-Aware Node Layout
-```rust
-// Optimize for cache line size (64 bytes)
-#[repr(C, align(64))]
-pub struct CacheOptimizedNode {
-    // Hot data: frequently accessed during spreading
-    memory_id: MemoryId,           // 8 bytes
-    activation: AtomicF32,         // 4 bytes
-    confidence: f32,               // 4 bytes
-    hop_count: u16,               // 2 bytes
-    storage_tier: StorageTier,     // 1 byte
-    flags: u8,                    // 1 byte
-
-    // Warm data: accessed during result collection
-    embedding_ptr: *const [f32; 768],  // 8 bytes
-    adjacency_list: *const [MemoryId], // 8 bytes
-
-    // Cold data: accessed less frequently
-    metadata: NodeMetadata,        // 32 bytes
-    _padding: [u8; 0],            // Align to 64 bytes
-}
-
-pub struct NodeMetadata {
-    last_access: f64,
-    creation_time: f64,
-    access_count: u32,
-    tier_migration_history: u32,
-}
-```
-
-### Adaptive Batching Strategy
-```rust
-pub struct AdaptiveBatcher {
-    cpu_topology: CPUTopology,
-    memory_bandwidth: f64,        // GB/s
-    cache_sizes: CacheSizes,
-    optimal_batch_size: AtomicUsize,
-}
-
-impl AdaptiveBatcher {
-    pub fn compute_optimal_batch_size(&self, workload_characteristics: &WorkloadStats) -> usize {
-        // Consider L1/L2/L3 cache sizes
-        let cache_friendly_size = self.cache_sizes.l2_size / size_of::<CacheOptimizedNode>();
-
-        // Consider memory bandwidth
-        let bandwidth_optimal = (self.memory_bandwidth * 1_000_000.0) /
-                               (size_of::<[f32; 768]>() as f64 * 2.0); // Read + write
-
-        // Consider CPU parallelism
-        let cpu_optimal = self.cpu_topology.logical_cores * 8; // 8 vectors per core
-
-        // Take geometric mean for balanced optimization
-        let optimal = ((cache_friendly_size * bandwidth_optimal * cpu_optimal) as f64).powf(1.0/3.0);
-
-        optimal.round() as usize
-    }
-}
-```
-
-### Latency Prediction Model
-```rust
-pub struct LatencyPredictor {
-    historical_latencies: RingBuffer<LatencySample>,
-    regression_model: SimpleLinearRegression,
-}
-
-struct LatencySample {
-    batch_size: usize,
-    hop_count: u16,
-    tier_distribution: [f32; 3], // Hot, warm, cold percentages
-    actual_latency: Duration,
-}
-
-impl LatencyPredictor {
-    pub fn predict_latency(&self, spreading_parameters: &SpreadingParams) -> Duration {
-        // Simple model: latency = base + (batch_size * vector_cost) + (hop_count * traversal_cost)
-        let base_latency = Duration::from_micros(100);
-        let vector_cost = Duration::from_nanos(50);   // Per vector similarity
-        let traversal_cost = Duration::from_micros(200); // Per hop
-
-        base_latency
-            + vector_cost * spreading_parameters.batch_size as u32
-            + traversal_cost * spreading_parameters.max_hops as u32
-    }
-
-    pub fn update_model(&mut self, actual: LatencySample) {
-        self.historical_latencies.push(actual);
-        if self.historical_latencies.len() >= 100 {
-            self.retrain_model();
-        }
-    }
-}
-```
-
-## Acceptance Criteria
-- [ ] Memory pool reduces allocation overhead by >50%
-- [ ] Cache-aware layout improves traversal performance by >20%
-- [ ] Adaptive batching automatically tunes for CPU topology
-- [ ] Latency prediction accurate within 20% for typical workloads
-- [ ] Overall spreading performance meets <10ms P95 latency target
-- [ ] Memory usage remains bounded under high load
-- [ ] Performance improvements validated across different CPU architectures
-
-## Testing Approach
-- Performance benchmarks comparing optimized vs baseline implementations
-- Cache performance analysis using hardware performance counters
-- Stress tests with high allocation rates and memory pressure
-- Latency prediction accuracy tests across various workload patterns
-- Cross-platform testing on different CPU architectures
+### Testing Approach
+- Benchmarks: `cargo bench --bench spreading` before/after optimization; track IPC and miss rates with `perf stat`
+- Long-running soak test (100 k spreads) to ensure pool does not leak; monitor via `PoolStats::utilization`
+- Unit tests for `AdaptiveBatcher::compute_optimal_batch_size` and `LatencyPredictor::predict_latency`
 
 ## Risk Mitigation
-- **Risk**: Memory pool fragmentation leading to memory leaks
-- **Mitigation**: Implement pool compaction, monitor pool health
-- **Testing**: Long-running stress tests with allocation pattern analysis
-
-- **Risk**: Cache optimizations beneficial only on specific architectures
-- **Mitigation**: Runtime detection of cache sizes, adaptive layouts
-- **Validation**: Test on ARM, Intel, AMD architectures
-
-- **Risk**: Adaptive batching oscillates or converges slowly
-- **Mitigation**: Implement damping factors, minimum convergence windows
-- **Testing**: Simulate various workload patterns and measure convergence
-
-## Implementation Strategy
-
-### Phase 1: Memory Pool Implementation
-- Implement lock-free activation record pool
-- Add pool metrics and monitoring
-- Basic performance validation
-
-### Phase 2: Cache Optimization
-- Design cache-aware node layout
-- Implement prefetching strategies
-- Cache performance measurement
-
-### Phase 3: Adaptive Systems
-- Implement adaptive batching
-- Add latency prediction model
-- End-to-end performance optimization
-
-## Performance Targets
-- **Allocation Overhead**: <10ns per activation record from pool
-- **Cache Miss Rate**: <5% L2 cache misses during node traversal
-- **Batch Efficiency**: >90% of theoretical peak SIMD performance
-- **Latency Prediction**: ±20% accuracy for 95% of predictions
-- **Memory Overhead**: <10% additional memory for optimization structures
-
-## Monitoring and Metrics
-```rust
-pub struct SpreadingPerformanceMetrics {
-    // Memory pool metrics
-    pool_hit_rate: Histogram,
-    pool_high_water_mark: Gauge,
-
-    // Cache performance
-    cache_miss_rate: Histogram,
-    prefetch_effectiveness: Counter,
-
-    // Latency tracking
-    spreading_latency_p95: Histogram,
-    latency_prediction_error: Histogram,
-
-    // Batch optimization
-    optimal_batch_size: Gauge,
-    batch_utilization: Histogram,
-}
-```
+- **Pool fragmentation** → add periodic `ActivationMemoryPool::reset` on engine idle and log high-water marks
+- **Oscillating batch size** → apply EWMA damping factor 0.5 and minimum update interval of 500 spreads
+- **Prediction mistakes** → fallback to similarity recall when predicted latency exceeds budget by >50 %
 
 ## Notes
-This task transforms the cognitive database from functional to performant. Unlike traditional databases that optimize for ACID compliance, cognitive systems must optimize for low-latency exploration of large memory networks. The optimizations here determine whether Engram can achieve real-time cognitive performance or remains a research prototype.
+Relevant modules:
+- Memory pool primitives (`engram-core/src/activation/memory_pool.rs`)
+- Parallel engine (`engram-core/src/activation/parallel.rs`)
+- Latency budgets (`engram-core/src/activation/latency_budget.rs`)

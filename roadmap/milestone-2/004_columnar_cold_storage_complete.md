@@ -1,12 +1,25 @@
 # Task 004: Columnar Cold Storage with SIMD
 
-## Status: Pending
+## Status: Partial ✅
 ## Priority: P2 - Optimization
 ## Estimated Effort: 3-4 days
 ## Dependencies: Task 001 (cold tier implementation)
 
 ## Objective
 Optimize cold tier storage with columnar layout for SIMD batch operations on large vector datasets, achieving 10-100x performance improvement for analytical workloads through cache-optimal memory access patterns and vectorized operations.
+
+## Current Implementation Status
+- ✅ Cold tier stores embeddings column-wise using `ColumnBuffer` structures (`engram-core/src/storage/cold_tier.rs:22-167`).
+- ✅ Batch similarity search leverages `VectorOps::batch_dot_product_columnar` and accumulates column chunks (`engram-core/src/storage/cold_tier.rs:184-200`, `engram-core/src/compute/mod.rs:40-102`).
+- ✅ Confidence calibration applied on recall results (`engram-core/src/storage/cold_tier.rs:660-671`).
+- ⚠️ No dedicated `columnar.rs` module with aligned allocators; we still rely on `Vec` allocations even though the spec requested 64-byte alignment and chunk management.
+- ⚠️ Product quantization / compression not implemented; `compression_enabled` flag toggles only compaction heuristics (`engram-core/src/storage/cold_tier.rs:320-343`).
+- ⚠️ No benchmarks demonstrating the promised 10–100× speedup; need criterion/bench harness comparing row- vs column-storage.
+
+## Remaining Work for Completion
+1. Introduce aligned memory helpers (e.g., `AlignedAlloc`) to guarantee AVX-512 friendly layout (`engram-core/src/storage/cold_tier.rs` or new module).
+2. Implement optional product quantization/compression path to honour the specification’s compression target.
+3. Add criterion benchmark validating performance improvements and store results in repo/docs.
 
 ## Research-Based Design Principles
 

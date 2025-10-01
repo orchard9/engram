@@ -1,7 +1,9 @@
 //! Entorhinal cortex-inspired context gathering with grid cell dynamics.
 
-use crate::{Episode, memory::Memory};
+use super::numeric::{round_f32_to_usize, usize_to_f32};
+use crate::{Episode, memory::Memory, numeric::u64_to_f64};
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 /// Grid module for spatial/temporal indexing
 #[derive(Debug, Clone)]
@@ -85,7 +87,7 @@ pub struct EntorhinalContext {
     spatial_radius: f32,
 
     /// Episode context cache
-    context_cache: HashMap<String, Vec<Episode>>,
+    context_cache: Mutex<HashMap<String, Vec<Episode>>>,
 }
 
 impl EntorhinalContext {
@@ -97,8 +99,9 @@ impl EntorhinalContext {
         let mut grid_modules = Vec::new();
 
         for (i, scale) in scales.into_iter().enumerate() {
-            let orientation = (i as f32) * std::f32::consts::PI / 6.0; // Different orientations
-            let phase = ((i as f32) * 7.3, (i as f32) * 11.7); // Pseudo-random phases
+            let index_scalar = usize_to_f32(i);
+            let orientation = index_scalar * std::f32::consts::PI / 6.0; // Different orientations
+            let phase = (index_scalar * 7.3, index_scalar * 11.7); // Pseudo-random phases
             grid_modules.push(GridModule::new(scale, orientation, phase));
         }
 
@@ -106,7 +109,7 @@ impl EntorhinalContext {
             grid_modules,
             temporal_window: 3600.0, // 1 hour window
             spatial_radius: 100.0,
-            context_cache: HashMap::new(),
+            context_cache: Mutex::new(HashMap::new()),
         }
     }
 
@@ -120,8 +123,9 @@ impl EntorhinalContext {
         let mut context_episodes = Vec::new();
 
         for episode in episodes {
-            let time_diff = (target_time - episode.when).num_seconds().abs() as f64;
-            if time_diff <= self.temporal_window {
+            let time_diff = (target_time - episode.when).num_seconds();
+            let time_diff_seconds = u64_to_f64(time_diff.unsigned_abs());
+            if time_diff_seconds <= self.temporal_window {
                 context_episodes.push(episode.clone());
             }
         }
@@ -139,30 +143,51 @@ impl EntorhinalContext {
         target_location: Option<&str>,
         episodes: &[Episode],
     ) -> Vec<Episode> {
-        if let Some(target) = target_location {
-            episodes
+        target_location.map_or_else(Vec::new, |target| {
+            let cached = self
+                .context_cache
+                .lock()
+                .ok()
+                .and_then(|cache| cache.get(target).cloned());
+
+            if let Some(results) = cached {
+                return results;
+            }
+
+            let mut matches: Vec<Episode> = episodes
                 .iter()
                 .filter(|ep| {
-                    if let Some(ref loc) = ep.where_location {
-                        // Simple string similarity for now
-                        loc.contains(target) || target.contains(loc)
-                    } else {
-                        false
-                    }
+                    ep.where_location
+                        .as_deref()
+                        .is_some_and(|loc| loc.contains(target) || target.contains(loc))
                 })
                 .cloned()
-                .collect()
-        } else {
-            Vec::new()
-        }
+                .collect();
+
+            let limit = round_f32_to_usize(self.spatial_radius.max(1.0));
+            if limit > 0 && matches.len() > limit {
+                matches.truncate(limit);
+            }
+
+            if let Ok(mut cache) = self.context_cache.lock() {
+                cache.insert(target.to_string(), matches.clone());
+            }
+
+            matches
+        })
     }
 
     /// Gather semantic context based on content similarity
+    ///
+    /// # Panics
+    /// Panics if activation values contain `NaN`, because sorting relies on
+    /// [`f32::partial_cmp`].
     pub fn gather_semantic_context(
         &self,
         target_content: &str,
         memories: &[Memory],
     ) -> Vec<Memory> {
+        let _ = self;
         let mut context_memories = Vec::new();
 
         for memory in memories {
@@ -174,7 +199,11 @@ impl EntorhinalContext {
         }
 
         // Sort by activation level
-        context_memories.sort_by(|a, b| b.activation().partial_cmp(&a.activation()).unwrap());
+        context_memories.sort_by(|a, b| {
+            b.activation()
+                .partial_cmp(&a.activation())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         context_memories
     }
@@ -189,6 +218,10 @@ impl EntorhinalContext {
     }
 
     /// Find episodes with similar grid codes
+    ///
+    /// # Panics
+    /// Panics when comparing similarity scores that contain NaN values because the
+    /// ordering relies on [`f32::partial_cmp`].
     #[must_use]
     pub fn find_similar_grid_patterns(
         &self,
@@ -207,12 +240,13 @@ impl EntorhinalContext {
         }
 
         // Sort by similarity
-        similar_episodes.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        similar_episodes.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         similar_episodes
     }
 
     /// Compute similarity between grid codes
     fn grid_code_similarity(&self, code1: &[f32], code2: &[f32]) -> f32 {
+        let _ = self;
         if code1.len() != code2.len() {
             return 0.0;
         }
@@ -229,6 +263,10 @@ impl EntorhinalContext {
     }
 
     /// Integrate multiple context sources
+    ///
+    /// # Panics
+    /// Panics if score bookkeeping becomes inconsistent and a previously recorded
+    /// episode identifier is missing when constructing the result vector.
     #[must_use]
     pub fn integrate_contexts(
         &self,
@@ -236,6 +274,7 @@ impl EntorhinalContext {
         spatial: Vec<Episode>,
         semantic: Vec<Memory>,
     ) -> Vec<Episode> {
+        let _ = self;
         let mut integrated = HashMap::new();
         let mut scores = HashMap::new();
 
@@ -272,7 +311,7 @@ impl EntorhinalContext {
             .into_iter()
             .map(|(id, ep)| (id.clone(), ep, scores[&id]))
             .collect();
-        result.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap());
+        result.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
 
         result.into_iter().map(|(_, ep, _)| ep).collect()
     }
@@ -284,6 +323,7 @@ impl EntorhinalContext {
         start_position: (f32, f32),
         movements: &[(f32, f32)],
     ) -> Vec<(f32, f32)> {
+        let _ = self;
         let mut path = vec![start_position];
         let mut current = start_position;
 
@@ -299,6 +339,7 @@ impl EntorhinalContext {
     /// Border cell activation for boundary detection
     #[must_use]
     pub fn border_activation(&self, position: (f32, f32), boundary: f32) -> f32 {
+        let _ = self;
         let distance_to_boundary = (position.0.abs().max(position.1.abs()) - boundary).abs();
         (-distance_to_boundary / 10.0).exp() // Exponential decay from boundary
     }
@@ -320,11 +361,11 @@ mod tests {
 
         // Test activation at origin
         let activation = module.activation((0.0, 0.0));
-        assert!(activation >= 0.0 && activation <= 1.0);
+        assert!((0.0..=1.0).contains(&activation));
 
         // Test activation at grid point
         let activation = module.activation((30.0, 0.0));
-        assert!(activation >= 0.0 && activation <= 1.0);
+        assert!((0.0..=1.0).contains(&activation));
     }
 
     #[test]
@@ -336,7 +377,7 @@ mod tests {
         let code = context.compute_grid_code((10.0, 20.0));
         assert_eq!(code.len(), 5);
         for value in code {
-            assert!(value >= 0.0 && value <= 1.0);
+            assert!((0.0..=1.0).contains(&value));
         }
     }
 

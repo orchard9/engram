@@ -34,6 +34,11 @@ pub struct HnswNode {
 
 impl HnswNode {
     /// Create a new HNSW node from a memory
+    ///
+    /// # Errors
+    ///
+    /// Returns `HnswError::InvalidDimension` when the memory embedding does not
+    /// match the expected dimensionality for the index.
     pub fn from_memory(
         node_id: u32,
         memory: Arc<Memory>,
@@ -101,6 +106,11 @@ impl HnswNode {
 
     /// Add a connection atomically
     #[allow(unsafe_code)]
+    ///
+    /// # Errors
+    ///
+    /// Propagates allocation or structural errors when the connection block
+    /// cannot be updated safely.
     pub fn add_connection(&self, layer: usize, edge: HnswEdge) -> Result<(), super::HnswError> {
         let connections_ptr = self.connections_ptr.load(Ordering::Acquire);
 
@@ -189,6 +199,11 @@ impl ConnectionBlock {
     }
 
     /// Add an edge to a specific layer
+    ///
+    /// # Errors
+    ///
+    /// Returns `HnswError::CorruptedGraph` when the requested layer index is
+    /// out of bounds for the current connection block.
     pub fn add_edge(&mut self, layer: usize, edge: HnswEdge) -> Result<(), super::HnswError> {
         if layer >= self.layer_connections.len() {
             return Err(super::HnswError::CorruptedGraph(format!(
@@ -253,6 +268,7 @@ impl HnswEdge {
 
 #[derive(Clone, Copy, Debug, Default)]
 #[repr(C)]
+/// Metadata for HNSW graph edges
 pub struct EdgeMetadata {
     /// Edge type discriminant
     pub edge_type: u8,
@@ -268,6 +284,20 @@ pub struct EdgeMetadata {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fmt::Debug;
+
+    type TestResult<T = ()> = Result<T, String>;
+
+    fn ensure_eq<T>(actual: &T, expected: &T, context: &str) -> TestResult
+    where
+        T: PartialEq + Debug,
+    {
+        if actual == expected {
+            Ok(())
+        } else {
+            Err(format!("{context}: expected {expected:?}, got {actual:?}"))
+        }
+    }
 
     #[test]
     fn test_node_cache_alignment() {
@@ -284,7 +314,7 @@ mod tests {
     }
 
     #[test]
-    fn test_node_creation() {
+    fn test_node_creation() -> TestResult {
         // use crate::MemoryBuilder;
         // use chrono::Utc;
 
@@ -295,9 +325,10 @@ mod tests {
             Confidence::HIGH,
         ));
 
-        let node = HnswNode::from_memory(0, memory.clone(), 3).unwrap();
-        assert_eq!(node.node_id, 0);
-        assert_eq!(node.layer_count.load(Ordering::Relaxed), 3);
-        assert_eq!(node.confidence, memory.confidence);
+        let node = HnswNode::from_memory(0, memory.clone(), 3)
+            .map_err(|err| format!("create node from memory: {err:?}"))?;
+        ensure_eq(&node.node_id, &0, "node id matches")?;
+        ensure_eq(&node.layer_count.load(Ordering::Relaxed), &3, "layer count")?;
+        ensure_eq(&node.confidence, &memory.confidence, "confidence matches")
     }
 }

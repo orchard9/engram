@@ -1,5 +1,6 @@
 //! Metacognitive confidence calibration for pattern completion.
 
+use super::numeric::usize_to_f32;
 use super::{CompletedEpisode, MemorySource};
 use crate::Confidence;
 use std::collections::HashMap;
@@ -27,19 +28,19 @@ struct CalibrationPoint {
 /// Weights for retrieval fluency factors
 #[derive(Debug, Clone)]
 struct FluencyWeights {
-    speed_weight: f32,
-    ease_weight: f32,
-    familiarity_weight: f32,
-    vividness_weight: f32,
+    speed: f32,
+    ease: f32,
+    familiarity: f32,
+    vividness: f32,
 }
 
 impl Default for FluencyWeights {
     fn default() -> Self {
         Self {
-            speed_weight: 0.3,
-            ease_weight: 0.25,
-            familiarity_weight: 0.25,
-            vividness_weight: 0.2,
+            speed: 0.3,
+            ease: 0.25,
+            familiarity: 0.25,
+            vividness: 0.2,
         }
     }
 }
@@ -79,7 +80,7 @@ impl MetacognitiveConfidence {
         }
 
         // Apply overconfidence reduction
-        calibrated = self.reduce_overconfidence(calibrated);
+        calibrated = Self::reduce_overconfidence(calibrated);
 
         Confidence::exact(calibrated.clamp(0.0, 1.0))
     }
@@ -90,9 +91,12 @@ impl MetacognitiveConfidence {
         let mut weighted_confidence = 0.0;
 
         for source in episode.source_attribution.field_sources.values() {
-            let threshold = self.source_thresholds.get(source).unwrap_or(&0.5);
+            let threshold = self.source_thresholds.get(source).copied().unwrap_or(0.5);
+            let calibration = self
+                .average_accuracy_for_source(*source)
+                .unwrap_or(threshold);
             total_weight += 1.0;
-            weighted_confidence += threshold;
+            weighted_confidence += calibration;
         }
 
         if total_weight > 0.0 {
@@ -105,62 +109,82 @@ impl MetacognitiveConfidence {
     /// Adjust confidence based on retrieval fluency
     fn retrieval_fluency_adjustment(&self, episode: &CompletedEpisode) -> f32 {
         // Calculate fluency components
-        let speed_fluency = self.calculate_speed_fluency(episode);
-        let ease_fluency = self.calculate_ease_fluency(episode);
-        let familiarity_fluency = self.calculate_familiarity_fluency(episode);
-        let vividness_fluency = self.calculate_vividness_fluency(episode);
+        let speed_fluency = Self::calculate_speed_fluency(episode);
+        let ease_fluency = Self::calculate_ease_fluency(episode);
+        let familiarity_fluency = Self::calculate_familiarity_fluency(episode);
+        let vividness_fluency = Self::calculate_vividness_fluency(episode);
 
         // Weighted combination
 
         vividness_fluency.mul_add(
-            self.fluency_weights.vividness_weight,
+            self.fluency_weights.vividness,
             familiarity_fluency.mul_add(
-                self.fluency_weights.familiarity_weight,
+                self.fluency_weights.familiarity,
                 speed_fluency.mul_add(
-                    self.fluency_weights.speed_weight,
-                    ease_fluency * self.fluency_weights.ease_weight,
+                    self.fluency_weights.speed,
+                    ease_fluency * self.fluency_weights.ease,
                 ),
             ),
         )
     }
 
+    fn average_accuracy_for_source(&self, source: MemorySource) -> Option<f32> {
+        let mut total = 0.0;
+        let mut count = 0_usize;
+
+        for point in &self.calibration_data {
+            if point.source == source {
+                total += point.actual_accuracy;
+                count += 1;
+            }
+        }
+
+        if count > 0 {
+            Some(total / usize_to_f32(count))
+        } else {
+            None
+        }
+    }
+
     /// Calculate speed-based fluency
-    fn calculate_speed_fluency(&self, episode: &CompletedEpisode) -> f32 {
+    fn calculate_speed_fluency(episode: &CompletedEpisode) -> f32 {
         // Faster retrieval = higher confidence
         // Based on number of activation traces (fewer = faster)
         let trace_count = episode.activation_evidence.len();
         if trace_count == 0 {
             1.0
         } else {
-            (1.0 / (trace_count as f32).mul_add(0.1, 1.0)).max(0.5)
+            let count = usize_to_f32(trace_count);
+            (1.0 / count.mul_add(0.1, 1.0)).max(0.5)
         }
     }
 
     /// Calculate ease-based fluency
-    fn calculate_ease_fluency(&self, episode: &CompletedEpisode) -> f32 {
+    fn calculate_ease_fluency(episode: &CompletedEpisode) -> f32 {
         // Higher activation strength = easier retrieval
         if episode.activation_evidence.is_empty() {
             0.5
         } else {
-            let avg_activation: f32 = episode
+            let total_activation: f32 = episode
                 .activation_evidence
                 .iter()
                 .map(|trace| trace.activation_strength)
-                .sum::<f32>()
-                / episode.activation_evidence.len() as f32;
-            avg_activation.clamp(0.0, 1.0)
+                .sum();
+            let count = usize_to_f32(episode.activation_evidence.len());
+            (total_activation / count).clamp(0.0, 1.0)
         }
     }
 
     /// Calculate familiarity-based fluency
-    fn calculate_familiarity_fluency(&self, episode: &CompletedEpisode) -> f32 {
+    fn calculate_familiarity_fluency(episode: &CompletedEpisode) -> f32 {
         // More alternative hypotheses = more familiar pattern
         let hypothesis_count = episode.alternative_hypotheses.len();
-        (hypothesis_count as f32 / 5.0).min(1.0)
+        let count = usize_to_f32(hypothesis_count);
+        (count / 5.0).min(1.0)
     }
 
     /// Calculate vividness-based fluency
-    const fn calculate_vividness_fluency(&self, episode: &CompletedEpisode) -> f32 {
+    const fn calculate_vividness_fluency(episode: &CompletedEpisode) -> f32 {
         // Use episode's vividness confidence
         episode.episode.vividness_confidence.raw()
     }
@@ -182,7 +206,7 @@ impl MetacognitiveConfidence {
         relevant_points.sort_by(|a, b| {
             a.predicted_confidence
                 .partial_cmp(&b.predicted_confidence)
-                .unwrap()
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
 
         // Apply isotonic regression (simplified)
@@ -205,7 +229,7 @@ impl MetacognitiveConfidence {
     }
 
     /// Reduce overconfidence bias
-    fn reduce_overconfidence(&self, confidence: f32) -> f32 {
+    fn reduce_overconfidence(confidence: f32) -> f32 {
         // Apply power transformation to reduce overconfidence
         // Higher confidence values are reduced more
         if confidence > 0.8 {
@@ -244,7 +268,8 @@ impl MetacognitiveConfidence {
             .map(|p| (p.predicted_confidence - p.actual_accuracy).powi(2))
             .sum();
 
-        sum / self.calibration_data.len() as f32
+        let count = usize_to_f32(self.calibration_data.len());
+        sum / count
     }
 
     /// Reality monitoring: distinguish internal vs external source
@@ -259,7 +284,15 @@ impl MetacognitiveConfidence {
         // Return most common source
         source_counts
             .into_iter()
-            .max_by_key(|(_, count)| *count)
+            .max_by(|(source_a, count_a), (source_b, count_b)| {
+                count_a.cmp(count_b).then_with(|| {
+                    let threshold_a = self.source_thresholds.get(source_a).copied().unwrap_or(0.0);
+                    let threshold_b = self.source_thresholds.get(source_b).copied().unwrap_or(0.0);
+                    threshold_a
+                        .partial_cmp(&threshold_b)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+            })
             .map_or(MemorySource::Reconstructed, |(source, _)| source)
     }
 
@@ -275,7 +308,25 @@ impl MetacognitiveConfidence {
 
         // Source confusion if multiple different sources
         let first_source = sources[0];
-        !sources.iter().all(|s| *s == first_source)
+        if sources.iter().all(|s| *s == first_source) {
+            return false;
+        }
+
+        let dominant = self.reality_monitoring(episode);
+        let dominant_threshold = self
+            .source_thresholds
+            .get(&dominant)
+            .copied()
+            .unwrap_or(0.0);
+
+        let mixed_threshold = sources
+            .iter()
+            .filter(|source| ***source != dominant)
+            .filter_map(|source| self.source_thresholds.get(source).copied())
+            .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .unwrap_or(0.0);
+
+        mixed_threshold > dominant_threshold * 0.9
     }
 }
 
@@ -298,13 +349,12 @@ mod tests {
 
     #[test]
     fn test_reduce_overconfidence() {
-        let meta = MetacognitiveConfidence::new();
-
         // High confidence should be reduced
-        assert!(meta.reduce_overconfidence(0.95) < 0.95);
+        assert!(MetacognitiveConfidence::reduce_overconfidence(0.95) < 0.95);
 
         // Low confidence should stay the same
-        assert_eq!(meta.reduce_overconfidence(0.3), 0.3);
+        let reduced = MetacognitiveConfidence::reduce_overconfidence(0.3);
+        assert!((reduced - 0.3).abs() <= f32::EPSILON);
     }
 
     #[test]
@@ -314,7 +364,7 @@ mod tests {
         // Perfect calibration
         meta.update_calibration(0.8, 0.8, MemorySource::Recalled);
         meta.update_calibration(0.6, 0.6, MemorySource::Recalled);
-        assert_eq!(meta.brier_score(), 0.0);
+        assert!((meta.brier_score() - 0.0).abs() <= f32::EPSILON);
 
         // Poor calibration
         meta.update_calibration(0.9, 0.1, MemorySource::Reconstructed);

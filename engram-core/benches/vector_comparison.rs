@@ -2,15 +2,42 @@
 //!
 //! Compares Engram, FAISS, and Annoy on standard ANN datasets
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+#![allow(missing_docs)]
+
+use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use std::convert::TryFrom;
 use std::time::Duration;
 
-// Include the modules directly since they're in the same benches directory
-include!("ann_comparison.rs");
-include!("datasets.rs");
-include!("engram_ann.rs");
-include!("mock_annoy.rs");
-include!("mock_faiss.rs");
+mod support;
+
+use support::ann_common::{AnnDataset, AnnIndex, BenchmarkFramework, BenchmarkResults};
+use support::datasets::DatasetLoader;
+use support::engram_ann::EngramOptimizedAnnIndex;
+use support::mock_annoy::MockAnnoyIndex;
+use support::mock_faiss::MockFaissIndex;
+
+fn dataset_or_panic(label: &str, loader: impl FnOnce() -> AnnDataset) -> AnnDataset {
+    let dataset = loader();
+    assert!(
+        !dataset.vectors.is_empty(),
+        "Dataset {label} produced no vectors"
+    );
+    dataset
+}
+
+fn faiss_or_panic(dims: usize, neighbors: usize) -> MockFaissIndex {
+    MockFaissIndex::new_hnsw(dims, neighbors)
+}
+
+const fn annoy_or_panic(dims: usize, trees: usize) -> MockAnnoyIndex {
+    MockAnnoyIndex::new(dims, trees)
+}
+
+fn build_index_or_panic(index: &mut dyn AnnIndex, vectors: &[[f32; 768]], label: &str) {
+    if let Err(err) = index.build(vectors) {
+        panic!("Failed to build {label}: {err}");
+    }
+}
 
 /// Run comprehensive comparison
 fn run_full_comparison() -> BenchmarkResults {
@@ -18,23 +45,25 @@ fn run_full_comparison() -> BenchmarkResults {
 
     // Add implementations
     framework.add_implementation(Box::new(EngramOptimizedAnnIndex::new()));
-    framework.add_implementation(Box::new(MockFaissIndex::new_hnsw(768, 16).unwrap()));
-    framework.add_implementation(Box::new(MockAnnoyIndex::new(768, 10).unwrap()));
+    framework.add_implementation(Box::new(faiss_or_panic(768, 16)));
+    framework.add_implementation(Box::new(annoy_or_panic(768, 10)));
 
     // Add datasets
-    framework.add_dataset(DatasetLoader::generate_synthetic(1000, 100).unwrap());
-    framework.add_dataset(DatasetLoader::load_sift1m_mock().unwrap());
-    framework.add_dataset(DatasetLoader::load_glove_mock().unwrap());
+    framework.add_dataset(dataset_or_panic("synthetic", || {
+        DatasetLoader::generate_synthetic(1000, 100)
+    }));
+    framework.add_dataset(dataset_or_panic("sift1m", DatasetLoader::load_sift1m_mock));
+    framework.add_dataset(dataset_or_panic("glove", DatasetLoader::load_glove_mock));
 
-    // Run comparison
-    let results = framework.run_comparison();
+    let results = match framework.run_comparison() {
+        Ok(results) => results,
+        Err(err) => panic!("Comparison failed: {err}"),
+    };
 
-    // Print summary
     results.print_summary();
 
-    // Export results
-    if let Err(e) = results.export_csv("benchmark_results.csv") {
-        eprintln!("Failed to export CSV: {}", e);
+    if let Err(err) = results.export_csv("benchmark_results.csv") {
+        eprintln!("Failed to export CSV: {err}");
     }
 
     results
@@ -42,7 +71,7 @@ fn run_full_comparison() -> BenchmarkResults {
 
 /// Benchmark recall performance
 fn benchmark_recall(c: &mut Criterion) {
-    let dataset = DatasetLoader::generate_synthetic(1000, 10).unwrap();
+    let dataset = dataset_or_panic("synthetic", || DatasetLoader::generate_synthetic(1000, 10));
 
     let mut group = c.benchmark_group("recall_at_10");
     group.sample_size(10);
@@ -50,13 +79,13 @@ fn benchmark_recall(c: &mut Criterion) {
 
     // Build indexes once
     let mut engram = EngramOptimizedAnnIndex::new();
-    engram.build(&dataset.vectors).expect("Failed to build Engram");
+    build_index_or_panic(&mut engram, &dataset.vectors, "Engram");
 
-    let mut faiss = MockFaissIndex::new_hnsw(768, 16).unwrap();
-    faiss.build(&dataset.vectors).expect("Failed to build FAISS");
+    let mut faiss = faiss_or_panic(768, 16);
+    build_index_or_panic(&mut faiss, &dataset.vectors, "FAISS");
 
-    let mut annoy = MockAnnoyIndex::new(768, 10).unwrap();
-    annoy.build(&dataset.vectors).expect("Failed to build Annoy");
+    let mut annoy = annoy_or_panic(768, 10);
+    build_index_or_panic(&mut annoy, &dataset.vectors, "Annoy");
 
     // Benchmark Engram
     group.bench_function("engram", |b| {
@@ -93,27 +122,27 @@ fn benchmark_build_time(c: &mut Criterion) {
     let mut group = c.benchmark_group("build_time");
     group.sample_size(10);
 
-    for size in [100, 500, 1000].iter() {
-        let dataset = DatasetLoader::generate_synthetic(*size, 10).unwrap();
+    for size in [100, 500, 1000] {
+        let dataset = dataset_or_panic("synthetic", || DatasetLoader::generate_synthetic(size, 10));
 
-        group.bench_with_input(BenchmarkId::new("engram", size), size, |b, _| {
+        group.bench_with_input(BenchmarkId::new("engram", size), &size, |b, _| {
             b.iter(|| {
                 let mut index = EngramOptimizedAnnIndex::new();
-                index.build(&dataset.vectors).unwrap();
+                build_index_or_panic(&mut index, &dataset.vectors, "Engram");
             });
         });
 
-        group.bench_with_input(BenchmarkId::new("faiss", size), size, |b, _| {
+        group.bench_with_input(BenchmarkId::new("faiss", size), &size, |b, _| {
             b.iter(|| {
-                let mut index = MockFaissIndex::new_hnsw(768, 16).unwrap();
-                index.build(&dataset.vectors).unwrap();
+                let mut index = faiss_or_panic(768, 16);
+                build_index_or_panic(&mut index, &dataset.vectors, "FAISS");
             });
         });
 
-        group.bench_with_input(BenchmarkId::new("annoy", size), size, |b, _| {
+        group.bench_with_input(BenchmarkId::new("annoy", size), &size, |b, _| {
             b.iter(|| {
-                let mut index = MockAnnoyIndex::new(768, 10).unwrap();
-                index.build(&dataset.vectors).unwrap();
+                let mut index = annoy_or_panic(768, 10);
+                build_index_or_panic(&mut index, &dataset.vectors, "Annoy");
             });
         });
     }
@@ -123,19 +152,19 @@ fn benchmark_build_time(c: &mut Criterion) {
 
 /// Benchmark memory usage
 fn benchmark_memory(c: &mut Criterion) {
-    let dataset = DatasetLoader::generate_synthetic(1000, 10).unwrap();
+    let dataset = dataset_or_panic("synthetic", || DatasetLoader::generate_synthetic(1000, 10));
 
     let mut group = c.benchmark_group("memory_usage");
     group.sample_size(10);
 
     let mut engram = EngramOptimizedAnnIndex::new();
-    engram.build(&dataset.vectors).unwrap();
+    build_index_or_panic(&mut engram, &dataset.vectors, "Engram");
 
-    let mut faiss = MockFaissIndex::new_hnsw(768, 16).unwrap();
-    faiss.build(&dataset.vectors).unwrap();
+    let mut faiss = faiss_or_panic(768, 16);
+    build_index_or_panic(&mut faiss, &dataset.vectors, "FAISS");
 
-    let mut annoy = MockAnnoyIndex::new(768, 10).unwrap();
-    annoy.build(&dataset.vectors).unwrap();
+    let mut annoy = annoy_or_panic(768, 10);
+    build_index_or_panic(&mut annoy, &dataset.vectors, "Annoy");
 
     group.bench_function("engram", |b| {
         b.iter(|| {
@@ -175,14 +204,14 @@ mod tests {
         let results = run_full_comparison();
 
         // Check that all implementations were tested
-        assert!(results.results.contains_key("Engram-Optimized"));
-        assert!(results.results.contains_key("FAISS (Mock)"));
-        assert!(results.results.contains_key("Annoy (Mock)"));
+        assert!(results.data().contains_key("Engram-Optimized"));
+        assert!(results.data().contains_key("FAISS (Mock)"));
+        assert!(results.data().contains_key("Annoy (Mock)"));
     }
 
     #[test]
     fn test_engram_meets_requirements() {
-        let dataset = DatasetLoader::generate_synthetic(1000, 100).unwrap();
+        let dataset = DatasetLoader::generate_synthetic(1000, 100);
 
         let mut engram = EngramOptimizedAnnIndex::new();
         engram.build(&dataset.vectors).expect("Failed to build");
@@ -195,37 +224,39 @@ mod tests {
             let results = engram.search(query, 10);
             let latency = start.elapsed();
 
-            // Calculate recall
-            let result_set: std::collections::HashSet<usize> =
-                results.iter().map(|(idx, _)| *idx).collect();
-
-            let ground_truth_set: std::collections::HashSet<usize> =
-                dataset.ground_truth[query_idx].iter().take(10).cloned().collect();
-
-            let intersection = result_set.intersection(&ground_truth_set).count();
-            let recall = intersection as f32 / 10.0;
-
+            let recall = support::ann_common::calculate_recall(
+                &results,
+                &dataset.ground_truth[query_idx],
+                10,
+            );
             recalls.push(recall);
             latencies.push(latency);
         }
 
-        let avg_recall: f32 = recalls.iter().sum::<f32>() / recalls.len() as f32;
-        let avg_latency = latencies.iter().sum::<Duration>() / latencies.len() as u32;
+        let avg_recall: f32 = if recalls.is_empty() {
+            0.0
+        } else {
+            let count = u64::try_from(recalls.len()).unwrap_or(0);
+            if count == 0 {
+                0.0
+            } else {
+                let sum = recalls.iter().map(|&value| f64::from(value)).sum::<f64>();
+                #[allow(clippy::cast_precision_loss)]
+                let average = sum / count as f64;
+                #[allow(clippy::cast_possible_truncation)]
+                let result = average as f32;
+                result
+            }
+        };
+        assert!(avg_recall > 0.8);
 
-        println!("Engram performance:");
-        println!("  Average recall@10: {:.3}", avg_recall);
-        println!("  Average latency: {:?}", avg_latency);
-
-        // Check requirements
-        assert!(
-            avg_recall >= 0.8, // Relaxed for synthetic data
-            "Recall {:.3} below target 0.9",
-            avg_recall
-        );
-        assert!(
-            avg_latency < Duration::from_millis(10), // Relaxed for debug build
-            "Latency {:?} above 1ms target",
-            avg_latency
-        );
+        let avg_latency = if latencies.is_empty() {
+            0
+        } else {
+            let total: u128 = latencies.iter().map(std::time::Duration::as_micros).sum();
+            let count = u128::try_from(latencies.len()).unwrap_or(1);
+            total / count
+        };
+        assert!(avg_latency < 5_000);
     }
 }

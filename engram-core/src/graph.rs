@@ -1,6 +1,6 @@
 //! Graph structures for cognitive memory operations.
 //!
-//! This module provides a migration path from the old MemoryGraph to the new
+//! This module provides a migration path from the old `MemoryGraph` to the new
 //! unified memory graph architecture.
 
 use crate::MemoryNode;
@@ -8,8 +8,8 @@ use std::collections::HashMap;
 
 // Re-export the new unified memory graph types
 pub use crate::memory_graph::{
-    UnifiedMemoryGraph, HashMapBackend, DashMapBackend, InfallibleBackend,
-    GraphConfig, MemoryBackend, GraphBackend, MemoryError,
+    DashMapBackend, GraphBackend, GraphConfig, HashMapBackend, InfallibleBackend, MemoryBackend,
+    MemoryError, UnifiedMemoryGraph,
 };
 
 /// Legacy memory graph structure for backward compatibility.
@@ -68,7 +68,8 @@ impl Default for MemoryGraph {
 
 /// Create a single-threaded memory graph with default configuration.
 ///
-/// This is the recommended replacement for the deprecated MemoryGraph.
+/// This is the recommended replacement for the deprecated `MemoryGraph`.
+#[must_use]
 pub fn create_simple_graph() -> UnifiedMemoryGraph<HashMapBackend> {
     UnifiedMemoryGraph::new(HashMapBackend::default(), GraphConfig::default())
 }
@@ -76,6 +77,7 @@ pub fn create_simple_graph() -> UnifiedMemoryGraph<HashMapBackend> {
 /// Create a concurrent memory graph with default configuration.
 ///
 /// Use this for parallel activation spreading and concurrent access patterns.
+#[must_use]
 pub fn create_concurrent_graph() -> UnifiedMemoryGraph<DashMapBackend> {
     UnifiedMemoryGraph::new(DashMapBackend::default(), GraphConfig::default())
 }

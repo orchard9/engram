@@ -5,6 +5,7 @@ use crate::batch::{
 };
 use crate::{Activation, Confidence, Cue, Episode, store::MemoryStore};
 use rayon::prelude::*;
+use std::convert::TryFrom;
 use std::time::Instant;
 
 /// Extension trait to add batch operations to `MemoryStore`
@@ -29,7 +30,7 @@ impl BatchOperations for MemoryStore {
             activations,
             successful_count,
             degraded_count,
-            processing_time_ms: start.elapsed().as_millis() as u64,
+            processing_time_ms: u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX),
             peak_memory_pressure: peak_pressure,
         }
     }
@@ -43,34 +44,35 @@ impl BatchOperations for MemoryStore {
             .partition(|cue| matches!(cue.cue_type, crate::CueType::Embedding { .. }));
 
         let mut results = Vec::new();
-        let mut simd_accelerated_count = 0;
 
-        // Process embedding cues with SIMD if available and beneficial
-        if !embedding_cues.is_empty() && config.use_simd {
-            let embedding_results = self.batch_recall_embeddings_simd(embedding_cues, &config);
-            simd_accelerated_count = embedding_results.len();
+        let simd_accelerated_count = if embedding_cues.is_empty() {
+            0
+        } else if config.use_simd {
+            let embedding_results = self.batch_recall_embeddings_simd(&embedding_cues, &config);
+            let count = embedding_results.len();
             results.extend(embedding_results);
-        } else if !embedding_cues.is_empty() {
-            // Process embedding cues without SIMD
+            count
+        } else {
             let embedding_results: Vec<_> = embedding_cues
                 .into_par_iter()
-                .map(|cue| self.recall(cue))
+                .map(|cue| self.recall(&cue))
                 .collect();
             results.extend(embedding_results);
-        }
+            0
+        };
 
         // Process other cue types in parallel
         if !other_cues.is_empty() {
             let other_results: Vec<_> = other_cues
                 .into_par_iter()
-                .map(|cue| self.recall(cue))
+                .map(|cue| self.recall(&cue))
                 .collect();
             results.extend(other_results);
         }
 
         BatchRecallResult {
             results,
-            processing_time_ms: start.elapsed().as_millis() as u64,
+            processing_time_ms: u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX),
             simd_accelerated_count,
         }
     }
@@ -104,7 +106,7 @@ impl BatchOperations for MemoryStore {
 
         BatchSimilarityResult {
             results,
-            processing_time_ms: start.elapsed().as_millis() as u64,
+            processing_time_ms: u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX),
             simd_efficiency,
         }
     }
@@ -114,7 +116,7 @@ impl MemoryStore {
     /// SIMD-optimized batch recall for embedding cues
     fn batch_recall_embeddings_simd(
         &self,
-        cues: Vec<Cue>,
+        cues: &[Cue],
         _config: &BatchConfig,
     ) -> Vec<Vec<(Episode, Confidence)>> {
         use crate::compute;
@@ -236,6 +238,7 @@ impl MemoryStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::completion::numeric::usize_to_f32;
     use crate::{Cue, EpisodeBuilder};
     use chrono::Utc;
 
@@ -244,12 +247,14 @@ mod tests {
         let store = MemoryStore::new(100);
 
         // Create batch of episodes with unique embeddings
-        let episodes: Vec<Episode> = (0..10)
+        let episodes: Vec<Episode> = (0_usize..10)
             .map(|i| {
                 // Create unique embedding for each episode to avoid deduplication
                 let mut embedding = [0.0f32; 768];
-                for j in 0..768 {
-                    embedding[j] = ((i as f32 + 1.0) * (j as f32 + 1.0) * 0.01).sin();
+                let episode_index = usize_to_f32(i + 1);
+                for (j, value) in embedding.iter_mut().enumerate() {
+                    let vector_index = usize_to_f32(j + 1);
+                    *value = (episode_index * vector_index * 0.01).sin();
                 }
                 // Normalize
                 let norm = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
@@ -258,11 +263,11 @@ mod tests {
                         *val /= norm;
                     }
                 }
-                
+
                 EpisodeBuilder::new()
-                    .id(format!("ep{}", i))
+                    .id(format!("ep{i}"))
                     .when(Utc::now())
-                    .what(format!("Episode {}", i))
+                    .what(format!("Episode {i}"))
                     .embedding(embedding)
                     .confidence(Confidence::HIGH)
                     .build()
@@ -270,7 +275,7 @@ mod tests {
             .collect();
 
         // Batch store
-        let result = store.batch_store(episodes.clone(), BatchConfig::default());
+        let result = store.batch_store(episodes, BatchConfig::default());
 
         // Verify all episodes stored
         assert_eq!(result.activations.len(), 10);
@@ -289,10 +294,12 @@ mod tests {
         let store = MemoryStore::new(100);
 
         // Store some episodes with unique embeddings
-        for i in 0..5 {
+        for i in 0_usize..5 {
             let mut embedding = [0.0f32; 768];
-            for j in 0..768 {
-                embedding[j] = ((i as f32 + 1.0) * (j as f32 + 1.0) * 0.01).sin();
+            let episode_index = usize_to_f32(i + 1);
+            for (j, value) in embedding.iter_mut().enumerate() {
+                let vector_index = usize_to_f32(j + 1);
+                *value = (episode_index * vector_index * 0.01).sin();
             }
             let norm = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
             if norm > 0.0 {
@@ -300,11 +307,11 @@ mod tests {
                     *val /= norm;
                 }
             }
-            
+
             let episode = EpisodeBuilder::new()
-                .id(format!("ep{}", i))
+                .id(format!("ep{i}"))
                 .when(Utc::now())
-                .what(format!("Memory content {}", i))
+                .what(format!("Memory content {i}"))
                 .embedding(embedding)
                 .confidence(Confidence::HIGH)
                 .build();
@@ -313,8 +320,8 @@ mod tests {
 
         // Create mixed cues - use the same embedding generation for cue
         let mut cue_embedding = [0.0f32; 768];
-        for j in 0..768 {
-            cue_embedding[j] = (1.0 * (j as f32 + 1.0) * 0.01).sin();
+        for (j, value) in cue_embedding.iter_mut().enumerate() {
+            *value = (usize_to_f32(j + 1) * 0.01).sin();
         }
         let norm = cue_embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
         if norm > 0.0 {
@@ -322,9 +329,9 @@ mod tests {
                 *val /= norm;
             }
         }
-        
+
         let cues = vec![
-            Cue::embedding("cue1".to_string(), cue_embedding, Confidence::LOW),  // Should find ep0
+            Cue::embedding("cue1".to_string(), cue_embedding, Confidence::LOW), // Should find ep0
             Cue::semantic(
                 "cue2".to_string(),
                 "Memory content 2".to_string(),
@@ -337,8 +344,8 @@ mod tests {
 
         // Verify results
         assert_eq!(result.results.len(), 2);
-        assert!(result.results[0].len() > 0); // Embedding cue should find matches
-        assert!(result.results[1].len() > 0); // Semantic cue should find exact match
+        assert!(!result.results[0].is_empty()); // Embedding cue should find matches
+        assert!(!result.results[1].is_empty()); // Semantic cue should find exact match
     }
 
     #[test]
@@ -351,9 +358,9 @@ mod tests {
             embedding[i] = 1.0;
 
             let episode = EpisodeBuilder::new()
-                .id(format!("ep{}", i))
+                .id(format!("ep{i}"))
                 .when(Utc::now())
-                .what(format!("Memory {}", i))
+                .what(format!("Memory {i}"))
                 .embedding(embedding)
                 .confidence(Confidence::HIGH)
                 .build();

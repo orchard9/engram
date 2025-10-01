@@ -62,7 +62,7 @@ pub enum RecoveryStrategy {
 
 /// Production-ready error types with recovery strategies
 ///
-/// Combines the cognitive principles of CognitiveError with practical
+/// Combines the cognitive principles of `CognitiveError` with practical
 /// recovery strategies for production systems.
 #[derive(Error, Debug)]
 pub enum EngramError {
@@ -77,7 +77,7 @@ pub enum EngramError {
         /// Recovery strategy for this error
         recovery: RecoveryStrategy,
     },
-    
+
     #[error("Storage error: {operation}")]
     /// Storage-related error with recovery
     Storage {
@@ -89,7 +89,7 @@ pub enum EngramError {
         /// Recovery strategy for this error
         recovery: RecoveryStrategy,
     },
-    
+
     #[error("Query failed: {reason}")]
     /// Query operation failed
     Query {
@@ -100,7 +100,7 @@ pub enum EngramError {
         /// Recovery strategy for this error
         recovery: RecoveryStrategy,
     },
-    
+
     #[error("WAL operation failed: {operation}")]
     /// Write-ahead log operation failed
     WriteAheadLog {
@@ -114,7 +114,7 @@ pub enum EngramError {
         /// Whether the system can continue without this operation
         can_continue: bool,
     },
-    
+
     #[error("Index corrupted or unavailable")]
     /// Index is corrupted or unavailable
     Index {
@@ -126,51 +126,64 @@ pub enum EngramError {
         /// Recovery strategy for this error
         recovery: RecoveryStrategy,
     },
-    
+
     #[error("Evidence type mismatch: expected {expected}, got {actual}")]
+    /// Occurs when evidence provided doesn't match the expected type
     EvidenceTypeMismatch {
+        /// The expected evidence type
         expected: String,
+        /// The actual evidence type that was provided
         actual: String,
+        /// Recovery strategy for this mismatch
         recovery: RecoveryStrategy,
     },
-    
+
     #[error("Cue type mismatch: expected {expected}, got {actual}")]
+    /// Occurs when a cue type doesn't match what was expected for the operation
     CueTypeMismatch {
+        /// The expected cue type
         expected: String,
+        /// The actual cue type that was provided
         actual: String,
+        /// Recovery strategy for this mismatch
         recovery: RecoveryStrategy,
     },
-    
+
     #[error("Pattern matching failed: {pattern}")]
+    /// Occurs when pattern matching operation fails to find matches
     PatternMatch {
+        /// The pattern that failed to match
         pattern: String,
+        /// Recovery strategy for this failure
         recovery: RecoveryStrategy,
     },
 }
 
 impl EngramError {
     /// Get the recovery strategy for this error
-    pub fn recovery_strategy(&self) -> &RecoveryStrategy {
+    #[must_use]
+    pub const fn recovery_strategy(&self) -> &RecoveryStrategy {
         match self {
-            Self::Memory { recovery, .. } => recovery,
-            Self::Storage { recovery, .. } => recovery,
-            Self::Query { recovery, .. } => recovery,
-            Self::WriteAheadLog { recovery, .. } => recovery,
-            Self::Index { recovery, .. } => recovery,
-            Self::EvidenceTypeMismatch { recovery, .. } => recovery,
-            Self::CueTypeMismatch { recovery, .. } => recovery,
-            Self::PatternMatch { recovery, .. } => recovery,
+            Self::Memory { recovery, .. }
+            | Self::Storage { recovery, .. }
+            | Self::Query { recovery, .. }
+            | Self::WriteAheadLog { recovery, .. }
+            | Self::Index { recovery, .. }
+            | Self::EvidenceTypeMismatch { recovery, .. }
+            | Self::CueTypeMismatch { recovery, .. }
+            | Self::PatternMatch { recovery, .. } => recovery,
         }
     }
-    
+
     /// Check if this error is recoverable
-    pub fn is_recoverable(&self) -> bool {
+    #[must_use]
+    pub const fn is_recoverable(&self) -> bool {
         !matches!(
             self.recovery_strategy(),
             RecoveryStrategy::RequiresIntervention { .. }
         )
     }
-    
+
     /// Create a memory error with context
     pub fn memory_error(
         context: impl Into<String>,
@@ -183,7 +196,7 @@ impl EngramError {
             recovery,
         }
     }
-    
+
     /// Create a storage error
     pub fn storage_error(
         operation: impl Into<String>,
@@ -196,7 +209,7 @@ impl EngramError {
             recovery,
         }
     }
-    
+
     /// Create a query error with optional partial results
     pub fn query_error(
         reason: impl Into<String>,
@@ -209,7 +222,7 @@ impl EngramError {
             recovery,
         }
     }
-    
+
     /// Create an evidence type mismatch error
     pub fn evidence_type_mismatch(
         expected: impl Into<String>,
@@ -222,7 +235,7 @@ impl EngramError {
             recovery,
         }
     }
-    
+
     /// Create a cue type mismatch error  
     pub fn cue_type_mismatch(
         expected: impl Into<String>,
@@ -235,12 +248,9 @@ impl EngramError {
             recovery,
         }
     }
-    
+
     /// Create a pattern matching error
-    pub fn pattern_match_error(
-        pattern: impl Into<String>,
-        recovery: RecoveryStrategy,
-    ) -> Self {
+    pub fn pattern_match_error(pattern: impl Into<String>, recovery: RecoveryStrategy) -> Self {
         Self::PatternMatch {
             pattern: pattern.into(),
             recovery,
@@ -345,16 +355,18 @@ impl CognitiveError {
         let len2 = s2.chars().count();
         let mut matrix = vec![vec![0; len2 + 1]; len1 + 1];
 
-        for i in 0..=len1 {
-            matrix[i][0] = i;
+        for (i, row) in matrix.iter_mut().enumerate().take(len1 + 1) {
+            row[0] = i;
         }
-        for j in 0..=len2 {
-            matrix[0][j] = j;
+        if let Some(first_row) = matrix.first_mut() {
+            for (j, cell) in first_row.iter_mut().enumerate().take(len2 + 1) {
+                *cell = j;
+            }
         }
 
         for (i, c1) in s1.chars().enumerate() {
             for (j, c2) in s2.chars().enumerate() {
-                let cost = if c1 == c2 { 0 } else { 1 };
+                let cost = usize::from(c1 != c2);
                 matrix[i + 1][j + 1] = std::cmp::min(
                     std::cmp::min(
                         matrix[i][j + 1] + 1, // deletion
@@ -562,35 +574,97 @@ impl CognitiveErrorBuilder {
     /// Build the error, returning None if required fields are missing
     #[must_use]
     pub fn build(self) -> Option<CognitiveError> {
-        Some(CognitiveError {
-            summary: self.summary?,
-            context: self.context?,
-            suggestion: self.suggestion?,
-            example: self.example?,
-            confidence: self.confidence?,
-            details: self.details,
-            documentation: self.documentation,
-            similar: self.similar,
-            source: self.source,
-        })
+        self.build_or_error().ok()
     }
 
-    /// Build the error, panicking if required fields are missing (for use in macros)
-    #[must_use]
-    pub fn build_or_panic(self) -> CognitiveError {
-        CognitiveError {
-            summary: self.summary.expect("CognitiveError requires summary"),
-            context: self.context.expect("CognitiveError requires context"),
-            suggestion: self.suggestion.expect("CognitiveError requires suggestion"),
-            example: self.example.expect("CognitiveError requires example"),
-            confidence: self.confidence.expect("CognitiveError requires confidence"),
-            details: self.details,
-            documentation: self.documentation,
-            similar: self.similar,
-            source: self.source,
+    /// Build the error, returning a descriptive error if required fields are missing.
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`CognitiveErrorBuilderError`] if any mandatory fields are absent.
+    pub fn build_or_error(self) -> std::result::Result<CognitiveError, CognitiveErrorBuilderError> {
+        let Self {
+            summary,
+            context,
+            suggestion,
+            example,
+            confidence,
+            details,
+            documentation,
+            similar,
+            source,
+        } = self;
+
+        match (summary, context, suggestion, example, confidence) {
+            (Some(summary), Some(context), Some(suggestion), Some(example), Some(confidence)) => {
+                Ok(CognitiveError {
+                    summary,
+                    context,
+                    suggestion,
+                    example,
+                    confidence,
+                    details,
+                    documentation,
+                    similar,
+                    source,
+                })
+            }
+            (summary, context, suggestion, example, confidence) => {
+                let mut missing_fields = Vec::new();
+                if summary.is_none() {
+                    missing_fields.push("summary");
+                }
+                if context.is_none() {
+                    missing_fields.push("context");
+                }
+                if suggestion.is_none() {
+                    missing_fields.push("suggestion");
+                }
+                if example.is_none() {
+                    missing_fields.push("example");
+                }
+                if confidence.is_none() {
+                    missing_fields.push("confidence");
+                }
+                Err(CognitiveErrorBuilderError::missing(missing_fields))
+            }
         }
     }
 }
+
+/// Error returned when mandatory fields are missing from a [`CognitiveErrorBuilder`].
+#[derive(Debug)]
+pub struct CognitiveErrorBuilderError {
+    missing_fields: Vec<&'static str>,
+}
+
+impl CognitiveErrorBuilderError {
+    const fn missing(missing_fields: Vec<&'static str>) -> Self {
+        Self { missing_fields }
+    }
+
+    /// Fields that were missing when constructing the error.
+    #[must_use]
+    pub fn missing_fields(&self) -> &[&'static str] {
+        &self.missing_fields
+    }
+}
+
+impl fmt::Display for CognitiveErrorBuilderError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.missing_fields.is_empty() {
+            write!(f, "builder missing required fields")
+        } else {
+            write!(
+                f,
+                "builder missing required fields: {}",
+                self.missing_fields.join(", ")
+            )
+        }
+    }
+}
+
+impl std::error::Error for CognitiveErrorBuilderError {}
 
 impl Default for CognitiveErrorBuilder {
     fn default() -> Self {
@@ -667,19 +741,28 @@ impl<T> PartialResult<T> {
         self.confidence.raw() >= threshold
     }
 
-    /// Convert to a Result, failing if confidence is below threshold
-    pub fn require_confidence(self, threshold: f32) -> std::result::Result<T, CognitiveError> {
+    /// Convert to a `Result`, failing if confidence is below `threshold`
+    ///
+    /// # Errors
+    ///
+    /// Returns an error containing a boxed `CognitiveError` when the confidence is
+    /// lower than `threshold`.
+    pub fn require_confidence(self, threshold: f32) -> std::result::Result<T, Box<CognitiveError>> {
         if self.confidence.raw() >= threshold {
             Ok(self.value)
         } else {
-            Err(cognitive_error!(
-                summary: format!("Result confidence {} below required threshold {}", self.confidence.raw(), threshold),
+            Err(Box::new(cognitive_error!(
+                summary: format!(
+                    "Result confidence {} below required threshold {}",
+                    self.confidence.raw(),
+                    threshold
+                ),
                 context: expected = format!("Confidence >= {}", threshold),
                          actual = format!("Confidence = {}", self.confidence.raw()),
                 suggestion: "Retry operation with more data or lower threshold",
                 example: "let result = operation().require_confidence(0.5)?;",
                 confidence: Confidence::exact(1.0)
-            ))
+            )))
         }
     }
 }
@@ -688,6 +771,9 @@ impl<T> PartialResult<T> {
 mod tests {
     use super::*;
     use crate::error_testing::{CognitiveErrorTesting, ErrorFamily};
+
+    const EPSILON: f32 = 1.0e-6;
+    type TestResult<T = ()> = std::result::Result<T, String>;
 
     #[test]
     fn test_cognitive_error_display() {
@@ -730,35 +816,51 @@ mod tests {
     }
 
     #[test]
-    fn test_error_builder() {
+    fn test_error_builder() -> TestResult {
         let err = CognitiveErrorBuilder::new()
             .summary("Test error")
             .context("expected", "actual")
             .suggestion("do this")
             .example("code here")
             .confidence(Confidence::MEDIUM)
-            .build()
-            .unwrap();
+            .build_or_error()
+            .map_err(|err| err.to_string())?;
 
-        assert_eq!(err.summary, "Test error");
-        assert_eq!(err.confidence.raw(), 0.5);
+        if err.summary != "Test error" {
+            return Err("Error summary mismatch".to_string());
+        }
+        if (err.confidence.raw() - 0.5).abs() > EPSILON {
+            return Err("Confidence should be 0.5".to_string());
+        }
+        Ok(())
     }
 
     #[test]
-    fn test_partial_result() {
+    fn test_partial_result() -> TestResult {
         let result = PartialResult::new(vec![1, 2, 3], Confidence::exact(0.7));
-        assert!(result.is_confident(0.6));
-        assert!(!result.is_confident(0.8));
+        if !result.is_confident(0.6) {
+            return Err("Result should be confident at 0.6".to_string());
+        }
+        if result.is_confident(0.8) {
+            return Err("Result should not be confident at 0.8".to_string());
+        }
 
         // Test with a high confidence result
         let high_conf_result = PartialResult::new(vec![1, 2, 3], Confidence::exact(0.7));
-        let value = high_conf_result.require_confidence(0.6).unwrap();
-        assert_eq!(value, vec![1, 2, 3]);
+        let value = high_conf_result
+            .require_confidence(0.6)
+            .map_err(|err| err.to_string())?;
+        if value != vec![1, 2, 3] {
+            return Err("Returned value should match input".to_string());
+        }
 
         // Test with a low confidence result
         let low_conf_result = PartialResult::new(vec![1, 2, 3], Confidence::exact(0.7));
         let err = low_conf_result.require_confidence(0.8);
-        assert!(err.is_err());
+        if err.is_ok() {
+            return Err("Low confidence result should error".to_string());
+        }
+        Ok(())
     }
 
     #[test]
@@ -787,8 +889,8 @@ mod tests {
         // Test specific aspects
         assert!(result.pattern_consistency.passes_pattern_consistency());
         assert!(result.cognitive_load.passes_cognitive_load_test());
-        assert!(result.cognitive_load.fits_cognitive_limits);
-        assert!(result.cognitive_load.system1_recognizable);
+        assert!(result.cognitive_load.fits_cognitive_limits.as_bool());
+        assert!(result.cognitive_load.system1_recognizable.as_bool());
     }
 
     #[test]
@@ -854,11 +956,11 @@ mod tests {
 
         // Should still pass cognitive load tests even when complex
         assert!(
-            load_result.fits_cognitive_limits,
+            load_result.fits_cognitive_limits.as_bool(),
             "Error should fit cognitive limits even when detailed"
         );
         assert!(
-            load_result.system1_recognizable,
+            load_result.system1_recognizable.as_bool(),
             "Error should be recognizable by System 1 processing"
         );
 
@@ -925,8 +1027,6 @@ mod tests {
         use crate::error_testing::ErrorPerformanceMonitor;
         use std::time::Duration;
 
-        let monitor = ErrorPerformanceMonitor::new();
-
         let error = cognitive_error!(
             summary: "Validation failed",
             context: expected = "Valid input",
@@ -937,21 +1037,22 @@ mod tests {
         );
 
         // Test formatting performance
-        let formatting_time = monitor.test_formatting_performance(&error);
+        let formatting_time = ErrorPerformanceMonitor::test_formatting_performance(&error);
         assert!(
             formatting_time < Duration::from_millis(10),
             "Error formatting took {formatting_time:?}, should be <10ms"
         );
 
         // Test comprehension time estimation
-        let comprehension_time = monitor.estimate_comprehension_time(&error, 1.0);
+        let comprehension_time = ErrorPerformanceMonitor::estimate_comprehension_time(&error, 1.0);
         assert!(
             comprehension_time < Duration::from_millis(30000),
             "Error comprehension estimated at {comprehension_time:?}, should be <30s"
         );
 
         // Test under high cognitive load
-        let fatigued_comprehension = monitor.estimate_comprehension_time(&error, 3.0);
+        let fatigued_comprehension =
+            ErrorPerformanceMonitor::estimate_comprehension_time(&error, 3.0);
         assert!(
             fatigued_comprehension < Duration::from_millis(90000),
             "Even under high cognitive load, comprehension should be reasonable"
@@ -976,7 +1077,7 @@ mod tests {
 
         let result = tester.test_cognitive_load_compatibility(&context_independent_error);
         assert!(
-            result.context_independent,
+            result.context_independent.as_bool(),
             "Error should be understandable without prior context"
         );
 
@@ -992,7 +1093,7 @@ mod tests {
 
         let bad_result = tester.test_cognitive_load_compatibility(&context_dependent_error);
         assert!(
-            !bad_result.context_independent,
+            !bad_result.context_independent.as_bool(),
             "Vague error should fail context independence test"
         );
     }
@@ -1051,7 +1152,7 @@ mod proptests {
             let result = testing_framework.test_error_comprehensive(&error, ErrorFamily::NodeAccess);
 
             // All generated errors should pass basic cognitive requirements
-            prop_assert!(result.cognitive_load.fits_cognitive_limits,
+            prop_assert!(result.cognitive_load.fits_cognitive_limits.as_bool(),
                 "Generated error should fit cognitive limits");
             prop_assert!(result.formatting_time.as_millis() < 10,
                 "Generated error formatting should be <10ms");
@@ -1166,7 +1267,7 @@ mod proptests {
                          actual = "Test input value",
                 suggestion: "Validate the test input",
                 example: "validate_test_input(input)",
-                confidence: Confidence::exact(confidence_value as f32)
+                confidence: Confidence::exact(crate::numeric::saturating_f32_from_f64(confidence_value))
             );
 
             let resolution_time = simulator.simulate_error_encounter(ErrorFamily::Validation, &error);

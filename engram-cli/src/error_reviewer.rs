@@ -3,6 +3,16 @@
 //! This tool scans the codebase for error definitions and validates they meet
 //! cognitive ergonomics requirements.
 
+#![allow(clippy::use_self)]
+#![allow(clippy::uninlined_format_args)]
+#![allow(clippy::needless_pass_by_value)]
+#![allow(clippy::field_reassign_with_default)]
+#![allow(clippy::unnecessary_debug_formatting)]
+#![allow(clippy::format_push_string)]
+#![allow(clippy::map_unwrap_or)]
+#![allow(clippy::branches_sharing_code)]
+#![allow(clippy::for_kv_map)]
+
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use engram_core::error_review::{ErrorReviewConfig, ErrorReviewer, Severity};

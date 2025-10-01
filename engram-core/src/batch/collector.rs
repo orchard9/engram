@@ -2,6 +2,7 @@
 
 use crate::batch::{BatchOperationResult, BatchResult};
 use crossbeam_queue::SegQueue;
+use std::convert::TryFrom;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 /// Lock-free atomic result collector
@@ -122,7 +123,9 @@ impl CollectedResults {
     pub fn average_latency_us(&self) -> f64 {
         let total_ops = self.successful_count + self.failed_count;
         if total_ops > 0 {
-            self.total_latency_us as f64 / total_ops as f64
+            let latency = u64_to_f64(self.total_latency_us);
+            let ops = usize_to_f64(total_ops);
+            latency / ops
         } else {
             0.0
         }
@@ -133,7 +136,10 @@ impl CollectedResults {
     pub fn simd_utilization(&self) -> f32 {
         let total_ops = self.successful_count + self.failed_count;
         if total_ops > 0 {
-            (self.simd_operations as f32 / total_ops as f32) * 100.0
+            let simd = usize_to_f64(self.simd_operations);
+            let total = usize_to_f64(total_ops);
+            let percentage = (simd / total) * 100.0;
+            clamped_f64_to_f32(percentage, 100.0)
         } else {
             0.0
         }
@@ -142,35 +148,80 @@ impl CollectedResults {
     /// Group results by operation type
     #[must_use]
     pub fn group_by_type(&self) -> GroupedResults {
-        let mut store_results = Vec::new();
-        let mut recall_results = Vec::new();
-        let mut similarity_results = Vec::new();
+        let mut stores = Vec::new();
+        let mut recalls = Vec::new();
+        let mut similarities = Vec::new();
 
         for result in &self.results {
             match &result.result {
-                BatchOperationResult::Store { .. } => store_results.push(result),
-                BatchOperationResult::Recall(_) => recall_results.push(result),
-                BatchOperationResult::SimilaritySearch(_) => similarity_results.push(result),
+                BatchOperationResult::Store { .. } => stores.push(result),
+                BatchOperationResult::Recall(_) => recalls.push(result),
+                BatchOperationResult::SimilaritySearch(_) => similarities.push(result),
             }
         }
 
         GroupedResults {
-            store_results,
-            recall_results,
-            similarity_results,
+            stores,
+            recalls,
+            similarities,
         }
     }
+}
+
+fn usize_to_f64(value: usize) -> f64 {
+    u64::try_from(value).map_or_else(|_| u64_to_f64(u64::MAX), u64_to_f64)
+}
+
+fn u64_to_f64(value: u64) -> f64 {
+    let high_part = u32::try_from(value >> 32).unwrap_or(u32::MAX);
+    let low_part = u32::try_from(value & 0xFFFF_FFFF).unwrap_or(u32::MAX);
+    f64::from(high_part).mul_add(4_294_967_296.0, f64::from(low_part))
+}
+
+fn clamped_f64_to_f32(value: f64, default: f32) -> f32 {
+    if !value.is_finite() {
+        return default;
+    }
+
+    let clamped = value.clamp(-f64::from(f32::MAX), f64::from(f32::MAX));
+    let sign_bit = if clamped.is_sign_negative() {
+        1_u32 << 31
+    } else {
+        0
+    };
+    let abs = clamped.abs();
+
+    if abs == 0.0 {
+        return f32::from_bits(sign_bit);
+    }
+
+    let bits = abs.to_bits();
+    let exponent_bits = (bits >> 52) & 0x7FF;
+    let exponent = i32::try_from(exponent_bits).unwrap_or(0);
+    let mut exponent_adjusted = exponent - 1023 + 127;
+    if exponent_adjusted <= 0 {
+        return f32::from_bits(sign_bit);
+    }
+    if exponent_adjusted >= 0xFF {
+        exponent_adjusted = 0xFE;
+    }
+
+    let mantissa = bits & ((1_u64 << 52) - 1);
+    let mantissa32 = u32::try_from(mantissa >> (52 - 23)).unwrap_or(0x007F_FFFF);
+    let exponent_field = u32::try_from(exponent_adjusted).unwrap_or(0);
+    let bits32 = sign_bit | (exponent_field << 23) | mantissa32;
+    f32::from_bits(bits32)
 }
 
 /// Results grouped by operation type
 #[derive(Debug)]
 pub struct GroupedResults<'a> {
     /// Results from memory storage operations
-    pub store_results: Vec<&'a BatchResult>,
+    pub stores: Vec<&'a BatchResult>,
     /// Results from memory recall operations
-    pub recall_results: Vec<&'a BatchResult>,
+    pub recalls: Vec<&'a BatchResult>,
     /// Results from similarity search operations
-    pub similarity_results: Vec<&'a BatchResult>,
+    pub similarities: Vec<&'a BatchResult>,
 }
 
 /// Current metrics from the collector
@@ -251,8 +302,8 @@ mod tests {
         let collected = collector.collect();
         assert_eq!(collected.results.len(), 2);
         assert_eq!(collected.successful_count, 2);
-        assert_eq!(collected.average_latency_us(), 150.0);
-        assert_eq!(collected.simd_utilization(), 50.0);
+        assert!((collected.average_latency_us() - 150.0_f64).abs() <= 1e-6_f64);
+        assert!((collected.simd_utilization() - 50.0_f32).abs() <= 1e-5_f32);
     }
 
     #[test]
@@ -266,7 +317,7 @@ mod tests {
                 result: if i == 0 {
                     BatchOperationResult::Store {
                         activation: Activation::new(0.9),
-                        memory_id: format!("mem_{}", i),
+                        memory_id: format!("mem_{i}"),
                     }
                 } else if i == 1 {
                     BatchOperationResult::Recall(vec![])
@@ -285,8 +336,8 @@ mod tests {
         let collected = collector.collect();
         let grouped = collected.group_by_type();
 
-        assert_eq!(grouped.store_results.len(), 1);
-        assert_eq!(grouped.recall_results.len(), 1);
-        assert_eq!(grouped.similarity_results.len(), 1);
+        assert_eq!(grouped.stores.len(), 1);
+        assert_eq!(grouped.recalls.len(), 1);
+        assert_eq!(grouped.similarities.len(), 1);
     }
 }
