@@ -5,6 +5,7 @@
 //! work-stealing graph traversal engine following biological principles.
 
 use atomic_float::AtomicF32;
+use dashmap::DashMap;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
@@ -737,12 +738,21 @@ pub trait ActivationGraphExt {
     fn edge_count(&self) -> usize;
 }
 
+// Global mapping from UUID to original NodeId for bidirectional conversion
+use std::sync::OnceLock;
+static UUID_TO_NODEID: OnceLock<DashMap<uuid::Uuid, NodeId>> = OnceLock::new();
+
 impl ActivationGraphExt for MemoryGraph {
     fn add_edge(&self, source: NodeId, target: NodeId, weight: f32, _edge_type: EdgeType) {
         // Convert NodeId (String) to Uuid for the backend
         use uuid::Uuid;
         let source_id = Uuid::new_v5(&Uuid::NAMESPACE_OID, source.as_bytes());
         let target_id = Uuid::new_v5(&Uuid::NAMESPACE_OID, target.as_bytes());
+
+        // Store reverse mappings for NodeId recovery
+        let map = UUID_TO_NODEID.get_or_init(DashMap::new);
+        map.insert(source_id, source.clone());
+        map.insert(target_id, target.clone());
 
         // Add edge using the UnifiedMemoryGraph's add_edge method
         let _ = Self::add_edge(self, source_id, target_id, weight);
@@ -758,9 +768,14 @@ impl ActivationGraphExt for MemoryGraph {
             neighbors
                 .into_iter()
                 .map(|(neighbor_id, weight)| {
-                    // Convert Uuid back to NodeId
+                    // Convert Uuid back to original NodeId using reverse mapping
+                    let target = UUID_TO_NODEID
+                        .get()
+                        .and_then(|map| map.get(&neighbor_id).map(|entry| entry.value().clone()))
+                        .unwrap_or_else(|| neighbor_id.to_string());
+
                     WeightedEdge {
-                        target: neighbor_id.to_string(),
+                        target,
                         weight,
                         edge_type: EdgeType::Excitatory, // Default for now
                     }

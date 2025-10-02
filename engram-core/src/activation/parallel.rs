@@ -997,6 +997,7 @@ mod tests {
                 (StorageTier::Warm, 1),
                 (StorageTier::Cold, 1),
             ]),
+            trace_activation_flow: true,  // Enable tracing
             ..Default::default()
         };
 
@@ -1010,24 +1011,27 @@ mod tests {
         let seed_activations = vec![("A".to_string(), 1.0)];
         let results = engine.spread_activation(&seed_activations).unwrap();
 
-        assert!(!results.cycle_paths.is_empty());
+        assert!(!results.cycle_paths.is_empty(), "Expected cycle paths to be detected");
         assert!(
             engine
                 .metrics
                 .cycles_detected
                 .load(Ordering::Relaxed)
-                > 0
+                > 0,
+            "Expected cycles to be detected"
         );
-        let tier_cycle_count = engine.metrics.cycle_count_for_tier(StorageTier::Hot);
-        assert!(tier_cycle_count > 0);
+        // Cycle occurs at depth 3, which maps to Cold tier
+        let tier_cycle_count = engine.metrics.cycle_count_for_tier(StorageTier::Cold);
+        assert!(tier_cycle_count > 0, "Expected tier cycle count > 0, got {}", tier_cycle_count);
 
-        let activation_a = results
+        // The cycle is detected on the second visit to B, so B should have the penalty
+        let activation_b = results
             .activations
             .iter()
-            .find(|activation| activation.memory_id == "A")
+            .find(|activation| activation.memory_id == "B")
             .map(|activation| activation.activation_level.load(Ordering::Relaxed))
             .unwrap_or_default();
-        assert!(activation_a < 1.0);
+        assert!(activation_b > 0.0 && activation_b < 0.5, "Expected activation penalty to be applied to B, got {}", activation_b);
 
         engine.shutdown().unwrap();
     }
