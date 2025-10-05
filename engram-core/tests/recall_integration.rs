@@ -21,9 +21,9 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    /// Create a test memory store with sample episodes
+    /// Create a test memory store with sample episodes and HNSW index enabled
     fn create_test_store() -> MemoryStore {
-        let store = MemoryStore::new(100);
+        let store = MemoryStore::new(100).with_hnsw_index();
 
         // Add some test episodes
         let episodes = vec![
@@ -138,14 +138,11 @@ mod tests {
     #[test]
     fn test_similarity_mode_recall() {
         let store = create_test_store();
-        let index = create_test_index();
+        // Use the store's HNSW index (auto-populated during store.store())
+        let index = store
+            .hnsw_index()
+            .expect("HNSW index should be available");
         let graph = create_test_graph();
-
-        // Note: HNSW index insertion API needs to be updated
-        // For now, episodes are indexed automatically during store operations
-        // for (id, episode) in store.get_all_episodes() {
-        //     index.insert(&id, &episode.embedding);
-        // }
 
         let seeder = Arc::new(VectorActivationSeeder::with_default_resolver(
             index,
@@ -187,14 +184,11 @@ mod tests {
     #[test]
     fn test_spreading_mode_recall() {
         let store = create_test_store();
-        let index = create_test_index();
+        // Use the store's HNSW index (auto-populated during store.store())
+        let index = store
+            .hnsw_index()
+            .expect("HNSW index should be available");
         let graph = create_test_graph();
-
-        // Note: HNSW index insertion API needs to be updated
-        // For now, episodes are indexed automatically during store operations
-        // for (id, episode) in store.get_all_episodes() {
-        //     index.insert(&id, &episode.embedding);
-        // }
 
         let seeder = Arc::new(VectorActivationSeeder::with_default_resolver(
             index,
@@ -246,9 +240,9 @@ mod tests {
 
     #[test]
     fn test_recency_boost() {
-        let store = MemoryStore::new(100);
+        let store = MemoryStore::new(100).with_hnsw_index();
 
-        // Add episodes with different ages
+        // Add episodes with different ages (auto-indexed via store.store())
         let now = Utc::now();
         let recent_episode = EpisodeBuilder::new()
             .id("recent".to_string())
@@ -269,10 +263,10 @@ mod tests {
         store.store(recent_episode);
         store.store(old_episode);
 
-        let index = create_test_index();
-        // Note: HNSW index insertion happens automatically during store operations
-        // Manual index insertion API not available yet
-
+        // Use the store's HNSW index (auto-populated during store.store())
+        let index = store
+            .hnsw_index()
+            .expect("HNSW index should be available");
         let graph = Arc::new(create_activation_graph());
         let seeder = Arc::new(VectorActivationSeeder::with_default_resolver(
             index,
@@ -326,7 +320,10 @@ mod tests {
     #[test]
     fn test_hybrid_mode_with_fallback() {
         let store = create_test_store();
-        let index = create_test_index();
+        // Use the store's HNSW index (auto-populated during store.store())
+        let index = store
+            .hnsw_index()
+            .expect("HNSW index should be available");
         let graph = create_test_graph();
 
         let seeder = Arc::new(VectorActivationSeeder::with_default_resolver(
@@ -365,13 +362,11 @@ mod tests {
     #[test]
     fn test_confidence_aggregation() {
         let store = create_test_store();
-        let index = create_test_index();
+        // Use the store's HNSW index (auto-populated during store.store())
+        let index = store
+            .hnsw_index()
+            .expect("HNSW index should be available");
         let graph = create_test_graph();
-
-        // Index all episodes
-        for (id, episode) in store.get_all_episodes() {
-            // index.insert(&id, &episode.embedding); // API needs update
-        }
 
         let seeder = Arc::new(VectorActivationSeeder::with_default_resolver(
             index,
@@ -412,12 +407,11 @@ mod tests {
     #[test]
     fn test_result_ranking() {
         let store = create_test_store();
-        let index = create_test_index();
+        // Use the store's HNSW index (auto-populated during store.store())
+        let index = store
+            .hnsw_index()
+            .expect("HNSW index should be available");
         let graph = create_test_graph();
-
-        for (id, episode) in store.get_all_episodes() {
-            // index.insert(&id, &episode.embedding); // API needs update
-        }
 
         let seeder = Arc::new(VectorActivationSeeder::with_default_resolver(
             index,
@@ -454,7 +448,10 @@ mod tests {
     #[test]
     fn test_empty_cue_handling() {
         let store = create_test_store();
-        let index = create_test_index();
+        // Use the store's HNSW index (auto-populated during store.store())
+        let index = store
+            .hnsw_index()
+            .expect("HNSW index should be available");
         let graph = create_test_graph();
 
         let seeder = Arc::new(VectorActivationSeeder::with_default_resolver(
@@ -490,7 +487,7 @@ mod tests {
         // Test that MemoryStore::recall() properly dispatches based on RecallMode::Spreading
         let mut store = MemoryStore::new(100).with_hnsw_index();
 
-        // Add test episodes
+        // Add test episodes (auto-indexed via store.store())
         let episodes = vec![
             ("mem1", "First memory", [0.3f32; 768]),
             ("mem2", "Second memory", [0.4f32; 768]),
@@ -508,8 +505,10 @@ mod tests {
             store.store(episode);
         }
 
-        // Build cognitive recall pipeline
-        let index = create_test_index();
+        // Build cognitive recall pipeline using the store's HNSW index
+        let index = store
+            .hnsw_index()
+            .expect("HNSW index should be available");
         let graph = create_test_graph();
         let seeder = Arc::new(VectorActivationSeeder::with_default_resolver(
             index,
@@ -564,7 +563,7 @@ mod tests {
         // Test that MemoryStore::recall() properly dispatches based on RecallMode::Similarity
         let mut store = MemoryStore::new(100).with_hnsw_index();
 
-        // Add test episodes
+        // Add test episodes (auto-indexed via store.store())
         let episode = EpisodeBuilder::new()
             .id("similarity_test".to_string())
             .when(Utc::now())
@@ -575,7 +574,9 @@ mod tests {
         store.store(episode);
 
         // Build minimal cognitive recall (won't be used in similarity mode)
-        let index = create_test_index();
+        let index = store
+            .hnsw_index()
+            .expect("HNSW index should be available");
         let graph = create_test_graph();
         let seeder = Arc::new(VectorActivationSeeder::with_default_resolver(
             index,
@@ -629,8 +630,10 @@ mod tests {
             .build();
         store.store(episode);
 
-        // Build cognitive recall pipeline
-        let index = create_test_index();
+        // Build cognitive recall pipeline using the store's HNSW index
+        let index = store
+            .hnsw_index()
+            .expect("HNSW index should be available");
         let graph = create_test_graph();
         let seeder = Arc::new(VectorActivationSeeder::with_default_resolver(
             index,

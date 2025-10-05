@@ -266,16 +266,23 @@ impl MemoryStore {
     }
 
     /// Access the HNSW index when enabled
+    ///
+    /// Returns a reference to the HNSW index Arc if one is configured.
+    /// This is useful for building cognitive recall pipelines that need
+    /// to use the same index the store is using.
     #[cfg(feature = "hnsw_index")]
     #[must_use]
-    pub(crate) fn hnsw_index(&self) -> Option<&CognitiveHnswIndex> {
-        self.hnsw_index.as_deref()
+    pub fn hnsw_index(&self) -> Option<Arc<CognitiveHnswIndex>> {
+        self.hnsw_index.clone()
     }
 
     /// Set cognitive recall pipeline for spreading activation
     #[cfg(feature = "hnsw_index")]
     #[must_use]
-    pub fn with_cognitive_recall(mut self, recall: Arc<crate::activation::CognitiveRecall>) -> Self {
+    pub fn with_cognitive_recall(
+        mut self,
+        recall: Arc<crate::activation::CognitiveRecall>,
+    ) -> Self {
         self.cognitive_recall = Some(recall);
         self
     }
