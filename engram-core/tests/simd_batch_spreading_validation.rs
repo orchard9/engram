@@ -4,7 +4,7 @@
 
 use approx::assert_ulps_eq;
 use engram_core::activation::simd_optimization::SimdActivationMapper;
-use engram_core::compute::{cosine_similarity_batch_768, scalar::ScalarVectorOps, VectorOps};
+use engram_core::compute::{VectorOps, cosine_similarity_batch_768, scalar::ScalarVectorOps};
 
 fn generate_test_vector(seed: usize) -> [f32; 768] {
     let mut result = [0.0f32; 768];
@@ -31,14 +31,12 @@ fn test_batch_cosine_similarity_matches_scalar() {
     );
 
     for (i, (scalar, simd)) in scalar_results.iter().zip(simd_results.iter()).enumerate() {
-        assert_ulps_eq!(
-            scalar,
-            simd,
-            max_ulps = 2,
-            epsilon = 1e-6
-        );
+        assert_ulps_eq!(scalar, simd, max_ulps = 2, epsilon = 1e-6);
         if (scalar - simd).abs() >= 1e-6 {
-            panic!("SIMD result differs from scalar at index {}: scalar={}, simd={}", i, scalar, simd);
+            panic!(
+                "SIMD result differs from scalar at index {}: scalar={}, simd={}",
+                i, scalar, simd
+            );
         }
     }
 }
@@ -99,9 +97,7 @@ fn test_sigmoid_activation_matches_scalar() {
     let mapper = SimdActivationMapper::new();
 
     // Generate test similarities
-    let similarities: Vec<f32> = (0..1000)
-        .map(|i| (i as f32 / 1000.0) - 0.5)
-        .collect();
+    let similarities: Vec<f32> = (0..1000).map(|i| (i as f32 / 1000.0) - 0.5).collect();
 
     let temperature = 0.5;
     let threshold = 0.1;
@@ -126,14 +122,12 @@ fn test_sigmoid_activation_matches_scalar() {
         .zip(scalar_activations.iter())
         .enumerate()
     {
-        assert_ulps_eq!(
-            simd,
-            scalar,
-            max_ulps = 2,
-            epsilon = 1e-6
-        );
+        assert_ulps_eq!(simd, scalar, max_ulps = 2, epsilon = 1e-6);
         if (simd - scalar).abs() >= 1e-6 {
-            panic!("Sigmoid activation differs at index {}: simd={}, scalar={}", i, simd, scalar);
+            panic!(
+                "Sigmoid activation differs at index {}: simd={}, scalar={}",
+                i, simd, scalar
+            );
         }
     }
 }
@@ -181,14 +175,12 @@ fn test_fma_confidence_aggregate_correctness() {
         .zip(scalar_activations.iter())
         .enumerate()
     {
-        assert_ulps_eq!(
-            simd,
-            scalar,
-            max_ulps = 2,
-            epsilon = 1e-6
-        );
+        assert_ulps_eq!(simd, scalar, max_ulps = 2, epsilon = 1e-6);
         if (simd - scalar).abs() >= 1e-6 {
-            panic!("FMA aggregate differs at index {}: simd={}, scalar={}", i, simd, scalar);
+            panic!(
+                "FMA aggregate differs at index {}: simd={}, scalar={}",
+                i, simd, scalar
+            );
         }
     }
 }
@@ -241,14 +233,12 @@ fn test_integrated_pipeline_consistency() {
     assert_eq!(run1.len(), run2.len());
 
     for (i, (r1, r2)) in run1.iter().zip(run2.iter()).enumerate() {
-        assert_ulps_eq!(
-            r1,
-            r2,
-            max_ulps = 0,
-            epsilon = 0.0
-        );
+        assert_ulps_eq!(r1, r2, max_ulps = 0, epsilon = 0.0);
         if r1 != r2 {
-            panic!("Pipeline not deterministic at index {}: run1={}, run2={}", i, r1, r2);
+            panic!(
+                "Pipeline not deterministic at index {}: run1={}, run2={}",
+                i, r1, r2
+            );
         }
     }
 }

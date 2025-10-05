@@ -1,9 +1,9 @@
 //! Integration tests for GPU acceleration foundation
 
 use engram_core::activation::{
-    create_activation_graph, ActivationGraphExt, AdaptiveConfig, AdaptiveSpreadingEngine,
-    CpuFallback, EdgeType, GPUActivationBatch, GPUSpreadingInterface, MockGpuInterface,
-    ParallelSpreadingConfig, ParallelSpreadingEngine,
+    ActivationGraphExt, AdaptiveConfig, AdaptiveSpreadingEngine, CpuFallback, EdgeType,
+    GPUActivationBatch, GPUSpreadingInterface, MockGpuInterface, ParallelSpreadingConfig,
+    ParallelSpreadingEngine, create_activation_graph,
 };
 use std::sync::Arc;
 
@@ -79,8 +79,20 @@ fn test_parallel_engine_with_gpu_config() {
     };
 
     let graph = create_activation_graph();
-    ActivationGraphExt::add_edge(&graph, "A".to_string(), "B".to_string(), 0.8, EdgeType::Excitatory);
-    ActivationGraphExt::add_edge(&graph, "B".to_string(), "C".to_string(), 0.6, EdgeType::Excitatory);
+    ActivationGraphExt::add_edge(
+        &graph,
+        "A".to_string(),
+        "B".to_string(),
+        0.8,
+        EdgeType::Excitatory,
+    );
+    ActivationGraphExt::add_edge(
+        &graph,
+        "B".to_string(),
+        "C".to_string(),
+        0.6,
+        EdgeType::Excitatory,
+    );
 
     let engine = ParallelSpreadingEngine::new(config, Arc::new(graph)).unwrap();
 

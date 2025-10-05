@@ -3,9 +3,10 @@
 //! Tests the complete pipeline from activation spreading through SIMD batch operations
 
 use engram_core::activation::{
-    create_activation_graph, simd_optimization::{ActivationBatch, should_use_simd_for_tier, auto_tune_batch_size},
-    storage_aware::StorageTier, ActivationGraphExt, EdgeType, ParallelSpreadingConfig,
-    ParallelSpreadingEngine,
+    ActivationGraphExt, EdgeType, ParallelSpreadingConfig, ParallelSpreadingEngine,
+    create_activation_graph,
+    simd_optimization::{ActivationBatch, auto_tune_batch_size, should_use_simd_for_tier},
+    storage_aware::StorageTier,
 };
 use std::sync::Arc;
 
@@ -168,10 +169,7 @@ fn test_batch_spreading_with_parallel_engine() {
         .filter(|a| a.memory_id == "A")
         .collect();
 
-    assert!(
-        !node_a.is_empty(),
-        "Should have activated node A"
-    );
+    assert!(!node_a.is_empty(), "Should have activated node A");
 
     // Note: B nodes may not be activated because SIMD batch processing falls back
     // to scalar path when embeddings are not available in the graph.
@@ -209,13 +207,7 @@ fn test_simd_batch_spreading_with_embeddings() {
 
         graph.set_embedding(&node_id, embedding);
 
-        ActivationGraphExt::add_edge(
-            &*graph,
-            "A".to_string(),
-            node_id,
-            0.5,
-            EdgeType::Excitatory,
-        );
+        ActivationGraphExt::add_edge(&*graph, "A".to_string(), node_id, 0.5, EdgeType::Excitatory);
     }
 
     // Create engine with SIMD batch size = 8
@@ -281,10 +273,9 @@ fn test_batch_spreading_determinism() {
         ..Default::default()
     };
 
-    let engine1 = ParallelSpreadingEngine::new(config.clone(), graph1)
-        .expect("Failed to create engine 1");
-    let engine2 = ParallelSpreadingEngine::new(config, graph2)
-        .expect("Failed to create engine 2");
+    let engine1 =
+        ParallelSpreadingEngine::new(config.clone(), graph1).expect("Failed to create engine 1");
+    let engine2 = ParallelSpreadingEngine::new(config, graph2).expect("Failed to create engine 2");
 
     // Run same spreading
     let seed = vec![("ROOT".to_string(), 1.0)];

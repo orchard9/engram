@@ -258,7 +258,7 @@ impl MemoryStore {
             return self.recall_probabilistic(cue);
         };
 
-        self.recall_with_hnsw_evidence(cue, hnsw_index)
+        self.recall_with_hnsw_evidence(cue, &hnsw_index)
     }
 
     #[cfg(feature = "hnsw_index")]

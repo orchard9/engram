@@ -4,10 +4,10 @@
 //! confidence aggregation, and result ranking into a production-ready recall API.
 
 use super::{
+    ActivationError, ActivationResult, ConfidenceAggregator, NodeId,
     cycle_detector::CycleDetector,
     parallel::ParallelSpreadingEngine,
     seeding::{self, SeededActivation, VectorActivationSeeder},
-    ActivationError, ActivationResult, ConfidenceAggregator, NodeId,
 };
 use crate::{Confidence, Cue, Episode, MemoryStore};
 use chrono::Utc;
@@ -76,7 +76,8 @@ impl RecallMetrics {
     /// Record activation mass
     pub fn record_activation_mass(&self, mass: f32) {
         let mass_u64 = (mass * 1000.0) as u64; // Store as fixed-point
-        self.recall_activation_mass.fetch_add(mass_u64, Ordering::Relaxed);
+        self.recall_activation_mass
+            .fetch_add(mass_u64, Ordering::Relaxed);
     }
 
     /// Record a seeding failure
@@ -297,11 +298,7 @@ impl CognitiveRecall {
     }
 
     /// Main recall method that orchestrates the pipeline
-    pub fn recall(
-        &self,
-        cue: &Cue,
-        store: &MemoryStore,
-    ) -> ActivationResult<Vec<RankedMemory>> {
+    pub fn recall(&self, cue: &Cue, store: &MemoryStore) -> ActivationResult<Vec<RankedMemory>> {
         let start_time = Instant::now();
 
         // Record recall operation
@@ -375,10 +372,7 @@ impl CognitiveRecall {
     }
 
     /// Seed activation from cue using vector similarity
-    fn seed_from_cue(
-        &self,
-        cue: &Cue,
-    ) -> Result<Vec<SeededActivation>, seeding::SeedingError> {
+    fn seed_from_cue(&self, cue: &Cue) -> Result<Vec<SeededActivation>, seeding::SeedingError> {
         let outcome = self.vector_seeder.seed_from_cue(cue)?;
         Ok(outcome.seeds)
     }
@@ -401,12 +395,16 @@ impl CognitiveRecall {
         let mut activation_map = HashMap::new();
         for activation in results.activations {
             let confidence = Confidence::from_raw(
-                activation.confidence.load(std::sync::atomic::Ordering::Relaxed),
+                activation
+                    .confidence
+                    .load(std::sync::atomic::Ordering::Relaxed),
             );
             activation_map.insert(
                 activation.memory_id.clone(),
                 (
-                    activation.activation_level.load(std::sync::atomic::Ordering::Relaxed),
+                    activation
+                        .activation_level
+                        .load(std::sync::atomic::Ordering::Relaxed),
                     confidence,
                 ),
             );
@@ -463,17 +461,9 @@ impl CognitiveRecall {
             .into_iter()
             .filter_map(|(node_id, activation, confidence, similarity)| {
                 // Try to retrieve the episode from store
-                store
-                    .get_episode(&node_id)
-                    .map(|episode| {
-                        RankedMemory::new(
-                            episode,
-                            activation,
-                            confidence,
-                            similarity,
-                            &self.config,
-                        )
-                    })
+                store.get_episode(&node_id).map(|episode| {
+                    RankedMemory::new(episode, activation, confidence, similarity, &self.config)
+                })
             })
             .filter(|r| r.confidence.raw() >= self.config.min_confidence)
             .collect();
@@ -622,7 +612,9 @@ impl CognitiveRecallBuilder {
             .confidence_aggregator
             .ok_or("Confidence aggregator required")?;
         let cycle_detector = self.cycle_detector.ok_or("Cycle detector required")?;
-        let metrics = self.metrics.unwrap_or_else(|| Arc::new(RecallMetrics::new()));
+        let metrics = self
+            .metrics
+            .unwrap_or_else(|| Arc::new(RecallMetrics::new()));
 
         Ok(CognitiveRecall {
             vector_seeder,

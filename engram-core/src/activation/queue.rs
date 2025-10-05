@@ -31,7 +31,10 @@ impl WorkStealingQueue {
     }
 
     /// Create new work-stealing queue with deterministic mode
-    pub const fn new_deterministic(global_queue: Arc<SegQueue<ActivationTask>>, batch_size: usize) -> Self {
+    pub const fn new_deterministic(
+        global_queue: Arc<SegQueue<ActivationTask>>,
+        batch_size: usize,
+    ) -> Self {
         Self {
             local_deque: VecDeque::new(),
             global_queue,

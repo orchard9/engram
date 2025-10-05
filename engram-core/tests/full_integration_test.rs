@@ -5,10 +5,18 @@
 
 use chrono::Utc;
 use engram_core::{
-    Confidence, MemoryStore,
+    Confidence, Memory, MemoryStore,
     memory::{CueBuilder, EpisodeBuilder},
 };
 use std::{convert::TryFrom, sync::Arc};
+
+#[cfg(feature = "pattern_completion")]
+use engram_core::completion::{
+    CompletionConfig, MemorySource, PartialEpisode, PatternCompleter, PatternReconstructor,
+};
+
+#[cfg(feature = "probabilistic_queries")]
+use engram_core::query::ProbabilisticRecall;
 
 /// Test the full memory lifecycle from storage to recall
 #[test]
@@ -106,63 +114,158 @@ fn test_simd_vector_operations() {
 #[cfg(feature = "hnsw_index")]
 #[test]
 fn test_activation_spreading() {
-    let store = MemoryStore::new(1000);
-    let mut episode_ids = Vec::new();
+    let store = MemoryStore::new(1000).with_hnsw_index();
 
-    // Create a network of related memories
     for i in 0..5 {
-        let embedding = create_test_embedding(f32_from_usize(i) * 0.1);
-        let episode_id = format!("episode_{i}");
+        let embedding = create_test_embedding(f32_from_usize(i) * 0.05);
         let episode = EpisodeBuilder::new()
-            .id(episode_id.clone())
+            .id(format!("episode_{i}"))
             .when(Utc::now())
             .what(format!("Memory {i}"))
             .embedding(embedding)
             .confidence(Confidence::MEDIUM)
             .build();
 
-        episode_ids.push(episode_id);
         store.store(episode);
     }
 
-    // TODO: Implement when full activation spreading is ready
-    // This test requires a fully implemented MemoryGraph and activation spreading system
-    println!("Activation spreading test skipped - feature not fully implemented");
+    let query_embedding = create_test_embedding(0.05);
+    let cue = CueBuilder::new()
+        .id("activation_test".to_string())
+        .embedding_search(query_embedding, Confidence::LOW)
+        .max_results(5)
+        .build();
 
-    // Simple verification that we can create episodes and store them
-    assert!(!episode_ids.is_empty());
-    let spread_results = vec![("episode_0".to_string(), 1.0f32)];
+    let results = store.recall(&cue);
+    assert!(
+        !results.is_empty(),
+        "expected recall results when querying inserted embeddings"
+    );
+    assert!(
+        results.iter().any(|(episode, _)| episode.id == "episode_0"),
+        "recall results should contain the closest episode"
+    );
 
-    // Verify activation spread
-    assert!(!spread_results.is_empty(), "Should have spread activation");
-
-    // Check that activation decreases with distance
-    let activations: std::collections::HashMap<_, _> = spread_results.into_iter().collect();
-
-    if let Some(&activation_1) = activations.get("episode_1") {
-        assert!(
-            activation_1 > 0.0 && activation_1 < 1.0,
-            "Should have partial activation"
-        );
-    }
+    let confidences: Vec<f32> = results
+        .iter()
+        .map(|(_, confidence)| confidence.raw())
+        .collect();
+    assert!(
+        confidences
+            .windows(2)
+            .all(|window| window[0] + f32::EPSILON >= window[1]),
+        "recall confidences must be sorted in descending order"
+    );
 }
 
 /// Test pattern completion for partial episodes
 #[cfg(feature = "pattern_completion")]
 #[test]
 fn test_pattern_completion() {
-    // TODO: Implement when pattern completion feature is ready
-    // This test is currently stubbed out as the PatternCompletionEngine is not yet implemented
-    println!("Pattern completion test skipped - feature not implemented");
+    use std::collections::HashMap;
+
+    let mut reconstructor = PatternReconstructor::new(CompletionConfig::default());
+
+    let base_episode = EpisodeBuilder::new()
+        .id("episode_base".to_string())
+        .when(Utc::now())
+        .what("Lunch with team".to_string())
+        .embedding(create_test_embedding(0.2))
+        .confidence(Confidence::HIGH)
+        .where_location("Cafeteria".to_string())
+        .build();
+
+    let alt_episode = EpisodeBuilder::new()
+        .id("episode_alt".to_string())
+        .when(Utc::now())
+        .what("Lunch with client".to_string())
+        .embedding(create_test_embedding(0.25))
+        .confidence(Confidence::MEDIUM)
+        .where_location("Cafeteria".to_string())
+        .build();
+
+    reconstructor.add_episodes(&[base_episode.clone(), alt_episode.clone()]);
+    reconstructor.add_memories(vec![
+        Memory::from_episode(base_episode.clone(), 0.9),
+        Memory::from_episode(alt_episode.clone(), 0.8),
+    ]);
+
+    let partial = PartialEpisode {
+        known_fields: HashMap::from([("what".to_string(), "Lunch with team".to_string())]),
+        partial_embedding: base_episode
+            .embedding
+            .iter()
+            .map(|value| Some(*value))
+            .collect(),
+        cue_strength: Confidence::exact(0.7),
+        temporal_context: vec![base_episode.id.clone()],
+    };
+
+    let completed = reconstructor
+        .complete(&partial)
+        .expect("pattern completion should succeed");
+
+    assert_eq!(
+        completed.episode.where_location.as_deref(),
+        Some("Cafeteria")
+    );
+    let where_source = completed
+        .source_attribution
+        .field_sources
+        .get("where")
+        .copied()
+        .expect("reconstructed field should include attribution");
+    assert_eq!(where_source, MemorySource::Reconstructed);
+    assert!(
+        completed.completion_confidence.raw() > 0.0,
+        "completion confidence should be positive"
+    );
 }
 
 /// Test probabilistic query engine with confidence propagation
 #[cfg(feature = "probabilistic_queries")]
 #[test]
 fn test_probabilistic_queries() {
-    // TODO: Implement when probabilistic query feature is ready
-    // This test is currently stubbed out as the ProbabilisticQueryResult is not yet implemented
-    println!("Probabilistic queries test skipped - feature not implemented");
+    let store = MemoryStore::new(1000);
+
+    for offset in [0.0_f32, 0.02, 0.5] {
+        let embedding = create_test_embedding(0.3 + offset);
+        let episode = EpisodeBuilder::new()
+            .id(format!("prob_ep_{offset}"))
+            .when(Utc::now())
+            .what(format!("Probabilistic episode {offset}"))
+            .embedding(embedding)
+            .confidence(Confidence::exact(0.6))
+            .build();
+        store.store(episode);
+    }
+
+    let cue = CueBuilder::new()
+        .id("probabilistic_cue".to_string())
+        .embedding_search(create_test_embedding(0.31), Confidence::exact(0.3))
+        .max_results(3)
+        .build();
+
+    let result = store.recall_probabilistic(cue);
+
+    assert!(
+        !result.episodes.is_empty(),
+        "probabilistic recall should return underlying recall results"
+    );
+    assert!(
+        result.confidence_interval.width >= 0.0 && result.confidence_interval.width <= 1.0,
+        "confidence interval width must be within probability bounds"
+    );
+    assert!(
+        result
+            .confidence_interval
+            .contains(result.confidence_interval.point.raw()),
+        "interval should contain the point estimate"
+    );
+    assert!(
+        !result.evidence_chain.is_empty(),
+        "probabilistic recall should provide supporting evidence"
+    );
 }
 
 /// Test batch operations for high throughput
@@ -199,9 +302,19 @@ fn test_batch_operations() {
 /// Test memory decay functions
 #[test]
 fn test_psychological_decay() {
-    // TODO: Implement when decay models are ready
-    // This test is currently stubbed out as the decay functionality is not yet implemented
-    println!("Psychological decay test skipped - feature not implemented");
+    let mut memory = Memory::new(
+        "decay_mem".to_string(),
+        create_test_embedding(0.4),
+        Confidence::HIGH,
+    );
+    let initial_confidence = memory.confidence;
+    memory.apply_forgetting_decay(24.0);
+
+    assert!(
+        memory.confidence.raw() < initial_confidence.raw(),
+        "confidence should decay over time"
+    );
+    assert!(memory.confidence.raw() >= 0.0);
 }
 
 /// Helper function to create test embeddings

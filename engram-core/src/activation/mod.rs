@@ -46,7 +46,9 @@ pub use gpu_interface::{
 };
 pub use multi_cue::CueAggregationStrategy;
 pub use parallel::ParallelSpreadingEngine;
-pub use recall::{CognitiveRecall, CognitiveRecallBuilder, RankedMemory, RecallConfig, RecallMetrics, RecallMode};
+pub use recall::{
+    CognitiveRecall, CognitiveRecallBuilder, RankedMemory, RecallConfig, RecallMetrics, RecallMode,
+};
 pub use scheduler::{SchedulerSnapshot, TierAwareSpreadingScheduler, TierQueueStateSnapshot};
 #[cfg(feature = "hnsw_index")]
 pub use seeding::{
@@ -60,7 +62,9 @@ pub use memory_pool::{ActivationMemoryPool, LocalMemoryPool, PoolStats};
 #[cfg(feature = "hnsw_index")]
 pub mod hnsw_integration;
 #[cfg(feature = "hnsw_index")]
-pub use hnsw_integration::{HnswActivationEngine, HierarchicalActivation, SpreadingConfig as HnswSpreadingConfig};
+pub use hnsw_integration::{
+    HierarchicalActivation, HnswActivationEngine, SpreadingConfig as HnswSpreadingConfig,
+};
 
 /// Node identifier for graph traversal
 pub type NodeId = String;
@@ -656,8 +660,8 @@ impl Default for ParallelSpreadingConfig {
             enable_gpu: false,
             gpu_threshold: 64,
             enable_memory_pool: true,
-            pool_chunk_size: 8192,    // 8KB per chunk
-            pool_max_chunks: 16,       // Max 128KB total
+            pool_chunk_size: 8192, // 8KB per chunk
+            pool_max_chunks: 16,   // Max 128KB total
         }
     }
 }
@@ -712,8 +716,25 @@ pub type ActivationResult<T> = Result<T, ActivationError>;
 /// for parallel activation spreading.
 pub use crate::memory_graph::{DashMapBackend, GraphConfig, UnifiedMemoryGraph};
 
+/// Activation graph wrapper with instance-level storage for UUID mappings and embeddings.
+///
+/// This eliminates global state and provides proper test isolation.
+pub struct ActivationGraph {
+    graph: UnifiedMemoryGraph<DashMapBackend>,
+    uuid_mappings: DashMap<uuid::Uuid, NodeId>,
+    embeddings: DashMap<NodeId, [f32; 768]>,
+}
+
+impl std::ops::Deref for ActivationGraph {
+    type Target = UnifiedMemoryGraph<DashMapBackend>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.graph
+    }
+}
+
 /// Default memory graph type for activation spreading
-pub type MemoryGraph = UnifiedMemoryGraph<DashMapBackend>;
+pub type MemoryGraph = ActivationGraph;
 
 /// Create a new memory graph optimized for parallel activation spreading
 #[must_use]
@@ -725,7 +746,11 @@ pub fn create_activation_graph() -> MemoryGraph {
         max_depth: 5,
         activation_threshold: 0.01,
     };
-    UnifiedMemoryGraph::new(DashMapBackend::default(), config)
+    ActivationGraph {
+        graph: UnifiedMemoryGraph::new(DashMapBackend::default(), config),
+        uuid_mappings: DashMap::new(),
+        embeddings: DashMap::new(),
+    }
 }
 
 /// Extension trait to add activation-specific methods to the unified graph
@@ -746,27 +771,19 @@ pub trait ActivationGraphExt {
     fn get_embedding(&self, node_id: &NodeId) -> Option<[f32; 768]>;
 }
 
-// Global mapping from UUID to original NodeId for bidirectional conversion
-use std::sync::OnceLock;
-static UUID_TO_NODEID: OnceLock<DashMap<uuid::Uuid, NodeId>> = OnceLock::new();
-
-// Global storage for node embeddings
-static NODE_EMBEDDINGS: OnceLock<DashMap<NodeId, [f32; 768]>> = OnceLock::new();
-
-impl ActivationGraphExt for MemoryGraph {
+impl ActivationGraphExt for ActivationGraph {
     fn add_edge(&self, source: NodeId, target: NodeId, weight: f32, _edge_type: EdgeType) {
         // Convert NodeId (String) to Uuid for the backend
         use uuid::Uuid;
         let source_id = Uuid::new_v5(&Uuid::NAMESPACE_OID, source.as_bytes());
         let target_id = Uuid::new_v5(&Uuid::NAMESPACE_OID, target.as_bytes());
 
-        // Store reverse mappings for NodeId recovery
-        let map = UUID_TO_NODEID.get_or_init(DashMap::new);
-        map.insert(source_id, source.clone());
-        map.insert(target_id, target.clone());
+        // Store reverse mappings for NodeId recovery in instance storage
+        self.uuid_mappings.insert(source_id, source.clone());
+        self.uuid_mappings.insert(target_id, target.clone());
 
         // Add edge using the UnifiedMemoryGraph's add_edge method
-        let _ = Self::add_edge(self, source_id, target_id, weight);
+        let _ = self.graph.add_edge(source_id, target_id, weight);
 
         // Edge type metadata will be handled in a future iteration
     }
@@ -775,14 +792,15 @@ impl ActivationGraphExt for MemoryGraph {
         use uuid::Uuid;
         let id = Uuid::new_v5(&Uuid::NAMESPACE_OID, node_id.as_bytes());
 
-        Self::get_neighbors(self, &id).ok().map(|neighbors| {
+        self.graph.get_neighbors(&id).ok().map(|neighbors| {
             neighbors
                 .into_iter()
                 .map(|(neighbor_id, weight)| {
-                    // Convert Uuid back to original NodeId using reverse mapping
-                    let target = UUID_TO_NODEID
-                        .get()
-                        .and_then(|map| map.get(&neighbor_id).map(|entry| entry.value().clone()))
+                    // Convert Uuid back to original NodeId using instance storage
+                    let target = self
+                        .uuid_mappings
+                        .get(&neighbor_id)
+                        .map(|entry| entry.value().clone())
                         .unwrap_or_else(|| neighbor_id.to_string());
 
                     WeightedEdge {
@@ -796,23 +814,20 @@ impl ActivationGraphExt for MemoryGraph {
     }
 
     fn node_count(&self) -> usize {
-        Self::count(self)
+        self.graph.count()
     }
 
     fn edge_count(&self) -> usize {
         // Use the all_edges method from UnifiedMemoryGraph
-        Self::all_edges(self).map_or(0, |edges| edges.len())
+        self.graph.all_edges().map_or(0, |edges| edges.len())
     }
 
     fn set_embedding(&self, node_id: &NodeId, embedding: [f32; 768]) {
-        let embeddings = NODE_EMBEDDINGS.get_or_init(DashMap::new);
-        embeddings.insert(node_id.clone(), embedding);
+        self.embeddings.insert(node_id.clone(), embedding);
     }
 
     fn get_embedding(&self, node_id: &NodeId) -> Option<[f32; 768]> {
-        NODE_EMBEDDINGS
-            .get()
-            .and_then(|embeddings| embeddings.get(node_id).map(|entry| *entry.value()))
+        self.embeddings.get(node_id).map(|entry| *entry.value())
     }
 }
 
@@ -835,7 +850,9 @@ mod tests {
         assert!(retrieved.is_some(), "Embedding should be retrievable");
 
         let retrieved_embedding = retrieved.unwrap();
-        for (i, (&expected, &actual)) in embedding.iter().zip(retrieved_embedding.iter()).enumerate() {
+        for (i, (&expected, &actual)) in
+            embedding.iter().zip(retrieved_embedding.iter()).enumerate()
+        {
             assert_eq!(expected, actual, "Mismatch at index {}", i);
         }
     }
@@ -883,7 +900,11 @@ mod tests {
         for i in 0..10 {
             let node_id = format!("node_{}", i);
             let retrieved = graph.get_embedding(&node_id).unwrap();
-            assert_eq!(retrieved[0], i as f32, "Embedding for node_{} should match", i);
+            assert_eq!(
+                retrieved[0], i as f32,
+                "Embedding for node_{} should match",
+                i
+            );
         }
     }
     use super::*;

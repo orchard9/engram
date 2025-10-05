@@ -47,7 +47,10 @@ fn export_counters(output: &mut String, registry: &MetricsRegistry) {
         ("queries_executed_total", "Total queries executed"),
         ("errors_total", "Total errors encountered"),
         ("spreading_gpu_launch_total", "Total GPU spreading launches"),
-        ("spreading_gpu_fallback_total", "Total GPU spreading fallbacks to CPU"),
+        (
+            "spreading_gpu_fallback_total",
+            "Total GPU spreading fallbacks to CPU",
+        ),
     ];
 
     for (name, help) in counters {

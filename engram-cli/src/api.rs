@@ -12,12 +12,11 @@ use axum::{
     routing::{get, post},
 };
 use chrono::{DateTime, Utc};
-use engram_proto::{Confidence, ConfidenceCategory, ConsolidationState, Cue, Memory, MemoryType};
+use engram_proto::{Confidence, ConsolidationState, Memory, MemoryType};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tokio_stream::{Stream, wrappers::ReceiverStream};
 use tracing::info;
 use utoipa::{IntoParams, ToSchema};
@@ -25,32 +24,45 @@ use utoipa::{IntoParams, ToSchema};
 use crate::grpc::MemoryService;
 use crate::openapi::create_swagger_ui;
 use engram_core::{
-    Confidence as CoreConfidence,
-    graph::{DashMapBackend, UnifiedMemoryGraph},
-    memory::{EpisodeBuilder as CoreEpisodeBuilder, Memory as CoreMemory},
+    Confidence as CoreConfidence, MemoryStore,
+    memory::{EpisodeBuilder as CoreEpisodeBuilder},
 };
-
-/// Shared graph type for concurrent access
-pub type SharedGraph = UnifiedMemoryGraph<DashMapBackend>;
 
 /// Shared application state
 #[derive(Clone)]
 pub struct ApiState {
-    /// In-memory graph for cognitive operations
-    pub graph: Arc<RwLock<SharedGraph>>,
+    /// Cognitive memory store with HNSW indexing and activation spreading
+    pub store: Arc<MemoryStore>,
     /// gRPC memory service for complex operations
     pub memory_service: Arc<MemoryService>,
 }
 
 impl ApiState {
-    /// Create new API state with shared graph
-    pub fn new(graph: Arc<RwLock<SharedGraph>>) -> Self {
-        let memory_service = Arc::new(MemoryService::new(graph.clone()));
+    /// Create new API state with memory store
+    pub fn new(store: Arc<MemoryStore>) -> Self {
+        let memory_service = Arc::new(MemoryService::new(Arc::clone(&store)));
         Self {
-            graph,
+            store,
             memory_service,
         }
     }
+}
+
+// ================================================================================================
+// Helper Functions
+// ================================================================================================
+
+/// Convert embedding vector to fixed-size array
+fn embedding_to_array(embedding: &[f32]) -> Result<[f32; 768], ApiError> {
+    if embedding.len() != 768 {
+        return Err(ApiError::InvalidInput(format!(
+            "Embedding must be exactly 768 dimensions, got {}",
+            embedding.len()
+        )));
+    }
+    let mut array = [0.0f32; 768];
+    array.copy_from_slice(embedding);
+    Ok(array)
 }
 
 // ================================================================================================
@@ -458,7 +470,7 @@ pub async fn remember_memory(
         _ => MemoryType::Semantic, // Default for "semantic" and unknown types
     };
 
-    // Create memory object
+    // Create memory object for response
     let memory = Memory::new(memory_id.clone(), embedding_vec.clone())
         .with_content(&request.content)
         .with_confidence(confidence.clone())
@@ -471,16 +483,17 @@ pub async fn remember_memory(
         memory
     };
 
-    // Store in graph (simplified - would use full gRPC service)
-    let mut core_memory = CoreMemory::new(memory_id.clone(), embedding_array, core_confidence);
-    core_memory.content = Some(request.content.clone());
+    // Store in MemoryStore as an episode
+    use engram_core::Episode;
+    let episode = Episode::new(
+        memory_id.clone(),
+        Utc::now(),
+        request.content.clone(),
+        embedding_array,
+        core_confidence,
+    );
 
-    {
-        let graph = state.graph.write().await;
-        graph
-            .store_memory(core_memory)
-            .map_err(|err| ApiError::SystemError(format!("Failed to store memory: {err}")))?;
-    }
+    let activation = state.store.store(episode);
 
     // Create auto-links if enabled
     let auto_links = if request.auto_link.unwrap_or(false) {
@@ -495,23 +508,30 @@ pub async fn remember_memory(
         vec![]
     };
 
+    let actual_confidence = activation.value();
     let response = RememberResponse {
         memory_id: memory_id.clone(),
         storage_confidence: ConfidenceInfo {
-            value: confidence.value,
-            category: format!("{:?}", confidence.semantic_category()),
-            reasoning: confidence.reasoning.clone(),
+            value: actual_confidence,
+            category: if actual_confidence > 0.7 {
+                "High"
+            } else if actual_confidence > 0.4 {
+                "Medium"
+            } else {
+                "Low"
+            }
+            .to_string(),
+            reasoning: format!(
+                "Stored with activation {:.2}, accounting for system pressure",
+                actual_confidence
+            ),
         },
         consolidation_state: format!("{:?}", ConsolidationState::Recent),
         auto_links,
         system_message: format!(
-            "Memory '{}' successfully encoded with {} confidence. {}",
+            "Memory '{}' successfully encoded with {:.2} activation. {}",
             memory_id,
-            match confidence.semantic_category() {
-                ConfidenceCategory::High | ConfidenceCategory::Certain => "high",
-                ConfidenceCategory::Medium => "medium",
-                _ => "low",
-            },
+            actual_confidence,
             if request.auto_link.unwrap_or(false) {
                 "Automatic linking enabled - similar memories will be connected during consolidation."
             } else {
@@ -585,25 +605,32 @@ pub async fn remember_episode(
 
     let core_episode = builder.build();
 
-    {
-        let graph = state.graph.write().await;
-        graph
-            .store_episode(core_episode)
-            .map_err(|err| ApiError::SystemError(format!("Failed to store episode: {err}")))?;
-    }
+    // Store in MemoryStore
+    let activation = state.store.store(core_episode);
 
+    let actual_confidence = activation.value();
     let response = RememberResponse {
         memory_id: episode_id.clone(),
         storage_confidence: ConfidenceInfo {
-            value: 0.8,
-            category: "High".to_string(),
-            reasoning: "Episodic memories with rich context achieve high encoding confidence"
-                .to_string(),
+            value: actual_confidence,
+            category: if actual_confidence > 0.7 {
+                "High"
+            } else if actual_confidence > 0.4 {
+                "Medium"
+            } else {
+                "Low"
+            }
+            .to_string(),
+            reasoning: format!(
+                "Episodic memory stored with activation {:.2}, rich context aids consolidation",
+                actual_confidence
+            ),
         },
         consolidation_state: format!("{:?}", ConsolidationState::Recent),
         auto_links: vec![],
         system_message: format!(
-            "Episode '{episode_id}' successfully encoded with contextual details. Rich episodes consolidate better over time."
+            "Episode '{episode_id}' successfully encoded with {:.2} activation. Rich episodes consolidate better over time.",
+            actual_confidence
         ),
     };
 
@@ -656,56 +683,66 @@ pub async fn recall_memories(
     };
 
     // Create search cue
-    let _cue = if let Some(query) = &params.query {
-        Cue::from_query(query)
+    use engram_core::Cue as CoreCue;
+    let cue = if let Some(query) = &params.query {
+        CoreCue::semantic(
+            "http_query".to_string(),
+            query.clone(),
+            CoreConfidence::exact(params.threshold.unwrap_or(0.5)),
+        )
     } else if let Some(embedding) = embedding_vector {
-        Cue::from_embedding(embedding, params.threshold.unwrap_or(0.5))
+        let embedding_array: [f32; 768] = embedding_to_array(&embedding)?;
+        CoreCue::embedding(
+            "http_embedding_query".to_string(),
+            embedding_array,
+            CoreConfidence::exact(params.threshold.unwrap_or(0.5)),
+        )
     } else {
         return Err(ApiError::InvalidInput(
             "No valid search cue provided".to_string(),
         ));
     };
 
-    // Perform search (simplified - would use full spreading activation)
-    let total_memories = {
-        let graph = state.graph.read().await;
-        graph.count()
-    };
+    // Perform actual recall using MemoryStore
+    let recall_results = state.store.recall(&cue);
+    let total_memories = state.store.count();
 
-    // Placeholder search results - would implement actual spreading activation
-    let vivid_results = vec![MemoryResult {
-        id: "mem_example1".to_string(),
-        content: "Example high-confidence match".to_string(),
-        confidence: ConfidenceInfo {
-            value: 0.9,
-            category: "High".to_string(),
-            reasoning: "Direct content match with strong activation".to_string(),
-        },
-        activation_level: 0.9,
-        similarity_score: 0.92,
-        retrieval_path: Some("Direct similarity match".to_string()),
-        last_access: Some(Utc::now()),
-        tags: vec!["example".to_string()],
-        memory_type: "Semantic".to_string(),
-        relevance_explanation: "Strong semantic match with query terms".to_string(),
-    }];
+    // Convert results to API response format
+    let mut vivid_results = Vec::new();
+    let mut associated_results = Vec::new();
 
-    let associated_results = vec![MemoryResult {
-        id: "mem_example2".to_string(),
-        content: "Related memory through spreading activation".to_string(),
-        confidence: ConfidenceInfo {
-            value: 0.6,
-            category: "Medium".to_string(),
-            reasoning: "Associated through semantic connections".to_string(),
-        },
-        activation_level: 0.6,
-        similarity_score: 0.75,
-        retrieval_path: Some("Spreading activation (2 hops)".to_string()),
-        last_access: Some(Utc::now()),
-        tags: vec!["associated".to_string()],
-        memory_type: "Semantic".to_string(),
-        relevance_explanation: "Connected through shared conceptual patterns".to_string(),
-    }];
+    for (episode, confidence) in recall_results.iter().take(params.max_results.unwrap_or(10)) {
+        let result = MemoryResult {
+            id: episode.id.clone(),
+            content: episode.what.clone(),
+            confidence: ConfidenceInfo {
+                value: confidence.raw(),
+                category: if confidence.is_high() {
+                    "High"
+                } else if confidence.is_medium() {
+                    "Medium"
+                } else {
+                    "Low"
+                }
+                .to_string(),
+                reasoning: "Recalled from memory store with confidence score".to_string(),
+            },
+            activation_level: confidence.raw(),
+            similarity_score: confidence.raw(),
+            retrieval_path: Some("Memory store recall".to_string()),
+            last_access: Some(episode.when),
+            tags: vec![],
+            memory_type: "Episodic".to_string(),
+            relevance_explanation: format!("Retrieved with {:.2} confidence", confidence.raw()),
+        };
+
+        // Classify as vivid (high confidence) or associated (lower confidence)
+        if confidence.raw() > 0.7 {
+            vivid_results.push(result);
+        } else {
+            associated_results.push(result);
+        }
+    }
 
     let processing_time = u64::try_from(start_time.elapsed().as_millis()).unwrap_or(u64::MAX);
 
@@ -859,10 +896,7 @@ pub async fn simple_health() -> Result<impl IntoResponse, ApiError> {
 ///
 /// Returns `ApiError` if system health check fails
 pub async fn system_health(State(state): State<ApiState>) -> Result<impl IntoResponse, ApiError> {
-    let memory_count = {
-        let graph = state.graph.read().await;
-        graph.count()
-    };
+    let memory_count = state.store.count();
 
     let health_data = json!({
         "status": "healthy",
@@ -902,10 +936,7 @@ pub async fn system_health(State(state): State<ApiState>) -> Result<impl IntoRes
 pub async fn system_introspect(
     State(state): State<ApiState>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let memory_count = {
-        let graph = state.graph.read().await;
-        graph.count()
-    };
+    let memory_count = state.store.count();
 
     let introspection_data = json!({
         "memory_statistics": {
@@ -1042,22 +1073,6 @@ impl IntoResponse for ApiError {
         (status, Json(error_response)).into_response()
     }
 }
-
-fn embedding_to_array(embedding: &[f32]) -> Result<[f32; 768], ApiError> {
-    if embedding.len() != 768 {
-        return Err(ApiError::InvalidInput(format!(
-            "Embedding must contain exactly 768 dimensions, received {}",
-            embedding.len()
-        )));
-    }
-
-    let mut array = [0.0f32; 768];
-    array.copy_from_slice(embedding);
-    Ok(array)
-}
-
-// Add uuid dependency for ID generation
-use uuid;
 
 // ================================================================================================
 // Server-Sent Events (SSE) Streaming Handlers

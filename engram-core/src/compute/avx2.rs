@@ -366,10 +366,7 @@ unsafe fn cosine_similarity_batch_768_avx2_fma(
 
 /// Optimized batch cosine similarity with AVX2 without FMA
 #[target_feature(enable = "avx2")]
-unsafe fn cosine_similarity_batch_768_avx2(
-    query: &[f32; 768],
-    vectors: &[[f32; 768]],
-) -> Vec<f32> {
+unsafe fn cosine_similarity_batch_768_avx2(query: &[f32; 768], vectors: &[[f32; 768]]) -> Vec<f32> {
     let mut results = Vec::with_capacity(vectors.len());
 
     // Pre-compute query norm once

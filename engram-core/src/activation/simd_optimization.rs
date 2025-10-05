@@ -114,7 +114,11 @@ impl ActivationBatch {
 
 /// Determines if SIMD should be used based on storage tier and batch size
 #[must_use]
-pub fn should_use_simd_for_tier(tier: crate::activation::storage_aware::StorageTier, batch_size: usize, min_batch_size: usize) -> bool {
+pub fn should_use_simd_for_tier(
+    tier: crate::activation::storage_aware::StorageTier,
+    batch_size: usize,
+    min_batch_size: usize,
+) -> bool {
     use crate::activation::storage_aware::StorageTier;
 
     // Don't use SIMD for batches smaller than threshold
@@ -124,7 +128,7 @@ pub fn should_use_simd_for_tier(tier: crate::activation::storage_aware::StorageT
 
     // Tier-aware SIMD selection
     match tier {
-        StorageTier::Hot => true,  // Always use SIMD for hot tier
+        StorageTier::Hot => true, // Always use SIMD for hot tier
         StorageTier::Warm => batch_size >= min_batch_size * 2, // Higher threshold for warm
         StorageTier::Cold => false, // Never use SIMD for cold tier (bandwidth limited)
     }
@@ -185,7 +189,12 @@ impl SimdActivationMapper {
         {
             if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
                 unsafe {
-                    fma_confidence_aggregate_avx2(activations, confidence_weights, path_confidence, len);
+                    fma_confidence_aggregate_avx2(
+                        activations,
+                        confidence_weights,
+                        path_confidence,
+                        len,
+                    );
                 }
                 return;
             }
@@ -375,6 +384,9 @@ mod tests {
     #[test]
     fn test_auto_tune_batch_size() {
         let optimal_size = super::auto_tune_batch_size();
-        assert!([8, 16, 32].contains(&optimal_size), "Auto-tuned batch size should be one of the test sizes");
+        assert!(
+            [8, 16, 32].contains(&optimal_size),
+            "Auto-tuned batch size should be one of the test sizes"
+        );
     }
 }

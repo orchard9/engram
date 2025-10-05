@@ -1,9 +1,8 @@
 //! Benchmarks for GPU abstraction layer overhead
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use engram_core::activation::{
-    AdaptiveConfig, AdaptiveSpreadingEngine, CpuFallback, GPUActivationBatch,
-    GPUSpreadingInterface,
+    AdaptiveConfig, AdaptiveSpreadingEngine, CpuFallback, GPUActivationBatch, GPUSpreadingInterface,
 };
 use std::sync::Arc;
 

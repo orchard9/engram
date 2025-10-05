@@ -3,7 +3,7 @@
 //! This module defines the interface for GPU-accelerated activation spreading,
 //! allowing CUDA kernels to be integrated without refactoring the spreading engine.
 
-use super::{simd_optimization::SimdActivationMapper, ActivationResult};
+use super::{ActivationResult, simd_optimization::SimdActivationMapper};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;

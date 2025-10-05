@@ -46,7 +46,7 @@ impl MemoryChunk {
         if !self.has_space(size) {
             return None;
         }
-        
+
         let start = self.used;
         self.used += size;
         Some(&mut self.data[start..start + size])
@@ -67,7 +67,7 @@ impl ActivationMemoryPool {
     /// Allocate memory from the pool
     pub fn allocate(&self, size: usize) -> PooledAllocation {
         let mut chunks = self.chunks.lock();
-        
+
         // Try to find a chunk with space
         for chunk in chunks.iter_mut() {
             if let Some(memory) = chunk.allocate(size) {
@@ -78,7 +78,7 @@ impl ActivationMemoryPool {
                 };
             }
         }
-        
+
         // Need a new chunk
         if chunks.len() < self.max_chunks {
             let mut new_chunk = MemoryChunk::new(self.chunk_size.max(size));
@@ -114,7 +114,7 @@ impl ActivationMemoryPool {
         let chunks = self.chunks.lock();
         let total_capacity = chunks.len() * self.chunk_size;
         let total_used: usize = chunks.iter().map(|c| c.used).sum();
-        
+
         PoolStats {
             num_chunks: chunks.len(),
             chunk_size: self.chunk_size,
@@ -178,14 +178,14 @@ impl LocalMemoryPool {
     pub fn allocate<T>(&mut self) -> Option<&mut T> {
         let size = mem::size_of::<T>();
         let align = mem::align_of::<T>();
-        
+
         // Align position
         let aligned_pos = (self.position + align - 1) & !(align - 1);
-        
+
         if aligned_pos + size > self.buffer.len() {
             return None;
         }
-        
+
         self.position = aligned_pos + size;
         let ptr = &mut self.buffer[aligned_pos] as *mut u8 as *mut T;
         Some(unsafe { &mut *ptr })
@@ -212,17 +212,17 @@ mod tests {
     #[test]
     fn test_memory_pool_allocation() {
         let pool = ActivationMemoryPool::new(1024, 4);
-        
+
         // Allocate some memory
         let mut alloc1 = pool.allocate(100);
         let slice1 = alloc1.as_mut_slice();
         slice1[0] = 42;
         assert_eq!(slice1.len(), 100);
-        
+
         // Allocate more
         let alloc2 = pool.allocate(200);
         assert_eq!(alloc2.as_slice().len(), 200);
-        
+
         // Check stats
         let stats = pool.stats();
         assert_eq!(stats.num_chunks, 1);

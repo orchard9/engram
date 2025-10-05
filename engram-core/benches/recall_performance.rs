@@ -2,9 +2,9 @@
 //!
 //! Validates P95 latency < 10ms requirement from Task 008 specification
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
-use engram_core::{Confidence, Cue, Episode, EpisodeBuilder, Memory, MemoryStore};
 use chrono::Utc;
+use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use engram_core::{Confidence, Cue, Episode, EpisodeBuilder, Memory, MemoryStore};
 use std::time::Duration;
 
 #[cfg(feature = "hnsw_index")]
@@ -48,16 +48,12 @@ fn bench_similarity_recall(c: &mut Criterion) {
         let store = create_test_store(*size);
         let cue = Cue::embedding(create_test_embedding(42), Confidence::HIGH, Some(10));
 
-        group.bench_with_input(
-            BenchmarkId::from_parameter(size),
-            size,
-            |b, _| {
-                b.iter(|| {
-                    let results = store.recall(black_box(&cue));
-                    black_box(results);
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, _| {
+            b.iter(|| {
+                let results = store.recall(black_box(&cue));
+                black_box(results);
+            });
+        });
     }
 
     group.finish();
@@ -73,16 +69,12 @@ fn bench_result_limits(c: &mut Criterion) {
     for limit in [5, 10, 20, 50, 100].iter() {
         let cue = Cue::embedding(create_test_embedding(123), Confidence::HIGH, Some(*limit));
 
-        group.bench_with_input(
-            BenchmarkId::from_parameter(limit),
-            limit,
-            |b, _| {
-                b.iter(|| {
-                    let results = store.recall(black_box(&cue));
-                    black_box(results);
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::from_parameter(limit), limit, |b, _| {
+            b.iter(|| {
+                let results = store.recall(black_box(&cue));
+                black_box(results);
+            });
+        });
     }
 
     group.finish();
@@ -94,7 +86,7 @@ fn bench_p95_latency(c: &mut Criterion) {
     group.measurement_time(Duration::from_secs(20));
 
     // Configure for P95 measurement
-    group.sample_size(1000);  // Enough samples for P95
+    group.sample_size(1000); // Enough samples for P95
 
     let store = create_test_store(10_000);
     let cue = Cue::embedding(create_test_embedding(999), Confidence::HIGH, Some(20));

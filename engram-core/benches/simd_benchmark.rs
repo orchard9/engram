@@ -2,11 +2,11 @@
 
 #![allow(missing_docs)]
 
-use criterion::{Criterion, black_box, criterion_group, criterion_main, BenchmarkId};
+use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use engram_core::activation::simd_optimization::SimdActivationMapper;
 use engram_core::compute::{
     VectorOps, cosine_similarity_768, cosine_similarity_batch_768, scalar::ScalarVectorOps,
 };
-use engram_core::activation::simd_optimization::SimdActivationMapper;
 
 fn generate_test_vector() -> [f32; 768] {
     let mut result = [0.0f32; 768];
@@ -18,15 +18,17 @@ fn generate_test_vector() -> [f32; 768] {
 }
 
 fn generate_test_batch(size: usize) -> Vec<[f32; 768]> {
-    (0..size).map(|i| {
-        let mut vec = generate_test_vector();
-        // Add variation based on index
-        for (j, item) in vec.iter_mut().enumerate().take(i % 100) {
-            let offset = f32::from(u16::try_from(j).expect("offset within u16"));
-            *item *= 0.9 + (offset / 1000.0);
-        }
-        vec
-    }).collect()
+    (0..size)
+        .map(|i| {
+            let mut vec = generate_test_vector();
+            // Add variation based on index
+            for (j, item) in vec.iter_mut().enumerate().take(i % 100) {
+                let offset = f32::from(u16::try_from(j).expect("offset within u16"));
+                *item *= 0.9 + (offset / 1000.0);
+            }
+            vec
+        })
+        .collect()
 }
 
 fn bench_cosine_similarity(c: &mut Criterion) {
@@ -183,10 +185,8 @@ fn bench_integrated_spreading_pipeline(c: &mut Criterion) {
             |b, _| {
                 b.iter(|| {
                     // Step 1: Compute batch similarities (SIMD optimized)
-                    let similarities = cosine_similarity_batch_768(
-                        black_box(&query),
-                        black_box(&vectors),
-                    );
+                    let similarities =
+                        cosine_similarity_batch_768(black_box(&query), black_box(&vectors));
 
                     // Step 2: Convert to activations (SIMD optimized)
                     let activations = mapper.batch_sigmoid_activation(

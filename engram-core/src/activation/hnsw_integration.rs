@@ -4,9 +4,9 @@
 //! allowing activation to flow through the hierarchical navigable small world
 //! graph based on vector similarity.
 
-use super::{storage_aware::StorageTier, ActivationRecord, NodeId};
-use crate::index::{HnswGraph, HnswNode, SearchResult};
+use super::{ActivationRecord, NodeId, storage_aware::StorageTier};
 use crate::Confidence;
+use crate::index::{HnswGraph, SearchResult};
 use dashmap::DashMap;
 use std::sync::Arc;
 
@@ -58,22 +58,26 @@ impl HnswActivationEngine {
     }
 
     /// Spread activation from a source node through HNSW neighbors
-    pub fn spread_activation(&self, source_id: &NodeId, initial_activation: f32) -> Vec<(NodeId, f32)> {
+    pub fn spread_activation(
+        &self,
+        source_id: &NodeId,
+        initial_activation: f32,
+    ) -> Vec<(NodeId, f32)> {
         let mut results = Vec::new();
         let mut visited = dashmap::DashSet::new();
-        
+
         // Initialize source activation
         let mut base_record = ActivationRecord::new(source_id.clone(), 0.1);
         base_record.set_storage_tier(StorageTier::Hot);
         self.activations.insert(source_id.clone(), base_record);
-        
+
         if let Some(record) = self.activations.get(source_id) {
             record.accumulate_activation(initial_activation);
         }
-        
+
         // Spread through HNSW neighbors
         self.spread_recursive(source_id, initial_activation, 0, &mut visited, &mut results);
-        
+
         results
     }
 
@@ -90,37 +94,39 @@ impl HnswActivationEngine {
         if depth >= self.config.max_hops || activation < 0.01 {
             return;
         }
-        
+
         // Mark as visited
         if !visited.insert(node_id.clone()) {
             return; // Already visited
         }
-        
+
         // Get neighbors from HNSW graph
         let neighbors = self.get_hnsw_neighbors(node_id);
-        
+
         for (neighbor_id, similarity) in neighbors {
             // Check similarity threshold
             if similarity < self.config.similarity_threshold {
                 continue;
             }
-            
+
             // Calculate propagated activation
             let decay = self.config.distance_decay.powi(depth as i32 + 1);
             let propagated = activation * similarity * decay;
-            
+
             // Update neighbor activation
             let tier = StorageTier::from_depth(depth as u16 + 1);
-            let record = self.activations.entry(neighbor_id.clone())
+            let record = self
+                .activations
+                .entry(neighbor_id.clone())
                 .or_insert_with(|| {
                     let mut base = ActivationRecord::new(neighbor_id.clone(), 0.1);
                     base.set_storage_tier(tier);
                     base
                 });
-            
+
             if record.accumulate_activation(propagated) {
                 results.push((neighbor_id.clone(), propagated));
-                
+
                 // Continue spreading
                 self.spread_recursive(&neighbor_id, propagated, depth + 1, visited, results);
             }
@@ -145,20 +151,22 @@ impl HnswActivationEngine {
     pub fn activate_by_query(&self, query_embedding: &[f32; 768], k: usize) -> Vec<(NodeId, f32)> {
         // Search HNSW for similar nodes
         let search_results = self.search_similar(query_embedding, k);
-        
+
         let mut activated = Vec::new();
-        
+
         for result in search_results {
             let activation = result.confidence.raw();
-            
+
             // Create or update activation record
-            let record = self.activations.entry(result.memory_id.clone())
+            let record = self
+                .activations
+                .entry(result.memory_id.clone())
                 .or_insert_with(|| ActivationRecord::new(result.memory_id.clone(), 0.1));
-            
+
             record.accumulate_activation(activation);
             activated.push((result.memory_id, activation));
         }
-        
+
         activated
     }
 
@@ -174,7 +182,7 @@ impl HnswActivationEngine {
             k,
             k * 2,
             self.config.confidence_threshold,
-            vector_ops.as_ref(),
+            vector_ops,
         );
 
         results.hits
@@ -217,10 +225,11 @@ impl HierarchicalActivation {
     /// Create hierarchical activation across HNSW layers
     pub fn new(hnsw_graph: Arc<HnswGraph>, layer_coupling: f32) -> Self {
         // Create an engine for each layer
-        let layer_engines = vec![
-            HnswActivationEngine::new(hnsw_graph.clone(), SpreadingConfig::default()),
-        ];
-        
+        let layer_engines = vec![HnswActivationEngine::new(
+            hnsw_graph.clone(),
+            SpreadingConfig::default(),
+        )];
+
         Self {
             layer_engines,
             layer_coupling,
@@ -228,20 +237,27 @@ impl HierarchicalActivation {
     }
 
     /// Spread activation across all layers
-    pub fn spread_hierarchical(&self, source_id: &NodeId, initial_activation: f32) -> Vec<(NodeId, f32)> {
+    pub fn spread_hierarchical(
+        &self,
+        source_id: &NodeId,
+        initial_activation: f32,
+    ) -> Vec<(NodeId, f32)> {
         let mut all_results = Vec::new();
-        
+
         // Spread through each layer
         for (layer_idx, engine) in self.layer_engines.iter().enumerate() {
             let layer_activation = initial_activation * (1.0 - layer_idx as f32 * 0.2);
             let layer_results = engine.spread_activation(source_id, layer_activation);
-            
+
             // Collect results
             for (node_id, activation) in layer_results {
-                all_results.push((node_id, activation * self.layer_coupling.powi(layer_idx as i32)));
+                all_results.push((
+                    node_id,
+                    activation * self.layer_coupling.powi(layer_idx as i32),
+                ));
             }
         }
-        
+
         all_results
     }
 }
@@ -269,7 +285,7 @@ mod tests {
             use_hierarchical: false,
             confidence_threshold: Confidence::MEDIUM,
         };
-        
+
         // Verify config is set correctly
         assert_eq!(config.similarity_threshold, 0.6);
         assert_eq!(config.distance_decay, 0.9);

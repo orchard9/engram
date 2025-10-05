@@ -139,9 +139,7 @@ mod tests {
     fn test_similarity_mode_recall() {
         let store = create_test_store();
         // Use the store's HNSW index (auto-populated during store.store())
-        let index = store
-            .hnsw_index()
-            .expect("HNSW index should be available");
+        let index = store.hnsw_index().expect("HNSW index should be available");
         let graph = create_test_graph();
 
         let seeder = Arc::new(VectorActivationSeeder::with_default_resolver(
@@ -172,7 +170,11 @@ mod tests {
         // Create a test cue
         let mut cue_embedding = [0.0f32; 768];
         cue_embedding.fill(0.7);
-        let cue = Cue::embedding("similarity_test".to_string(), cue_embedding, Confidence::HIGH);
+        let cue = Cue::embedding(
+            "similarity_test".to_string(),
+            cue_embedding,
+            Confidence::HIGH,
+        );
 
         let results = recall.recall(&cue, &store).expect("Recall failed");
 
@@ -185,9 +187,7 @@ mod tests {
     fn test_spreading_mode_recall() {
         let store = create_test_store();
         // Use the store's HNSW index (auto-populated during store.store())
-        let index = store
-            .hnsw_index()
-            .expect("HNSW index should be available");
+        let index = store.hnsw_index().expect("HNSW index should be available");
         let graph = create_test_graph();
 
         let seeder = Arc::new(VectorActivationSeeder::with_default_resolver(
@@ -224,7 +224,11 @@ mod tests {
         // Create a test cue
         let mut cue_embedding = [0.0f32; 768];
         cue_embedding.fill(0.5); // Should match memory1
-        let cue = Cue::embedding("spreading_test".to_string(), cue_embedding, Confidence::HIGH);
+        let cue = Cue::embedding(
+            "spreading_test".to_string(),
+            cue_embedding,
+            Confidence::HIGH,
+        );
 
         let results = recall.recall(&cue, &store).expect("Recall failed");
 
@@ -264,9 +268,7 @@ mod tests {
         store.store(old_episode);
 
         // Use the store's HNSW index (auto-populated during store.store())
-        let index = store
-            .hnsw_index()
-            .expect("HNSW index should be available");
+        let index = store.hnsw_index().expect("HNSW index should be available");
         let graph = Arc::new(create_activation_graph());
         let seeder = Arc::new(VectorActivationSeeder::with_default_resolver(
             index,
@@ -321,9 +323,7 @@ mod tests {
     fn test_hybrid_mode_with_fallback() {
         let store = create_test_store();
         // Use the store's HNSW index (auto-populated during store.store())
-        let index = store
-            .hnsw_index()
-            .expect("HNSW index should be available");
+        let index = store.hnsw_index().expect("HNSW index should be available");
         let graph = create_test_graph();
 
         let seeder = Arc::new(VectorActivationSeeder::with_default_resolver(
@@ -363,9 +363,7 @@ mod tests {
     fn test_confidence_aggregation() {
         let store = create_test_store();
         // Use the store's HNSW index (auto-populated during store.store())
-        let index = store
-            .hnsw_index()
-            .expect("HNSW index should be available");
+        let index = store.hnsw_index().expect("HNSW index should be available");
         let graph = create_test_graph();
 
         let seeder = Arc::new(VectorActivationSeeder::with_default_resolver(
@@ -388,7 +386,11 @@ mod tests {
             RecallConfig::default(),
         );
 
-        let cue = Cue::embedding("confidence_test".to_string(), [0.5f32; 768], Confidence::exact(1.0));
+        let cue = Cue::embedding(
+            "confidence_test".to_string(),
+            [0.5f32; 768],
+            Confidence::exact(1.0),
+        );
         let results = recall.recall(&cue, &store).expect("Recall failed");
 
         // All results should have valid confidence scores
@@ -408,9 +410,7 @@ mod tests {
     fn test_result_ranking() {
         let store = create_test_store();
         // Use the store's HNSW index (auto-populated during store.store())
-        let index = store
-            .hnsw_index()
-            .expect("HNSW index should be available");
+        let index = store.hnsw_index().expect("HNSW index should be available");
         let graph = create_test_graph();
 
         let seeder = Arc::new(VectorActivationSeeder::with_default_resolver(
@@ -449,9 +449,7 @@ mod tests {
     fn test_empty_cue_handling() {
         let store = create_test_store();
         // Use the store's HNSW index (auto-populated during store.store())
-        let index = store
-            .hnsw_index()
-            .expect("HNSW index should be available");
+        let index = store.hnsw_index().expect("HNSW index should be available");
         let graph = create_test_graph();
 
         let seeder = Arc::new(VectorActivationSeeder::with_default_resolver(
@@ -506,9 +504,7 @@ mod tests {
         }
 
         // Build cognitive recall pipeline using the store's HNSW index
-        let index = store
-            .hnsw_index()
-            .expect("HNSW index should be available");
+        let index = store.hnsw_index().expect("HNSW index should be available");
         let graph = create_test_graph();
         let seeder = Arc::new(VectorActivationSeeder::with_default_resolver(
             index,
@@ -548,7 +544,10 @@ mod tests {
         let results = store.recall(&cue);
 
         // Verify results
-        assert!(!results.is_empty(), "Should return results via spreading activation");
+        assert!(
+            !results.is_empty(),
+            "Should return results via spreading activation"
+        );
 
         // Results should be Episode-Confidence tuples
         for (episode, confidence) in results {
@@ -574,9 +573,7 @@ mod tests {
         store.store(episode);
 
         // Build minimal cognitive recall (won't be used in similarity mode)
-        let index = store
-            .hnsw_index()
-            .expect("HNSW index should be available");
+        let index = store.hnsw_index().expect("HNSW index should be available");
         let graph = create_test_graph();
         let seeder = Arc::new(VectorActivationSeeder::with_default_resolver(
             index,
@@ -607,13 +604,20 @@ mod tests {
             .with_recall_config(recall_config);
 
         // Create test cue
-        let cue = Cue::embedding("similarity_cue".to_string(), [0.6f32; 768], Confidence::HIGH);
+        let cue = Cue::embedding(
+            "similarity_cue".to_string(),
+            [0.6f32; 768],
+            Confidence::HIGH,
+        );
 
         // Call MemoryStore::recall() which should use similarity-only path
         let results = store.recall(&cue);
 
         // Should return results (using HNSW or basic similarity)
-        assert!(!results.is_empty() || true, "Similarity mode should complete without error");
+        assert!(
+            !results.is_empty() || true,
+            "Similarity mode should complete without error"
+        );
     }
 
     #[test]
@@ -631,9 +635,7 @@ mod tests {
         store.store(episode);
 
         // Build cognitive recall pipeline using the store's HNSW index
-        let index = store
-            .hnsw_index()
-            .expect("HNSW index should be available");
+        let index = store.hnsw_index().expect("HNSW index should be available");
         let graph = create_test_graph();
         let seeder = Arc::new(VectorActivationSeeder::with_default_resolver(
             index,
@@ -671,6 +673,9 @@ mod tests {
         let results = store.recall(&cue);
 
         // Should return results via hybrid mode
-        assert!(results.is_empty() || !results.is_empty(), "Hybrid mode should complete");
+        assert!(
+            results.is_empty() || !results.is_empty(),
+            "Hybrid mode should complete"
+        );
     }
 }

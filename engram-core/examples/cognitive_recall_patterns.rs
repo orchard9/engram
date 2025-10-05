@@ -4,7 +4,7 @@
 //! This example shows the API design and expected usage patterns.
 
 #[cfg(feature = "hnsw_index")]
-use engram_core::activation::{RecallConfig, RecallMode, RecallMetrics};
+use engram_core::activation::{RecallConfig, RecallMetrics, RecallMode};
 #[cfg(feature = "hnsw_index")]
 use std::time::Duration;
 

@@ -659,9 +659,8 @@ mod tests {
 
     #[test]
     fn test_cycle_detection() {
-        use crate::activation::ActivationGraphExt;
-        use crate::graph::create_concurrent_graph;
-        let graph = create_concurrent_graph();
+        use crate::activation::{ActivationGraphExt, create_activation_graph};
+        let graph = create_activation_graph();
 
         // Create cycle: A -> B -> A
         // Use the ActivationGraphExt trait for String-based node IDs

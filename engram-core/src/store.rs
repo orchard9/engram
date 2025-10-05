@@ -32,9 +32,7 @@ use crate::completion::{
 };
 
 #[cfg(feature = "hnsw_index")]
-use crate::index::{CognitiveHnswIndex, IndexUpdate, UpdatePriority};
-#[cfg(feature = "hnsw_index")]
-use crossbeam_queue::SegQueue;
+use crate::index::CognitiveHnswIndex;
 
 #[cfg(feature = "memory_mapped_persistence")]
 use crate::storage::{CognitiveTierArchitecture, FsyncMode, StorageMetrics, wal::WalWriter};
@@ -105,10 +103,6 @@ pub struct MemoryStore {
     /// HNSW index for fast similarity search
     #[cfg(feature = "hnsw_index")]
     hnsw_index: Option<Arc<CognitiveHnswIndex>>,
-
-    /// Queue for background index updates
-    #[cfg(feature = "hnsw_index")]
-    index_update_queue: Option<Arc<SegQueue<IndexUpdate>>>,
 
     /// Persistent storage backend
     #[cfg(feature = "memory_mapped_persistence")]
@@ -203,14 +197,40 @@ impl MemoryStore {
         if let Some(ref backend) = self.persistent_backend {
             let backend = Arc::clone(backend);
             let memory = Arc::clone(memory_arc);
-            if let Err(e) = std::thread::spawn(move || {
-                let _backend = backend;
-                tracing::info!("Would persist memory {} in background", memory.id);
+            Self::spawn_persistence_task(backend, memory);
+        }
+    }
+
+    #[cfg(feature = "memory_mapped_persistence")]
+    fn spawn_persistence_task(backend: Arc<CognitiveTierArchitecture>, memory: Arc<Memory>) {
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async move {
+                if let Err(error) = backend.store(memory).await {
+                    tracing::warn!(?error, "failed to persist memory in tiered storage backend");
+                }
+            });
+        } else if let Err(spawn_error) = std::thread::Builder::new()
+            .name("engram-tier-persistence".to_string())
+            .spawn(move || {
+                match tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    Ok(runtime) => {
+                        if let Err(error) = runtime.block_on(backend.store(memory)) {
+                            tracing::warn!(
+                                ?error,
+                                "failed to persist memory in tiered storage backend"
+                            );
+                        }
+                    }
+                    Err(error) => {
+                        tracing::warn!(?error, "failed to construct persistence runtime");
+                    }
+                }
             })
-            .join()
-            {
-                tracing::warn!("Background persistence thread failed: {:?}", e);
-            }
+        {
+            tracing::warn!(?spawn_error, "failed to spawn persistence worker thread");
         }
     }
 
@@ -238,8 +258,6 @@ impl MemoryStore {
             eviction_queue: RwLock::new(BTreeMap::new()),
             #[cfg(feature = "hnsw_index")]
             hnsw_index: None,
-            #[cfg(feature = "hnsw_index")]
-            index_update_queue: None,
             #[cfg(feature = "memory_mapped_persistence")]
             persistent_backend: None,
             #[cfg(feature = "memory_mapped_persistence")]
@@ -261,7 +279,6 @@ impl MemoryStore {
     #[must_use]
     pub fn with_hnsw_index(mut self) -> Self {
         self.hnsw_index = Some(Arc::new(CognitiveHnswIndex::new()));
-        self.index_update_queue = Some(Arc::new(SegQueue::new()));
         self
     }
 
@@ -457,15 +474,6 @@ impl MemoryStore {
 
         #[cfg(feature = "hnsw_index")]
         {
-            if let Some(ref queue) = self.index_update_queue {
-                queue.push(IndexUpdate::Insert {
-                    memory_id,
-                    memory: Arc::clone(&memory_arc),
-                    generation: 0,
-                    priority: UpdatePriority::Normal,
-                });
-            }
-
             if let Some(ref hnsw) = self.hnsw_index {
                 let _ = hnsw.insert_memory(Arc::clone(&memory_arc));
             }

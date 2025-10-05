@@ -259,7 +259,12 @@ struct TierQueue {
 }
 
 impl TierQueue {
-    fn new(tier: StorageTier, timeout: Duration, max_in_flight: usize, deterministic: bool) -> Self {
+    fn new(
+        tier: StorageTier,
+        timeout: Duration,
+        max_in_flight: usize,
+        deterministic: bool,
+    ) -> Self {
         Self {
             tier,
             tasks: SegQueue::new(),
@@ -331,12 +336,14 @@ impl TierQueue {
 
             // Sort by (depth, target_node, contribution) for canonical ordering
             tasks.sort_by(|a, b| {
-                a.task.depth
+                a.task
+                    .depth
                     .cmp(&b.task.depth)
                     .then_with(|| a.task.target_node.cmp(&b.task.target_node))
                     .then_with(|| {
                         // Higher contribution first (reverse order)
-                        b.task.contribution()
+                        b.task
+                            .contribution()
                             .partial_cmp(&a.task.contribution())
                             .unwrap_or(std::cmp::Ordering::Equal)
                     })

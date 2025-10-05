@@ -3,7 +3,7 @@
 //! Provides cognitive-friendly service interface with natural language method names
 //! and educational error messages that teach memory system concepts.
 
-use crate::api::SharedGraph;
+use engram_core::MemoryStore;
 use engram_proto::engram_service_server::{EngramService, EngramServiceServer};
 use engram_proto::{
     AssociateRequest, AssociateResponse, CompleteRequest, CompleteResponse, Confidence,
@@ -19,7 +19,6 @@ use engram_proto::{
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream};
 use tonic::Streaming;
 use tonic::{Request, Response, Status, transport::Server};
@@ -30,13 +29,13 @@ use tonic::{Request, Response, Status, transport::Server};
 /// rather than generic database operations (store/query/search) to improve
 /// API discovery through semantic priming.
 pub struct MemoryService {
-    graph: Arc<RwLock<SharedGraph>>,
+    store: Arc<MemoryStore>,
 }
 
 impl MemoryService {
-    /// Create a new memory service with the given graph.
-    pub const fn new(graph: Arc<RwLock<SharedGraph>>) -> Self {
-        Self { graph }
+    /// Create a new memory service with the given memory store.
+    pub const fn new(store: Arc<MemoryStore>) -> Self {
+        Self { store }
     }
 
     /// Start the gRPC server on the specified port.
@@ -46,7 +45,7 @@ impl MemoryService {
     pub async fn serve(self, port: u16) -> Result<(), Box<dyn std::error::Error>> {
         let addr = format!("0.0.0.0:{port}").parse()?;
 
-        println!("🧠 Engram gRPC service listening on {addr}");
+        println!("Engram gRPC service listening on {addr}");
         println!("   Ready for memory operations (Remember, Recall, Recognize)");
 
         Server::builder()
@@ -70,25 +69,57 @@ impl EngramService for MemoryService {
     ) -> Result<Response<RememberResponse>, Status> {
         let req = request.into_inner();
 
-        // Extract memory from request
+        // Extract memory from request and store to MemoryStore
         let (memory_id, confidence_value) = match req.memory_type {
             Some(remember_request::MemoryType::Memory(memory)) => {
-                // Store generic memory
-                let _graph = self.graph.write().await;
+                use engram_core::{Confidence as CoreConfidence, Episode};
+                use chrono::Utc;
+
                 let id = memory.id.clone();
+                let embedding = memory.embedding.clone().try_into()
+                    .map_err(|_| Status::invalid_argument("Embedding must be exactly 768 dimensions"))?;
 
-                // For now, just acknowledge storage with high confidence
-                // Real implementation would persist to graph
-                (id, 0.95)
+                let confidence = CoreConfidence::exact(memory.confidence.map(|c| c.value).unwrap_or(0.7));
+
+                // Create episode from memory
+                let episode = Episode::new(
+                    id.clone(),
+                    Utc::now(),
+                    memory.content,
+                    embedding,
+                    confidence,
+                );
+
+                // Store and get activation
+                let activation = self.store.store(episode);
+                (id, activation.value())
             }
-            Some(remember_request::MemoryType::Episode(episode)) => {
-                // Store episodic memory with rich context
-                let _graph = self.graph.write().await;
-                let id = episode.id.clone();
+            Some(remember_request::MemoryType::Episode(proto_episode)) => {
+                use engram_core::{Confidence as CoreConfidence, Episode};
 
-                // Episodes get slightly lower initial confidence
-                // as they're subject to consolidation
-                (id, 0.85)
+                let id = proto_episode.id.clone();
+                let embedding = proto_episode.embedding.clone().try_into()
+                    .map_err(|_| Status::invalid_argument("Embedding must be exactly 768 dimensions"))?;
+
+                let confidence = CoreConfidence::exact(
+                    proto_episode.encoding_confidence.map(|c| c.value).unwrap_or(0.7)
+                );
+
+                let when = proto_episode.when
+                    .map(|ts| chrono::DateTime::from_timestamp(ts.seconds, ts.nanos as u32).unwrap_or_else(chrono::Utc::now))
+                    .unwrap_or_else(chrono::Utc::now);
+
+                let episode = Episode::new(
+                    id.clone(),
+                    when,
+                    proto_episode.what,
+                    embedding,
+                    confidence,
+                );
+
+                // Store and get activation
+                let activation = self.store.store(episode);
+                (id, activation.value())
             }
             None => {
                 return Err(Status::invalid_argument(
@@ -509,7 +540,7 @@ impl EngramService for MemoryService {
     ) -> Result<Response<Self::StreamingRememberStream>, Status> {
         let mut stream = request.into_inner();
         let (tx, rx) = tokio::sync::mpsc::channel(32);
-        let _graph = Arc::clone(&self.graph);
+        let _store = Arc::clone(&self.store);
 
         tokio::spawn(async move {
             let mut sequence = 0u64;
@@ -576,7 +607,7 @@ impl EngramService for MemoryService {
     ) -> Result<Response<Self::StreamingRecallStream>, Status> {
         let mut stream = request.into_inner();
         let (tx, rx) = tokio::sync::mpsc::channel(32);
-        let _graph = Arc::clone(&self.graph);
+        let _store = Arc::clone(&self.store);
 
         tokio::spawn(async move {
             let mut query_count = 0u64;
@@ -639,7 +670,7 @@ impl EngramService for MemoryService {
     ) -> Result<Response<Self::MemoryFlowStream>, Status> {
         let mut stream = request.into_inner();
         let (tx, rx) = tokio::sync::mpsc::channel(64); // Higher buffer for bidirectional flow
-        let _graph = Arc::clone(&self.graph);
+        let _store = Arc::clone(&self.store);
 
         tokio::spawn(async move {
             let mut session_state = std::collections::HashMap::new();
