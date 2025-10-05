@@ -156,6 +156,13 @@ async fn start_server(port: u16, grpc_port: u16) -> Result<()> {
         info!(" Background tier migration started (5 minute interval)");
     }
 
+    // Start HNSW update worker for async index updates
+    #[cfg(feature = "hnsw_index")]
+    {
+        memory_store.start_hnsw_worker();
+        info!(" HNSW update worker started (batch size: 100, timeout: 50ms)");
+    }
+
     // Create API state
     let api_state = ApiState::new(memory_store);
 

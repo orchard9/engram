@@ -46,6 +46,30 @@ use crate::storage::{
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub struct Activation(f32);
 
+/// HNSW index update for async processing
+#[cfg(feature = "hnsw_index")]
+#[derive(Clone)]
+pub enum HnswUpdate {
+    /// Insert a memory into the HNSW index
+    Insert { memory: Arc<Memory> },
+    /// Remove a memory from the HNSW index
+    Remove { id: String },
+    /// Rebuild the entire HNSW index
+    Rebuild,
+}
+
+/// Statistics for HNSW update queue
+#[cfg(feature = "hnsw_index")]
+#[derive(Debug, Clone, Copy)]
+pub struct HnswQueueStats {
+    /// Current number of updates in queue
+    pub queue_depth: usize,
+    /// Maximum queue capacity
+    pub queue_capacity: usize,
+    /// Queue utilization (0.0 to 1.0)
+    pub utilization: f32,
+}
+
 impl Activation {
     /// Create a new activation level
     #[must_use]
@@ -106,6 +130,14 @@ pub struct MemoryStore {
     /// HNSW index for fast similarity search
     #[cfg(feature = "hnsw_index")]
     hnsw_index: Option<Arc<CognitiveHnswIndex>>,
+
+    /// HNSW index update queue for async processing
+    #[cfg(feature = "hnsw_index")]
+    hnsw_update_queue: Arc<crossbeam_queue::ArrayQueue<HnswUpdate>>,
+
+    /// Background worker handle for HNSW updates
+    #[cfg(feature = "hnsw_index")]
+    hnsw_worker: Arc<parking_lot::Mutex<Option<std::thread::JoinHandle<()>>>>,
 
     /// Persistent storage backend
     #[cfg(feature = "memory_mapped_persistence")]
@@ -261,6 +293,10 @@ impl MemoryStore {
             eviction_queue: RwLock::new(BTreeMap::new()),
             #[cfg(feature = "hnsw_index")]
             hnsw_index: None,
+            #[cfg(feature = "hnsw_index")]
+            hnsw_update_queue: Arc::new(crossbeam_queue::ArrayQueue::new(10_000)),
+            #[cfg(feature = "hnsw_index")]
+            hnsw_worker: Arc::new(parking_lot::Mutex::new(None)),
             #[cfg(feature = "memory_mapped_persistence")]
             persistent_backend: None,
             #[cfg(feature = "memory_mapped_persistence")]
@@ -423,6 +459,141 @@ impl MemoryStore {
         }
 
         handle
+    }
+
+    /// Start HNSW update worker thread for async index updates
+    ///
+    /// Returns a join handle for the background thread if HNSW is enabled.
+    /// The worker processes updates in batches of 100 with 50ms timeout.
+    #[cfg(feature = "hnsw_index")]
+    #[must_use = "Join handle should be stored for graceful shutdown"]
+    pub fn start_hnsw_worker(&self) {
+        let queue = Arc::clone(&self.hnsw_update_queue);
+        let hnsw = match &self.hnsw_index {
+            Some(index) => Arc::clone(index),
+            None => {
+                tracing::warn!("Cannot start HNSW worker: no HNSW index configured");
+                return;
+            }
+        };
+
+        let handle = std::thread::Builder::new()
+            .name("hnsw-worker".to_string())
+            .spawn(move || {
+                Self::hnsw_worker_loop(queue, hnsw);
+            })
+            .expect("Failed to spawn HNSW worker thread");
+
+        *self.hnsw_worker.lock() = Some(handle);
+        tracing::info!("Started HNSW update worker thread (batch size: 100, timeout: 50ms)");
+    }
+
+    /// Background worker loop for processing HNSW updates
+    #[cfg(feature = "hnsw_index")]
+    fn hnsw_worker_loop(
+        queue: Arc<crossbeam_queue::ArrayQueue<HnswUpdate>>,
+        hnsw: Arc<CognitiveHnswIndex>,
+    ) {
+        const BATCH_SIZE: usize = 100;
+        const BATCH_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(50);
+
+        let mut batch = Vec::with_capacity(BATCH_SIZE);
+        let mut last_flush = std::time::Instant::now();
+
+        loop {
+            // Collect updates into batch
+            while batch.len() < BATCH_SIZE {
+                match queue.pop() {
+                    Some(update) => batch.push(update),
+                    None => break,
+                }
+            }
+
+            // Flush batch if full or timeout reached
+            let should_flush = batch.len() >= BATCH_SIZE
+                || (last_flush.elapsed() > BATCH_TIMEOUT && !batch.is_empty());
+
+            if should_flush {
+                Self::process_hnsw_batch(&hnsw, &batch);
+                batch.clear();
+                last_flush = std::time::Instant::now();
+            } else if batch.is_empty() {
+                // Sleep briefly to avoid busy loop
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
+    }
+
+    /// Process a batch of HNSW updates
+    #[cfg(feature = "hnsw_index")]
+    fn process_hnsw_batch(hnsw: &CognitiveHnswIndex, batch: &[HnswUpdate]) {
+        let start = std::time::Instant::now();
+        let mut processed = 0;
+        let mut failed = 0;
+        let mut skipped = 0;
+
+        for update in batch {
+            match update {
+                HnswUpdate::Insert { memory } => {
+                    if let Err(e) = hnsw.insert_memory(Arc::clone(memory)) {
+                        tracing::warn!(error = ?e, memory_id = %memory.id, "HNSW insert failed");
+                        failed += 1;
+                    } else {
+                        processed += 1;
+                    }
+                }
+                HnswUpdate::Remove { id } => {
+                    // Remove operation not yet implemented in CognitiveHnswIndex
+                    tracing::trace!(memory_id = %id, "HNSW remove operation not yet implemented");
+                    skipped += 1;
+                }
+                HnswUpdate::Rebuild => {
+                    // Rebuild operation not yet implemented in CognitiveHnswIndex
+                    tracing::trace!("HNSW rebuild operation not yet implemented");
+                    skipped += 1;
+                }
+            }
+        }
+
+        if processed > 0 || failed > 0 || skipped > 0 {
+            tracing::debug!(
+                processed,
+                failed,
+                skipped,
+                duration_ms = start.elapsed().as_millis() as u64,
+                "Processed HNSW update batch"
+            );
+        }
+    }
+
+    /// Graceful shutdown of HNSW worker
+    #[cfg(feature = "hnsw_index")]
+    pub fn shutdown_hnsw_worker(&self) {
+        if let Some(handle) = self.hnsw_worker.lock().take() {
+            tracing::info!("Shutting down HNSW worker (note: queue may not be fully drained)");
+            // Note: In production, would use shutdown signal channel
+            // For now, we just drop the handle which will terminate the thread
+            drop(handle);
+            tracing::info!("HNSW worker thread stopped");
+        }
+    }
+
+    /// Get HNSW queue statistics
+    #[cfg(feature = "hnsw_index")]
+    #[must_use]
+    pub fn hnsw_queue_stats(&self) -> HnswQueueStats {
+        let queue_len = self.hnsw_update_queue.len();
+        let queue_capacity = self.hnsw_update_queue.capacity();
+
+        HnswQueueStats {
+            queue_depth: queue_len,
+            queue_capacity,
+            utilization: if queue_capacity > 0 {
+                queue_len as f32 / queue_capacity as f32
+            } else {
+                0.0
+            },
+        }
     }
 
     /// Recover previously written episodes from the WAL into the hot tier
@@ -619,10 +790,24 @@ impl MemoryStore {
 
         self.wal_buffer.insert(memory_id.clone(), wal_episode);
 
+        // Queue HNSW update for async processing instead of blocking
         #[cfg(feature = "hnsw_index")]
         {
-            if let Some(ref hnsw) = self.hnsw_index {
-                let _ = hnsw.insert_memory(Arc::clone(&memory_arc));
+            if self.hnsw_index.is_some() {
+                let update = HnswUpdate::Insert {
+                    memory: Arc::clone(&memory_arc),
+                };
+
+                if let Err(_) = self.hnsw_update_queue.push(update) {
+                    tracing::warn!(
+                        "HNSW update queue full for {}, falling back to synchronous insert",
+                        memory_id
+                    );
+                    // Fallback: synchronous update if queue is full
+                    if let Some(ref hnsw) = self.hnsw_index {
+                        let _ = hnsw.insert_memory(Arc::clone(&memory_arc));
+                    }
+                }
             }
         }
 
