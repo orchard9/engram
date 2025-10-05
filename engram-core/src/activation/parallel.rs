@@ -248,46 +248,32 @@ impl ParallelSpreadingEngine {
         decay_factor: f32,
     ) {
         use crate::activation::simd_optimization::SimdActivationMapper;
+        use crate::activation::ActivationGraphExt;
         use crate::compute::cosine_similarity_batch_768;
 
-        // Get current node's embedding for similarity computation
-        // For now, we'll skip this optimization if embeddings aren't available
-        // and fall back to weight-based spreading
+        // Get current node's embedding from the graph
+        let current_embedding = match context.memory_graph.get_embedding(&task.target_node) {
+            Some(emb) => emb,
+            None => {
+                // No embedding for current node, fallback to scalar
+                Self::fallback_to_scalar(context, task, record, neighbors, next_tier, decay_factor);
+                return;
+            }
+        };
 
-        // Collect neighbor embeddings if available
-        let neighbor_embeddings: Vec<_> = neighbors
+        // Collect neighbor embeddings from the graph
+        let neighbor_embeddings: Vec<[f32; 768]> = neighbors
             .iter()
-            .filter_map(|_edge| {
-                // Try to get embedding from memory graph
-                // This is a placeholder - actual implementation depends on graph storage
-                None::<[f32; 768]>
-            })
+            .filter_map(|edge| context.memory_graph.get_embedding(&edge.target))
             .collect();
 
-        // If we don't have embeddings, fall back to weight-based approach
+        // Ensure we have all embeddings before using SIMD
         if neighbor_embeddings.is_empty() || neighbor_embeddings.len() != neighbors.len() {
-            // Fall back to individual task creation with weights
-            for edge in neighbors {
-                let mut next_path = task.path.clone();
-                next_path.push(edge.target.clone());
-                let new_task = ActivationTask::new(
-                    edge.target.clone(),
-                    record.get_activation(),
-                    edge.weight,
-                    decay_factor,
-                    task.depth + 1,
-                    task.max_depth,
-                )
-                .with_storage_tier(next_tier)
-                .with_path(next_path);
-
-                context.scheduler.enqueue_task(new_task);
-            }
+            Self::fallback_to_scalar(context, task, record, neighbors, next_tier, decay_factor);
             return;
         }
 
         // Batch compute similarities using SIMD
-        let current_embedding = [0.5f32; 768]; // Placeholder - should come from task/record
         let similarities = cosine_similarity_batch_768(&current_embedding, &neighbor_embeddings);
 
         // Convert similarities to activations using SIMD
@@ -306,6 +292,33 @@ impl ParallelSpreadingEngine {
                 edge.target.clone(),
                 record.get_activation(),
                 activation_weight,
+                decay_factor,
+                task.depth + 1,
+                task.max_depth,
+            )
+            .with_storage_tier(next_tier)
+            .with_path(next_path);
+
+            context.scheduler.enqueue_task(new_task);
+        }
+    }
+
+    /// Fallback to scalar processing when embeddings are unavailable
+    fn fallback_to_scalar(
+        context: &WorkerContext,
+        task: &ActivationTask,
+        record: &Arc<ActivationRecord>,
+        neighbors: &[WeightedEdge],
+        next_tier: StorageTier,
+        decay_factor: f32,
+    ) {
+        for edge in neighbors {
+            let mut next_path = task.path.clone();
+            next_path.push(edge.target.clone());
+            let new_task = ActivationTask::new(
+                edge.target.clone(),
+                record.get_activation(),
+                edge.weight,
                 decay_factor,
                 task.depth + 1,
                 task.max_depth,

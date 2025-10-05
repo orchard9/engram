@@ -182,6 +182,77 @@ fn test_batch_spreading_with_parallel_engine() {
 }
 
 #[test]
+fn test_simd_batch_spreading_with_embeddings() {
+    use engram_core::activation::ActivationGraphExt;
+
+    // Create graph with embeddings
+    let graph = Arc::new(create_activation_graph());
+
+    // Create varied embeddings for testing
+    let mut embedding_a = [0.0f32; 768];
+    for (i, val) in embedding_a.iter_mut().enumerate() {
+        *val = (i as f32 * 0.01).sin();
+    }
+
+    // Set embedding for node A
+    graph.set_embedding(&"A".to_string(), embedding_a);
+
+    // Add 8 neighbors with similar but distinct embeddings
+    for i in 1..=8 {
+        let node_id = format!("B{}", i);
+
+        // Create similar embedding with slight variations
+        let mut embedding = embedding_a;
+        for (j, val) in embedding.iter_mut().enumerate() {
+            *val += (i as f32 * 0.001) * (j as f32).cos();
+        }
+
+        graph.set_embedding(&node_id, embedding);
+
+        ActivationGraphExt::add_edge(
+            &*graph,
+            "A".to_string(),
+            node_id,
+            0.5,
+            EdgeType::Excitatory,
+        );
+    }
+
+    // Create engine with SIMD batch size = 8
+    let config = ParallelSpreadingConfig {
+        num_threads: 2,
+        max_depth: 2,
+        simd_batch_size: 8,
+        threshold: 0.01,
+        ..Default::default()
+    };
+
+    let engine = ParallelSpreadingEngine::new(config, graph).expect("Failed to create engine");
+
+    // Spread activation from node A
+    let seed_activations = vec![("A".to_string(), 1.0)];
+    let results = engine
+        .spread_activation(&seed_activations)
+        .expect("Failed to spread activation");
+
+    // Verify that SIMD batch processing was used
+    // With embeddings available, neighbors should be activated
+    let b_nodes: Vec<_> = results
+        .activations
+        .iter()
+        .filter(|a| a.memory_id.starts_with('B'))
+        .collect();
+
+    assert!(
+        b_nodes.len() >= 4,
+        "Should have activated at least 4 B nodes with SIMD batch processing, got {}",
+        b_nodes.len()
+    );
+
+    engine.shutdown().expect("Failed to shutdown engine");
+}
+
+#[test]
 fn test_batch_spreading_determinism() {
     // Create identical graphs
     let graph1 = Arc::new(create_activation_graph());

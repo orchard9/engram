@@ -57,8 +57,10 @@ pub mod memory_pool;
 pub use memory_pool::{ActivationMemoryPool, LocalMemoryPool, PoolStats};
 
 // HNSW integration
-// #[cfg(feature = "hnsw_index")]
-// pub mod hnsw_integration; // TODO: Implement HNSW integration module
+#[cfg(feature = "hnsw_index")]
+pub mod hnsw_integration;
+#[cfg(feature = "hnsw_index")]
+pub use hnsw_integration::{HnswActivationEngine, HierarchicalActivation, SpreadingConfig as HnswSpreadingConfig};
 
 /// Node identifier for graph traversal
 pub type NodeId = String;
@@ -736,11 +738,20 @@ pub trait ActivationGraphExt {
     fn node_count(&self) -> usize;
     /// Get the total number of edges in the graph
     fn edge_count(&self) -> usize;
+
+    /// Store embedding for a node
+    fn set_embedding(&self, node_id: &NodeId, embedding: [f32; 768]);
+
+    /// Retrieve embedding for a node
+    fn get_embedding(&self, node_id: &NodeId) -> Option<[f32; 768]>;
 }
 
 // Global mapping from UUID to original NodeId for bidirectional conversion
 use std::sync::OnceLock;
 static UUID_TO_NODEID: OnceLock<DashMap<uuid::Uuid, NodeId>> = OnceLock::new();
+
+// Global storage for node embeddings
+static NODE_EMBEDDINGS: OnceLock<DashMap<NodeId, [f32; 768]>> = OnceLock::new();
 
 impl ActivationGraphExt for MemoryGraph {
     fn add_edge(&self, source: NodeId, target: NodeId, weight: f32, _edge_type: EdgeType) {
@@ -792,11 +803,89 @@ impl ActivationGraphExt for MemoryGraph {
         // Use the all_edges method from UnifiedMemoryGraph
         Self::all_edges(self).map_or(0, |edges| edges.len())
     }
+
+    fn set_embedding(&self, node_id: &NodeId, embedding: [f32; 768]) {
+        let embeddings = NODE_EMBEDDINGS.get_or_init(DashMap::new);
+        embeddings.insert(node_id.clone(), embedding);
+    }
+
+    fn get_embedding(&self, node_id: &NodeId) -> Option<[f32; 768]> {
+        NODE_EMBEDDINGS
+            .get()
+            .and_then(|embeddings| embeddings.get(node_id).map(|entry| *entry.value()))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::storage_aware::StorageTier;
+    use super::{ActivationGraphExt, create_activation_graph};
+
+    #[test]
+    fn test_embedding_storage_and_retrieval() {
+        let graph = create_activation_graph();
+        let node_id = "test_node".to_string();
+        let embedding = [0.5f32; 768];
+
+        // Store embedding
+        graph.set_embedding(&node_id, embedding);
+
+        // Retrieve embedding
+        let retrieved = graph.get_embedding(&node_id);
+        assert!(retrieved.is_some(), "Embedding should be retrievable");
+
+        let retrieved_embedding = retrieved.unwrap();
+        for (i, (&expected, &actual)) in embedding.iter().zip(retrieved_embedding.iter()).enumerate() {
+            assert_eq!(expected, actual, "Mismatch at index {}", i);
+        }
+    }
+
+    #[test]
+    fn test_embedding_retrieval_nonexistent() {
+        let graph = create_activation_graph();
+        let node_id = "nonexistent_node".to_string();
+
+        let retrieved = graph.get_embedding(&node_id);
+        assert!(retrieved.is_none(), "Non-existent node should return None");
+    }
+
+    #[test]
+    fn test_embedding_update() {
+        let graph = create_activation_graph();
+        let node_id = "update_test".to_string();
+
+        // Store initial embedding
+        let embedding1 = [1.0f32; 768];
+        graph.set_embedding(&node_id, embedding1);
+
+        // Update with new embedding
+        let embedding2 = [2.0f32; 768];
+        graph.set_embedding(&node_id, embedding2);
+
+        // Verify updated embedding
+        let retrieved = graph.get_embedding(&node_id).unwrap();
+        assert_eq!(retrieved[0], 2.0, "Embedding should be updated");
+    }
+
+    #[test]
+    fn test_multiple_node_embeddings() {
+        let graph = create_activation_graph();
+
+        // Store embeddings for multiple nodes
+        for i in 0..10 {
+            let node_id = format!("node_{}", i);
+            let mut embedding = [0.0f32; 768];
+            embedding[0] = i as f32;
+            graph.set_embedding(&node_id, embedding);
+        }
+
+        // Verify all embeddings
+        for i in 0..10 {
+            let node_id = format!("node_{}", i);
+            let retrieved = graph.get_embedding(&node_id).unwrap();
+            assert_eq!(retrieved[0], i as f32, "Embedding for node_{} should match", i);
+        }
+    }
     use super::*;
     use std::sync::atomic::Ordering as AtomicOrdering;
 
