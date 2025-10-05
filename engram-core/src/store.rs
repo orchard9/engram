@@ -35,7 +35,10 @@ use crate::completion::{
 use crate::index::CognitiveHnswIndex;
 
 #[cfg(feature = "memory_mapped_persistence")]
-use crate::storage::{CognitiveTierArchitecture, FsyncMode, StorageMetrics, wal::WalWriter};
+use crate::storage::{
+    CognitiveTierArchitecture, FsyncMode, StorageMetrics,
+    wal::{WalEntryType, WalReader, WalWriter},
+};
 
 /// Activation level returned by store operations
 ///
@@ -368,6 +371,150 @@ impl MemoryStore {
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
         }
         Ok(())
+    }
+
+    /// Start background tier migration task
+    ///
+    /// Returns a join handle for the background thread if migration is enabled.
+    /// The task runs every 5 minutes and migrates memories between tiers based on
+    /// access patterns (hot→warm→cold and warm→hot for recently accessed).
+    #[cfg(feature = "memory_mapped_persistence")]
+    #[must_use = "Join handle should be stored for graceful shutdown"]
+    pub fn start_tier_migration(&self) -> Option<std::thread::JoinHandle<()>> {
+        let backend = self.persistent_backend.as_ref()?.clone();
+
+        let handle = std::thread::Builder::new()
+            .name("tier-migration".to_string())
+            .spawn(move || {
+                // Create a tokio runtime for async operations
+                let runtime = match tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    Ok(rt) => rt,
+                    Err(e) => {
+                        tracing::error!(error = ?e, "Failed to create runtime for tier migration");
+                        return;
+                    }
+                };
+
+                runtime.block_on(async {
+                    let mut interval = tokio::time::interval(std::time::Duration::from_secs(300)); // 5 minutes
+
+                    loop {
+                        interval.tick().await;
+
+                        // Run migration cycle
+                        match backend.maintenance().await {
+                            Ok(()) => {
+                                tracing::debug!("Tier maintenance completed successfully");
+                            }
+                            Err(e) => {
+                                tracing::warn!(error = ?e, "Tier maintenance failed");
+                            }
+                        }
+                    }
+                });
+            })
+            .ok();
+
+        if handle.is_some() {
+            tracing::info!("Started tier migration background task (5 minute interval)");
+        }
+
+        handle
+    }
+
+    /// Recover previously written episodes from the WAL into the hot tier
+    #[cfg(feature = "memory_mapped_persistence")]
+    pub fn recover_from_wal(&mut self) -> Result<usize, crate::storage::StorageError> {
+        let Some(wal_writer) = self.wal_writer.as_ref() else {
+            return Ok(0);
+        };
+
+        let wal_reader = WalReader::new(
+            wal_writer.wal_directory(),
+            Arc::clone(&self.storage_metrics),
+        );
+        let entries = wal_reader.scan_all()?;
+
+        let mut recovered = 0usize;
+
+        for entry in entries {
+            let entry_type = WalEntryType::from(entry.header.entry_type);
+            match entry_type {
+                WalEntryType::EpisodeStore => {
+                    match bincode::deserialize::<Episode>(&entry.payload) {
+                        Ok(episode) => {
+                            if self.hot_memories.contains_key(&episode.id) {
+                                continue;
+                            }
+
+                            let activation = episode.encoding_confidence.raw();
+                            let memory = Memory::from_episode(episode.clone(), activation);
+                            let memory_arc = Arc::new(memory);
+
+                            let content_address =
+                                ContentAddress::from_embedding(&memory_arc.embedding);
+                            let _ = self
+                                .content_index
+                                .insert(content_address, episode.id.clone());
+
+                            self.hot_memories
+                                .insert(episode.id.clone(), Arc::clone(&memory_arc));
+                            self.wal_buffer.insert(episode.id.clone(), episode.clone());
+
+                            {
+                                let mut queue = self.eviction_queue.write();
+                                queue.insert(
+                                    (OrderedFloat(memory_arc.activation()), episode.id.clone()),
+                                    Arc::clone(&memory_arc),
+                                );
+                            }
+
+                            self.memory_count.fetch_add(1, Ordering::Relaxed);
+                            recovered += 1;
+                        }
+                        Err(error) => {
+                            tracing::warn!(
+                                ?error,
+                                "Failed to deserialize WAL episode during recovery"
+                            );
+                        }
+                    }
+                }
+                WalEntryType::MemoryDelete => {
+                    if let Ok(memory_id) = String::from_utf8(entry.payload.clone()) {
+                        if self.hot_memories.remove(&memory_id).is_some() {
+                            self.memory_count.fetch_sub(1, Ordering::Relaxed);
+                        }
+                        self.wal_buffer.remove(&memory_id);
+                        let _ = self.content_index.remove_by_memory_id(&memory_id);
+                        {
+                            let mut queue = self.eviction_queue.write();
+                            queue.retain(|(_, id), _| id != &memory_id);
+                        }
+                    } else {
+                        tracing::warn!("Invalid UTF-8 payload for WAL memory deletion entry");
+                    }
+                }
+                WalEntryType::MemoryUpdate
+                | WalEntryType::Consolidation
+                | WalEntryType::Checkpoint
+                | WalEntryType::CompactionMarker => {
+                    tracing::debug!(
+                        entry_type = ?entry_type,
+                        "Skipping WAL entry type during recovery"
+                    );
+                }
+            }
+        }
+
+        let current_count = self.memory_count.load(Ordering::Relaxed);
+        let pressure = Self::pressure_ratio(current_count, self.max_memories);
+        self.update_pressure_metric(pressure);
+
+        Ok(recovered)
     }
 
     /// Store an episode, returning activation level indicating store quality
@@ -753,44 +900,57 @@ impl MemoryStore {
     fn recall_with_persistence(
         &self,
         cue: &Cue,
-        _backend: &Arc<CognitiveTierArchitecture>,
+        backend: &Arc<CognitiveTierArchitecture>,
     ) -> Vec<(Episode, Confidence)> {
-        // For now, use the WAL buffer as a simple persistent store
-        // In a full implementation, this would query the actual persistent tiers
-        let mut results = Vec::new();
-
-        // Search in WAL buffer (which contains persisted episodes)
-        for entry in self.wal_buffer.iter() {
-            let episode = entry.value();
-            let confidence = Self::calculate_episode_confidence(episode, cue);
-
-            if confidence.raw() > 0.1 {
-                // Basic threshold
-                results.push((episode.clone(), confidence));
-            }
-        }
-
-        // Sort by confidence (highest first) and limit results
-        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        results.truncate(50); // Reasonable limit
-
-        // If persistent backend returned insufficient results, supplement with in-memory
-        if results.len() < cue.max_results {
-            let mut combined = results;
-            let mut in_memory = self.recall_in_memory(cue);
-
-            // Remove duplicates and merge
-            in_memory.retain(|(episode, _)| {
-                !combined
-                    .iter()
-                    .any(|(existing, _): &(Episode, Confidence)| existing.id == episode.id)
-            });
-
-            combined.extend(in_memory);
-            combined.truncate(cue.max_results);
-            combined
+        // Search across all tiers (hot/warm/cold) using the tier architecture
+        // We need to run async code from a sync context
+        let tier_results = if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            // We're already in a tokio runtime
+            // Spawn blocking task to avoid nested runtime issues
+            std::thread::scope(|s| {
+                let backend = backend.clone();
+                let cue = cue.clone();
+                let thread_handle = s.spawn(move || {
+                    // Create a new runtime in this thread
+                    let rt = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .expect("Failed to create runtime");
+                    rt.block_on(backend.recall(&cue))
+                });
+                thread_handle.join().expect("Thread panicked")
+            })
         } else {
-            results
+            // No runtime available, create a new one
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build();
+
+            match runtime {
+                Ok(rt) => rt.block_on(backend.recall(cue)),
+                Err(e) => {
+                    tracing::warn!(error = ?e, "Failed to create runtime for tier search, falling back to in-memory");
+                    return self.recall_in_memory(cue);
+                }
+            }
+        };
+
+        match tier_results {
+            Ok(results) => {
+                // If tier search succeeded, return those results
+                if !results.is_empty() {
+                    return results;
+                }
+
+                // If tier search returned no results, fallback to in-memory
+                tracing::debug!("Tier search returned no results, falling back to in-memory");
+                self.recall_in_memory(cue)
+            }
+            Err(e) => {
+                // On error, fallback to in-memory recall
+                tracing::warn!(error = ?e, "Tier search failed, falling back to in-memory");
+                self.recall_in_memory(cue)
+            }
         }
     }
 

@@ -4,14 +4,16 @@
 #![allow(clippy::multiple_crate_versions)] // Dependencies control their own versions
 #![allow(clippy::too_many_lines)] // Main.rs coordinates multiple subsystems
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
 use engram_cli::{
     api::{ApiState, create_api_routes},
     docs::{DocSection, OperationalDocs},
     find_available_port,
 };
+use std::fs;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::signal;
@@ -115,14 +117,44 @@ async fn start_server(port: u16, grpc_port: u16) -> Result<()> {
         );
     }
 
-    // Initialize memory store with HNSW indexing
+    // Initialize memory store with optional indexing and persistence
     use engram_core::MemoryStore;
 
-    #[cfg(feature = "hnsw_index")]
-    let memory_store = Arc::new(MemoryStore::new(100_000).with_hnsw_index());
+    let mut store = MemoryStore::new(100_000);
 
-    #[cfg(not(feature = "hnsw_index"))]
-    let memory_store = Arc::new(MemoryStore::new(100_000));
+    #[cfg(feature = "hnsw_index")]
+    {
+        store = store.with_hnsw_index();
+    }
+
+    #[cfg(feature = "memory_mapped_persistence")]
+    {
+        let data_dir = resolve_data_directory()?;
+        store = store
+            .with_persistence(&data_dir)
+            .with_context(|| format!("Failed to enable persistence at {}", data_dir.display()))?;
+
+        let recovered = store
+            .recover_from_wal()
+            .with_context(|| format!("Failed to recover WAL from {}", data_dir.display()))?;
+        if recovered > 0 {
+            info!(recovered, "Recovered episodes from write-ahead log");
+        } else {
+            info!("No write-ahead log entries to recover");
+        }
+
+        store
+            .initialize_persistence()
+            .context("Failed to start persistence workers")?;
+    }
+
+    let memory_store = Arc::new(store);
+
+    // Start background tier migration task if persistence is enabled
+    #[cfg(feature = "memory_mapped_persistence")]
+    if let Some(_migration_handle) = memory_store.start_tier_migration() {
+        info!(" Background tier migration started (5 minute interval)");
+    }
 
     // Create API state
     let api_state = ApiState::new(memory_store);
@@ -170,6 +202,23 @@ async fn start_server(port: u16, grpc_port: u16) -> Result<()> {
     info!(" Server stopped gracefully");
 
     Ok(())
+}
+
+#[cfg(feature = "memory_mapped_persistence")]
+fn resolve_data_directory() -> Result<PathBuf> {
+    let env_dir = std::env::var("ENGRAM_DATA_DIR").map(PathBuf::from).ok();
+    let base_dir = match env_dir {
+        Some(path) => path,
+        None => {
+            let cwd = std::env::current_dir().context("Unable to determine current directory")?;
+            cwd.join("engram-data")
+        }
+    };
+
+    fs::create_dir_all(&base_dir)
+        .with_context(|| format!("Failed to create data directory at {}", base_dir.display()))?;
+
+    Ok(base_dir)
 }
 
 async fn handle_memory_command(action: MemoryAction) -> Result<()> {
