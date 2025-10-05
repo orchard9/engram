@@ -257,7 +257,7 @@ impl ParallelSpreadingEngine {
         // Collect neighbor embeddings if available
         let neighbor_embeddings: Vec<_> = neighbors
             .iter()
-            .filter_map(|edge| {
+            .filter_map(|_edge| {
                 // Try to get embedding from memory graph
                 // This is a placeholder - actual implementation depends on graph storage
                 None::<[f32; 768]>
