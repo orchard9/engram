@@ -72,14 +72,16 @@ impl EngramService for MemoryService {
         // Extract memory from request and store to MemoryStore
         let (memory_id, confidence_value) = match req.memory_type {
             Some(remember_request::MemoryType::Memory(memory)) => {
-                use engram_core::{Confidence as CoreConfidence, Episode};
                 use chrono::Utc;
+                use engram_core::{Confidence as CoreConfidence, Episode};
 
                 let id = memory.id.clone();
-                let embedding = memory.embedding.clone().try_into()
-                    .map_err(|_| Status::invalid_argument("Embedding must be exactly 768 dimensions"))?;
+                let embedding = memory.embedding.clone().try_into().map_err(|_| {
+                    Status::invalid_argument("Embedding must be exactly 768 dimensions")
+                })?;
 
-                let confidence = CoreConfidence::exact(memory.confidence.map(|c| c.value).unwrap_or(0.7));
+                let confidence =
+                    CoreConfidence::exact(memory.confidence.map(|c| c.value).unwrap_or(0.7));
 
                 // Create episode from memory
                 let episode = Episode::new(
@@ -98,24 +100,27 @@ impl EngramService for MemoryService {
                 use engram_core::{Confidence as CoreConfidence, Episode};
 
                 let id = proto_episode.id.clone();
-                let embedding = proto_episode.embedding.clone().try_into()
-                    .map_err(|_| Status::invalid_argument("Embedding must be exactly 768 dimensions"))?;
+                let embedding = proto_episode.embedding.clone().try_into().map_err(|_| {
+                    Status::invalid_argument("Embedding must be exactly 768 dimensions")
+                })?;
 
                 let confidence = CoreConfidence::exact(
-                    proto_episode.encoding_confidence.map(|c| c.value).unwrap_or(0.7)
+                    proto_episode
+                        .encoding_confidence
+                        .map(|c| c.value)
+                        .unwrap_or(0.7),
                 );
 
-                let when = proto_episode.when
-                    .map(|ts| chrono::DateTime::from_timestamp(ts.seconds, ts.nanos as u32).unwrap_or_else(chrono::Utc::now))
+                let when = proto_episode
+                    .when
+                    .map(|ts| {
+                        chrono::DateTime::from_timestamp(ts.seconds, ts.nanos as u32)
+                            .unwrap_or_else(chrono::Utc::now)
+                    })
                     .unwrap_or_else(chrono::Utc::now);
 
-                let episode = Episode::new(
-                    id.clone(),
-                    when,
-                    proto_episode.what,
-                    embedding,
-                    confidence,
-                );
+                let episode =
+                    Episode::new(id.clone(), when, proto_episode.what, embedding, confidence);
 
                 // Store and get activation
                 let activation = self.store.store(episode);

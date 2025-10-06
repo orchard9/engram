@@ -4,12 +4,18 @@ use std::convert::TryFrom;
 use std::time::{Duration, Instant};
 
 /// Trait for ANN index implementations
+///
+/// Note: `search` requires `&mut self` to be compatible with FAISS and other
+/// libraries that may need to update internal state during search (e.g., caching).
 pub trait AnnIndex: Send + Sync {
     /// Build index from vectors
     fn build(&mut self, vectors: &[[f32; 768]]) -> Result<()>;
 
     /// Search for k nearest neighbors
-    fn search(&self, query: &[f32; 768], k: usize) -> Vec<(usize, f32)>;
+    ///
+    /// Requires mutable reference to support libraries like FAISS that
+    /// may update internal caches or statistics during search.
+    fn search(&mut self, query: &[f32; 768], k: usize) -> Vec<(usize, f32)>;
 
     /// Get index size in bytes
     fn memory_usage(&self) -> usize;
@@ -164,7 +170,7 @@ impl BenchmarkFramework {
 
         for (query_idx, query) in dataset.queries.iter().enumerate() {
             let search_start = Instant::now();
-            let results = index.search(query, 10);
+            let results = index.search(query, 10); // index is &mut
             let latency = search_start.elapsed();
 
             let recall = calculate_recall(&results, &dataset.ground_truth[query_idx], 10);

@@ -206,7 +206,7 @@ impl AnnIndex for EngramOptimizedAnnIndex {
         Ok(())
     }
 
-    fn search(&self, query: &[f32; 768], k: usize) -> Vec<(usize, f32)> {
+    fn search(&mut self, query: &[f32; 768], k: usize) -> Vec<(usize, f32)> {
         if self.vectors.is_empty() {
             return Vec::new();
         }

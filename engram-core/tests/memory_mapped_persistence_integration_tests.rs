@@ -172,6 +172,8 @@ async fn test_crash_consistency() {
             .with_persistence(temp_dir.path())
             .unwrap();
 
+        let recovered = store.recover_from_wal().unwrap();
+        assert!(recovered >= 5, "Expected recovered entries after crash");
         store.initialize_persistence().unwrap();
 
         // Verify we can still recall the data
@@ -181,12 +183,14 @@ async fn test_crash_consistency() {
             Confidence::LOW,
         );
         let results = store.recall(&cue);
-
-        // Note: This test might not find results immediately as recovery
-        // implementation is simplified. In a full implementation,
-        // WAL replay would restore the data.
-        let recovered = results.len();
-        println!("Recovered {recovered} memories after simulated crash");
+        assert!(
+            results.len() >= 5,
+            "Expected recalled memories after recovery"
+        );
+        assert!(
+            store.count() >= 5,
+            "Recovered store should contain memories"
+        );
 
         store.shutdown().unwrap();
     }

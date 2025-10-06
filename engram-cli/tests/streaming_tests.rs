@@ -22,8 +22,8 @@ use tower::ServiceExt;
 
 /// Create test router for streaming tests
 fn create_test_router() -> Router {
-    let graph = Arc::new(RwLock::new(create_concurrent_graph()));
-    let api_state = ApiState::new(graph);
+    let store = Arc::new(engram_core::MemoryStore::new(100));
+    let api_state = ApiState::new(store);
 
     create_api_routes().with_state(api_state)
 }

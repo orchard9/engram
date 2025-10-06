@@ -15,8 +15,8 @@ use tonic::Request;
 
 /// Start a test gRPC server and return the port
 async fn start_test_grpc_server() -> u16 {
-    let graph = Arc::new(RwLock::new(create_concurrent_graph()));
-    let service = MemoryService::new(graph);
+    let store = Arc::new(engram_core::MemoryStore::new(100));
+    let service = MemoryService::new(store);
 
     // Find an available port
     let port = portpicker::pick_unused_port().expect("No available ports");

@@ -1,33 +1,169 @@
 //! Criterion harness comparing baseline ANN behaviours.
+//!
+//! Compares Engram's HNSW implementation against industry-standard libraries (FAISS, Annoy).
+//! Requires the `ann_benchmarks` feature to be enabled for real library comparisons.
 #![allow(missing_docs)]
 
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+// Ensure benchmarks are only run with the ann_benchmarks feature
+#[cfg(not(feature = "ann_benchmarks"))]
+compile_error!("ANN benchmarks require 'ann_benchmarks' feature. Run with: cargo bench --features ann_benchmarks");
+
+use criterion::{Criterion, black_box, criterion_group, criterion_main, BenchmarkId};
 
 mod support;
 
-use support::ann_common::AnnDataset;
+use support::ann_common::AnnIndex;
+use support::datasets::DatasetLoader;
+use support::engram_ann::EngramOptimizedAnnIndex;
 
-fn benchmark_ann_framework(c: &mut Criterion) {
-    let mut group = c.benchmark_group("ann_framework");
+#[cfg(feature = "ann_benchmarks")]
+use support::faiss_ann::FaissAnnIndex;
+#[cfg(feature = "ann_benchmarks")]
+use support::annoy_ann::AnnoyAnnIndex;
 
-    // Create a small test dataset
-    let dataset = AnnDataset {
-        name: "test".to_string(),
-        vectors: vec![[0.1f32; 768]; 100],
-        queries: vec![[0.1f32; 768]; 10],
-        ground_truth: vec![vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]; 10],
-    };
+/// Benchmark search performance across all ANN implementations
+fn benchmark_ann_search(c: &mut Criterion) {
+    let mut group = c.benchmark_group("ann_search_comparison");
+    group.sample_size(50);
 
-    group.bench_function("framework_test", |b| {
+    // Use a moderately-sized dataset for benchmarking
+    let dataset = DatasetLoader::generate_synthetic(1000, 100);
+
+    // Build Engram index
+    let mut engram = EngramOptimizedAnnIndex::new();
+    engram.build(&dataset.vectors).expect("Failed to build Engram index");
+
+    // Build FAISS-HNSW index
+    #[cfg(feature = "ann_benchmarks")]
+    let mut faiss_hnsw = FaissAnnIndex::new_hnsw(768, 16)
+        .expect("Failed to create FAISS index");
+    #[cfg(feature = "ann_benchmarks")]
+    faiss_hnsw.build(&dataset.vectors).expect("Failed to build FAISS index");
+
+    // Build Annoy index
+    #[cfg(feature = "ann_benchmarks")]
+    let mut annoy = AnnoyAnnIndex::new(768, 10)
+        .expect("Failed to create Annoy index");
+    #[cfg(feature = "ann_benchmarks")]
+    annoy.build(&dataset.vectors).expect("Failed to build Annoy index");
+
+    // Benchmark Engram search
+    group.bench_function("engram_search", |b| {
         b.iter(|| {
-            black_box(&dataset.vectors[0]);
+            for query in &dataset.queries {
+                let results = engram.search(query, 10);
+                black_box(results);
+            }
+        });
+    });
+
+    // Benchmark FAISS-HNSW search
+    #[cfg(feature = "ann_benchmarks")]
+    group.bench_function("faiss_hnsw_search", |b| {
+        b.iter(|| {
+            for query in &dataset.queries {
+                let results = faiss_hnsw.search(query, 10);
+                black_box(results);
+            }
+        });
+    });
+
+    // Benchmark Annoy search
+    #[cfg(feature = "ann_benchmarks")]
+    group.bench_function("annoy_search", |b| {
+        b.iter(|| {
+            for query in &dataset.queries {
+                let results = annoy.search(query, 10);
+                black_box(results);
+            }
         });
     });
 
     group.finish();
 }
 
-criterion_group!(benches, benchmark_ann_framework);
+/// Benchmark index build time across implementations
+fn benchmark_ann_build(c: &mut Criterion) {
+    let mut group = c.benchmark_group("ann_build_comparison");
+    group.sample_size(10);
+
+    let dataset = DatasetLoader::generate_synthetic(1000, 10);
+
+    group.bench_function("engram_build", |b| {
+        b.iter(|| {
+            let mut index = EngramOptimizedAnnIndex::new();
+            index.build(&dataset.vectors).expect("Build failed");
+            black_box(index);
+        });
+    });
+
+    #[cfg(feature = "ann_benchmarks")]
+    group.bench_function("faiss_hnsw_build", |b| {
+        b.iter(|| {
+            let mut index = FaissAnnIndex::new_hnsw(768, 16).expect("Create failed");
+            index.build(&dataset.vectors).expect("Build failed");
+            black_box(index);
+        });
+    });
+
+    #[cfg(feature = "ann_benchmarks")]
+    group.bench_function("annoy_build", |b| {
+        b.iter(|| {
+            let mut index = AnnoyAnnIndex::new(768, 10).expect("Create failed");
+            index.build(&dataset.vectors).expect("Build failed");
+            black_box(index);
+        });
+    });
+
+    group.finish();
+}
+
+/// Benchmark scalability with different dataset sizes
+fn benchmark_ann_scalability(c: &mut Criterion) {
+    let mut group = c.benchmark_group("ann_scalability");
+
+    for size in [100, 500, 1000, 5000] {
+        let dataset = DatasetLoader::generate_synthetic(size, 10);
+
+        group.bench_with_input(
+            BenchmarkId::new("engram", size),
+            &dataset,
+            |b, dataset| {
+                let mut index = EngramOptimizedAnnIndex::new();
+                index.build(&dataset.vectors).expect("Build failed");
+
+                b.iter(|| {
+                    let results = index.search(&dataset.queries[0], 10);
+                    black_box(results);
+                });
+            }
+        );
+
+        #[cfg(feature = "ann_benchmarks")]
+        group.bench_with_input(
+            BenchmarkId::new("faiss_hnsw", size),
+            &dataset,
+            |b, dataset| {
+                let mut index = FaissAnnIndex::new_hnsw(768, 16).expect("Create failed");
+                index.build(&dataset.vectors).expect("Build failed");
+
+                b.iter(|| {
+                    let results = index.search(&dataset.queries[0], 10);
+                    black_box(results);
+                });
+            }
+        );
+    }
+
+    group.finish();
+}
+
+criterion_group!(
+    benches,
+    benchmark_ann_search,
+    benchmark_ann_build,
+    benchmark_ann_scalability
+);
 criterion_main!(benches);
 
 #[cfg(test)]
@@ -95,7 +231,7 @@ mod tests {
             Ok(())
         }
 
-        fn search(&self, _query: &[f32; 768], _k: usize) -> Vec<(usize, f32)> {
+        fn search(&mut self, _query: &[f32; 768], _k: usize) -> Vec<(usize, f32)> {
             vec![(0, 1.0)]
         }
 

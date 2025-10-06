@@ -425,8 +425,7 @@ impl WalBatch {
     }
 
     /// Add an entry to the batch
-    pub fn add_entry(&mut self, mut entry: WalEntry) {
-        entry.header.sequence = self.entries.len() as u64;
+    pub fn add_entry(&mut self, entry: WalEntry) {
         self.total_size += entry.serialized_size();
         self.entries.push(entry);
     }
@@ -452,6 +451,8 @@ impl Default for WalBatch {
 
 /// High-performance write-ahead log implementation
 pub struct WalWriter {
+    /// Root directory where WAL files are written
+    wal_dir: PathBuf,
     /// File handle for WAL
     file: Arc<parking_lot::Mutex<BufWriter<File>>>,
 
@@ -521,6 +522,7 @@ impl WalWriter {
         let buf_writer = BufWriter::with_capacity(64 * 1024, file); // 64KB buffer
 
         Ok(Self {
+            wal_dir,
             file: Arc::new(parking_lot::Mutex::new(buf_writer)),
             sequence_counter: AtomicU64::new(0),
             entry_queue: Arc::new(SegQueue::new()),
@@ -570,6 +572,12 @@ impl WalWriter {
 
         self.writer_thread = Some(handle);
         Ok(())
+    }
+
+    /// Return the WAL directory used by this writer
+    #[must_use]
+    pub fn wal_directory(&self) -> &Path {
+        &self.wal_dir
     }
 
     /// Write entry asynchronously
@@ -636,6 +644,10 @@ impl WalWriter {
                 if let Some(mut entry) = entry_queue.pop() {
                     entry.header.sequence = sequence_counter;
                     sequence_counter += 1;
+                    #[cfg(feature = "memory_mapped_persistence")]
+                    {
+                        entry.header.header_crc = entry.header.compute_header_crc();
+                    }
                     batch.add_entry(entry);
                     entries_collected += 1;
                 } else {
@@ -661,6 +673,10 @@ impl WalWriter {
         while let Some(mut entry) = entry_queue.pop() {
             entry.header.sequence = sequence_counter;
             sequence_counter += 1;
+            #[cfg(feature = "memory_mapped_persistence")]
+            {
+                entry.header.header_crc = entry.header.compute_header_crc();
+            }
             batch.add_entry(entry);
         }
 
@@ -1045,6 +1061,37 @@ mod tests {
             .write_sync(entry)
             .into_test_result("write wal entry synchronously")?;
         ensure_eq(&sequence, &0_u64, "wal sequence")?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_wal_write_and_read() -> TestResult {
+        let temp_dir = TempDir::new().into_test_result("create wal temp dir")?;
+        let metrics = Arc::new(StorageMetrics::new());
+        let mut wal = WalWriter::new(temp_dir.path(), FsyncMode::PerWrite, Arc::clone(&metrics))
+            .into_test_result("construct wal writer for write/read test")?;
+
+        let episode = create_test_episode();
+        let entry = WalEntry::new_episode(&episode).into_test_result("serialize episode")?;
+
+        wal.write_sync(entry)
+            .into_test_result("write wal entry for readback")?;
+        wal.shutdown()
+            .into_test_result("shutdown wal writer after write")?;
+
+        let reader = WalReader::new(temp_dir.path(), metrics);
+        let entries = reader
+            .scan_all()
+            .into_test_result("scan wal entries for readback")?;
+
+        ensure_eq(&entries.len(), &1_usize, "wal entry count after readback")?;
+        let recovered = entries
+            .first()
+            .ok_or_else(|| "missing wal entry".to_string())?;
+        recovered
+            .validate()
+            .into_test_result("validate wal entry during readback")?;
 
         Ok(())
     }

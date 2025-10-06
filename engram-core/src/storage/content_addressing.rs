@@ -295,6 +295,26 @@ impl ContentIndex {
         memory_id
     }
 
+    /// Remove all entries associated with a memory identifier
+    #[must_use]
+    pub fn remove_by_memory_id(&self, memory_id: &str) -> usize {
+        let matching_addresses: Vec<ContentAddress> = self
+            .addresses
+            .iter()
+            .filter(|entry| entry.value() == memory_id)
+            .map(|entry| entry.key().clone())
+            .collect();
+
+        let mut removed = 0usize;
+        for address in matching_addresses {
+            if self.remove(&address).is_some() {
+                removed += 1;
+            }
+        }
+
+        removed
+    }
+
     /// Get statistics about the content index
     #[must_use]
     pub fn stats(&self) -> ContentIndexStats {

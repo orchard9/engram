@@ -24,8 +24,7 @@ use utoipa::{IntoParams, ToSchema};
 use crate::grpc::MemoryService;
 use crate::openapi::create_swagger_ui;
 use engram_core::{
-    Confidence as CoreConfidence, MemoryStore,
-    memory::{EpisodeBuilder as CoreEpisodeBuilder},
+    Confidence as CoreConfidence, MemoryStore, memory::EpisodeBuilder as CoreEpisodeBuilder,
 };
 
 /// Shared application state
