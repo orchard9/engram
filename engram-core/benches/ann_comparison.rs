@@ -6,9 +6,11 @@
 
 // Ensure benchmarks are only run with the ann_benchmarks feature
 #[cfg(not(feature = "ann_benchmarks"))]
-compile_error!("ANN benchmarks require 'ann_benchmarks' feature. Run with: cargo bench --features ann_benchmarks");
+compile_error!(
+    "ANN benchmarks require 'ann_benchmarks' feature. Run with: cargo bench --features ann_benchmarks"
+);
 
-use criterion::{Criterion, black_box, criterion_group, criterion_main, BenchmarkId};
+use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 
 mod support;
 
@@ -17,9 +19,9 @@ use support::datasets::DatasetLoader;
 use support::engram_ann::EngramOptimizedAnnIndex;
 
 #[cfg(feature = "ann_benchmarks")]
-use support::faiss_ann::FaissAnnIndex;
-#[cfg(feature = "ann_benchmarks")]
 use support::annoy_ann::AnnoyAnnIndex;
+#[cfg(feature = "ann_benchmarks")]
+use support::faiss_ann::FaissAnnIndex;
 
 /// Benchmark search performance across all ANN implementations
 fn benchmark_ann_search(c: &mut Criterion) {
@@ -31,21 +33,25 @@ fn benchmark_ann_search(c: &mut Criterion) {
 
     // Build Engram index
     let mut engram = EngramOptimizedAnnIndex::new();
-    engram.build(&dataset.vectors).expect("Failed to build Engram index");
+    engram
+        .build(&dataset.vectors)
+        .expect("Failed to build Engram index");
 
     // Build FAISS-HNSW index
     #[cfg(feature = "ann_benchmarks")]
-    let mut faiss_hnsw = FaissAnnIndex::new_hnsw(768, 16)
-        .expect("Failed to create FAISS index");
+    let mut faiss_hnsw = FaissAnnIndex::new_hnsw(768, 16).expect("Failed to create FAISS index");
     #[cfg(feature = "ann_benchmarks")]
-    faiss_hnsw.build(&dataset.vectors).expect("Failed to build FAISS index");
+    faiss_hnsw
+        .build(&dataset.vectors)
+        .expect("Failed to build FAISS index");
 
     // Build Annoy index
     #[cfg(feature = "ann_benchmarks")]
-    let mut annoy = AnnoyAnnIndex::new(768, 10)
-        .expect("Failed to create Annoy index");
+    let mut annoy = AnnoyAnnIndex::new(768, 10).expect("Failed to create Annoy index");
     #[cfg(feature = "ann_benchmarks")]
-    annoy.build(&dataset.vectors).expect("Failed to build Annoy index");
+    annoy
+        .build(&dataset.vectors)
+        .expect("Failed to build Annoy index");
 
     // Benchmark Engram search
     group.bench_function("engram_search", |b| {
@@ -125,19 +131,15 @@ fn benchmark_ann_scalability(c: &mut Criterion) {
     for size in [100, 500, 1000, 5000] {
         let dataset = DatasetLoader::generate_synthetic(size, 10);
 
-        group.bench_with_input(
-            BenchmarkId::new("engram", size),
-            &dataset,
-            |b, dataset| {
-                let mut index = EngramOptimizedAnnIndex::new();
-                index.build(&dataset.vectors).expect("Build failed");
+        group.bench_with_input(BenchmarkId::new("engram", size), &dataset, |b, dataset| {
+            let mut index = EngramOptimizedAnnIndex::new();
+            index.build(&dataset.vectors).expect("Build failed");
 
-                b.iter(|| {
-                    let results = index.search(&dataset.queries[0], 10);
-                    black_box(results);
-                });
-            }
-        );
+            b.iter(|| {
+                let results = index.search(&dataset.queries[0], 10);
+                black_box(results);
+            });
+        });
 
         #[cfg(feature = "ann_benchmarks")]
         group.bench_with_input(
@@ -151,7 +153,7 @@ fn benchmark_ann_scalability(c: &mut Criterion) {
                     let results = index.search(&dataset.queries[0], 10);
                     black_box(results);
                 });
-            }
+            },
         );
     }
 

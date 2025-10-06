@@ -4,9 +4,9 @@
 
 #![cfg(feature = "hnsw_index")]
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
-use engram_core::{Confidence, EpisodeBuilder, MemoryStore};
 use chrono::Utc;
+use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use engram_core::{Confidence, EpisodeBuilder, MemoryStore};
 use std::sync::Arc;
 
 /// Benchmark store operations with HNSW async queue

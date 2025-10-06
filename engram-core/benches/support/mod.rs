@@ -4,6 +4,6 @@ pub mod engram_ann;
 
 // Real ANN library implementations (require feature flag and system libraries)
 #[cfg(feature = "ann_benchmarks")]
-pub mod faiss_ann;
+pub mod annoy_ann;
 #[cfg(feature = "ann_benchmarks")]
-pub mod annoy_ann; // Note: Uses mock impl due to annoy-rs API limitations
+pub mod faiss_ann; // Note: Uses mock impl due to annoy-rs API limitations

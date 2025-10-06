@@ -120,6 +120,8 @@ async fn start_server(port: u16, grpc_port: u16) -> Result<()> {
     // Initialize memory store with optional indexing and persistence
     use engram_core::MemoryStore;
 
+    // mut needed for cfg-gated feature initialization below
+    #[allow(unused_mut)]
     let mut store = MemoryStore::new(100_000);
 
     #[cfg(feature = "hnsw_index")]
@@ -132,11 +134,11 @@ async fn start_server(port: u16, grpc_port: u16) -> Result<()> {
         let data_dir = resolve_data_directory()?;
         store = store
             .with_persistence(&data_dir)
-            .with_context(|| format!("Failed to enable persistence at {}", data_dir.display()))?;
+            .map_err(|e| anyhow::anyhow!("Failed to enable persistence at {}: {}", data_dir.display(), e))?;
 
         let recovered = store
             .recover_from_wal()
-            .with_context(|| format!("Failed to recover WAL from {}", data_dir.display()))?;
+            .map_err(|e| anyhow::anyhow!("Failed to recover WAL from {}: {}", data_dir.display(), e))?;
         if recovered > 0 {
             info!(recovered, "Recovered episodes from write-ahead log");
         } else {
@@ -145,7 +147,7 @@ async fn start_server(port: u16, grpc_port: u16) -> Result<()> {
 
         store
             .initialize_persistence()
-            .context("Failed to start persistence workers")?;
+            .map_err(|e| anyhow::anyhow!("Failed to start persistence workers: {}", e))?;
     }
 
     let memory_store = Arc::new(store);

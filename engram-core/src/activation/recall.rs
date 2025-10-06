@@ -256,9 +256,11 @@ pub struct CognitiveRecall {
     vector_seeder: Arc<VectorActivationSeeder>,
     /// Parallel spreading engine
     spreading_engine: Arc<ParallelSpreadingEngine>,
-    /// Confidence aggregator
+    /// Confidence aggregator reserved for future multi-path confidence calibration
+    #[allow(dead_code)]
     confidence_aggregator: Arc<ConfidenceAggregator>,
-    /// Cycle detector
+    /// Cycle detector reserved for future graph cycle prevention
+    #[allow(dead_code)]
     cycle_detector: Arc<CycleDetector>,
     /// Recall configuration
     config: RecallConfig,

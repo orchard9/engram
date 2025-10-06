@@ -23,8 +23,13 @@ path = "src/main.rs"
 name = "error-reviewer"
 path = "src/error_reviewer.rs"
 
+[features]
+default = ["hnsw_index", "memory_mapped_persistence"]
+hnsw_index = ["engram-core/hnsw_index"]
+memory_mapped_persistence = ["engram-core/memory_mapped_persistence"]
+
 [dependencies]
-engram-core = { path = "../engram-core" }
+engram-core = { path = "../engram-core", features = ["hnsw_index", "memory_mapped_persistence"] }
 engram-storage = { path = "../engram-storage" }
 engram-proto = { path = "../engram-proto" }
 tonic = "0.13"

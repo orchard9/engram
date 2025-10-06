@@ -514,16 +514,20 @@ impl MemoryStore {
             tracing::info!("Shutting down tier migration worker");
 
             // Signal shutdown
-            self.tier_migration_shutdown.store(true, std::sync::atomic::Ordering::Relaxed);
+            self.tier_migration_shutdown
+                .store(true, std::sync::atomic::Ordering::Relaxed);
 
             // Wait for worker to finish
             match handle.join() {
                 Ok(()) => tracing::info!("Tier migration worker shut down gracefully"),
-                Err(e) => tracing::error!("Tier migration worker panicked during shutdown: {:?}", e),
+                Err(e) => {
+                    tracing::error!("Tier migration worker panicked during shutdown: {:?}", e)
+                }
             }
 
             // Reset shutdown flag for potential restart
-            self.tier_migration_shutdown.store(false, std::sync::atomic::Ordering::Relaxed);
+            self.tier_migration_shutdown
+                .store(false, std::sync::atomic::Ordering::Relaxed);
         }
     }
 
@@ -584,7 +588,10 @@ impl MemoryStore {
                     batch.push(update);
                 }
                 if !batch.is_empty() {
-                    tracing::info!(count = batch.len(), "Processing remaining HNSW updates before shutdown");
+                    tracing::info!(
+                        count = batch.len(),
+                        "Processing remaining HNSW updates before shutdown"
+                    );
                     Self::process_hnsw_batch(&hnsw, &batch);
                 }
                 tracing::info!("HNSW worker shutting down");
@@ -666,7 +673,8 @@ impl MemoryStore {
             tracing::info!("Shutting down HNSW worker");
 
             // Signal shutdown
-            self.hnsw_shutdown.store(true, std::sync::atomic::Ordering::Relaxed);
+            self.hnsw_shutdown
+                .store(true, std::sync::atomic::Ordering::Relaxed);
 
             // Wait for worker to finish processing remaining updates
             match handle.join() {
@@ -675,7 +683,8 @@ impl MemoryStore {
             }
 
             // Reset shutdown flag for potential restart
-            self.hnsw_shutdown.store(false, std::sync::atomic::Ordering::Relaxed);
+            self.hnsw_shutdown
+                .store(false, std::sync::atomic::Ordering::Relaxed);
         }
     }
 
@@ -1190,7 +1199,7 @@ impl MemoryStore {
     ) -> Vec<(Episode, Confidence)> {
         // Search across all tiers (hot/warm/cold) using the tier architecture
         // We need to run async code from a sync context
-        let tier_results = if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        let tier_results = if let Ok(_handle) = tokio::runtime::Handle::try_current() {
             // We're already in a tokio runtime
             // Spawn blocking task to avoid nested runtime issues
             std::thread::scope(|s| {
@@ -1241,7 +1250,9 @@ impl MemoryStore {
     }
 
     /// Calculate confidence score for an episode matching a cue
+    /// Reserved for future confidence calibration during tier-based recall
     #[cfg(feature = "memory_mapped_persistence")]
+    #[allow(dead_code)]
     fn calculate_episode_confidence(episode: &Episode, cue: &Cue) -> Confidence {
         match &cue.cue_type {
             CueType::Embedding {

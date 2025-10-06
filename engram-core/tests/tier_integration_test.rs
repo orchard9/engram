@@ -5,8 +5,8 @@
 
 #![cfg(feature = "memory_mapped_persistence")]
 
-use engram_core::{Confidence, Cue, CueBuilder, Episode, EpisodeBuilder, MemoryStore};
 use chrono::Utc;
+use engram_core::{Confidence, Cue, CueBuilder, Episode, EpisodeBuilder, MemoryStore};
 use tempfile::TempDir;
 
 /// Test that memories can be stored and recalled across multiple tiers
@@ -72,7 +72,10 @@ async fn test_cross_tier_recall() {
         );
     }
 
-    println!("Cross-tier recall test passed: found {} memories", results.len());
+    println!(
+        "Cross-tier recall test passed: found {} memories",
+        results.len()
+    );
 }
 
 /// Test that tier migration background task can be started
@@ -107,7 +110,11 @@ async fn test_semantic_cross_tier_search() {
 
     // Store episodes with semantic content
     let episodes = vec![
-        ("ep1", "cognitive memory system with spreading activation", 0.9),
+        (
+            "ep1",
+            "cognitive memory system with spreading activation",
+            0.9,
+        ),
         ("ep2", "neural network architecture for deep learning", 0.7),
         ("ep3", "graph database for knowledge representation", 0.5),
         ("ep4", "memory consolidation during sleep", 0.3),
@@ -140,16 +147,19 @@ async fn test_semantic_cross_tier_search() {
     );
 
     // Verify we found at least one memory-related episode
-    let found_memory_episode = results.iter().any(|(ep, _)| {
-        ep.id == "ep1" || ep.id == "ep4"
-    });
+    let found_memory_episode = results
+        .iter()
+        .any(|(ep, _)| ep.id == "ep1" || ep.id == "ep4");
 
     assert!(
         found_memory_episode,
         "Should find episodes containing 'memory' keyword"
     );
 
-    println!("Semantic cross-tier search passed: found {} memories", results.len());
+    println!(
+        "Semantic cross-tier search passed: found {} memories",
+        results.len()
+    );
 }
 
 /// Test that high-confidence cues search fewer tiers
@@ -194,8 +204,14 @@ async fn test_tier_search_strategy_optimization() {
     let low_results = store.recall(&low_conf_cue);
 
     // Both should return results
-    assert!(!high_results.is_empty(), "High confidence search should find results");
-    assert!(!low_results.is_empty(), "Low confidence search should find results");
+    assert!(
+        !high_results.is_empty(),
+        "High confidence search should find results"
+    );
+    assert!(
+        !low_results.is_empty(),
+        "Low confidence search should find results"
+    );
 
     println!(
         "Tier strategy test passed: high_conf={} results, low_conf={} results",

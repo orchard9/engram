@@ -7,13 +7,14 @@ use engram_core::activation::{
 
 fn bench_cpu_fallback_direct(c: &mut Criterion) {
     let fallback = CpuFallback::new();
-    let mut batch = GPUActivationBatch::new([1.0; 768]);
+    let source = [1.0; 768];
+    let mut batch = GPUActivationBatch::new(&source);
 
     // Add 100 targets
     for i in 0..100 {
         let mut target = [0.0; 768];
         target[i % 768] = 1.0;
-        batch.add_target(target, 0.5, 0.5);
+        batch.add_target(&target, 0.5, 0.5);
     }
 
     c.bench_function("cpu_fallback_direct", |b| {
@@ -30,13 +31,14 @@ fn bench_adaptive_engine_cpu(c: &mut Criterion) {
         enable_gpu: false,
     };
     let mut engine = AdaptiveSpreadingEngine::new(None, config);
-    let mut batch = GPUActivationBatch::new([1.0; 768]);
+    let source = [1.0; 768];
+    let mut batch = GPUActivationBatch::new(&source);
 
     // Add 100 targets
     for i in 0..100 {
         let mut target = [0.0; 768];
         target[i % 768] = 1.0;
-        batch.add_target(target, 0.5, 0.5);
+        batch.add_target(&target, 0.5, 0.5);
     }
 
     c.bench_function("adaptive_engine_cpu", |b| {
@@ -50,11 +52,12 @@ fn bench_adaptive_engine_cpu(c: &mut Criterion) {
 fn bench_batch_construction(c: &mut Criterion) {
     c.bench_function("batch_construction_100", |b| {
         b.iter(|| {
-            let mut batch = GPUActivationBatch::new([1.0; 768]);
+            let source = [1.0; 768];
+            let mut batch = GPUActivationBatch::new(&source);
             for i in 0..100 {
                 let mut target = [0.0; 768];
                 target[i % 768] = 1.0;
-                batch.add_target(black_box(target), 0.5, 0.5);
+                batch.add_target(black_box(&target), 0.5, 0.5);
             }
             batch.ensure_contiguous();
             batch

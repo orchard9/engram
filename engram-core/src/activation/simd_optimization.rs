@@ -137,6 +137,8 @@ pub fn should_use_simd_for_tier(
 /// SIMD-aware activation mapper that converts similarity scores into activations.
 #[derive(Debug, Clone, Copy)]
 pub struct SimdActivationMapper {
+    /// Number of SIMD lanes reserved for future vectorized operations metadata
+    #[allow(dead_code)]
     lanes: usize,
 }
 

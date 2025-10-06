@@ -12,9 +12,12 @@ fn test_cpu_fallback_processing() {
     let fallback = CpuFallback::new();
     assert!(fallback.is_available());
 
-    let mut batch = GPUActivationBatch::new([1.0; 768]);
-    batch.add_target([1.0; 768], 0.5, 0.6); // Same vector, similarity = 1.0
-    batch.add_target([0.0; 768], 0.3, 0.4); // Zero vector, similarity = 0.0
+    let source = [1.0; 768];
+    let mut batch = GPUActivationBatch::new(&source);
+    let target1 = [1.0; 768];
+    let target2 = [0.0; 768];
+    batch.add_target(&target1, 0.5, 0.6); // Same vector, similarity = 1.0
+    batch.add_target(&target2, 0.3, 0.4); // Zero vector, similarity = 0.0
 
     let results = fallback.launch(&batch);
     // In synchronous context, the future is immediately ready
@@ -30,11 +33,12 @@ fn test_adaptive_engine_dispatch() {
     };
     let mut engine_cpu = AdaptiveSpreadingEngine::new(None, config_cpu);
 
-    let mut batch = GPUActivationBatch::new([1.0; 768]);
+    let source = [1.0; 768];
+    let mut batch = GPUActivationBatch::new(&source);
     for i in 0..20 {
         let mut target = [0.0; 768];
         target[i] = 1.0;
-        batch.add_target(target, 0.5, 0.5);
+        batch.add_target(&target, 0.5, 0.5);
     }
 
     // Should use CPU even though batch size exceeds threshold
@@ -52,11 +56,12 @@ fn test_adaptive_engine_with_mock_gpu() {
     };
     let mut engine = AdaptiveSpreadingEngine::new(Some(mock_gpu), config);
 
-    let mut batch = GPUActivationBatch::new([1.0; 768]);
+    let source = [1.0; 768];
+    let mut batch = GPUActivationBatch::new(&source);
     for i in 0..10 {
         let mut target = [0.0; 768];
         target[i] = 1.0;
-        batch.add_target(target, 0.5, 0.5);
+        batch.add_target(&target, 0.5, 0.5);
     }
 
     // Should use GPU since batch size exceeds threshold and GPU is enabled
@@ -106,7 +111,8 @@ fn test_parallel_engine_with_gpu_config() {
 
 #[test]
 fn test_batch_memory_layout() {
-    let mut batch = GPUActivationBatch::new([1.0; 768]);
+    let source = [1.0; 768];
+    let mut batch = GPUActivationBatch::new(&source);
     assert!(batch.is_empty());
 
     // Reserve capacity to ensure contiguous allocation
@@ -116,7 +122,7 @@ fn test_batch_memory_layout() {
     for i in 0..50 {
         let mut target = [0.0; 768];
         target[i % 768] = 1.0;
-        batch.add_target(target, 0.1 * i as f32, 0.2 * i as f32);
+        batch.add_target(&target, 0.1 * i as f32, 0.2 * i as f32);
     }
 
     assert_eq!(batch.size(), 50);
@@ -132,8 +138,10 @@ fn test_batch_memory_layout() {
 async fn test_async_gpu_interface() {
     let fallback = CpuFallback::new();
 
-    let mut batch = GPUActivationBatch::new([1.0; 768]);
-    batch.add_target([1.0; 768], 1.0, 1.0);
+    let source = [1.0; 768];
+    let mut batch = GPUActivationBatch::new(&source);
+    let target = [1.0; 768];
+    batch.add_target(&target, 1.0, 1.0);
 
     let future = fallback.launch(&batch);
     let result = future.await;

@@ -27,6 +27,8 @@ pub trait AnnIndex: Send + Sync {
 /// Standard ANN dataset for benchmarking
 #[derive(Debug, Clone)]
 pub struct AnnDataset {
+    /// Dataset name reserved for future benchmark diagnostics
+    #[allow(dead_code)]
     pub name: String,
     pub vectors: Vec<[f32; 768]>,
     pub queries: Vec<[f32; 768]>,

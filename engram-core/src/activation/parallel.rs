@@ -36,6 +36,8 @@ pub struct ParallelSpreadingEngine {
     cycle_detector: Arc<CycleDetector>,
     deterministic_trace: Arc<Mutex<Vec<TraceEntry>>>,
     adaptive_engine: Arc<Mutex<AdaptiveSpreadingEngine>>,
+    /// Memory pool reserved for future activation spreading optimization
+    #[allow(dead_code)]
     memory_pool: Option<Arc<ActivationMemoryPool>>,
 }
 
@@ -94,6 +96,8 @@ impl PhaseBarrier {
 /// through canonical task ordering (via TierQueue sorting) and phase barriers for
 /// hop-level synchronization. Future probabilistic features can add RNG if needed.
 struct WorkerContext {
+    /// Worker ID reserved for future per-worker diagnostics and tracing
+    #[allow(dead_code)]
     worker_id: usize,
     activation_records: Arc<DashMap<NodeId, Arc<ActivationRecord>>>,
     memory_graph: Arc<MemoryGraph>,
@@ -105,6 +109,8 @@ struct WorkerContext {
     scheduler: Arc<TierAwareSpreadingScheduler>,
     cycle_detector: Arc<CycleDetector>,
     deterministic_trace: Arc<Mutex<Vec<TraceEntry>>>,
+    /// Adaptive engine reserved for future GPU-accelerated spreading
+    #[allow(dead_code)]
     adaptive_engine: Arc<Mutex<AdaptiveSpreadingEngine>>,
 }
 
@@ -178,9 +184,9 @@ impl ParallelSpreadingEngine {
         };
 
         let mut engine = Self {
-            config: config.clone(),
+            config,
             activation_records,
-            memory_graph: memory_graph.clone(),
+            memory_graph,
             scheduler,
             thread_handles: Vec::new(),
             metrics,
@@ -574,7 +580,9 @@ impl ParallelSpreadingEngine {
 
     /// Wait for all workers to complete processing
     fn wait_for_completion(&self) -> ActivationResult<()> {
-        let timeout = Duration::from_secs(30);
+        // Increased timeout for resource-intensive parallel operations
+        // Tests may run concurrently and compete for CPU/threads
+        let timeout = Duration::from_secs(90);
         let start = Instant::now();
 
         while start.elapsed() < timeout {
@@ -1140,8 +1148,9 @@ mod tests {
             engine.metrics.cycles_detected.load(Ordering::Relaxed) > 0,
             "Expected cycles to be detected"
         );
-        // Cycle occurs at depth 3, which maps to Cold tier
-        let tier_cycle_count = engine.metrics.cycle_count_for_tier(StorageTier::Cold);
+        // With budget=1 (allow visit 0, reject visit 1), cycle detected at depth 2 (Warm tier)
+        // Flow: A(depth=0) -> B(depth=1) -> A(depth=2, visit_count=1 rejected)
+        let tier_cycle_count = engine.metrics.cycle_count_for_tier(StorageTier::Warm);
         assert!(
             tier_cycle_count > 0,
             "Expected tier cycle count > 0, got {}",

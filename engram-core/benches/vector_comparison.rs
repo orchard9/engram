@@ -15,9 +15,9 @@ use support::datasets::DatasetLoader;
 use support::engram_ann::EngramOptimizedAnnIndex;
 
 #[cfg(feature = "ann_benchmarks")]
-use support::faiss_ann::FaissAnnIndex;
-#[cfg(feature = "ann_benchmarks")]
 use support::annoy_ann::AnnoyAnnIndex;
+#[cfg(feature = "ann_benchmarks")]
+use support::faiss_ann::FaissAnnIndex;
 
 fn dataset_or_panic(label: &str, loader: impl FnOnce() -> AnnDataset) -> AnnDataset {
     let dataset = loader();

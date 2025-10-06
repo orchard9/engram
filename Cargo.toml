@@ -107,10 +107,29 @@ unsafe_code = "warn"
 missing_docs = "warn"
 
 [workspace.lints.clippy]
-all = "warn"
-pedantic = "warn"
-nursery = "warn"
-cargo = "warn"
+# Enable comprehensive linting (groups)
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
+
+# Override specific pedantic lints that are too noisy (higher priority)
+cast_possible_truncation = "allow"  # Intentional in numeric conversions
+cast_precision_loss = "allow"       # Acceptable for our use case
+cast_sign_loss = "allow"            # Intentional in conversions
+cast_possible_wrap = "allow"        # Handled by checks
+too_many_lines = "allow"            # Some modules are necessarily large
+missing_errors_doc = "allow"        # Self-evident error types
+missing_panics_doc = "allow"        # Most panics are documented via asserts
+module_name_repetitions = "allow"   # Sometimes clearer with repetition
+doc_markdown = "allow"              # Allow flexibility in doc formatting
+
+# Override specific nursery lints
+cognitive_complexity = "allow"      # Some algorithms are inherently complex
+suboptimal_flops = "allow"         # Compiler often optimizes this anyway
+
+# Override cargo lints that are expected
+multiple_crate_versions = "allow"   # Transitive deps often have duplicates
 
 [profile.release]
 lto = true

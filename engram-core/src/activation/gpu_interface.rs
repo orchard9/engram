@@ -77,9 +77,9 @@ pub struct GPUActivationBatch {
 impl GPUActivationBatch {
     /// Create a new GPU activation batch
     #[must_use]
-    pub fn new(source: [f32; 768]) -> Self {
+    pub fn new(source: &[f32; 768]) -> Self {
         Self {
-            source,
+            source: *source,
             targets: Vec::new(),
             activations: Vec::new(),
             confidences: Vec::new(),
@@ -88,21 +88,21 @@ impl GPUActivationBatch {
     }
 
     /// Add a target node to the batch
-    pub fn add_target(&mut self, target: [f32; 768], activation: f32, confidence: f32) {
-        self.targets.push(target);
+    pub fn add_target(&mut self, target: &[f32; 768], activation: f32, confidence: f32) {
+        self.targets.push(*target);
         self.activations.push(activation);
         self.confidences.push(confidence);
     }
 
     /// Get the batch size
     #[must_use]
-    pub fn size(&self) -> usize {
+    pub const fn size(&self) -> usize {
         self.targets.len()
     }
 
     /// Check if batch is empty
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.targets.is_empty()
     }
 
@@ -140,7 +140,7 @@ pub struct GpuLaunchFuture {
 impl GpuLaunchFuture {
     /// Create a completed future with results
     #[must_use]
-    pub fn ready(result: Vec<f32>) -> Self {
+    pub const fn ready(result: Vec<f32>) -> Self {
         Self {
             result: Some(result),
             completed: true,
@@ -149,7 +149,7 @@ impl GpuLaunchFuture {
 
     /// Create a pending future
     #[must_use]
-    pub fn pending() -> Self {
+    pub const fn pending() -> Self {
         Self {
             result: None,
             completed: false,
@@ -433,11 +433,13 @@ mod tests {
 
     #[test]
     fn test_gpu_batch_operations() {
-        let mut batch = GPUActivationBatch::new([1.0; 768]);
+        let source = [1.0; 768];
+        let mut batch = GPUActivationBatch::new(&source);
         assert!(batch.is_empty());
         assert_eq!(batch.size(), 0);
 
-        batch.add_target([0.5; 768], 0.7, 0.8);
+        let target = [0.5; 768];
+        batch.add_target(&target, 0.7, 0.8);
         assert!(!batch.is_empty());
         assert_eq!(batch.size(), 1);
         assert_eq!(batch.activations[0], 0.7);
@@ -453,9 +455,12 @@ mod tests {
         assert!(fallback.is_available());
         assert_eq!(fallback.capabilities().device_name, "CPU_SIMD_FALLBACK");
 
-        let mut batch = GPUActivationBatch::new([1.0; 768]);
-        batch.add_target([1.0; 768], 0.5, 0.6);
-        batch.add_target([0.0; 768], 0.3, 0.4);
+        let source = [1.0; 768];
+        let mut batch = GPUActivationBatch::new(&source);
+        let target1 = [1.0; 768];
+        let target2 = [0.0; 768];
+        batch.add_target(&target1, 0.5, 0.6);
+        batch.add_target(&target2, 0.3, 0.4);
 
         let future = fallback.launch(&batch);
         // In real async context, this would be awaited
@@ -514,8 +519,10 @@ mod tests {
         };
         let mut engine = AdaptiveSpreadingEngine::new(Some(mock_gpu), config);
 
-        let mut batch = GPUActivationBatch::new([1.0; 768]);
-        batch.add_target([0.5; 768], 0.7, 0.8);
+        let source = [1.0; 768];
+        let mut batch = GPUActivationBatch::new(&source);
+        let target = [0.5; 768];
+        batch.add_target(&target, 0.7, 0.8);
 
         let result = engine.spread(&batch).await.unwrap();
         assert_eq!(result.len(), 1);

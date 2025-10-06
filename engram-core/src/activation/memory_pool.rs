@@ -129,16 +129,26 @@ impl ActivationMemoryPool {
 pub struct PooledAllocation {
     data: *mut u8,
     size: usize,
+    /// Pool reference reserved for future RAII-based deallocation on drop
+    #[allow(dead_code)]
     pool: Option<Arc<ActivationMemoryPool>>,
 }
 
 impl PooledAllocation {
     /// Get the allocated memory as a slice
+    ///
+    /// # Safety
+    /// Safe because pointer and size are guaranteed valid by pool allocation
+    #[allow(unsafe_code)]
     pub fn as_slice(&self) -> &[u8] {
         unsafe { std::slice::from_raw_parts(self.data, self.size) }
     }
 
     /// Get the allocated memory as a mutable slice
+    ///
+    /// # Safety
+    /// Safe because pointer and size are guaranteed valid by pool allocation
+    #[allow(unsafe_code)]
     pub fn as_mut_slice(&mut self) -> &mut [u8] {
         unsafe { std::slice::from_raw_parts_mut(self.data, self.size) }
     }
@@ -154,8 +164,8 @@ pub struct PoolStats {
     pub utilization: f32,
 }
 
-/// Thread-local memory pool for single-threaded access
 thread_local! {
+    /// Thread-local memory pool for single-threaded access
     static LOCAL_POOL: RefCell<LocalMemoryPool> = RefCell::new(LocalMemoryPool::new(4096));
 }
 
@@ -188,6 +198,9 @@ impl LocalMemoryPool {
 
         self.position = aligned_pos + size;
         let ptr = &mut self.buffer[aligned_pos] as *mut u8 as *mut T;
+        // SAFETY: ptr is derived from a valid mutable reference to aligned buffer space
+        // that we just verified has enough room for T. The lifetime is tied to &mut self.
+        #[allow(unsafe_code)]
         Some(unsafe { &mut *ptr })
     }
 

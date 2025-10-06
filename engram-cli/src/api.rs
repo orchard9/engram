@@ -454,11 +454,10 @@ pub async fn remember_memory(
 
     // Create confidence with reasoning
     let confidence_value = request.confidence.unwrap_or(0.7);
-    let confidence = Confidence::new(confidence_value).with_reasoning(
-        request
-            .confidence_reasoning
-            .unwrap_or_else(|| "Default confidence for user-provided memory".to_string()),
-    );
+    let confidence_reasoning = request
+        .confidence_reasoning
+        .unwrap_or_else(|| "Default confidence for user-provided memory".to_string());
+    let confidence = Confidence::new(confidence_value).with_reasoning(confidence_reasoning.clone());
 
     let core_confidence = CoreConfidence::exact(confidence_value);
 
@@ -520,10 +519,7 @@ pub async fn remember_memory(
                 "Low"
             }
             .to_string(),
-            reasoning: format!(
-                "Stored with activation {:.2}, accounting for system pressure",
-                actual_confidence
-            ),
+            reasoning: confidence_reasoning,
         },
         consolidation_state: format!("{:?}", ConsolidationState::Recent),
         auto_links,

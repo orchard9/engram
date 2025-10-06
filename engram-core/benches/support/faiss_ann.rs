@@ -4,8 +4,8 @@
 
 use super::ann_common::AnnIndex;
 use anyhow::Result;
-use faiss::{Index, MetricType, index_factory};
 use faiss::index::IndexImpl;
+use faiss::{Index, MetricType, index_factory};
 
 /// FAISS index types supported for benchmarking
 #[derive(Debug, Clone, Copy)]
@@ -59,6 +59,7 @@ impl FaissAnnIndex {
     /// # Arguments
     /// * `dimension` - Vector dimensionality
     /// * `nlist` - Number of clusters (typically sqrt(n) where n is dataset size)
+    #[allow(dead_code)]
     pub fn new_ivf_flat(dimension: usize, nlist: usize) -> Result<Self> {
         let description = format!("IVF{},Flat", nlist);
         let index = index_factory(dimension as u32, &description, MetricType::L2)?;
@@ -81,10 +82,7 @@ impl FaissAnnIndex {
 impl AnnIndex for FaissAnnIndex {
     fn build(&mut self, vectors: &[[f32; 768]]) -> Result<()> {
         // Flatten vectors to FAISS format: [x1,y1,z1, x2,y2,z2, ...]
-        let flat_vectors: Vec<f32> = vectors
-            .iter()
-            .flat_map(|v| v.iter().copied())
-            .collect();
+        let flat_vectors: Vec<f32> = vectors.iter().flat_map(|v| v.iter().copied()).collect();
 
         // Train index if needed (IVF requires training)
         if !self.index.is_trained() {

@@ -8,10 +8,10 @@
 mod support;
 
 use support::ann_common::AnnIndex;
+use support::annoy_ann::AnnoyAnnIndex;
 use support::datasets::DatasetLoader;
 use support::engram_ann::EngramOptimizedAnnIndex;
 use support::faiss_ann::FaissAnnIndex;
-use support::annoy_ann::AnnoyAnnIndex;
 
 /// Compute recall@k: fraction of ground truth neighbors found in results
 fn compute_recall(results: &[usize], ground_truth: &[usize]) -> f32 {
@@ -32,14 +32,18 @@ fn validate_engram_recall_90_percent() {
     // Load test dataset (10K vectors for validation)
     let dataset = DatasetLoader::load_sift1m_mock();
 
-    println!("Dataset loaded: {} vectors, {} queries",
-        dataset.vectors.len(), dataset.queries.len());
+    println!(
+        "Dataset loaded: {} vectors, {} queries",
+        dataset.vectors.len(),
+        dataset.queries.len()
+    );
 
     // Build ground truth using FAISS Flat (exact search)
     println!("Building ground truth with FAISS Flat...");
-    let mut ground_truth_index = FaissAnnIndex::new_flat(768)
-        .expect("Failed to create FAISS Flat index");
-    ground_truth_index.build(&dataset.vectors)
+    let mut ground_truth_index =
+        FaissAnnIndex::new_flat(768).expect("Failed to create FAISS Flat index");
+    ground_truth_index
+        .build(&dataset.vectors)
         .expect("Failed to build ground truth index");
 
     let ground_truth: Vec<Vec<usize>> = dataset
@@ -57,7 +61,8 @@ fn validate_engram_recall_90_percent() {
     // Build Engram index
     println!("Building Engram HNSW index...");
     let mut engram = EngramOptimizedAnnIndex::new();
-    engram.build(&dataset.vectors)
+    engram
+        .build(&dataset.vectors)
         .expect("Failed to build Engram index");
 
     // Compute recall for Engram
@@ -87,25 +92,29 @@ fn compare_all_implementations() {
     // Use a smaller dataset for comparison test
     let dataset = DatasetLoader::generate_synthetic(1000, 100);
 
-    println!("Synthetic dataset: {} vectors, {} queries",
-        dataset.vectors.len(), dataset.queries.len());
+    println!(
+        "Synthetic dataset: {} vectors, {} queries",
+        dataset.vectors.len(),
+        dataset.queries.len()
+    );
 
     // Build all indices
     println!("Building Engram index...");
     let mut engram = EngramOptimizedAnnIndex::new();
-    engram.build(&dataset.vectors)
+    engram
+        .build(&dataset.vectors)
         .expect("Failed to build Engram index");
 
     println!("Building FAISS-HNSW index...");
-    let mut faiss = FaissAnnIndex::new_hnsw(768, 16)
-        .expect("Failed to create FAISS index");
-    faiss.build(&dataset.vectors)
+    let mut faiss = FaissAnnIndex::new_hnsw(768, 16).expect("Failed to create FAISS index");
+    faiss
+        .build(&dataset.vectors)
         .expect("Failed to build FAISS index");
 
     println!("Building Annoy index...");
-    let mut annoy = AnnoyAnnIndex::new(768, 10)
-        .expect("Failed to create Annoy index");
-    annoy.build(&dataset.vectors)
+    let mut annoy = AnnoyAnnIndex::new(768, 10).expect("Failed to create Annoy index");
+    annoy
+        .build(&dataset.vectors)
         .expect("Failed to build Annoy index");
 
     // Compare results for first query
@@ -116,9 +125,18 @@ fn compare_all_implementations() {
     let annoy_results = annoy.search(query, 10);
 
     println!("\nResults for first query:");
-    println!("Engram: {:?}", engram_results.iter().map(|(i, _)| i).collect::<Vec<_>>());
-    println!("FAISS:  {:?}", faiss_results.iter().map(|(i, _)| i).collect::<Vec<_>>());
-    println!("Annoy:  {:?}", annoy_results.iter().map(|(i, _)| i).collect::<Vec<_>>());
+    println!(
+        "Engram: {:?}",
+        engram_results.iter().map(|(i, _)| i).collect::<Vec<_>>()
+    );
+    println!(
+        "FAISS:  {:?}",
+        faiss_results.iter().map(|(i, _)| i).collect::<Vec<_>>()
+    );
+    println!(
+        "Annoy:  {:?}",
+        annoy_results.iter().map(|(i, _)| i).collect::<Vec<_>>()
+    );
 
     // All should return requested number of results
     assert_eq!(engram_results.len(), 10, "Engram should return 10 results");
@@ -127,9 +145,9 @@ fn compare_all_implementations() {
 
     // Results should be sorted by similarity (highest first)
     for results in [&engram_results, &faiss_results, &annoy_results] {
-        for i in 0..results.len()-1 {
+        for i in 0..results.len() - 1 {
             assert!(
-                results[i].1 >= results[i+1].1,
+                results[i].1 >= results[i + 1].1,
                 "Results should be sorted by similarity"
             );
         }

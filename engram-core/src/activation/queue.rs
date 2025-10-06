@@ -59,7 +59,15 @@ impl WorkStealingQueue {
 
     /// Pop task from local queue
     pub fn pop(&mut self) -> Option<ActivationTask> {
-        if let Some(task) = self.local_deque.pop_back() {
+        // Use pop_front for deterministic queues to maintain sort order
+        // Use pop_back for non-deterministic (work-stealing) queues for LIFO locality
+        let task = if self.deterministic {
+            self.local_deque.pop_front()
+        } else {
+            self.local_deque.pop_back()
+        };
+
+        if let Some(task) = task {
             self.local_count.fetch_sub(1, Ordering::Relaxed);
             Some(task)
         } else {
