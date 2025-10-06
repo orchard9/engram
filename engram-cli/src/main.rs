@@ -152,7 +152,8 @@ async fn start_server(port: u16, grpc_port: u16) -> Result<()> {
 
     // Start background tier migration task if persistence is enabled
     #[cfg(feature = "memory_mapped_persistence")]
-    if let Some(_migration_handle) = memory_store.start_tier_migration() {
+    {
+        memory_store.start_tier_migration();
         info!(" Background tier migration started (5 minute interval)");
     }
 

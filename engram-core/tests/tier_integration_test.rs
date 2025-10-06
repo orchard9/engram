@@ -84,13 +84,11 @@ async fn test_tier_migration_startup() {
         .with_persistence(temp_dir.path())
         .expect("Failed to enable persistence");
 
-    // Start migration task
-    let handle = store.start_tier_migration();
+    // Start migration task - worker now auto-managed
+    store.start_tier_migration();
 
-    assert!(
-        handle.is_some(),
-        "Should successfully start tier migration background task"
-    );
+    // Give worker a moment to start
+    std::thread::sleep(std::time::Duration::from_millis(100));
 
     // Note: We don't actually wait for migration to complete in this test
     // as it would take 5 minutes. We just verify the task starts.

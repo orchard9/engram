@@ -139,9 +139,21 @@ pub struct MemoryStore {
     #[cfg(feature = "hnsw_index")]
     hnsw_worker: Arc<parking_lot::Mutex<Option<std::thread::JoinHandle<()>>>>,
 
+    /// Shutdown signal for HNSW worker
+    #[cfg(feature = "hnsw_index")]
+    hnsw_shutdown: Arc<std::sync::atomic::AtomicBool>,
+
     /// Persistent storage backend
     #[cfg(feature = "memory_mapped_persistence")]
     persistent_backend: Option<Arc<CognitiveTierArchitecture>>,
+
+    /// Background worker handle for tier migration
+    #[cfg(feature = "memory_mapped_persistence")]
+    tier_migration_worker: Arc<parking_lot::Mutex<Option<std::thread::JoinHandle<()>>>>,
+
+    /// Shutdown signal for tier migration worker
+    #[cfg(feature = "memory_mapped_persistence")]
+    tier_migration_shutdown: Arc<std::sync::atomic::AtomicBool>,
 
     /// Write-ahead log for durability
     #[cfg(feature = "memory_mapped_persistence")]
@@ -297,8 +309,14 @@ impl MemoryStore {
             hnsw_update_queue: Arc::new(crossbeam_queue::ArrayQueue::new(10_000)),
             #[cfg(feature = "hnsw_index")]
             hnsw_worker: Arc::new(parking_lot::Mutex::new(None)),
+            #[cfg(feature = "hnsw_index")]
+            hnsw_shutdown: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             #[cfg(feature = "memory_mapped_persistence")]
             persistent_backend: None,
+            #[cfg(feature = "memory_mapped_persistence")]
+            tier_migration_worker: Arc::new(parking_lot::Mutex::new(None)),
+            #[cfg(feature = "memory_mapped_persistence")]
+            tier_migration_shutdown: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             #[cfg(feature = "memory_mapped_persistence")]
             wal_writer: None,
             #[cfg(feature = "memory_mapped_persistence")]
@@ -314,10 +332,14 @@ impl MemoryStore {
     }
 
     /// Create a memory store with HNSW index enabled
+    ///
+    /// Automatically starts the background worker thread to process HNSW updates.
+    /// The worker will run until `shutdown_hnsw_worker()` is called.
     #[cfg(feature = "hnsw_index")]
     #[must_use]
     pub fn with_hnsw_index(mut self) -> Self {
         self.hnsw_index = Some(Arc::new(CognitiveHnswIndex::new()));
+        self.start_hnsw_worker();
         self
     }
 
@@ -416,10 +438,24 @@ impl MemoryStore {
     /// access patterns (hot→warm→cold and warm→hot for recently accessed).
     #[cfg(feature = "memory_mapped_persistence")]
     #[must_use = "Join handle should be stored for graceful shutdown"]
-    pub fn start_tier_migration(&self) -> Option<std::thread::JoinHandle<()>> {
-        let backend = self.persistent_backend.as_ref()?.clone();
+    pub fn start_tier_migration(&self) {
+        // Check if worker is already running
+        if self.tier_migration_worker.lock().is_some() {
+            tracing::debug!("Tier migration worker already running");
+            return;
+        }
 
-        let handle = std::thread::Builder::new()
+        let backend = match &self.persistent_backend {
+            Some(b) => b.clone(),
+            None => {
+                tracing::warn!("Cannot start tier migration: no persistent backend configured");
+                return;
+            }
+        };
+
+        let shutdown = Arc::clone(&self.tier_migration_shutdown);
+
+        let handle = match std::thread::Builder::new()
             .name("tier-migration".to_string())
             .spawn(move || {
                 // Create a tokio runtime for async operations
@@ -438,6 +474,12 @@ impl MemoryStore {
                     let mut interval = tokio::time::interval(std::time::Duration::from_secs(300)); // 5 minutes
 
                     loop {
+                        // Check shutdown signal
+                        if shutdown.load(std::sync::atomic::Ordering::Relaxed) {
+                            tracing::info!("Tier migration worker shutting down");
+                            break;
+                        }
+
                         interval.tick().await;
 
                         // Run migration cycle
@@ -451,14 +493,38 @@ impl MemoryStore {
                         }
                     }
                 });
-            })
-            .ok();
+            }) {
+            Ok(h) => h,
+            Err(e) => {
+                tracing::error!(error = ?e, "Failed to spawn tier migration thread");
+                return;
+            }
+        };
 
-        if handle.is_some() {
-            tracing::info!("Started tier migration background task (5 minute interval)");
+        *self.tier_migration_worker.lock() = Some(handle);
+        tracing::info!("Started tier migration background task (5 minute interval)");
+    }
+
+    /// Graceful shutdown of tier migration worker
+    ///
+    /// Signals the worker to stop and joins the thread.
+    #[cfg(feature = "memory_mapped_persistence")]
+    pub fn shutdown_tier_migration(&self) {
+        if let Some(handle) = self.tier_migration_worker.lock().take() {
+            tracing::info!("Shutting down tier migration worker");
+
+            // Signal shutdown
+            self.tier_migration_shutdown.store(true, std::sync::atomic::Ordering::Relaxed);
+
+            // Wait for worker to finish
+            match handle.join() {
+                Ok(()) => tracing::info!("Tier migration worker shut down gracefully"),
+                Err(e) => tracing::error!("Tier migration worker panicked during shutdown: {:?}", e),
+            }
+
+            // Reset shutdown flag for potential restart
+            self.tier_migration_shutdown.store(false, std::sync::atomic::Ordering::Relaxed);
         }
-
-        handle
     }
 
     /// Start HNSW update worker thread for async index updates
@@ -468,7 +534,14 @@ impl MemoryStore {
     #[cfg(feature = "hnsw_index")]
     #[must_use = "Join handle should be stored for graceful shutdown"]
     pub fn start_hnsw_worker(&self) {
+        // Check if worker is already running
+        if self.hnsw_worker.lock().is_some() {
+            tracing::debug!("HNSW worker already running");
+            return;
+        }
+
         let queue = Arc::clone(&self.hnsw_update_queue);
+        let shutdown = Arc::clone(&self.hnsw_shutdown);
         let hnsw = match &self.hnsw_index {
             Some(index) => Arc::clone(index),
             None => {
@@ -480,7 +553,7 @@ impl MemoryStore {
         let handle = std::thread::Builder::new()
             .name("hnsw-worker".to_string())
             .spawn(move || {
-                Self::hnsw_worker_loop(queue, hnsw);
+                Self::hnsw_worker_loop(queue, hnsw, shutdown);
             })
             .expect("Failed to spawn HNSW worker thread");
 
@@ -489,10 +562,13 @@ impl MemoryStore {
     }
 
     /// Background worker loop for processing HNSW updates
+    ///
+    /// Runs until shutdown signal is received, processing updates in batches.
     #[cfg(feature = "hnsw_index")]
     fn hnsw_worker_loop(
         queue: Arc<crossbeam_queue::ArrayQueue<HnswUpdate>>,
         hnsw: Arc<CognitiveHnswIndex>,
+        shutdown: Arc<std::sync::atomic::AtomicBool>,
     ) {
         const BATCH_SIZE: usize = 100;
         const BATCH_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(50);
@@ -501,6 +577,20 @@ impl MemoryStore {
         let mut last_flush = std::time::Instant::now();
 
         loop {
+            // Check shutdown signal
+            if shutdown.load(std::sync::atomic::Ordering::Relaxed) {
+                // Drain remaining updates before shutdown
+                while let Some(update) = queue.pop() {
+                    batch.push(update);
+                }
+                if !batch.is_empty() {
+                    tracing::info!(count = batch.len(), "Processing remaining HNSW updates before shutdown");
+                    Self::process_hnsw_batch(&hnsw, &batch);
+                }
+                tracing::info!("HNSW worker shutting down");
+                break;
+            }
+
             // Collect updates into batch
             while batch.len() < BATCH_SIZE {
                 match queue.pop() {
@@ -567,14 +657,25 @@ impl MemoryStore {
     }
 
     /// Graceful shutdown of HNSW worker
+    ///
+    /// Signals the worker to stop, drains any remaining updates, and joins the thread.
+    /// This ensures all queued HNSW updates are processed before shutdown completes.
     #[cfg(feature = "hnsw_index")]
     pub fn shutdown_hnsw_worker(&self) {
         if let Some(handle) = self.hnsw_worker.lock().take() {
-            tracing::info!("Shutting down HNSW worker (note: queue may not be fully drained)");
-            // Note: In production, would use shutdown signal channel
-            // For now, we just drop the handle which will terminate the thread
-            drop(handle);
-            tracing::info!("HNSW worker thread stopped");
+            tracing::info!("Shutting down HNSW worker");
+
+            // Signal shutdown
+            self.hnsw_shutdown.store(true, std::sync::atomic::Ordering::Relaxed);
+
+            // Wait for worker to finish processing remaining updates
+            match handle.join() {
+                Ok(()) => tracing::info!("HNSW worker shut down gracefully"),
+                Err(e) => tracing::error!("HNSW worker panicked during shutdown: {:?}", e),
+            }
+
+            // Reset shutdown flag for potential restart
+            self.hnsw_shutdown.store(false, std::sync::atomic::Ordering::Relaxed);
         }
     }
 

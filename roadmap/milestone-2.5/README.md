@@ -4,13 +4,14 @@
 
 This milestone closes the gap between "infrastructure exists" and "system operational." Tasks here activate existing code that was built but not fully integrated into the execution path.
 
-## Status: COMPLETE ✅
+## Status: COMPLETE (with lifecycle fixes applied) ✅
 
 **Created**: 2025-10-05
 **Completed**: 2025-10-05
+**Revised**: 2025-10-05 (lifecycle and shutdown fixes)
 **Priority**: P0 (Critical - blocks production deployment)
 **Estimated Duration**: 5-6 days (1 engineer)
-**Actual Duration**: 1 day (all 4 tasks completed)
+**Actual Duration**: 1 day initial + 2 hours fixes
 
 ## Problem Statement
 
@@ -105,6 +106,44 @@ This milestone makes existing infrastructure **operational**.
   - Type annotations in gpu_abstraction_overhead.rs
 - Benchmark framework ready for performance comparison
 - Note: Full recall@10 validation deferred (requires large dataset, estimated 30+ min runtime)
+- **Limitation**: Annoy is mock implementation due to annoy-rs library limitations (only supports loading pre-built indexes, not building). FAISS provides sufficient industry comparison.
+
+## Issues Found and Fixed ⚠️ → ✅
+
+### Original Integration Issues (Discovered in Review)
+
+**1. HNSW Worker Never Started** ❌
+- `with_hnsw_index()` only set the flag, never started the worker
+- Queue filled up but was never drained
+- No shutdown mechanism - infinite loop with no termination signal
+
+**Fixes Applied** ✅
+- `with_hnsw_index()` now auto-starts worker thread
+- Added `hnsw_shutdown` AtomicBool for graceful termination
+- Worker loop checks shutdown signal and drains remaining updates
+- `shutdown_hnsw_worker()` properly signals, joins thread, and resets
+
+**2. Tier Migration Worker Leaked** ❌
+- `start_tier_migration()` spawned thread then dropped handle
+- No way to stop or observe the worker
+- Infinite loop with no shutdown mechanism
+- TierCoordinator queue never started
+
+**Fixes Applied** ✅
+- Added `tier_migration_worker` handle storage
+- Added `tier_migration_shutdown` AtomicBool for termination
+- Worker loop checks shutdown signal
+- New `shutdown_tier_migration()` method for graceful shutdown
+- Updated callsites to not expect return value
+
+**3. Task 004 Status Mismatch** ❌
+- FAISS integration was complete but status file said "BLOCKED"
+- Annoy mock not documented as intentional limitation
+
+**Fixes Applied** ✅
+- Updated TASK_004_STATUS.md to reflect FAISS completion
+- Documented Annoy mock as acceptable limitation (annoy-rs API constraint)
+- Clarified that FAISS provides sufficient industry comparison
 
 ## Risk Mitigation
 
