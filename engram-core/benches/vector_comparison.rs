@@ -13,8 +13,11 @@ mod support;
 use support::ann_common::{AnnDataset, AnnIndex, BenchmarkFramework, BenchmarkResults};
 use support::datasets::DatasetLoader;
 use support::engram_ann::EngramOptimizedAnnIndex;
-use support::mock_annoy::MockAnnoyIndex;
-use support::mock_faiss::MockFaissIndex;
+
+#[cfg(feature = "ann_benchmarks")]
+use support::faiss_ann::FaissAnnIndex;
+#[cfg(feature = "ann_benchmarks")]
+use support::annoy_ann::AnnoyAnnIndex;
 
 fn dataset_or_panic(label: &str, loader: impl FnOnce() -> AnnDataset) -> AnnDataset {
     let dataset = loader();
@@ -25,12 +28,14 @@ fn dataset_or_panic(label: &str, loader: impl FnOnce() -> AnnDataset) -> AnnData
     dataset
 }
 
-fn faiss_or_panic(dims: usize, neighbors: usize) -> MockFaissIndex {
-    MockFaissIndex::new_hnsw(dims, neighbors)
+#[cfg(feature = "ann_benchmarks")]
+fn faiss_or_panic(dims: usize, neighbors: usize) -> FaissAnnIndex {
+    FaissAnnIndex::new_hnsw(dims, neighbors).expect("Failed to create FAISS index")
 }
 
-const fn annoy_or_panic(dims: usize, trees: usize) -> MockAnnoyIndex {
-    MockAnnoyIndex::new(dims, trees)
+#[cfg(feature = "ann_benchmarks")]
+fn annoy_or_panic(dims: usize, trees: usize) -> AnnoyAnnIndex {
+    AnnoyAnnIndex::new(dims, trees).expect("Failed to create Annoy index")
 }
 
 fn build_index_or_panic(index: &mut dyn AnnIndex, vectors: &[[f32; 768]], label: &str) {
@@ -45,7 +50,9 @@ fn run_full_comparison() -> BenchmarkResults {
 
     // Add implementations
     framework.add_implementation(Box::new(EngramOptimizedAnnIndex::new()));
+    #[cfg(feature = "ann_benchmarks")]
     framework.add_implementation(Box::new(faiss_or_panic(768, 16)));
+    #[cfg(feature = "ann_benchmarks")]
     framework.add_implementation(Box::new(annoy_or_panic(768, 10)));
 
     // Add datasets
@@ -81,10 +88,14 @@ fn benchmark_recall(c: &mut Criterion) {
     let mut engram = EngramOptimizedAnnIndex::new();
     build_index_or_panic(&mut engram, &dataset.vectors, "Engram");
 
+    #[cfg(feature = "ann_benchmarks")]
     let mut faiss = faiss_or_panic(768, 16);
+    #[cfg(feature = "ann_benchmarks")]
     build_index_or_panic(&mut faiss, &dataset.vectors, "FAISS");
 
+    #[cfg(feature = "ann_benchmarks")]
     let mut annoy = annoy_or_panic(768, 10);
+    #[cfg(feature = "ann_benchmarks")]
     build_index_or_panic(&mut annoy, &dataset.vectors, "Annoy");
 
     // Benchmark Engram
@@ -97,6 +108,7 @@ fn benchmark_recall(c: &mut Criterion) {
     });
 
     // Benchmark FAISS
+    #[cfg(feature = "ann_benchmarks")]
     group.bench_function("faiss", |b| {
         b.iter(|| {
             for query in &dataset.queries {
@@ -106,6 +118,7 @@ fn benchmark_recall(c: &mut Criterion) {
     });
 
     // Benchmark Annoy
+    #[cfg(feature = "ann_benchmarks")]
     group.bench_function("annoy", |b| {
         b.iter(|| {
             for query in &dataset.queries {
@@ -132,6 +145,7 @@ fn benchmark_build_time(c: &mut Criterion) {
             });
         });
 
+        #[cfg(feature = "ann_benchmarks")]
         group.bench_with_input(BenchmarkId::new("faiss", size), &size, |b, _| {
             b.iter(|| {
                 let mut index = faiss_or_panic(768, 16);
@@ -139,6 +153,7 @@ fn benchmark_build_time(c: &mut Criterion) {
             });
         });
 
+        #[cfg(feature = "ann_benchmarks")]
         group.bench_with_input(BenchmarkId::new("annoy", size), &size, |b, _| {
             b.iter(|| {
                 let mut index = annoy_or_panic(768, 10);
@@ -160,10 +175,14 @@ fn benchmark_memory(c: &mut Criterion) {
     let mut engram = EngramOptimizedAnnIndex::new();
     build_index_or_panic(&mut engram, &dataset.vectors, "Engram");
 
+    #[cfg(feature = "ann_benchmarks")]
     let mut faiss = faiss_or_panic(768, 16);
+    #[cfg(feature = "ann_benchmarks")]
     build_index_or_panic(&mut faiss, &dataset.vectors, "FAISS");
 
+    #[cfg(feature = "ann_benchmarks")]
     let mut annoy = annoy_or_panic(768, 10);
+    #[cfg(feature = "ann_benchmarks")]
     build_index_or_panic(&mut annoy, &dataset.vectors, "Annoy");
 
     group.bench_function("engram", |b| {
@@ -172,12 +191,14 @@ fn benchmark_memory(c: &mut Criterion) {
         });
     });
 
+    #[cfg(feature = "ann_benchmarks")]
     group.bench_function("faiss", |b| {
         b.iter(|| {
             black_box(faiss.memory_usage());
         });
     });
 
+    #[cfg(feature = "ann_benchmarks")]
     group.bench_function("annoy", |b| {
         b.iter(|| {
             black_box(annoy.memory_usage());
@@ -203,10 +224,15 @@ mod tests {
     fn test_full_comparison() {
         let results = run_full_comparison();
 
-        // Check that all implementations were tested
+        // Check that Engram was tested
         assert!(results.data().contains_key("Engram-Optimized"));
-        assert!(results.data().contains_key("FAISS (Mock)"));
-        assert!(results.data().contains_key("Annoy (Mock)"));
+
+        // Real implementations only tested when feature flag enabled
+        #[cfg(feature = "ann_benchmarks")]
+        {
+            assert!(results.data().contains_key("FAISS-HNSW"));
+            assert!(results.data().contains_key("Annoy"));
+        }
     }
 
     #[test]

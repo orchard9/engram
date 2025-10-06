@@ -4,7 +4,7 @@
 
 use chrono::Utc;
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
-use engram_core::{Confidence, Cue, Episode, EpisodeBuilder, Memory, MemoryStore};
+use engram_core::{Confidence, Cue, EpisodeBuilder, MemoryStore};
 use std::time::Duration;
 
 #[cfg(feature = "hnsw_index")]
@@ -32,8 +32,7 @@ fn create_test_store(episode_count: usize) -> MemoryStore {
             .confidence(Confidence::HIGH)
             .build();
 
-        let memory = Memory::from_episode(episode, 1.0);
-        store.store(memory);
+        store.store(episode);
     }
 
     store
@@ -46,7 +45,7 @@ fn bench_similarity_recall(c: &mut Criterion) {
 
     for size in [100, 1000, 10_000].iter() {
         let store = create_test_store(*size);
-        let cue = Cue::embedding(create_test_embedding(42), Confidence::HIGH, Some(10));
+        let cue = Cue::embedding("recall_cue".to_string(), create_test_embedding(42), Confidence::HIGH);
 
         group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, _| {
             b.iter(|| {
@@ -67,7 +66,7 @@ fn bench_result_limits(c: &mut Criterion) {
     let store = create_test_store(10_000);
 
     for limit in [5, 10, 20, 50, 100].iter() {
-        let cue = Cue::embedding(create_test_embedding(123), Confidence::HIGH, Some(*limit));
+        let cue = Cue::embedding(format!("limit_cue_{}", limit), create_test_embedding(123), Confidence::HIGH);
 
         group.bench_with_input(BenchmarkId::from_parameter(limit), limit, |b, _| {
             b.iter(|| {
@@ -89,7 +88,7 @@ fn bench_p95_latency(c: &mut Criterion) {
     group.sample_size(1000); // Enough samples for P95
 
     let store = create_test_store(10_000);
-    let cue = Cue::embedding(create_test_embedding(999), Confidence::HIGH, Some(20));
+    let cue = Cue::embedding("p95_cue".to_string(), create_test_embedding(999), Confidence::HIGH);
 
     group.bench_function("10k_episodes", |b| {
         b.iter(|| {
@@ -106,12 +105,10 @@ fn bench_allocation_overhead(c: &mut Criterion) {
     let mut group = c.benchmark_group("allocation");
     group.measurement_time(Duration::from_secs(5));
 
-    let store = create_test_store(1000);
-
     group.bench_function("cue_creation", |b| {
         b.iter(|| {
             let embedding = create_test_embedding(42);
-            let cue = Cue::embedding(embedding, Confidence::HIGH, Some(10));
+            let cue = Cue::embedding("alloc_cue".to_string(), embedding, Confidence::HIGH);
             black_box(cue);
         });
     });

@@ -4,7 +4,6 @@ use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use engram_core::activation::{
     AdaptiveConfig, AdaptiveSpreadingEngine, CpuFallback, GPUActivationBatch, GPUSpreadingInterface,
 };
-use std::sync::Arc;
 
 fn bench_cpu_fallback_direct(c: &mut Criterion) {
     let fallback = CpuFallback::new();
@@ -69,9 +68,9 @@ fn bench_cosine_similarity(c: &mut Criterion) {
 
     c.bench_function("cosine_similarity_768d", |b| {
         b.iter(|| {
-            let mut dot_product = 0.0;
-            let mut norm_a = 0.0;
-            let mut norm_b = 0.0;
+            let mut dot_product: f32 = 0.0;
+            let mut norm_a: f32 = 0.0;
+            let mut norm_b: f32 = 0.0;
 
             for i in 0..768 {
                 dot_product += source[i] * target[i];
