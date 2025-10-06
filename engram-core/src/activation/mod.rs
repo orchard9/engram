@@ -853,7 +853,10 @@ mod tests {
         for (i, (&expected, &actual)) in
             embedding.iter().zip(retrieved_embedding.iter()).enumerate()
         {
-            assert!((expected - actual).abs() < f32::EPSILON, "Mismatch at index {i}");
+            assert!(
+                (expected - actual).abs() < f32::EPSILON,
+                "Mismatch at index {i}"
+            );
         }
     }
 
@@ -880,8 +883,13 @@ mod tests {
         graph.set_embedding(&node_id, &embedding2);
 
         // Verify updated embedding
-        let retrieved = graph.get_embedding(&node_id).expect("embedding should exist");
-        assert!((retrieved[0] - 2.0).abs() < f32::EPSILON, "Embedding should be updated");
+        let retrieved = graph
+            .get_embedding(&node_id)
+            .expect("embedding should exist");
+        assert!(
+            (retrieved[0] - 2.0).abs() < f32::EPSILON,
+            "Embedding should be updated"
+        );
     }
 
     #[test]
@@ -899,7 +907,9 @@ mod tests {
         // Verify all embeddings
         for i in 0..10 {
             let node_id = format!("node_{i}");
-            let retrieved = graph.get_embedding(&node_id).expect("embedding should exist");
+            let retrieved = graph
+                .get_embedding(&node_id)
+                .expect("embedding should exist");
             assert!(
                 (retrieved[0] - i as f32).abs() < f32::EPSILON,
                 "Embedding for node_{i} should match"

@@ -131,13 +131,17 @@ async fn start_server(port: u16, grpc_port: u16) -> Result<()> {
     #[cfg(feature = "memory_mapped_persistence")]
     {
         let data_dir = resolve_data_directory()?;
-        store = store
-            .with_persistence(&data_dir)
-            .map_err(|e| anyhow::anyhow!("Failed to enable persistence at {}: {}", data_dir.display(), e))?;
+        store = store.with_persistence(&data_dir).map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to enable persistence at {}: {}",
+                data_dir.display(),
+                e
+            )
+        })?;
 
-        let recovered = store
-            .recover_from_wal()
-            .map_err(|e| anyhow::anyhow!("Failed to recover WAL from {}: {}", data_dir.display(), e))?;
+        let recovered = store.recover_from_wal().map_err(|e| {
+            anyhow::anyhow!("Failed to recover WAL from {}: {}", data_dir.display(), e)
+        })?;
         if recovered > 0 {
             info!(recovered, "Recovered episodes from write-ahead log");
         } else {
@@ -315,8 +319,9 @@ async fn start_interactive_shell() -> Result<()> {
                     eprintln!(" {e}");
                 }
             }
-            Err(rustyline::error::ReadlineError::Interrupted |
-                rustyline::error::ReadlineError::Eof) => {
+            Err(
+                rustyline::error::ReadlineError::Interrupted | rustyline::error::ReadlineError::Eof,
+            ) => {
                 break;
             }
             Err(err) => {
@@ -409,9 +414,7 @@ async fn handle_benchmark_command(
 
     println!(" Server connection verified");
     println!("  Full memory operation benchmarking not yet implemented");
-    println!(
-        " This would benchmark {operations} operations of type '{operation}'"
-    );
+    println!(" This would benchmark {operations} operations of type '{operation}'");
 
     Ok(())
 }
@@ -442,11 +445,7 @@ async fn shutdown_signal() {
     info!(" Shutdown signal received");
 }
 
-fn handle_docs_command(
-    section: Option<String>,
-    list: bool,
-    export: Option<String>,
-) -> Result<()> {
+fn handle_docs_command(section: Option<String>, list: bool, export: Option<String>) -> Result<()> {
     if list {
         println!(" Available Documentation Sections:");
         println!("═══════════════════════════════════════");

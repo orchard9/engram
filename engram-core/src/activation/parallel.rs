@@ -285,7 +285,8 @@ impl ParallelSpreadingEngine {
         // Convert similarities to activations using SIMD
         let temperature = 0.5; // From config
         let threshold = context.config.threshold;
-        let activations = SimdActivationMapper::batch_sigmoid_activation(&similarities, temperature, threshold);
+        let activations =
+            SimdActivationMapper::batch_sigmoid_activation(&similarities, temperature, threshold);
 
         // Create tasks with computed activations
         for (idx, edge) in neighbors.iter().enumerate() {
@@ -817,7 +818,8 @@ mod tests {
         };
 
         let graph = create_test_graph();
-        let engine = ParallelSpreadingEngine::new(config, graph).expect("engine creation should succeed");
+        let engine =
+            ParallelSpreadingEngine::new(config, graph).expect("engine creation should succeed");
 
         assert!(engine.scheduler.is_idle());
         assert!(!engine.shutdown_signal.load(Ordering::Relaxed));
@@ -836,11 +838,14 @@ mod tests {
         };
 
         let graph = create_test_graph();
-        let engine = ParallelSpreadingEngine::new(config, graph).expect("engine creation should succeed");
+        let engine =
+            ParallelSpreadingEngine::new(config, graph).expect("engine creation should succeed");
 
         // Spread activation from node A
         let seed_activations = vec![("A".to_string(), 1.0)];
-        let results = engine.spread_activation(&seed_activations).expect("spread should succeed");
+        let results = engine
+            .spread_activation(&seed_activations)
+            .expect("spread should succeed");
 
         assert!(!results.activations.is_empty());
         let hot_summary = results
@@ -867,13 +872,19 @@ mod tests {
         let graph1 = create_test_graph();
         let graph2 = create_test_graph();
 
-        let engine1 = ParallelSpreadingEngine::new(config1, graph1).expect("engine1 creation should succeed");
-        let engine2 = ParallelSpreadingEngine::new(config2, graph2).expect("engine2 creation should succeed");
+        let engine1 =
+            ParallelSpreadingEngine::new(config1, graph1).expect("engine1 creation should succeed");
+        let engine2 =
+            ParallelSpreadingEngine::new(config2, graph2).expect("engine2 creation should succeed");
 
         let seed_activations = vec![("A".to_string(), 1.0)];
 
-        let results1 = engine1.spread_activation(&seed_activations).expect("spread1 should succeed");
-        let results2 = engine2.spread_activation(&seed_activations).expect("spread2 should succeed");
+        let results1 = engine1
+            .spread_activation(&seed_activations)
+            .expect("spread1 should succeed");
+        let results2 = engine2
+            .spread_activation(&seed_activations)
+            .expect("spread2 should succeed");
 
         let mut activations1: Vec<_> = results1
             .activations
@@ -927,8 +938,11 @@ mod tests {
             ..ParallelSpreadingConfig::deterministic(123)
         };
         let graph1 = create_test_graph();
-        let engine1 = ParallelSpreadingEngine::new(config1, graph1).expect("engine1 should succeed");
-        let results1 = engine1.spread_activation(&seed_activations).expect("spread1 should succeed");
+        let engine1 =
+            ParallelSpreadingEngine::new(config1, graph1).expect("engine1 should succeed");
+        let results1 = engine1
+            .spread_activation(&seed_activations)
+            .expect("spread1 should succeed");
 
         // Run with 2 threads
         let config2 = ParallelSpreadingConfig {
@@ -936,8 +950,11 @@ mod tests {
             ..ParallelSpreadingConfig::deterministic(123)
         };
         let graph2 = create_test_graph();
-        let engine2 = ParallelSpreadingEngine::new(config2, graph2).expect("engine2 should succeed");
-        let results2 = engine2.spread_activation(&seed_activations).expect("spread2 should succeed");
+        let engine2 =
+            ParallelSpreadingEngine::new(config2, graph2).expect("engine2 should succeed");
+        let results2 = engine2
+            .spread_activation(&seed_activations)
+            .expect("spread2 should succeed");
 
         // Run with 4 threads
         let config3 = ParallelSpreadingConfig {
@@ -945,8 +962,11 @@ mod tests {
             ..ParallelSpreadingConfig::deterministic(123)
         };
         let graph3 = create_test_graph();
-        let engine3 = ParallelSpreadingEngine::new(config3, graph3).expect("engine3 should succeed");
-        let results3 = engine3.spread_activation(&seed_activations).expect("spread3 should succeed");
+        let engine3 =
+            ParallelSpreadingEngine::new(config3, graph3).expect("engine3 should succeed");
+        let results3 = engine3
+            .spread_activation(&seed_activations)
+            .expect("spread3 should succeed");
 
         // Compare results
         let mut act1: Vec<_> = results1
@@ -1015,7 +1035,9 @@ mod tests {
         let engine = ParallelSpreadingEngine::new(config, graph).expect("engine should succeed");
 
         let seed_activations = vec![("A".to_string(), 1.0)];
-        let results = engine.spread_activation(&seed_activations).expect("spread should succeed");
+        let results = engine
+            .spread_activation(&seed_activations)
+            .expect("spread should succeed");
 
         // Verify trace was captured
         assert!(!results.deterministic_trace.is_empty());
@@ -1072,7 +1094,9 @@ mod tests {
         let engine = ParallelSpreadingEngine::new(config, graph).expect("engine should succeed");
 
         let seed_activations = vec![("A".to_string(), 1.0)];
-        let results = engine.spread_activation(&seed_activations).expect("spread should succeed");
+        let results = engine
+            .spread_activation(&seed_activations)
+            .expect("spread should succeed");
 
         let metrics = engine.get_metrics();
         assert!(metrics.total_activations.load(Ordering::Relaxed) > 0);
@@ -1098,7 +1122,9 @@ mod tests {
         let engine = ParallelSpreadingEngine::new(config, graph).expect("engine should succeed");
 
         let seed_activations = vec![("A".to_string(), 0.3)]; // Low seed
-        let results = engine.spread_activation(&seed_activations).expect("spread should succeed");
+        let results = engine
+            .spread_activation(&seed_activations)
+            .expect("spread should succeed");
 
         let active_nodes = engine.get_active_nodes(0.5);
         // Should have fewer nodes due to high threshold
@@ -1143,7 +1169,9 @@ mod tests {
 
         let engine = ParallelSpreadingEngine::new(config, graph).expect("engine should succeed");
         let seed_activations = vec![("A".to_string(), 1.0)];
-        let results = engine.spread_activation(&seed_activations).expect("spread should succeed");
+        let results = engine
+            .spread_activation(&seed_activations)
+            .expect("spread should succeed");
 
         assert!(
             !results.cycle_paths.is_empty(),

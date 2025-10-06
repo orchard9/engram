@@ -97,7 +97,8 @@ fn test_sigmoid_activation_matches_scalar() {
     let threshold = 0.1;
 
     // SIMD result
-    let simd_activations = SimdActivationMapper::batch_sigmoid_activation(&similarities, temperature, threshold);
+    let simd_activations =
+        SimdActivationMapper::batch_sigmoid_activation(&similarities, temperature, threshold);
 
     // Scalar reference
     let scalar_activations: Vec<f32> = similarities
@@ -147,7 +148,11 @@ fn test_fma_confidence_aggregate_correctness() {
     let path_confidence = 0.9f32;
 
     // SIMD version
-    SimdActivationMapper::fma_confidence_aggregate(&mut simd_activations, &confidence_weights, path_confidence);
+    SimdActivationMapper::fma_confidence_aggregate(
+        &mut simd_activations,
+        &confidence_weights,
+        path_confidence,
+    );
 
     // Scalar reference
     for i in 0..scalar_activations.len() {

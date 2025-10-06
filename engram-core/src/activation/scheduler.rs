@@ -380,7 +380,9 @@ impl TierQueue {
 
         // Check deterministic buffer if in deterministic mode
         let has_buffer_tasks = if self.deterministic {
-            self.deterministic_buffer.lock().is_ok_and(|buffer| !buffer.is_empty())
+            self.deterministic_buffer
+                .lock()
+                .is_ok_and(|buffer| !buffer.is_empty())
         } else {
             false
         };

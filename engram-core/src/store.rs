@@ -53,12 +53,12 @@ pub enum HnswUpdate {
     /// Insert a memory into the HNSW index
     Insert {
         /// Memory to insert
-        memory: Arc<Memory>
+        memory: Arc<Memory>,
     },
     /// Remove a memory from the HNSW index
     Remove {
         /// ID of memory to remove
-        id: String
+        id: String,
     },
     /// Rebuild the entire HNSW index
     Rebuild,

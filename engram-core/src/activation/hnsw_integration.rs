@@ -160,10 +160,10 @@ impl HnswActivationEngine {
             let activation = result.confidence.raw();
 
             // Create or update activation record
-            self
-                .activations
+            self.activations
                 .entry(result.memory_id.clone())
-                .or_insert_with(|| ActivationRecord::new(result.memory_id.clone(), 0.1)).accumulate_activation(activation);
+                .or_insert_with(|| ActivationRecord::new(result.memory_id.clone(), 0.1))
+                .accumulate_activation(activation);
 
             activated.push((result.memory_id, activation));
         }

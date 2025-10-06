@@ -24,7 +24,8 @@ use utoipa::{IntoParams, ToSchema};
 use crate::grpc::MemoryService;
 use crate::openapi::create_swagger_ui;
 use engram_core::{
-    Confidence as CoreConfidence, Cue as CoreCue, Episode, MemoryStore, memory::EpisodeBuilder as CoreEpisodeBuilder,
+    Confidence as CoreConfidence, Cue as CoreCue, Episode, MemoryStore,
+    memory::EpisodeBuilder as CoreEpisodeBuilder,
 };
 
 /// Shared application state
@@ -1466,21 +1467,22 @@ pub async fn monitor_events(
     let min_activation = params.min_activation.unwrap_or(0.1).clamp(0.0, 1.0);
     let include_causality = params.include_causality.unwrap_or(true);
 
-    let event_types = params
-        .event_types
-        .map_or_else(|| {
+    let event_types = params.event_types.map_or_else(
+        || {
             vec![
                 "activation".to_string(),
                 "formation".to_string(),
                 "decay".to_string(),
                 "spreading".to_string(),
             ]
-        }, |types| {
+        },
+        |types| {
             types
                 .split(',')
                 .map(|t| t.trim().to_lowercase())
                 .collect::<Vec<_>>()
-        });
+        },
+    );
 
     let stream = create_monitoring_stream(
         session_id,
@@ -1554,21 +1556,22 @@ pub async fn monitor_causality(
     let temporal_window = params.temporal_window.unwrap_or(1000).min(10000);
     let include_indirect = params.include_indirect.unwrap_or(false);
 
-    let operation_types = params
-        .operation_types
-        .map_or_else(|| {
+    let operation_types = params.operation_types.map_or_else(
+        || {
             vec![
                 "remember".to_string(),
                 "recall".to_string(),
                 "consolidate".to_string(),
                 "activate".to_string(),
             ]
-        }, |types| {
+        },
+        |types| {
             types
                 .split(',')
                 .map(|t| t.trim().to_lowercase())
                 .collect::<Vec<_>>()
-        });
+        },
+    );
 
     let stream = create_causality_monitoring_stream(
         session_id,

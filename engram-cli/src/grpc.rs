@@ -80,8 +80,7 @@ impl EngramService for MemoryService {
                     Status::invalid_argument("Embedding must be exactly 768 dimensions")
                 })?;
 
-                let confidence =
-                    CoreConfidence::exact(memory.confidence.map_or(0.7, |c| c.value));
+                let confidence = CoreConfidence::exact(memory.confidence.map_or(0.7, |c| c.value));
 
                 // Create episode from memory
                 let episode = Episode::new(
@@ -105,17 +104,13 @@ impl EngramService for MemoryService {
                 })?;
 
                 let confidence = CoreConfidence::exact(
-                    proto_episode
-                        .encoding_confidence
-                        .map_or(0.7, |c| c.value),
+                    proto_episode.encoding_confidence.map_or(0.7, |c| c.value),
                 );
 
-                let when = proto_episode
-                    .when
-                    .map_or_else(chrono::Utc::now, |ts| {
-                        chrono::DateTime::from_timestamp(ts.seconds, ts.nanos as u32)
-                            .unwrap_or_else(chrono::Utc::now)
-                    });
+                let when = proto_episode.when.map_or_else(chrono::Utc::now, |ts| {
+                    chrono::DateTime::from_timestamp(ts.seconds, ts.nanos as u32)
+                        .unwrap_or_else(chrono::Utc::now)
+                });
 
                 let episode =
                     Episode::new(id.clone(), when, proto_episode.what, embedding, confidence);

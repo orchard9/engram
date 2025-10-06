@@ -162,10 +162,7 @@ fn test_batch_spreading_with_parallel_engine() {
     assert!(!results.activations.is_empty());
 
     // Should have activated node A at minimum
-    let has_node_a = results
-        .activations
-        .iter()
-        .any(|a| a.memory_id == "A");
+    let has_node_a = results.activations.iter().any(|a| a.memory_id == "A");
 
     assert!(has_node_a, "Should have activated node A");
 
