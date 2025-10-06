@@ -51,9 +51,15 @@ pub struct Activation(f32);
 #[derive(Clone)]
 pub enum HnswUpdate {
     /// Insert a memory into the HNSW index
-    Insert { memory: Arc<Memory> },
+    Insert {
+        /// Memory to insert
+        memory: Arc<Memory>
+    },
     /// Remove a memory from the HNSW index
-    Remove { id: String },
+    Remove {
+        /// ID of memory to remove
+        id: String
+    },
     /// Rebuild the entire HNSW index
     Rebuild,
 }
@@ -367,7 +373,7 @@ impl MemoryStore {
 
     /// Set recall configuration
     #[must_use]
-    pub fn with_recall_config(mut self, config: crate::activation::RecallConfig) -> Self {
+    pub const fn with_recall_config(mut self, config: crate::activation::RecallConfig) -> Self {
         self.recall_config = config;
         self
     }
@@ -433,11 +439,10 @@ impl MemoryStore {
 
     /// Start background tier migration task
     ///
-    /// Returns a join handle for the background thread if migration is enabled.
     /// The task runs every 5 minutes and migrates memories between tiers based on
     /// access patterns (hot→warm→cold and warm→hot for recently accessed).
+    /// The join handle is stored internally for graceful shutdown.
     #[cfg(feature = "memory_mapped_persistence")]
-    #[must_use = "Join handle should be stored for graceful shutdown"]
     pub fn start_tier_migration(&self) {
         // Check if worker is already running
         if self.tier_migration_worker.lock().is_some() {
@@ -445,13 +450,11 @@ impl MemoryStore {
             return;
         }
 
-        let backend = match &self.persistent_backend {
-            Some(b) => b.clone(),
-            None => {
-                tracing::warn!("Cannot start tier migration: no persistent backend configured");
-                return;
-            }
+        let Some(backend) = &self.persistent_backend else {
+            tracing::warn!("Cannot start tier migration: no persistent backend configured");
+            return;
         };
+        let backend = backend.clone();
 
         let shutdown = Arc::clone(&self.tier_migration_shutdown);
 
@@ -510,7 +513,8 @@ impl MemoryStore {
     /// Signals the worker to stop and joins the thread.
     #[cfg(feature = "memory_mapped_persistence")]
     pub fn shutdown_tier_migration(&self) {
-        if let Some(handle) = self.tier_migration_worker.lock().take() {
+        let handle = self.tier_migration_worker.lock().take();
+        if let Some(handle) = handle {
             tracing::info!("Shutting down tier migration worker");
 
             // Signal shutdown
@@ -521,7 +525,7 @@ impl MemoryStore {
             match handle.join() {
                 Ok(()) => tracing::info!("Tier migration worker shut down gracefully"),
                 Err(e) => {
-                    tracing::error!("Tier migration worker panicked during shutdown: {:?}", e)
+                    tracing::error!("Tier migration worker panicked during shutdown: {:?}", e);
                 }
             }
 
@@ -533,10 +537,10 @@ impl MemoryStore {
 
     /// Start HNSW update worker thread for async index updates
     ///
-    /// Returns a join handle for the background thread if HNSW is enabled.
     /// The worker processes updates in batches of 100 with 50ms timeout.
+    /// The join handle is stored internally for graceful shutdown.
     #[cfg(feature = "hnsw_index")]
-    #[must_use = "Join handle should be stored for graceful shutdown"]
+    #[allow(clippy::expect_used)] // Thread spawn failure is a critical error
     pub fn start_hnsw_worker(&self) {
         // Check if worker is already running
         if self.hnsw_worker.lock().is_some() {
@@ -546,18 +550,16 @@ impl MemoryStore {
 
         let queue = Arc::clone(&self.hnsw_update_queue);
         let shutdown = Arc::clone(&self.hnsw_shutdown);
-        let hnsw = match &self.hnsw_index {
-            Some(index) => Arc::clone(index),
-            None => {
-                tracing::warn!("Cannot start HNSW worker: no HNSW index configured");
-                return;
-            }
+        let Some(hnsw_ref) = &self.hnsw_index else {
+            tracing::warn!("Cannot start HNSW worker: no HNSW index configured");
+            return;
         };
+        let hnsw = Arc::clone(hnsw_ref);
 
         let handle = std::thread::Builder::new()
             .name("hnsw-worker".to_string())
             .spawn(move || {
-                Self::hnsw_worker_loop(queue, hnsw, shutdown);
+                Self::hnsw_worker_loop(&queue, &hnsw, &shutdown);
             })
             .expect("Failed to spawn HNSW worker thread");
 
@@ -570,9 +572,9 @@ impl MemoryStore {
     /// Runs until shutdown signal is received, processing updates in batches.
     #[cfg(feature = "hnsw_index")]
     fn hnsw_worker_loop(
-        queue: Arc<crossbeam_queue::ArrayQueue<HnswUpdate>>,
-        hnsw: Arc<CognitiveHnswIndex>,
-        shutdown: Arc<std::sync::atomic::AtomicBool>,
+        queue: &Arc<crossbeam_queue::ArrayQueue<HnswUpdate>>,
+        hnsw: &Arc<CognitiveHnswIndex>,
+        shutdown: &Arc<std::sync::atomic::AtomicBool>,
     ) {
         const BATCH_SIZE: usize = 100;
         const BATCH_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(50);
@@ -592,7 +594,7 @@ impl MemoryStore {
                         count = batch.len(),
                         "Processing remaining HNSW updates before shutdown"
                     );
-                    Self::process_hnsw_batch(&hnsw, &batch);
+                    Self::process_hnsw_batch(hnsw, &batch);
                 }
                 tracing::info!("HNSW worker shutting down");
                 break;
@@ -611,7 +613,7 @@ impl MemoryStore {
                 || (last_flush.elapsed() > BATCH_TIMEOUT && !batch.is_empty());
 
             if should_flush {
-                Self::process_hnsw_batch(&hnsw, &batch);
+                Self::process_hnsw_batch(hnsw, &batch);
                 batch.clear();
                 last_flush = std::time::Instant::now();
             } else if batch.is_empty() {
@@ -669,7 +671,8 @@ impl MemoryStore {
     /// This ensures all queued HNSW updates are processed before shutdown completes.
     #[cfg(feature = "hnsw_index")]
     pub fn shutdown_hnsw_worker(&self) {
-        if let Some(handle) = self.hnsw_worker.lock().take() {
+        let handle = self.hnsw_worker.lock().take();
+        if let Some(handle) = handle {
             tracing::info!("Shutting down HNSW worker");
 
             // Signal shutdown
@@ -708,7 +711,7 @@ impl MemoryStore {
 
     /// Recover previously written episodes from the WAL into the hot tier
     #[cfg(feature = "memory_mapped_persistence")]
-    pub fn recover_from_wal(&mut self) -> Result<usize, crate::storage::StorageError> {
+    pub fn recover_from_wal(&self) -> Result<usize, crate::storage::StorageError> {
         let Some(wal_writer) = self.wal_writer.as_ref() else {
             return Ok(0);
         };
@@ -908,7 +911,7 @@ impl MemoryStore {
                     memory: Arc::clone(&memory_arc),
                 };
 
-                if let Err(_) = self.hnsw_update_queue.push(update) {
+                if self.hnsw_update_queue.push(update).is_err() {
                     tracing::warn!(
                         "HNSW update queue full for {}, falling back to synchronous insert",
                         memory_id
@@ -1139,8 +1142,9 @@ impl MemoryStore {
                         }
                     }
                 }
-                RecallMode::Similarity | _ => {
+                RecallMode::Similarity | RecallMode::Spreading | RecallMode::Hybrid => {
                     // Use similarity-only recall (default path below)
+                    // Cognitive recall not available for Spreading/Hybrid, fall through to similarity-based recall
                 }
             }
         }
@@ -1207,13 +1211,22 @@ impl MemoryStore {
                 let cue = cue.clone();
                 let thread_handle = s.spawn(move || {
                     // Create a new runtime in this thread
-                    let rt = tokio::runtime::Builder::new_current_thread()
+                    let rt = match tokio::runtime::Builder::new_current_thread()
                         .enable_all()
                         .build()
-                        .expect("Failed to create runtime");
-                    rt.block_on(backend.recall(&cue))
+                    {
+                        Ok(rt) => rt,
+                        Err(e) => {
+                            tracing::error!(error = ?e, "Failed to create runtime for recall");
+                            return Vec::new();
+                        }
+                    };
+                    rt.block_on(backend.recall(&cue)).unwrap_or_default()
                 });
-                thread_handle.join().expect("Thread panicked")
+                thread_handle.join().unwrap_or_else(|e| {
+                    tracing::error!(error = ?e, "Thread panicked during recall");
+                    Vec::new()
+                })
             })
         } else {
             // No runtime available, create a new one
@@ -1222,7 +1235,7 @@ impl MemoryStore {
                 .build();
 
             match runtime {
-                Ok(rt) => rt.block_on(backend.recall(cue)),
+                Ok(rt) => rt.block_on(backend.recall(cue)).unwrap_or_default(),
                 Err(e) => {
                     tracing::warn!(error = ?e, "Failed to create runtime for tier search, falling back to in-memory");
                     return self.recall_in_memory(cue);
@@ -1230,22 +1243,12 @@ impl MemoryStore {
             }
         };
 
-        match tier_results {
-            Ok(results) => {
-                // If tier search succeeded, return those results
-                if !results.is_empty() {
-                    return results;
-                }
-
-                // If tier search returned no results, fallback to in-memory
-                tracing::debug!("Tier search returned no results, falling back to in-memory");
-                self.recall_in_memory(cue)
-            }
-            Err(e) => {
-                // On error, fallback to in-memory recall
-                tracing::warn!(error = ?e, "Tier search failed, falling back to in-memory");
-                self.recall_in_memory(cue)
-            }
+        // If tier search returned results, use them; otherwise fallback to in-memory
+        if tier_results.is_empty() {
+            tracing::debug!("Tier search returned no results, falling back to in-memory");
+            self.recall_in_memory(cue)
+        } else {
+            tier_results
         }
     }
 

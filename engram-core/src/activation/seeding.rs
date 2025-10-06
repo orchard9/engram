@@ -91,7 +91,6 @@ pub struct SeedingOutcome {
 pub struct VectorActivationSeeder {
     index: Arc<CognitiveHnswIndex>,
     config: SimilarityConfig,
-    mapper: SimdActivationMapper,
     aggregator: MultiCueAggregator,
     tier_resolver: Arc<dyn Fn(&str) -> ActivationTier + Send + Sync>,
 }
@@ -107,7 +106,6 @@ impl VectorActivationSeeder {
         Self {
             index,
             config,
-            mapper: SimdActivationMapper::new(),
             aggregator: MultiCueAggregator::new(),
             tier_resolver,
         }
@@ -204,7 +202,7 @@ impl VectorActivationSeeder {
             }
 
             let similarities: Vec<f32> = hits.iter().map(SearchResult::similarity).collect();
-            let activations = self.mapper.batch_sigmoid_activation(
+            let activations = SimdActivationMapper::batch_sigmoid_activation(
                 &similarities,
                 self.config.clamped_temperature(),
                 threshold_value,

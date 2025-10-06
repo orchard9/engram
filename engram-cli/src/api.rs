@@ -24,7 +24,7 @@ use utoipa::{IntoParams, ToSchema};
 use crate::grpc::MemoryService;
 use crate::openapi::create_swagger_ui;
 use engram_core::{
-    Confidence as CoreConfidence, MemoryStore, memory::EpisodeBuilder as CoreEpisodeBuilder,
+    Confidence as CoreConfidence, Cue as CoreCue, Episode, MemoryStore, memory::EpisodeBuilder as CoreEpisodeBuilder,
 };
 
 /// Shared application state
@@ -469,9 +469,9 @@ pub async fn remember_memory(
     };
 
     // Create memory object for response
-    let memory = Memory::new(memory_id.clone(), embedding_vec.clone())
+    let memory = Memory::new(memory_id.clone(), embedding_vec)
         .with_content(&request.content)
-        .with_confidence(confidence.clone())
+        .with_confidence(confidence)
         .with_type(memory_type);
 
     // Add tags if provided
@@ -482,7 +482,6 @@ pub async fn remember_memory(
     };
 
     // Store in MemoryStore as an episode
-    use engram_core::Episode;
     let episode = Episode::new(
         memory_id.clone(),
         Utc::now(),
@@ -592,7 +591,7 @@ pub async fn remember_episode(
         builder
     };
 
-    let builder = if let Some(participants) = request.who.clone() {
+    let builder = if let Some(participants) = request.who {
         builder.who(participants)
     } else {
         builder
@@ -617,15 +616,13 @@ pub async fn remember_episode(
             }
             .to_string(),
             reasoning: format!(
-                "Episodic memory stored with activation {:.2}, rich context aids consolidation",
-                actual_confidence
+                "Episodic memory stored with activation {actual_confidence:.2}, rich context aids consolidation"
             ),
         },
         consolidation_state: format!("{:?}", ConsolidationState::Recent),
         auto_links: vec![],
         system_message: format!(
-            "Episode '{episode_id}' successfully encoded with {:.2} activation. Rich episodes consolidate better over time.",
-            actual_confidence
+            "Episode '{episode_id}' successfully encoded with {actual_confidence:.2} activation. Rich episodes consolidate better over time."
         ),
     };
 
@@ -678,7 +675,6 @@ pub async fn recall_memories(
     };
 
     // Create search cue
-    use engram_core::Cue as CoreCue;
     let cue = if let Some(query) = &params.query {
         CoreCue::semantic(
             "http_query".to_string(),
@@ -979,6 +975,7 @@ pub async fn system_introspect(
 /// # Errors
 ///
 /// Returns `ApiError` if episode replay fails
+#[allow(clippy::implicit_hasher)]
 pub async fn replay_episodes(
     State(_state): State<ApiState>,
     Query(params): Query<HashMap<String, String>>,
@@ -1471,19 +1468,18 @@ pub async fn monitor_events(
 
     let event_types = params
         .event_types
-        .map(|types| {
-            types
-                .split(',')
-                .map(|t| t.trim().to_lowercase())
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_else(|| {
+        .map_or_else(|| {
             vec![
                 "activation".to_string(),
                 "formation".to_string(),
                 "decay".to_string(),
                 "spreading".to_string(),
             ]
+        }, |types| {
+            types
+                .split(',')
+                .map(|t| t.trim().to_lowercase())
+                .collect::<Vec<_>>()
         });
 
     let stream = create_monitoring_stream(
@@ -1560,19 +1556,18 @@ pub async fn monitor_causality(
 
     let operation_types = params
         .operation_types
-        .map(|types| {
-            types
-                .split(',')
-                .map(|t| t.trim().to_lowercase())
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_else(|| {
+        .map_or_else(|| {
             vec![
                 "remember".to_string(),
                 "recall".to_string(),
                 "consolidate".to_string(),
                 "activate".to_string(),
             ]
+        }, |types| {
+            types
+                .split(',')
+                .map(|t| t.trim().to_lowercase())
+                .collect::<Vec<_>>()
         });
 
     let stream = create_causality_monitoring_stream(

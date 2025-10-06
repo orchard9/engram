@@ -81,7 +81,7 @@ impl EngramService for MemoryService {
                 })?;
 
                 let confidence =
-                    CoreConfidence::exact(memory.confidence.map(|c| c.value).unwrap_or(0.7));
+                    CoreConfidence::exact(memory.confidence.map_or(0.7, |c| c.value));
 
                 // Create episode from memory
                 let episode = Episode::new(
@@ -107,17 +107,15 @@ impl EngramService for MemoryService {
                 let confidence = CoreConfidence::exact(
                     proto_episode
                         .encoding_confidence
-                        .map(|c| c.value)
-                        .unwrap_or(0.7),
+                        .map_or(0.7, |c| c.value),
                 );
 
                 let when = proto_episode
                     .when
-                    .map(|ts| {
+                    .map_or_else(chrono::Utc::now, |ts| {
                         chrono::DateTime::from_timestamp(ts.seconds, ts.nanos as u32)
                             .unwrap_or_else(chrono::Utc::now)
-                    })
-                    .unwrap_or_else(chrono::Utc::now);
+                    });
 
                 let episode =
                     Episode::new(id.clone(), when, proto_episode.what, embedding, confidence);
@@ -678,7 +676,8 @@ impl EngramService for MemoryService {
         let _store = Arc::clone(&self.store);
 
         tokio::spawn(async move {
-            let mut session_state = std::collections::HashMap::new();
+            #[allow(clippy::collection_is_never_read)]
+            let mut _session_state = std::collections::HashMap::new();
             let mut global_sequence = 0u64;
 
             while let Some(result) = stream.next().await {
@@ -743,7 +742,7 @@ impl EngramService for MemoryService {
                             }
                             Some(memory_flow_request::Request::Subscribe(sub_req)) => {
                                 // Handle subscription
-                                session_state.insert(session_id.clone(), sub_req);
+                                _session_state.insert(session_id.clone(), sub_req);
 
                                 let status = FlowStatus {
                                     state: flow_status::State::Active as i32,

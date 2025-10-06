@@ -1367,7 +1367,7 @@ mod tests {
 
         for (name, section) in sections {
             let content = OperationalDocs::get_section(section);
-            assert!(!content.is_empty(), "Section {} should not be empty", name);
+            assert!(!content.is_empty(), "Section {name} should not be empty");
         }
     }
 }

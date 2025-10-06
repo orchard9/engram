@@ -6,11 +6,9 @@
 #![allow(clippy::cast_sign_loss)]
 
 use engram_cli::grpc::MemoryService;
-use engram_core::graph::create_concurrent_graph;
 use engram_proto::engram_service_client::EngramServiceClient;
 use engram_proto::*;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tonic::Request;
 
 /// Start a test gRPC server and return the port

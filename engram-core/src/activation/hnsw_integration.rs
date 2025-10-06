@@ -58,6 +58,7 @@ impl HnswActivationEngine {
     }
 
     /// Spread activation from a source node through HNSW neighbors
+    #[must_use]
     pub fn spread_activation(
         &self,
         source_id: &NodeId,
@@ -148,6 +149,7 @@ impl HnswActivationEngine {
     }
 
     /// Query-based activation: activate nodes similar to query
+    #[must_use]
     pub fn activate_by_query(&self, query_embedding: &[f32; 768], k: usize) -> Vec<(NodeId, f32)> {
         // Search HNSW for similar nodes
         let search_results = self.search_similar(query_embedding, k);
@@ -158,12 +160,11 @@ impl HnswActivationEngine {
             let activation = result.confidence.raw();
 
             // Create or update activation record
-            let record = self
+            self
                 .activations
                 .entry(result.memory_id.clone())
-                .or_insert_with(|| ActivationRecord::new(result.memory_id.clone(), 0.1));
+                .or_insert_with(|| ActivationRecord::new(result.memory_id.clone(), 0.1)).accumulate_activation(activation);
 
-            record.accumulate_activation(activation);
             activated.push((result.memory_id, activation));
         }
 
@@ -189,6 +190,7 @@ impl HnswActivationEngine {
     }
 
     /// Get current activation levels for all nodes
+    #[must_use]
     pub fn get_activations(&self) -> Vec<(NodeId, f32)> {
         self.activations
             .iter()
@@ -223,10 +225,10 @@ pub struct HierarchicalActivation {
 
 impl HierarchicalActivation {
     /// Create hierarchical activation across HNSW layers
-    pub fn new(hnsw_graph: Arc<HnswGraph>, layer_coupling: f32) -> Self {
+    pub fn new(hnsw_graph: &Arc<HnswGraph>, layer_coupling: f32) -> Self {
         // Create an engine for each layer
         let layer_engines = vec![HnswActivationEngine::new(
-            hnsw_graph.clone(),
+            Arc::clone(hnsw_graph),
             SpreadingConfig::default(),
         )];
 
@@ -237,6 +239,7 @@ impl HierarchicalActivation {
     }
 
     /// Spread activation across all layers
+    #[must_use]
     pub fn spread_hierarchical(
         &self,
         source_id: &NodeId,
@@ -269,7 +272,7 @@ mod tests {
     #[test]
     fn test_spreading_config() {
         let config = SpreadingConfig::default();
-        assert_eq!(config.similarity_threshold, 0.5);
+        assert!((config.similarity_threshold - 0.5).abs() < f32::EPSILON);
         assert_eq!(config.max_hops, 3);
         assert!(config.use_hierarchical);
     }
@@ -287,7 +290,7 @@ mod tests {
         };
 
         // Verify config is set correctly
-        assert_eq!(config.similarity_threshold, 0.6);
-        assert_eq!(config.distance_decay, 0.9);
+        assert!((config.similarity_threshold - 0.6).abs() < f32::EPSILON);
+        assert!((config.distance_decay - 0.9).abs() < f32::EPSILON);
     }
 }

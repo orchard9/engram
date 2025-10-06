@@ -3,6 +3,7 @@
 //! Compares performance of async queue-based HNSW updates vs synchronous updates.
 
 #![cfg(feature = "hnsw_index")]
+#![allow(missing_docs)]
 
 use chrono::Utc;
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};

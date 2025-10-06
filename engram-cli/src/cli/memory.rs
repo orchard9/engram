@@ -17,7 +17,7 @@ pub fn print_memory_result(memory: &Value) {
         }
 
         if let Some(confidence) = obj.get("confidence").and_then(serde_json::Value::as_f64) {
-            let confidence_bar = "█".repeat((confidence * 10.0).max(0.0).min(10.0) as usize);
+            let confidence_bar = "█".repeat((confidence * 10.0).clamp(0.0, 10.0) as usize);
             println!(
                 "🎯 Confidence: {:.1}% {}",
                 confidence * 100.0,

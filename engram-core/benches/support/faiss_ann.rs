@@ -13,7 +13,7 @@ pub enum FaissIndexType {
     /// Flat exact search (baseline)
     FlatL2,
     /// HNSW approximate search
-    HNSW { m: usize },
+    Hnsw { m: usize },
     /// Inverted file with flat encoding
     IVFFlat { nlist: usize },
 }
@@ -44,13 +44,13 @@ impl FaissAnnIndex {
     /// * `dimension` - Vector dimensionality (768 for Engram)
     /// * `m` - Number of connections per node (typically 16-32)
     pub fn new_hnsw(dimension: usize, m: usize) -> Result<Self> {
-        let description = format!("HNSW{}", m);
+        let description = format!("HNSW{m}");
         let index = index_factory(dimension as u32, &description, MetricType::L2)?;
 
         Ok(Self {
             index: Box::new(index),
             dimension,
-            index_type: FaissIndexType::HNSW { m },
+            index_type: FaissIndexType::Hnsw { m },
         })
     }
 
@@ -61,7 +61,7 @@ impl FaissAnnIndex {
     /// * `nlist` - Number of clusters (typically sqrt(n) where n is dataset size)
     #[allow(dead_code)]
     pub fn new_ivf_flat(dimension: usize, nlist: usize) -> Result<Self> {
-        let description = format!("IVF{},Flat", nlist);
+        let description = format!("IVF{nlist},Flat");
         let index = index_factory(dimension as u32, &description, MetricType::L2)?;
 
         Ok(Self {
@@ -123,7 +123,7 @@ impl AnnIndex for FaissAnnIndex {
                 results
             }
             Err(e) => {
-                eprintln!("FAISS search failed: {:?}", e);
+                eprintln!("FAISS search failed: {e:?}");
                 Vec::new()
             }
         }
@@ -139,7 +139,7 @@ impl AnnIndex for FaissAnnIndex {
         // Index-specific overhead
         let overhead = match self.index_type {
             FaissIndexType::FlatL2 => 0,
-            FaissIndexType::HNSW { m } => {
+            FaissIndexType::Hnsw { m } => {
                 // HNSW stores M links per node, each link is ~8 bytes
                 n * m * 8
             }
@@ -155,7 +155,7 @@ impl AnnIndex for FaissAnnIndex {
     fn name(&self) -> &'static str {
         match self.index_type {
             FaissIndexType::FlatL2 => "FAISS-Flat",
-            FaissIndexType::HNSW { .. } => "FAISS-HNSW",
+            FaissIndexType::Hnsw { .. } => "FAISS-HNSW",
             FaissIndexType::IVFFlat { .. } => "FAISS-IVF",
         }
     }

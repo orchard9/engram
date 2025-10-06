@@ -6,7 +6,7 @@
 #![cfg(feature = "memory_mapped_persistence")]
 
 use chrono::Utc;
-use engram_core::{Confidence, Cue, CueBuilder, Episode, EpisodeBuilder, MemoryStore};
+use engram_core::{Confidence, CueBuilder, EpisodeBuilder, MemoryStore};
 use tempfile::TempDir;
 
 /// Test that memories can be stored and recalled across multiple tiers

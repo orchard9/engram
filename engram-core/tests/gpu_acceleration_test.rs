@@ -70,7 +70,7 @@ fn test_adaptive_engine_with_mock_gpu() {
     let values = result.unwrap();
     assert_eq!(values.len(), 10);
     // Mock GPU returns all 1.0 values
-    assert!(values.iter().all(|&v| v == 1.0));
+    assert!(values.iter().all(|&v| (v - 1.0).abs() < 1e-6));
 }
 
 #[test]

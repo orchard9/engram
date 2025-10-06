@@ -24,6 +24,7 @@ impl AnnoyAnnIndex {
     /// # Arguments
     /// * `dimension` - Vector dimensionality (must be 768)
     /// * `n_trees` - Number of trees (more trees = better recall but slower build, typically 10-100)
+    #[allow(clippy::unnecessary_wraps)]
     pub fn new(dimension: usize, n_trees: usize) -> Result<Self> {
         assert_eq!(dimension, 768, "Only 768-dim vectors supported");
 

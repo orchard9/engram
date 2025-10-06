@@ -389,6 +389,7 @@ async fn swagger_ui_asset(
     render_swagger(path, config)
 }
 
+#[allow(clippy::needless_pass_by_value)]
 fn render_swagger(path: String, config: Arc<Config<'static>>) -> impl IntoResponse {
     match utoipa_swagger_ui::serve(&path, config) {
         Ok(Some(file)) => (

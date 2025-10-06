@@ -235,7 +235,7 @@ impl RankedMemory {
         // Calculate final rank score combining all factors
         let mut rank_score = activation * confidence.raw();
         if let Some(sim) = similarity {
-            rank_score = (rank_score + sim) / 2.0;
+            rank_score = f32::midpoint(rank_score, sim);
         }
         rank_score *= recency_boost;
 
@@ -270,6 +270,7 @@ pub struct CognitiveRecall {
 
 impl CognitiveRecall {
     /// Create a new cognitive recall instance
+    #[must_use]
     pub fn new(
         vector_seeder: Arc<VectorActivationSeeder>,
         spreading_engine: Arc<ParallelSpreadingEngine>,
@@ -289,7 +290,7 @@ impl CognitiveRecall {
 
     /// Get the recall configuration
     #[must_use]
-    pub fn config(&self) -> &RecallConfig {
+    pub const fn config(&self) -> &RecallConfig {
         &self.config
     }
 
@@ -326,17 +327,17 @@ impl CognitiveRecall {
             warn!(target: "engram::recall", "Time budget exceeded during seeding");
             self.metrics.record_time_budget_violation();
             self.metrics.record_fallback();
-            return self.rank_seeded_results(seeded_activations, store);
+            return Ok(self.rank_seeded_results(seeded_activations, store));
         }
 
         // Step 2: Spread activation through graph
-        let spreading_results = match self.spread_activation(seeded_activations.clone()) {
+        let spreading_results = match self.spread_activation(&seeded_activations) {
             Ok(results) => results,
             Err(e) => {
                 error!(target: "engram::recall", error = ?e, "Spreading activation failed");
                 self.metrics.record_spreading_failure();
                 self.metrics.record_fallback();
-                return self.rank_seeded_results(seeded_activations, store);
+                return Ok(self.rank_seeded_results(seeded_activations, store));
             }
         };
 
@@ -345,11 +346,11 @@ impl CognitiveRecall {
             warn!(target: "engram::recall", "Time budget exceeded during spreading");
             self.metrics.record_time_budget_violation();
             self.metrics.record_fallback();
-            return self.rank_seeded_results(seeded_activations, store);
+            return Ok(self.rank_seeded_results(seeded_activations, store));
         }
 
         // Step 3: Aggregate confidence scores
-        let aggregated_results = self.aggregate_confidence(spreading_results, seeded_activations);
+        let aggregated_results = Self::aggregate_confidence(spreading_results, seeded_activations);
 
         // Step 4: Rank and filter results
         let ranked_results = self.rank_results(aggregated_results, store);
@@ -382,7 +383,7 @@ impl CognitiveRecall {
     /// Spread activation through the memory graph
     fn spread_activation(
         &self,
-        seeds: Vec<SeededActivation>,
+        seeds: &[SeededActivation],
     ) -> ActivationResult<HashMap<NodeId, (f32, Confidence)>> {
         // Convert seeds to format expected by spreading engine
         let seed_nodes: Vec<(NodeId, f32)> = seeds
@@ -423,7 +424,6 @@ impl CognitiveRecall {
     /// is designed for scenarios where multiple convergent paths with different characteristics
     /// arrive at the same node. Here we only have final activation and confidence values.
     fn aggregate_confidence(
-        &self,
         spreading_results: HashMap<NodeId, (f32, Confidence)>,
         seeds: Vec<SeededActivation>,
     ) -> Vec<(String, f32, Confidence, Option<f32>)> {
@@ -491,9 +491,9 @@ impl CognitiveRecall {
     ) -> ActivationResult<Vec<RankedMemory>> {
         // Use vector seeder to get similar memories without spreading
         let seeded_activations = self.seed_from_cue(cue).map_err(|e| {
-            ActivationError::InvalidConfig(format!("Seeding failed in fallback: {:?}", e))
+            ActivationError::InvalidConfig(format!("Seeding failed in fallback: {e:?}"))
         })?;
-        self.rank_seeded_results(seeded_activations, store)
+        Ok(self.rank_seeded_results(seeded_activations, store))
     }
 
     /// Rank seeded results without spreading
@@ -501,7 +501,7 @@ impl CognitiveRecall {
         &self,
         seeds: Vec<SeededActivation>,
         store: &MemoryStore,
-    ) -> ActivationResult<Vec<RankedMemory>> {
+    ) -> Vec<RankedMemory> {
         let mut ranked: Vec<RankedMemory> = seeds
             .into_iter()
             .filter_map(|seed| {
@@ -525,7 +525,7 @@ impl CognitiveRecall {
 
         ranked.truncate(self.config.max_results);
 
-        Ok(ranked)
+        ranked
     }
 }
 
@@ -547,6 +547,7 @@ impl Default for CognitiveRecallBuilder {
 
 impl CognitiveRecallBuilder {
     /// Create a new builder
+    #[must_use]
     pub fn new() -> Self {
         Self {
             vector_seeder: None,
@@ -559,49 +560,57 @@ impl CognitiveRecallBuilder {
     }
 
     /// Set the vector seeder
+    #[must_use]
     pub fn vector_seeder(mut self, seeder: Arc<VectorActivationSeeder>) -> Self {
         self.vector_seeder = Some(seeder);
         self
     }
 
     /// Set custom metrics instance
+    #[must_use]
     pub fn metrics(mut self, metrics: Arc<RecallMetrics>) -> Self {
         self.metrics = Some(metrics);
         self
     }
 
     /// Set the spreading engine
+    #[must_use]
     pub fn spreading_engine(mut self, engine: Arc<ParallelSpreadingEngine>) -> Self {
         self.spreading_engine = Some(engine);
         self
     }
 
     /// Set the confidence aggregator
+    #[must_use]
     pub fn confidence_aggregator(mut self, aggregator: Arc<ConfidenceAggregator>) -> Self {
         self.confidence_aggregator = Some(aggregator);
         self
     }
 
     /// Set the cycle detector
+    #[must_use]
     pub fn cycle_detector(mut self, detector: Arc<CycleDetector>) -> Self {
         self.cycle_detector = Some(detector);
         self
     }
 
     /// Set the recall configuration
-    pub fn config(mut self, config: RecallConfig) -> Self {
+    #[must_use]
+    pub const fn config(mut self, config: RecallConfig) -> Self {
         self.config = config;
         self
     }
 
     /// Set the recall mode
-    pub fn recall_mode(mut self, mode: RecallMode) -> Self {
+    #[must_use]
+    pub const fn recall_mode(mut self, mode: RecallMode) -> Self {
         self.config.recall_mode = mode;
         self
     }
 
     /// Set the time budget
-    pub fn time_budget(mut self, budget: Duration) -> Self {
+    #[must_use]
+    pub const fn time_budget(mut self, budget: Duration) -> Self {
         self.config.time_budget = budget;
         self
     }

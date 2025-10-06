@@ -2,13 +2,12 @@
 //!
 //! Validates P95 latency < 10ms requirement from Task 008 specification
 
+#![allow(missing_docs)]
+
 use chrono::Utc;
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use engram_core::{Confidence, Cue, EpisodeBuilder, MemoryStore};
 use std::time::Duration;
-
-#[cfg(feature = "hnsw_index")]
-use engram_core::activation::{RecallConfig, RecallMode};
 
 /// Generate a test embedding with deterministic values
 fn create_test_embedding(seed: usize) -> [f32; 768] {
@@ -25,9 +24,9 @@ fn create_test_store(episode_count: usize) -> MemoryStore {
 
     for i in 0..episode_count {
         let episode = EpisodeBuilder::new()
-            .id(format!("episode_{:05}", i))
+            .id(format!("episode_{i:05}"))
             .when(Utc::now())
-            .what(format!("Test episode {} content", i))
+            .what(format!("Test episode {i} content"))
             .embedding(create_test_embedding(i))
             .confidence(Confidence::HIGH)
             .build();
@@ -43,7 +42,7 @@ fn bench_similarity_recall(c: &mut Criterion) {
     let mut group = c.benchmark_group("recall_similarity");
     group.measurement_time(Duration::from_secs(10));
 
-    for size in [100, 1000, 10_000].iter() {
+    for size in &[100, 1000, 10_000] {
         let store = create_test_store(*size);
         let cue = Cue::embedding(
             "recall_cue".to_string(),
@@ -69,9 +68,9 @@ fn bench_result_limits(c: &mut Criterion) {
 
     let store = create_test_store(10_000);
 
-    for limit in [5, 10, 20, 50, 100].iter() {
+    for limit in &[5, 10, 20, 50, 100] {
         let cue = Cue::embedding(
-            format!("limit_cue_{}", limit),
+            format!("limit_cue_{limit}"),
             create_test_embedding(123),
             Confidence::HIGH,
         );

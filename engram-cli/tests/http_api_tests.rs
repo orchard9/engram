@@ -10,10 +10,8 @@ use axum::{
 };
 use chrono::Utc;
 use engram_cli::api::{ApiState, create_api_routes};
-use engram_core::graph::create_concurrent_graph;
 use serde_json::{Value, json};
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use tower::ServiceExt; // for `oneshot`
 
 /// Create test router with API routes
@@ -441,7 +439,7 @@ async fn test_confidence_levels_and_reasoning() {
 
         let returned_confidence = response["storage_confidence"]["value"].as_f64().unwrap();
         // Allow system to adjust confidence - verify it's in reasonable range
-        assert!(returned_confidence >= 0.0 && returned_confidence <= 1.0);
+        assert!((0.0..=1.0).contains(&returned_confidence));
         assert_eq!(
             response["storage_confidence"]["reasoning"]
                 .as_str()

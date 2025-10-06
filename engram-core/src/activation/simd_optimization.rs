@@ -18,7 +18,7 @@ impl ActivationBatch {
     #[must_use]
     pub fn new(capacity: usize) -> Self {
         // Round up to next multiple of LANES for alignment
-        let aligned_capacity = (capacity + LANES - 1) / LANES * LANES;
+        let aligned_capacity = capacity.div_ceil(LANES) * LANES;
         Self {
             embeddings: vec![[0.0; LANES]; TILE_DIM * aligned_capacity / LANES],
             count: 0,
@@ -36,10 +36,10 @@ impl ActivationBatch {
         let batch_offset = (self.count / LANES) * TILE_DIM;
 
         // Copy embedding into AoSoA layout
-        for dim in 0..768 {
+        for (dim, &value) in embedding.iter().enumerate() {
             let tile_idx = dim / LANES;
             let tile_offset = batch_offset + tile_idx;
-            self.embeddings[tile_offset][lane_idx] = embedding[dim];
+            self.embeddings[tile_offset][lane_idx] = value;
         }
 
         self.count += 1;
@@ -60,12 +60,12 @@ impl ActivationBatch {
 
     /// Get the capacity of this batch
     #[must_use]
-    pub fn capacity(&self) -> usize {
+    pub const fn capacity(&self) -> usize {
         self.embeddings.len() / TILE_DIM * LANES
     }
 
     /// Clear the batch for reuse
-    pub fn clear(&mut self) {
+    pub const fn clear(&mut self) {
         self.count = 0;
     }
 
@@ -79,10 +79,10 @@ impl ActivationBatch {
             let lane_idx = i % LANES;
             let batch_offset = (i / LANES) * TILE_DIM;
 
-            for dim in 0..768 {
+            for (dim, item) in embedding.iter_mut().enumerate() {
                 let tile_idx = dim / LANES;
                 let tile_offset = batch_offset + tile_idx;
-                embedding[dim] = self.embeddings[tile_offset][lane_idx];
+                *item = self.embeddings[tile_offset][lane_idx];
             }
 
             result.push(embedding);
@@ -114,7 +114,7 @@ impl ActivationBatch {
 
 /// Determines if SIMD should be used based on storage tier and batch size
 #[must_use]
-pub fn should_use_simd_for_tier(
+pub const fn should_use_simd_for_tier(
     tier: crate::activation::storage_aware::StorageTier,
     batch_size: usize,
     min_batch_size: usize,
@@ -153,7 +153,6 @@ impl SimdActivationMapper {
     /// Uses SIMD when available for better performance.
     #[must_use]
     pub fn batch_sigmoid_activation(
-        self,
         similarities: &[f32],
         temperature: f32,
         threshold: f32,
@@ -180,7 +179,6 @@ impl SimdActivationMapper {
     /// Fused multiply-add for confidence aggregation with SIMD acceleration.
     /// Computes: activations[i] = activations[i] + confidence_weights[i] * path_confidence
     pub fn fma_confidence_aggregate(
-        &self,
         activations: &mut [f32],
         confidence_weights: &[f32],
         path_confidence: f32,
@@ -374,9 +372,8 @@ mod tests {
 
     #[test]
     fn sigmoid_mapping_produces_bounded_values() {
-        let mapper = SimdActivationMapper::new();
         let sims = vec![-0.5, 0.0, 0.4, 0.9, 1.2, -0.2, 0.7, 0.3, 0.8];
-        let activations = mapper.batch_sigmoid_activation(&sims, 0.5, 0.1);
+        let activations = SimdActivationMapper::batch_sigmoid_activation(&sims, 0.5, 0.1);
         assert_eq!(activations.len(), sims.len());
         for value in activations {
             assert!((0.0..=1.0).contains(&value), "value {value} out of bounds");

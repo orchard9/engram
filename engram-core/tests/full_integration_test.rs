@@ -187,7 +187,7 @@ fn test_pattern_completion() {
     reconstructor.add_episodes(&[base_episode.clone(), alt_episode.clone()]);
     reconstructor.add_memories(vec![
         Memory::from_episode(base_episode.clone(), 0.9),
-        Memory::from_episode(alt_episode.clone(), 0.8),
+        Memory::from_episode(alt_episode, 0.8),
     ]);
 
     let partial = PartialEpisode {
@@ -198,7 +198,7 @@ fn test_pattern_completion() {
             .map(|value| Some(*value))
             .collect(),
         cue_strength: Confidence::exact(0.7),
-        temporal_context: vec![base_episode.id.clone()],
+        temporal_context: vec![base_episode.id],
     };
 
     let completed = reconstructor

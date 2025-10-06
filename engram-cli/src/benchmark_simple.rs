@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 /// # Panics
 ///
 /// Panics if temporary directory path cannot be converted to string
-pub fn run_benchmark(repo_url: String, use_release: bool, verbose: bool) -> Result<bool> {
+pub fn run_benchmark(repo_url: &str, use_release: bool, verbose: bool) -> Result<bool> {
     println!("🚀 Engram Startup Benchmark");
     println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     println!("Target: Git clone to operational in <60 seconds");
@@ -40,7 +40,7 @@ pub fn run_benchmark(repo_url: String, use_release: bool, verbose: bool) -> Resu
         .args([
             "clone",
             "--depth=1",
-            &repo_url,
+            repo_url,
             temp_dir
                 .to_str()
                 .expect("temp dir path should be valid UTF-8"),
@@ -234,7 +234,7 @@ pub fn run_benchmark(repo_url: String, use_release: bool, verbose: bool) -> Resu
 ///
 /// Panics if script path cannot be converted to string
 pub fn run_with_hyperfine(
-    repo_url: String,
+    repo_url: &str,
     warmup_runs: u32,
     benchmark_runs: u32,
     use_release: bool,
@@ -331,7 +331,7 @@ fn print_phase(title: &str) {
 
 fn print_timing(phase: &str, duration: Duration, total: Duration) {
     let percentage = (duration.as_secs_f64() / total.as_secs_f64()) * 100.0;
-    let bar_length = (percentage / 2.0).max(0.0).min(50.0) as usize;
+    let bar_length = (percentage / 2.0).clamp(0.0, 50.0) as usize;
     let bar = "█".repeat(bar_length.min(50));
 
     println!(

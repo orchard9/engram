@@ -259,7 +259,7 @@ struct TierQueue {
 }
 
 impl TierQueue {
-    fn new(
+    const fn new(
         tier: StorageTier,
         timeout: Duration,
         max_in_flight: usize,
@@ -380,11 +380,7 @@ impl TierQueue {
 
         // Check deterministic buffer if in deterministic mode
         let has_buffer_tasks = if self.deterministic {
-            if let Ok(buffer) = self.deterministic_buffer.lock() {
-                !buffer.is_empty()
-            } else {
-                false
-            }
+            self.deterministic_buffer.lock().is_ok_and(|buffer| !buffer.is_empty())
         } else {
             false
         };

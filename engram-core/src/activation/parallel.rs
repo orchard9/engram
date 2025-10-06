@@ -50,7 +50,7 @@ pub struct PhaseBarrier {
 }
 
 impl PhaseBarrier {
-    fn new(worker_count: usize) -> Self {
+    const fn new(worker_count: usize) -> Self {
         Self {
             worker_count: AtomicUsize::new(worker_count),
             phase_counter: AtomicU64::new(0),
@@ -121,7 +121,7 @@ struct TierTaskGuard<'a> {
 }
 
 impl<'a> TierTaskGuard<'a> {
-    fn new(scheduler: &'a TierAwareSpreadingScheduler, tier: StorageTier) -> Self {
+    const fn new(scheduler: &'a TierAwareSpreadingScheduler, tier: StorageTier) -> Self {
         Self {
             scheduler,
             tier,
@@ -223,7 +223,7 @@ impl ParallelSpreadingEngine {
             };
 
             let handle = thread::Builder::new()
-                .name(format!("activation-worker-{}", worker_id))
+                .name(format!("activation-worker-{worker_id}"))
                 .spawn(move || {
                     Self::worker_main(context);
                 })
@@ -236,7 +236,7 @@ impl ParallelSpreadingEngine {
     }
 
     /// Determine if batch spreading should be used for this set of neighbors
-    fn should_use_batch_spreading(
+    const fn should_use_batch_spreading(
         context: &WorkerContext,
         neighbors: &[WeightedEdge],
         tier: StorageTier,
@@ -261,13 +261,10 @@ impl ParallelSpreadingEngine {
         use crate::compute::cosine_similarity_batch_768;
 
         // Get current node's embedding from the graph
-        let current_embedding = match context.memory_graph.get_embedding(&task.target_node) {
-            Some(emb) => emb,
-            None => {
-                // No embedding for current node, fallback to scalar
-                Self::fallback_to_scalar(context, task, record, neighbors, next_tier, decay_factor);
-                return;
-            }
+        let Some(current_embedding) = context.memory_graph.get_embedding(&task.target_node) else {
+            // No embedding for current node, fallback to scalar
+            Self::fallback_to_scalar(context, task, record, neighbors, next_tier, decay_factor);
+            return;
         };
 
         // Collect neighbor embeddings from the graph
@@ -286,10 +283,9 @@ impl ParallelSpreadingEngine {
         let similarities = cosine_similarity_batch_768(&current_embedding, &neighbor_embeddings);
 
         // Convert similarities to activations using SIMD
-        let mapper = SimdActivationMapper::new();
         let temperature = 0.5; // From config
         let threshold = context.config.threshold;
-        let activations = mapper.batch_sigmoid_activation(&similarities, temperature, threshold);
+        let activations = SimdActivationMapper::batch_sigmoid_activation(&similarities, temperature, threshold);
 
         // Create tasks with computed activations
         for (idx, edge) in neighbors.iter().enumerate() {
@@ -340,6 +336,7 @@ impl ParallelSpreadingEngine {
     }
 
     /// Main worker thread execution loop
+    #[allow(clippy::needless_pass_by_value)] // Context is moved into thread closure
     fn worker_main(context: WorkerContext) {
         while !context.shutdown_signal.load(Ordering::Relaxed) {
             if let Some(task) = context.scheduler.next_task() {
@@ -639,8 +636,7 @@ impl ParallelSpreadingEngine {
             let deadline_missed = snapshot
                 .tiers
                 .get(&tier)
-                .map(|state| state.deadline_missed)
-                .unwrap_or(false);
+                .is_some_and(|state| state.deadline_missed);
 
             let average = if acc.node_count > 0 {
                 acc.confidence_sum / acc.node_count as f32
@@ -679,6 +675,7 @@ impl ParallelSpreadingEngine {
     }
 
     /// Get current activation levels for all nodes
+    #[must_use]
     pub fn get_activations(&self) -> Vec<(NodeId, f32)> {
         self.activation_records
             .iter()
@@ -687,6 +684,7 @@ impl ParallelSpreadingEngine {
     }
 
     /// Get nodes with activation above threshold
+    #[must_use]
     pub fn get_active_nodes(&self, threshold: f32) -> Vec<(NodeId, f32)> {
         self.activation_records
             .iter()
@@ -702,6 +700,7 @@ impl ParallelSpreadingEngine {
     }
 
     /// Get performance metrics
+    #[must_use]
     pub fn get_metrics(&self) -> &SpreadingMetrics {
         &self.metrics
     }
@@ -734,9 +733,11 @@ impl Drop for ParallelSpreadingEngine {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::activation::{ActivationGraphExt, EdgeType, create_activation_graph};
+    use serial_test::serial;
     use std::collections::HashMap;
     use std::time::Duration;
 
@@ -771,9 +772,9 @@ mod tests {
         let embedding_b = [0.2f32; 768];
         let embedding_c = [0.3f32; 768];
 
-        ActivationGraphExt::set_embedding(&*graph, &"A".to_string(), embedding_a);
-        ActivationGraphExt::set_embedding(&*graph, &"B".to_string(), embedding_b);
-        ActivationGraphExt::set_embedding(&*graph, &"C".to_string(), embedding_c);
+        ActivationGraphExt::set_embedding(&*graph, &"A".to_string(), &embedding_a);
+        ActivationGraphExt::set_embedding(&*graph, &"B".to_string(), &embedding_b);
+        ActivationGraphExt::set_embedding(&*graph, &"C".to_string(), &embedding_c);
 
         // Fix 2: Diagnostic verification of edge addition
         let neighbors_a = ActivationGraphExt::get_neighbors(&*graph, &"A".to_string());
@@ -781,7 +782,7 @@ mod tests {
             neighbors_a.is_some(),
             "Node A should have neighbors after adding edges"
         );
-        let neighbors_a = neighbors_a.unwrap();
+        let neighbors_a = neighbors_a.expect("node A should have neighbors");
         assert_eq!(
             neighbors_a.len(),
             2,
@@ -793,7 +794,7 @@ mod tests {
             neighbors_b.is_some(),
             "Node B should have neighbors after adding edges"
         );
-        let neighbors_b = neighbors_b.unwrap();
+        let neighbors_b = neighbors_b.expect("node B should have neighbors");
         assert_eq!(
             neighbors_b.len(),
             1,
@@ -816,15 +817,16 @@ mod tests {
         };
 
         let graph = create_test_graph();
-        let engine = ParallelSpreadingEngine::new(config, graph).unwrap();
+        let engine = ParallelSpreadingEngine::new(config, graph).expect("engine creation should succeed");
 
         assert!(engine.scheduler.is_idle());
         assert!(!engine.shutdown_signal.load(Ordering::Relaxed));
 
-        engine.shutdown().unwrap();
+        engine.shutdown().expect("shutdown should succeed");
     }
 
     #[test]
+    #[serial(parallel_engine)]
     fn test_activation_spreading() {
         let config = ParallelSpreadingConfig {
             num_threads: 2,
@@ -834,11 +836,11 @@ mod tests {
         };
 
         let graph = create_test_graph();
-        let engine = ParallelSpreadingEngine::new(config, graph).unwrap();
+        let engine = ParallelSpreadingEngine::new(config, graph).expect("engine creation should succeed");
 
         // Spread activation from node A
         let seed_activations = vec![("A".to_string(), 1.0)];
-        let results = engine.spread_activation(&seed_activations).unwrap();
+        let results = engine.spread_activation(&seed_activations).expect("spread should succeed");
 
         assert!(!results.activations.is_empty());
         let hot_summary = results
@@ -852,9 +854,9 @@ mod tests {
             .find(|activation| activation.memory_id == "A")
             .map(|activation| activation.activation_level.load(Ordering::Relaxed));
         assert!(node_a_activation.is_some());
-        assert!(node_a_activation.unwrap() >= 1.0);
+        assert!(node_a_activation.expect("activation should exist") >= 1.0);
 
-        engine.shutdown().unwrap();
+        engine.shutdown().expect("shutdown should succeed");
     }
 
     #[test]
@@ -865,13 +867,13 @@ mod tests {
         let graph1 = create_test_graph();
         let graph2 = create_test_graph();
 
-        let engine1 = ParallelSpreadingEngine::new(config1, graph1).unwrap();
-        let engine2 = ParallelSpreadingEngine::new(config2, graph2).unwrap();
+        let engine1 = ParallelSpreadingEngine::new(config1, graph1).expect("engine1 creation should succeed");
+        let engine2 = ParallelSpreadingEngine::new(config2, graph2).expect("engine2 creation should succeed");
 
         let seed_activations = vec![("A".to_string(), 1.0)];
 
-        let results1 = engine1.spread_activation(&seed_activations).unwrap();
-        let results2 = engine2.spread_activation(&seed_activations).unwrap();
+        let results1 = engine1.spread_activation(&seed_activations).expect("spread1 should succeed");
+        let results2 = engine2.spread_activation(&seed_activations).expect("spread2 should succeed");
 
         let mut activations1: Vec<_> = results1
             .activations
@@ -910,11 +912,12 @@ mod tests {
             results2.deterministic_trace.len()
         );
 
-        engine1.shutdown().unwrap();
-        engine2.shutdown().unwrap();
+        engine1.shutdown().expect("shutdown1 should succeed");
+        engine2.shutdown().expect("shutdown2 should succeed");
     }
 
     #[test]
+    #[serial(parallel_engine)]
     fn test_deterministic_across_thread_counts() {
         let seed_activations = vec![("A".to_string(), 1.0)];
 
@@ -924,8 +927,8 @@ mod tests {
             ..ParallelSpreadingConfig::deterministic(123)
         };
         let graph1 = create_test_graph();
-        let engine1 = ParallelSpreadingEngine::new(config1, graph1).unwrap();
-        let results1 = engine1.spread_activation(&seed_activations).unwrap();
+        let engine1 = ParallelSpreadingEngine::new(config1, graph1).expect("engine1 should succeed");
+        let results1 = engine1.spread_activation(&seed_activations).expect("spread1 should succeed");
 
         // Run with 2 threads
         let config2 = ParallelSpreadingConfig {
@@ -933,8 +936,8 @@ mod tests {
             ..ParallelSpreadingConfig::deterministic(123)
         };
         let graph2 = create_test_graph();
-        let engine2 = ParallelSpreadingEngine::new(config2, graph2).unwrap();
-        let results2 = engine2.spread_activation(&seed_activations).unwrap();
+        let engine2 = ParallelSpreadingEngine::new(config2, graph2).expect("engine2 should succeed");
+        let results2 = engine2.spread_activation(&seed_activations).expect("spread2 should succeed");
 
         // Run with 4 threads
         let config3 = ParallelSpreadingConfig {
@@ -942,8 +945,8 @@ mod tests {
             ..ParallelSpreadingConfig::deterministic(123)
         };
         let graph3 = create_test_graph();
-        let engine3 = ParallelSpreadingEngine::new(config3, graph3).unwrap();
-        let results3 = engine3.spread_activation(&seed_activations).unwrap();
+        let engine3 = ParallelSpreadingEngine::new(config3, graph3).expect("engine3 should succeed");
+        let results3 = engine3.spread_activation(&seed_activations).expect("spread3 should succeed");
 
         // Compare results
         let mut act1: Vec<_> = results1
@@ -999,19 +1002,20 @@ mod tests {
             );
         }
 
-        engine1.shutdown().unwrap();
-        engine2.shutdown().unwrap();
-        engine3.shutdown().unwrap();
+        engine1.shutdown().expect("shutdown1 should succeed");
+        engine2.shutdown().expect("shutdown2 should succeed");
+        engine3.shutdown().expect("shutdown3 should succeed");
     }
 
     #[test]
+    #[serial(parallel_engine)]
     fn test_deterministic_trace_capture() {
         let config = ParallelSpreadingConfig::deterministic(999);
         let graph = create_test_graph();
-        let engine = ParallelSpreadingEngine::new(config, graph).unwrap();
+        let engine = ParallelSpreadingEngine::new(config, graph).expect("engine should succeed");
 
         let seed_activations = vec![("A".to_string(), 1.0)];
-        let results = engine.spread_activation(&seed_activations).unwrap();
+        let results = engine.spread_activation(&seed_activations).expect("spread should succeed");
 
         // Verify trace was captured
         assert!(!results.deterministic_trace.is_empty());
@@ -1022,7 +1026,7 @@ mod tests {
             assert!(entry.confidence >= 0.0 && entry.confidence <= 1.0);
         }
 
-        engine.shutdown().unwrap();
+        engine.shutdown().expect("shutdown should succeed");
     }
 
     #[test]
@@ -1056,6 +1060,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(parallel_engine)]
     fn test_metrics_tracking() {
         let config = ParallelSpreadingConfig {
             num_threads: 4,
@@ -1064,10 +1069,10 @@ mod tests {
         };
 
         let graph = create_test_graph();
-        let engine = ParallelSpreadingEngine::new(config, graph).unwrap();
+        let engine = ParallelSpreadingEngine::new(config, graph).expect("engine should succeed");
 
         let seed_activations = vec![("A".to_string(), 1.0)];
-        let results = engine.spread_activation(&seed_activations).unwrap();
+        let results = engine.spread_activation(&seed_activations).expect("spread should succeed");
 
         let metrics = engine.get_metrics();
         assert!(metrics.total_activations.load(Ordering::Relaxed) > 0);
@@ -1076,10 +1081,11 @@ mod tests {
             .expect("hot tier summary available");
         assert!(hot_summary.total_activation > 0.0);
 
-        engine.shutdown().unwrap();
+        engine.shutdown().expect("shutdown should succeed");
     }
 
     #[test]
+    #[serial(parallel_engine)]
     fn test_threshold_filtering() {
         let config = ParallelSpreadingConfig {
             num_threads: 2,
@@ -1089,20 +1095,21 @@ mod tests {
         };
 
         let graph = create_test_graph();
-        let engine = ParallelSpreadingEngine::new(config, graph).unwrap();
+        let engine = ParallelSpreadingEngine::new(config, graph).expect("engine should succeed");
 
         let seed_activations = vec![("A".to_string(), 0.3)]; // Low seed
-        let results = engine.spread_activation(&seed_activations).unwrap();
+        let results = engine.spread_activation(&seed_activations).expect("spread should succeed");
 
         let active_nodes = engine.get_active_nodes(0.5);
         // Should have fewer nodes due to high threshold
         assert!(active_nodes.len() <= 1);
         assert!(results.activations.len() >= active_nodes.len());
 
-        engine.shutdown().unwrap();
+        engine.shutdown().expect("shutdown should succeed");
     }
 
     #[test]
+    #[serial(parallel_engine)]
     fn cycle_detection_penalises_revisits() {
         let config = ParallelSpreadingConfig {
             num_threads: 1,
@@ -1117,8 +1124,6 @@ mod tests {
             trace_activation_flow: true, // Enable tracing
             ..Default::default()
         };
-
-        use crate::activation::{ActivationGraphExt, create_activation_graph};
 
         let graph = Arc::new(create_activation_graph());
         ActivationGraphExt::add_edge(
@@ -1136,9 +1141,9 @@ mod tests {
             EdgeType::Excitatory,
         );
 
-        let engine = ParallelSpreadingEngine::new(config, graph).unwrap();
+        let engine = ParallelSpreadingEngine::new(config, graph).expect("engine should succeed");
         let seed_activations = vec![("A".to_string(), 1.0)];
-        let results = engine.spread_activation(&seed_activations).unwrap();
+        let results = engine.spread_activation(&seed_activations).expect("spread should succeed");
 
         assert!(
             !results.cycle_paths.is_empty(),
@@ -1153,8 +1158,7 @@ mod tests {
         let tier_cycle_count = engine.metrics.cycle_count_for_tier(StorageTier::Warm);
         assert!(
             tier_cycle_count > 0,
-            "Expected tier cycle count > 0, got {}",
-            tier_cycle_count
+            "Expected tier cycle count > 0, got {tier_cycle_count}"
         );
 
         // The cycle is detected on the second visit to B, so B should have the penalty
@@ -1166,11 +1170,10 @@ mod tests {
             .unwrap_or_default();
         assert!(
             activation_b > 0.0 && activation_b < 0.5,
-            "Expected activation penalty to be applied to B, got {}",
-            activation_b
+            "Expected activation penalty to be applied to B, got {activation_b}"
         );
 
-        engine.shutdown().unwrap();
+        engine.shutdown().expect("shutdown should succeed");
     }
 
     #[test]
@@ -1192,7 +1195,7 @@ mod tests {
 
         // Wait for all threads to complete
         for handle in handles {
-            handle.join().unwrap();
+            handle.join().expect("thread should complete");
         }
 
         assert_eq!(barrier_arc.phase_counter.load(Ordering::Relaxed), 1);

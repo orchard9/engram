@@ -765,7 +765,7 @@ pub trait ActivationGraphExt {
     fn edge_count(&self) -> usize;
 
     /// Store embedding for a node
-    fn set_embedding(&self, node_id: &NodeId, embedding: [f32; 768]);
+    fn set_embedding(&self, node_id: &NodeId, embedding: &[f32; 768]);
 
     /// Retrieve embedding for a node
     fn get_embedding(&self, node_id: &NodeId) -> Option<[f32; 768]>;
@@ -779,8 +779,8 @@ impl ActivationGraphExt for ActivationGraph {
         let target_id = Uuid::new_v5(&Uuid::NAMESPACE_OID, target.as_bytes());
 
         // Store reverse mappings for NodeId recovery in instance storage
-        self.uuid_mappings.insert(source_id, source.clone());
-        self.uuid_mappings.insert(target_id, target.clone());
+        self.uuid_mappings.insert(source_id, source);
+        self.uuid_mappings.insert(target_id, target);
 
         // Add edge using the UnifiedMemoryGraph's add_edge method
         let _ = self.graph.add_edge(source_id, target_id, weight);
@@ -800,8 +800,7 @@ impl ActivationGraphExt for ActivationGraph {
                     let target = self
                         .uuid_mappings
                         .get(&neighbor_id)
-                        .map(|entry| entry.value().clone())
-                        .unwrap_or_else(|| neighbor_id.to_string());
+                        .map_or_else(|| neighbor_id.to_string(), |entry| entry.value().clone());
 
                     WeightedEdge {
                         target,
@@ -822,8 +821,8 @@ impl ActivationGraphExt for ActivationGraph {
         self.graph.all_edges().map_or(0, |edges| edges.len())
     }
 
-    fn set_embedding(&self, node_id: &NodeId, embedding: [f32; 768]) {
-        self.embeddings.insert(node_id.clone(), embedding);
+    fn set_embedding(&self, node_id: &NodeId, embedding: &[f32; 768]) {
+        self.embeddings.insert(node_id.clone(), *embedding);
     }
 
     fn get_embedding(&self, node_id: &NodeId) -> Option<[f32; 768]> {
@@ -832,6 +831,7 @@ impl ActivationGraphExt for ActivationGraph {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::storage_aware::StorageTier;
     use super::{ActivationGraphExt, create_activation_graph};
@@ -843,17 +843,17 @@ mod tests {
         let embedding = [0.5f32; 768];
 
         // Store embedding
-        graph.set_embedding(&node_id, embedding);
+        graph.set_embedding(&node_id, &embedding);
 
         // Retrieve embedding
         let retrieved = graph.get_embedding(&node_id);
         assert!(retrieved.is_some(), "Embedding should be retrievable");
 
-        let retrieved_embedding = retrieved.unwrap();
+        let retrieved_embedding = retrieved.expect("embedding should exist");
         for (i, (&expected, &actual)) in
             embedding.iter().zip(retrieved_embedding.iter()).enumerate()
         {
-            assert_eq!(expected, actual, "Mismatch at index {}", i);
+            assert!((expected - actual).abs() < f32::EPSILON, "Mismatch at index {i}");
         }
     }
 
@@ -873,15 +873,15 @@ mod tests {
 
         // Store initial embedding
         let embedding1 = [1.0f32; 768];
-        graph.set_embedding(&node_id, embedding1);
+        graph.set_embedding(&node_id, &embedding1);
 
         // Update with new embedding
         let embedding2 = [2.0f32; 768];
-        graph.set_embedding(&node_id, embedding2);
+        graph.set_embedding(&node_id, &embedding2);
 
         // Verify updated embedding
-        let retrieved = graph.get_embedding(&node_id).unwrap();
-        assert_eq!(retrieved[0], 2.0, "Embedding should be updated");
+        let retrieved = graph.get_embedding(&node_id).expect("embedding should exist");
+        assert!((retrieved[0] - 2.0).abs() < f32::EPSILON, "Embedding should be updated");
     }
 
     #[test]
@@ -890,20 +890,19 @@ mod tests {
 
         // Store embeddings for multiple nodes
         for i in 0..10 {
-            let node_id = format!("node_{}", i);
+            let node_id = format!("node_{i}");
             let mut embedding = [0.0f32; 768];
             embedding[0] = i as f32;
-            graph.set_embedding(&node_id, embedding);
+            graph.set_embedding(&node_id, &embedding);
         }
 
         // Verify all embeddings
         for i in 0..10 {
-            let node_id = format!("node_{}", i);
-            let retrieved = graph.get_embedding(&node_id).unwrap();
-            assert_eq!(
-                retrieved[0], i as f32,
-                "Embedding for node_{} should match",
-                i
+            let node_id = format!("node_{i}");
+            let retrieved = graph.get_embedding(&node_id).expect("embedding should exist");
+            assert!(
+                (retrieved[0] - i as f32).abs() < f32::EPSILON,
+                "Embedding for node_{i} should match"
             );
         }
     }

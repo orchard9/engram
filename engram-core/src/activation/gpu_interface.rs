@@ -204,8 +204,6 @@ pub trait GPUSpreadingInterface: Send + Sync {
 pub struct CpuFallback {
     /// Capabilities for CPU processing
     capabilities: GpuCapabilities,
-    /// SIMD mapper for batch operations
-    simd_mapper: SimdActivationMapper,
 }
 
 impl CpuFallback {
@@ -218,12 +216,11 @@ impl CpuFallback {
                 unified_memory: true,
                 device_name: "CPU_SIMD_FALLBACK".to_string(),
             },
-            simd_mapper: SimdActivationMapper::new(),
         }
     }
 
     /// Process batch using SIMD operations
-    fn process_batch(&self, batch: &GPUActivationBatch) -> Vec<f32> {
+    fn process_batch(batch: &GPUActivationBatch) -> Vec<f32> {
         if batch.is_empty() {
             return Vec::new();
         }
@@ -236,7 +233,7 @@ impl CpuFallback {
             .collect::<Vec<_>>();
 
         // Apply sigmoid activation mapping
-        self.simd_mapper.batch_sigmoid_activation(
+        SimdActivationMapper::batch_sigmoid_activation(
             &similarities,
             batch.meta.temperature,
             batch.meta.threshold,
@@ -261,7 +258,7 @@ impl GPUSpreadingInterface for CpuFallback {
 
     fn launch(&self, batch: &GPUActivationBatch) -> GpuLaunchFuture {
         // Synchronous CPU processing wrapped in future
-        let result = self.process_batch(batch);
+        let result = Self::process_batch(batch);
         GpuLaunchFuture::ready(result)
     }
 }
@@ -359,7 +356,7 @@ impl AdaptiveSpreadingEngine {
             self.gpu_available_cached = Some(
                 self.gpu_interface
                     .as_ref()
-                    .map_or(false, |gpu| gpu.is_available()),
+                    .is_some_and(|gpu| gpu.is_available()),
             );
 
             // Warm up GPU context if available
@@ -383,7 +380,7 @@ impl AdaptiveSpreadingEngine {
         }
 
         // Fall back to CPU SIMD
-        Ok(self.cpu_fallback.process_batch(batch))
+        Ok(CpuFallback::process_batch(batch))
     }
 
     /// Get the current processing backend name
@@ -420,6 +417,7 @@ fn compute_cosine_similarity(a: &[f32; 768], b: &[f32; 768]) -> f32 {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
 
@@ -442,8 +440,8 @@ mod tests {
         batch.add_target(&target, 0.7, 0.8);
         assert!(!batch.is_empty());
         assert_eq!(batch.size(), 1);
-        assert_eq!(batch.activations[0], 0.7);
-        assert_eq!(batch.confidences[0], 0.8);
+        assert!((batch.activations[0] - 0.7).abs() < f32::EPSILON);
+        assert!((batch.confidences[0] - 0.8).abs() < f32::EPSILON);
 
         batch.clear();
         assert!(batch.is_empty());
@@ -465,7 +463,7 @@ mod tests {
         let future = fallback.launch(&batch);
         // In real async context, this would be awaited
         // For now, we just verify it's created successfully
-        assert!(matches!(future.result, Some(_)));
+        assert!(future.result.is_some());
     }
 
     #[test]
@@ -524,8 +522,8 @@ mod tests {
         let target = [0.5; 768];
         batch.add_target(&target, 0.7, 0.8);
 
-        let result = engine.spread(&batch).await.unwrap();
+        let result = engine.spread(&batch).await.expect("spread should succeed");
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0], 1.0); // Mock GPU returns 1.0
+        assert!((result[0] - 1.0).abs() < f32::EPSILON); // Mock GPU returns 1.0
     }
 }

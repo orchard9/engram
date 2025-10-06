@@ -74,8 +74,7 @@ fn test_auto_tune_returns_valid_batch_size() {
     // Should return one of the tested sizes
     assert!(
         [8, 16, 32].contains(&optimal_size),
-        "Auto-tuned size {} not in valid range",
-        optimal_size
+        "Auto-tuned size {optimal_size} not in valid range"
     );
 }
 
@@ -163,13 +162,12 @@ fn test_batch_spreading_with_parallel_engine() {
     assert!(!results.activations.is_empty());
 
     // Should have activated node A at minimum
-    let node_a: Vec<_> = results
+    let has_node_a = results
         .activations
         .iter()
-        .filter(|a| a.memory_id == "A")
-        .collect();
+        .any(|a| a.memory_id == "A");
 
-    assert!(!node_a.is_empty(), "Should have activated node A");
+    assert!(has_node_a, "Should have activated node A");
 
     // Note: B nodes may not be activated because SIMD batch processing falls back
     // to scalar path when embeddings are not available in the graph.
@@ -193,11 +191,11 @@ fn test_simd_batch_spreading_with_embeddings() {
     }
 
     // Set embedding for node A
-    graph.set_embedding(&"A".to_string(), embedding_a);
+    graph.set_embedding(&"A".to_string(), &embedding_a);
 
     // Add 8 neighbors with similar but distinct embeddings
     for i in 1..=8 {
-        let node_id = format!("B{}", i);
+        let node_id = format!("B{i}");
 
         // Create similar embedding with slight variations
         let mut embedding = embedding_a;
@@ -205,7 +203,7 @@ fn test_simd_batch_spreading_with_embeddings() {
             *val += (i as f32 * 0.001) * (j as f32).cos();
         }
 
-        graph.set_embedding(&node_id, embedding);
+        graph.set_embedding(&node_id, &embedding);
 
         ActivationGraphExt::add_edge(&*graph, "A".to_string(), node_id, 0.5, EdgeType::Excitatory);
     }

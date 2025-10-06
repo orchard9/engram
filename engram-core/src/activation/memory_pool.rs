@@ -32,13 +32,13 @@ impl MemoryChunk {
         }
     }
 
-    fn reset(&mut self) {
+    const fn reset(&mut self) {
         self.used = 0;
         // Optionally clear memory for security
         // self.data.fill(0);
     }
 
-    fn has_space(&self, size: usize) -> bool {
+    const fn has_space(&self, size: usize) -> bool {
         self.used + size <= self.data.len()
     }
 
@@ -55,6 +55,7 @@ impl MemoryChunk {
 
 impl ActivationMemoryPool {
     /// Create a new memory pool
+    #[must_use]
     pub fn new(chunk_size: usize, max_chunks: usize) -> Self {
         let initial_chunks = vec![MemoryChunk::new(chunk_size)];
         Self {
@@ -65,6 +66,7 @@ impl ActivationMemoryPool {
     }
 
     /// Allocate memory from the pool
+    #[must_use]
     pub fn allocate(&self, size: usize) -> PooledAllocation {
         let mut chunks = self.chunks.lock();
 
@@ -82,9 +84,12 @@ impl ActivationMemoryPool {
         // Need a new chunk
         if chunks.len() < self.max_chunks {
             let mut new_chunk = MemoryChunk::new(self.chunk_size.max(size));
-            let memory = new_chunk.allocate(size).unwrap();
+            let Some(memory) = new_chunk.allocate(size) else {
+                unreachable!("Fresh chunk should have capacity for requested size")
+            };
             let ptr = memory.as_mut_ptr();
             chunks.push(new_chunk);
+            drop(chunks);
             PooledAllocation {
                 data: ptr,
                 size,
@@ -110,6 +115,7 @@ impl ActivationMemoryPool {
     }
 
     /// Get statistics about pool usage
+    #[must_use]
     pub fn stats(&self) -> PoolStats {
         let chunks = self.chunks.lock();
         let total_capacity = chunks.len() * self.chunk_size;
@@ -140,7 +146,8 @@ impl PooledAllocation {
     /// # Safety
     /// Safe because pointer and size are guaranteed valid by pool allocation
     #[allow(unsafe_code)]
-    pub fn as_slice(&self) -> &[u8] {
+    #[must_use]
+    pub const fn as_slice(&self) -> &[u8] {
         unsafe { std::slice::from_raw_parts(self.data, self.size) }
     }
 
@@ -149,7 +156,7 @@ impl PooledAllocation {
     /// # Safety
     /// Safe because pointer and size are guaranteed valid by pool allocation
     #[allow(unsafe_code)]
-    pub fn as_mut_slice(&mut self) -> &mut [u8] {
+    pub const fn as_mut_slice(&mut self) -> &mut [u8] {
         unsafe { std::slice::from_raw_parts_mut(self.data, self.size) }
     }
 }
@@ -157,10 +164,15 @@ impl PooledAllocation {
 /// Statistics about memory pool usage
 #[derive(Debug, Clone)]
 pub struct PoolStats {
+    /// Number of chunks allocated
     pub num_chunks: usize,
+    /// Size of each chunk in bytes
     pub chunk_size: usize,
+    /// Total capacity across all chunks
     pub total_capacity: usize,
+    /// Total memory currently in use
     pub total_used: usize,
+    /// Utilization ratio (0.0 to 1.0)
     pub utilization: f32,
 }
 
@@ -177,6 +189,7 @@ pub struct LocalMemoryPool {
 
 impl LocalMemoryPool {
     /// Create a new local memory pool
+    #[must_use]
     pub fn new(size: usize) -> Self {
         Self {
             buffer: vec![0u8; size],
@@ -197,7 +210,7 @@ impl LocalMemoryPool {
         }
 
         self.position = aligned_pos + size;
-        let ptr = &mut self.buffer[aligned_pos] as *mut u8 as *mut T;
+        let ptr = (&raw mut self.buffer[aligned_pos]).cast::<T>();
         // SAFETY: ptr is derived from a valid mutable reference to aligned buffer space
         // that we just verified has enough room for T. The lifetime is tied to &mut self.
         #[allow(unsafe_code)]
@@ -205,20 +218,21 @@ impl LocalMemoryPool {
     }
 
     /// Reset the pool for reuse
-    pub fn reset(&mut self) {
+    pub const fn reset(&mut self) {
         self.position = 0;
     }
 
     /// Allocate from thread-local pool
-    pub fn with<T, F, R>(f: F) -> R
+    pub fn with<F, R>(f: F) -> R
     where
-        F: FnOnce(&mut LocalMemoryPool) -> R,
+        F: FnOnce(&mut Self) -> R,
     {
         LOCAL_POOL.with(|pool| f(&mut pool.borrow_mut()))
     }
 }
 
 #[cfg(test)]
+#[allow(clippy::panic)]
 mod tests {
     use super::*;
 
@@ -247,17 +261,23 @@ mod tests {
         let mut pool = LocalMemoryPool::new(256);
 
         // Allocate some values
-        let val1: &mut u32 = pool.allocate().unwrap();
+        let Some(val1) = pool.allocate::<u32>() else {
+            panic!("allocation should succeed");
+        };
         *val1 = 42;
         assert_eq!(*val1, 42);
 
-        let val2: &mut u64 = pool.allocate().unwrap();
+        let Some(val2) = pool.allocate::<u64>() else {
+            panic!("allocation should succeed");
+        };
         *val2 = 100;
         assert_eq!(*val2, 100);
 
         // Reset and reuse
         pool.reset();
-        let val3: &mut u32 = pool.allocate().unwrap();
+        let Some(val3) = pool.allocate::<u32>() else {
+            panic!("allocation should succeed");
+        };
         *val3 = 7;
         assert_eq!(*val3, 7);
     }

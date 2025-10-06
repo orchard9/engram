@@ -133,8 +133,6 @@ fn bench_batch_spreading(c: &mut Criterion) {
 }
 
 fn bench_sigmoid_activation(c: &mut Criterion) {
-    let mapper = SimdActivationMapper::new();
-
     // Generate similarity scores
     let mut similarities = Vec::with_capacity(1000);
     for i in 0..1000 {
@@ -144,7 +142,7 @@ fn bench_sigmoid_activation(c: &mut Criterion) {
 
     c.bench_function("batch_sigmoid_activation", |b| {
         b.iter(|| {
-            black_box(mapper.batch_sigmoid_activation(
+            black_box(SimdActivationMapper::batch_sigmoid_activation(
                 black_box(&similarities),
                 black_box(0.5),
                 black_box(0.1),
@@ -154,15 +152,13 @@ fn bench_sigmoid_activation(c: &mut Criterion) {
 }
 
 fn bench_fma_confidence_aggregate(c: &mut Criterion) {
-    let mapper = SimdActivationMapper::new();
-
     let mut activations = vec![0.5f32; 1000];
     let confidence_weights = vec![0.8f32; 1000];
     let path_confidence = 0.9f32;
 
     c.bench_function("fma_confidence_aggregate", |b| {
         b.iter(|| {
-            mapper.fma_confidence_aggregate(
+            SimdActivationMapper::fma_confidence_aggregate(
                 black_box(&mut activations),
                 black_box(&confidence_weights),
                 black_box(path_confidence),
@@ -177,7 +173,6 @@ fn bench_integrated_spreading_pipeline(c: &mut Criterion) {
     for batch_size in [32, 64, 128] {
         let query = generate_test_vector();
         let vectors = generate_test_batch(batch_size);
-        let mapper = SimdActivationMapper::new();
 
         group.bench_with_input(
             BenchmarkId::new("full_pipeline", batch_size),
@@ -189,7 +184,7 @@ fn bench_integrated_spreading_pipeline(c: &mut Criterion) {
                         cosine_similarity_batch_768(black_box(&query), black_box(&vectors));
 
                     // Step 2: Convert to activations (SIMD optimized)
-                    let activations = mapper.batch_sigmoid_activation(
+                    let activations = SimdActivationMapper::batch_sigmoid_activation(
                         black_box(&similarities),
                         black_box(0.5),
                         black_box(0.1),

@@ -1,5 +1,7 @@
 //! Benchmarks for GPU abstraction layer overhead
 
+#![allow(missing_docs)]
+
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use engram_core::activation::{
     AdaptiveConfig, AdaptiveSpreadingEngine, CpuFallback, GPUActivationBatch, GPUSpreadingInterface,
@@ -21,7 +23,7 @@ fn bench_cpu_fallback_direct(c: &mut Criterion) {
         b.iter(|| {
             let result = fallback.launch(&batch);
             futures::executor::block_on(result)
-        })
+        });
     });
 }
 
@@ -45,7 +47,7 @@ fn bench_adaptive_engine_cpu(c: &mut Criterion) {
         b.iter(|| {
             let result = engine.spread(&batch);
             futures::executor::block_on(result)
-        })
+        });
     });
 }
 
@@ -61,7 +63,7 @@ fn bench_batch_construction(c: &mut Criterion) {
             }
             batch.ensure_contiguous();
             batch
-        })
+        });
     });
 }
 
@@ -86,7 +88,7 @@ fn bench_cosine_similarity(c: &mut Criterion) {
             } else {
                 0.0
             }
-        })
+        });
     });
 }
 

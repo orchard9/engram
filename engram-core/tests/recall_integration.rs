@@ -16,7 +16,7 @@ mod tests {
         similarity_config::SimilarityConfig,
     };
     use engram_core::index::CognitiveHnswIndex;
-    use engram_core::{Confidence, Cue, CueType, Episode, EpisodeBuilder, Memory, MemoryStore};
+    use engram_core::{Confidence, Cue, EpisodeBuilder, MemoryStore};
     use std::collections::HashMap;
     use std::sync::Arc;
     use std::time::Duration;
@@ -474,10 +474,10 @@ mod tests {
 
         // Create a semantic cue (not supported yet)
         let cue = Cue::context("test context".to_string(), None, None, Confidence::HIGH);
-        let results = recall.recall(&cue, &store).expect("Recall failed");
+        let _results = recall.recall(&cue, &store).expect("Recall failed");
 
         // Should handle gracefully (return empty or fallback)
-        assert!(results.is_empty() || results.len() > 0); // Either empty or fallback worked
+        // This always passes - testing that no panic occurred
     }
 
     #[test]
@@ -611,13 +611,10 @@ mod tests {
         );
 
         // Call MemoryStore::recall() which should use similarity-only path
-        let results = store.recall(&cue);
+        let _results = store.recall(&cue);
 
         // Should return results (using HNSW or basic similarity)
-        assert!(
-            !results.is_empty() || true,
-            "Similarity mode should complete without error"
-        );
+        // Test passes if no panic occurred
     }
 
     #[test]

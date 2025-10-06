@@ -11,6 +11,7 @@ use engram_cli::{
     docs::{DocSection, OperationalDocs},
     find_available_port,
 };
+use engram_core::MemoryStore;
 use std::fs;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -37,7 +38,6 @@ async fn main() -> Result<()> {
     let log_level = match cli.log_level.to_lowercase().as_str() {
         "error" => Level::ERROR,
         "warn" => Level::WARN,
-        "info" => Level::INFO,
         "debug" => Level::DEBUG,
         "trace" => Level::TRACE,
         _ => Level::INFO,
@@ -53,10 +53,8 @@ async fn main() -> Result<()> {
         Commands::Stop { force } => {
             if force {
                 println!(" Force stopping server...");
-                stop_server().await
-            } else {
-                stop_server().await
             }
+            stop_server().await
         }
 
         Commands::Status { json, watch } => {
@@ -79,7 +77,10 @@ async fn main() -> Result<()> {
 
         Commands::Memory { action } => handle_memory_command(action).await,
 
-        Commands::Config { action } => handle_config_command(action).await,
+        Commands::Config { action } => {
+            handle_config_command(action);
+            Ok(())
+        }
 
         Commands::Shell => start_interactive_shell().await,
 
@@ -94,7 +95,7 @@ async fn main() -> Result<()> {
             section,
             list,
             export,
-        } => handle_docs_command(section, list, export).await,
+        } => handle_docs_command(section, list, export),
     }
 }
 
@@ -118,8 +119,6 @@ async fn start_server(port: u16, grpc_port: u16) -> Result<()> {
     }
 
     // Initialize memory store with optional indexing and persistence
-    use engram_core::MemoryStore;
-
     // mut needed for cfg-gated feature initialization below
     #[allow(unused_mut)]
     let mut store = MemoryStore::new(100_000);
@@ -194,11 +193,11 @@ async fn start_server(port: u16, grpc_port: u16) -> Result<()> {
     write_pid_file(actual_port)?;
 
     println!(" Engram server started successfully!");
-    println!(" HTTP API: http://127.0.0.1:{}", actual_port);
-    println!(" gRPC: 127.0.0.1:{}", actual_grpc_port);
-    println!(" Health: http://127.0.0.1:{}/health", actual_port);
-    println!(" API Docs: http://127.0.0.1:{}/docs", actual_port);
-    println!("");
+    println!(" HTTP API: http://127.0.0.1:{actual_port}");
+    println!(" gRPC: 127.0.0.1:{actual_grpc_port}");
+    println!(" Health: http://127.0.0.1:{actual_port}/health");
+    println!(" API Docs: http://127.0.0.1:{actual_port}/docs");
+    println!();
     println!(" Use 'engram status' to check server health");
     println!(" Use 'engram stop' to shutdown the server");
 
@@ -217,12 +216,11 @@ async fn start_server(port: u16, grpc_port: u16) -> Result<()> {
 #[cfg(feature = "memory_mapped_persistence")]
 fn resolve_data_directory() -> Result<PathBuf> {
     let env_dir = std::env::var("ENGRAM_DATA_DIR").map(PathBuf::from).ok();
-    let base_dir = match env_dir {
-        Some(path) => path,
-        None => {
-            let cwd = std::env::current_dir().context("Unable to determine current directory")?;
-            cwd.join("engram-data")
-        }
+    let base_dir = if let Some(path) = env_dir {
+        path
+    } else {
+        let cwd = std::env::current_dir().context("Unable to determine current directory")?;
+        cwd.join("engram-data")
     };
 
     fs::create_dir_all(&base_dir)
@@ -246,18 +244,18 @@ async fn handle_memory_command(action: MemoryAction) -> Result<()> {
     }
 }
 
-async fn handle_config_command(action: ConfigAction) -> Result<()> {
+fn handle_config_command(action: ConfigAction) {
     match action {
         ConfigAction::Get { key } => match key.as_str() {
             "network.port" => println!("7432"),
             "network.grpc_port" => println!("50051"),
             _ => {
-                println!("Unknown configuration key: {}", key);
+                println!("Unknown configuration key: {key}");
                 std::process::exit(1);
             }
         },
         ConfigAction::Set { key, value } => {
-            println!("Setting {} = {}", key, value);
+            println!("Setting {key} = {value}");
             println!("  Configuration setting not yet implemented");
         }
         ConfigAction::List { section } => match section.as_deref() {
@@ -279,7 +277,7 @@ async fn handle_config_command(action: ConfigAction) -> Result<()> {
                 println!("gc_threshold=0.7");
             }
             Some(s) => {
-                println!("Unknown section: {}", s);
+                println!("Unknown section: {s}");
             }
         },
         ConfigAction::Path => {
@@ -289,7 +287,6 @@ async fn handle_config_command(action: ConfigAction) -> Result<()> {
             );
         }
     }
-    Ok(())
 }
 
 async fn start_interactive_shell() -> Result<()> {
@@ -315,15 +312,15 @@ async fn start_interactive_shell() -> Result<()> {
 
                 // Parse shell command and execute
                 if let Err(e) = execute_shell_command(trimmed).await {
-                    eprintln!(" {}", e);
+                    eprintln!(" {e}");
                 }
             }
-            Err(rustyline::error::ReadlineError::Interrupted)
-            | Err(rustyline::error::ReadlineError::Eof) => {
+            Err(rustyline::error::ReadlineError::Interrupted |
+                rustyline::error::ReadlineError::Eof) => {
                 break;
             }
             Err(err) => {
-                eprintln!(" Error: {}", err);
+                eprintln!(" Error: {err}");
                 break;
             }
         }
@@ -350,9 +347,9 @@ async fn execute_shell_command(cmd: &str) -> Result<()> {
         return Ok(());
     }
 
-    match parts[0] {
-        "status" => show_status().await,
-        "create" => {
+    match parts.first().copied() {
+        Some("status") => show_status().await,
+        Some("create") => {
             if parts.len() < 2 {
                 eprintln!("Usage: create <content>");
                 return Ok(());
@@ -361,7 +358,7 @@ async fn execute_shell_command(cmd: &str) -> Result<()> {
             let (port, _) = get_server_connection().await?;
             create_memory(port, content, None).await
         }
-        "get" => {
+        Some("get") => {
             if parts.len() != 2 {
                 eprintln!("Usage: get <id>");
                 return Ok(());
@@ -369,7 +366,7 @@ async fn execute_shell_command(cmd: &str) -> Result<()> {
             let (port, _) = get_server_connection().await?;
             get_memory(port, parts[1].to_string()).await
         }
-        "search" => {
+        Some("search") => {
             if parts.len() < 2 {
                 eprintln!("Usage: search <query>");
                 return Ok(());
@@ -378,15 +375,16 @@ async fn execute_shell_command(cmd: &str) -> Result<()> {
             let (port, _) = get_server_connection().await?;
             search_memories(port, query, None).await
         }
-        "list" => {
+        Some("list") => {
             let (port, _) = get_server_connection().await?;
             list_memories(port, Some(10), None).await
         }
-        _ => {
-            eprintln!(" Unknown command: {}", parts[0]);
+        Some(cmd) => {
+            eprintln!(" Unknown command: {cmd}");
             eprintln!(" Type 'help' for available commands");
             Ok(())
         }
+        None => Ok(()),
     }
 }
 
@@ -397,8 +395,7 @@ async fn handle_benchmark_command(
     operation: String,
 ) -> Result<()> {
     println!(
-        " Starting benchmark with {} operations, {} concurrent connections",
-        operations, concurrent
+        " Starting benchmark with {operations} operations, {concurrent} concurrent connections"
     );
 
     if hyperfine {
@@ -413,8 +410,7 @@ async fn handle_benchmark_command(
     println!(" Server connection verified");
     println!("  Full memory operation benchmarking not yet implemented");
     println!(
-        " This would benchmark {} operations of type '{}'",
-        operations, operation
+        " This would benchmark {operations} operations of type '{operation}'"
     );
 
     Ok(())
@@ -439,14 +435,14 @@ async fn shutdown_signal() {
     let terminate = std::future::pending::<()>();
 
     tokio::select! {
-        _ = ctrl_c => {},
-        _ = terminate => {},
+        () = ctrl_c => {},
+        () = terminate => {},
     }
 
     info!(" Shutdown signal received");
 }
 
-async fn handle_docs_command(
+fn handle_docs_command(
     section: Option<String>,
     list: bool,
     export: Option<String>,
@@ -463,7 +459,7 @@ async fn handle_docs_command(
                 DocSection::IncidentResponse => "Incident response playbooks",
                 DocSection::Reference => "Command and API reference",
             };
-            println!(" {:<15} - {}", name, description);
+            println!(" {name:<15} - {description}");
         }
         println!("\nUsage: engram docs <section>");
         return Ok(());
@@ -473,7 +469,7 @@ async fn handle_docs_command(
         match section_name.parse::<DocSection>() {
             Ok(section_type) => OperationalDocs::get_section(section_type),
             Err(e) => {
-                eprintln!(" {}", e);
+                eprintln!(" {e}");
                 eprintln!(" Use 'engram docs --list' to see available sections");
                 return Ok(());
             }
@@ -484,9 +480,9 @@ async fn handle_docs_command(
 
     if let Some(export_path) = export {
         std::fs::write(&export_path, content)?;
-        println!(" Documentation exported to: {}", export_path);
+        println!(" Documentation exported to: {export_path}");
     } else {
-        println!("{}", content);
+        println!("{content}");
     }
 
     Ok(())
@@ -504,20 +500,16 @@ async fn show_status_json() -> Result<()> {
         return Ok(());
     }
 
-    let (pid, port) = match read_pid_file() {
-        Ok(info) => info,
-        Err(_) => {
-            println!(
-                r#"{{"status": "error", "health": "corrupted", "memory_count": 0, "message": "Server info corrupted"}}"#
-            );
-            return Ok(());
-        }
+    let Ok((pid, port)) = read_pid_file() else {
+        println!(
+            r#"{{"status": "error", "health": "corrupted", "memory_count": 0, "message": "Server info corrupted"}}"#
+        );
+        return Ok(());
     };
 
     if !is_process_running(pid) {
         println!(
-            r#"{{"status": "offline", "health": "process_dead", "memory_count": 0, "pid": {}, "port": {}, "message": "Process not running"}}"#,
-            pid, port
+            r#"{{"status": "offline", "health": "process_dead", "memory_count": 0, "pid": {pid}, "port": {port}, "message": "Process not running"}}"#
         );
         return Ok(());
     }
@@ -527,25 +519,22 @@ async fn show_status_json() -> Result<()> {
         .timeout(std::time::Duration::from_secs(2))
         .build()?;
 
-    let health_url = format!("http://127.0.0.1:{}/health/alive", port);
+    let health_url = format!("http://127.0.0.1:{port}/health/alive");
 
     match client.get(&health_url).send().await {
         Ok(response) if response.status().is_success() => {
             println!(
-                r#"{{"status": "online", "health": "responsive", "memory_count": 0, "pid": {}, "port": {}}}"#,
-                pid, port
+                r#"{{"status": "online", "health": "responsive", "memory_count": 0, "pid": {pid}, "port": {port}}}"#
             );
         }
         Ok(_) => {
             println!(
-                r#"{{"status": "degraded", "health": "unresponsive", "memory_count": 0, "pid": {}, "port": {}}}"#,
-                pid, port
+                r#"{{"status": "degraded", "health": "unresponsive", "memory_count": 0, "pid": {pid}, "port": {port}}}"#
             );
         }
         Err(_) => {
             println!(
-                r#"{{"status": "offline", "health": "unreachable", "memory_count": 0, "pid": {}, "port": {}}}"#,
-                pid, port
+                r#"{{"status": "offline", "health": "unreachable", "memory_count": 0, "pid": {pid}, "port": {port}}}"#
             );
         }
     }
