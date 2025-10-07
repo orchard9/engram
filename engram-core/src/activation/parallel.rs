@@ -80,11 +80,16 @@ impl PhaseBarrier {
             self.phase_counter.fetch_add(1, Ordering::SeqCst);
         } else {
             // Wait for phase to advance or barrier to be disabled
+            // Use exponential backoff to reduce CPU contention under load
             let current_phase = self.phase_counter.load(Ordering::Relaxed);
+            let mut backoff = Duration::from_micros(1);
+
             while self.phase_counter.load(Ordering::Relaxed) == current_phase
                 && self.enabled.load(Ordering::Relaxed)
             {
-                thread::yield_now();
+                thread::sleep(backoff);
+                // Exponentially increase backoff, capped at 10ms to prevent excessive delays
+                backoff = (backoff * 2).min(Duration::from_millis(10));
             }
         }
     }
@@ -578,9 +583,12 @@ impl ParallelSpreadingEngine {
 
     /// Wait for all workers to complete processing
     fn wait_for_completion(&self) -> ActivationResult<()> {
-        // Increased timeout for resource-intensive parallel operations
-        // Tests may run concurrently and compete for CPU/threads
-        let timeout = Duration::from_secs(90);
+        // Adaptive timeout based on available system parallelism
+        // Base: 30s + 10s per available core (accounts for contention)
+        let available_parallelism = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4);
+        let timeout = Duration::from_secs(30 + (available_parallelism as u64 * 10));
         let start = Instant::now();
 
         while start.elapsed() < timeout {
@@ -809,10 +817,18 @@ mod tests {
         graph
     }
 
+    /// Compute resource-aware thread count for tests
+    /// Uses at most 25% of available cores to prevent oversubscription
+    fn test_thread_count() -> usize {
+        std::thread::available_parallelism()
+            .map(|n| (n.get() / 4).max(1))
+            .unwrap_or(1)
+    }
+
     #[test]
     fn test_parallel_engine_creation() {
         let config = ParallelSpreadingConfig {
-            num_threads: 2,
+            num_threads: test_thread_count(),
             max_depth: 3,
             ..Default::default()
         };
@@ -831,7 +847,7 @@ mod tests {
     #[serial(parallel_engine)]
     fn test_activation_spreading() {
         let config = ParallelSpreadingConfig {
-            num_threads: 2,
+            num_threads: test_thread_count(),
             max_depth: 2,
             threshold: 0.01,
             ..Default::default()
@@ -1085,7 +1101,7 @@ mod tests {
     #[serial(parallel_engine)]
     fn test_metrics_tracking() {
         let config = ParallelSpreadingConfig {
-            num_threads: 4,
+            num_threads: test_thread_count(),
             max_depth: 3,
             ..Default::default()
         };
@@ -1112,7 +1128,7 @@ mod tests {
     #[serial(parallel_engine)]
     fn test_threshold_filtering() {
         let config = ParallelSpreadingConfig {
-            num_threads: 2,
+            num_threads: test_thread_count(),
             max_depth: 2,
             threshold: 0.5, // High threshold
             ..Default::default()
@@ -1138,7 +1154,7 @@ mod tests {
     #[serial(parallel_engine)]
     fn cycle_detection_penalises_revisits() {
         let config = ParallelSpreadingConfig {
-            num_threads: 1,
+            num_threads: test_thread_count(),
             max_depth: 3,
             cycle_detection: true,
             cycle_penalty_factor: 0.5,
