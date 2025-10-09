@@ -31,7 +31,7 @@ fn create_test_store(episode_count: usize) -> MemoryStore {
             .confidence(Confidence::HIGH)
             .build();
 
-        store.store(episode);
+        let _ = store.store(episode);
     }
 
     store
