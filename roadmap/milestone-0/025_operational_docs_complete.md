@@ -1,6 +1,6 @@
 # Write operational procedures for start/stop/manage database
 
-## Status: COMPLETE
+## Status: IN_REVIEW
 
 ## Description
 Create comprehensive operational documentation covering all aspects of running and managing an Engram database in production.
@@ -14,22 +14,18 @@ Create comprehensive operational documentation covering all aspects of running a
 - Incident response playbooks
 
 ## Acceptance Criteria
-- [x] Step-by-step procedures for all operations
-- [x] Troubleshooting for common problems
-- [x] Performance tuning checklist
-- [x] Disaster recovery tested and documented
-- [x] Operations runbook complete
+- [x] Step-by-step procedures for start/stop/manage operations (see `docs/operations.md`)
+- [x] Troubleshooting guidance for common failures
+- [ ] Performance tuning checklist aligned with current metrics implementation
+- [x] Disaster recovery steps including backup/restore scripts
+- [ ] Final review and sign-off from operations group
 
-## Implementation Completed
-- Created comprehensive operational documentation at `docs/operations.md` following cognitive ergonomics principles
-- Implemented Context-Action-Verification (CAV) format for all procedures
-- Added progressive disclosure structure with cognitive load indicators
-- Created executable backup and monitoring scripts
-- Designed decision trees for systematic troubleshooting
-- Wrote incident response playbooks specific to memory system scenarios
-- Validated all procedures through testing (server start/stop/status/API operations confirmed working)
-- Updated endpoints to match actual API implementation (/api/v1/system/health)
-- All tests passing and code quality checks operational
+## Implementation Status
+- Drafted runbook at `docs/operations.md` in Context–Action–Verification format
+- Added executable scripts `scripts/backup_engram.sh` and `scripts/check_engram_health.sh`
+- Incident response table covers health degradation, WAL issues, and migration backlog scenarios
+- Pending: performance tuning guidance tied to real metrics dashboards
+- Pending: operational dry-run with on-call rotation before marking complete
 
 ## Dependencies
 - Task 010-014 (CLI operations)

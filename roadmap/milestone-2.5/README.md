@@ -4,7 +4,7 @@
 
 This milestone closes the gap between "infrastructure exists" and "system operational." Tasks here activate existing code that was built but not fully integrated into the execution path.
 
-## Status: COMPLETE (with lifecycle fixes applied) ✅
+## Status: IN_REVIEW (awaiting end-to-end validation) 🔄
 
 **Created**: 2025-10-05
 **Completed**: 2025-10-05
@@ -45,27 +45,24 @@ This milestone makes existing infrastructure **operational**.
 - ✅ Milestone 0-2 infrastructure (already complete)
 - ✅ Storage unification from tech debt cleanup (commit 1628abd)
 
-## Success Criteria - All Met ✅
+## Success Criteria – Current Status
 
 - ✅ WAL writes to disk on every store operation with configurable fsync
-  - Implemented in `store.rs:643-665` (WAL append on store)
-  - Content-addressed storage with CRC32 verification
-  - Recovery tested in `wal_recovery_test.rs`
+  - Implemented via `MemoryStore::persist_episode` and `MemoryStore::recover_from_wal`
+  - Content-addressed storage with CRC32 validation in `engram-core/src/storage/wal.rs`
+  - Recovery covered by `engram-core/tests/wal_recovery_test.rs`
 
 - ✅ Queries search all tiers (hot → warm → cold) with migration
-  - Cross-tier recall in `store.rs:1092-1161`
-  - Background migration task in `store.rs:376-450`
-  - Integration tests in `tier_integration_test.rs`
+  - Tier coordination handled by `CognitiveTierArchitecture` and `TierCoordinator::run_migration_cycle`
+  - Integration checks in `engram-core/tests/tier_integration_test.rs`
 
-- ✅ HNSW has async queue consumer (not just documented)
-  - Queue-based updates in `store.rs:452-590`
-  - Batching: 100 updates, 50ms timeout
-  - Worker lifecycle management included
+- ✅ HNSW has async queue consumer
+  - Queue located in `MemoryStore::start_hnsw_worker`
+  - Batched processing in `MemoryStore::process_hnsw_batch`
 
-- ✅ FAISS benchmarks use real library (not mocks)
-  - Real FAISS v0.11 bindings in `faiss_ann.rs`
-  - Compiles and links against libfaiss_c
-  - Framework ready for recall@10 validation
+- ⚠️ FAISS benchmarks rely on real library; second baseline integration tracked separately
+  - Real FAISS bindings in `engram-core/benches/support/faiss_ann.rs`
+  - Follow-up Task 005 (secondary ANN baseline) remains PENDING until an additional library is wired in
 
 ## Validation Results ✅
 
@@ -106,7 +103,7 @@ This milestone makes existing infrastructure **operational**.
   - Type annotations in gpu_abstraction_overhead.rs
 - Benchmark framework ready for performance comparison
 - Note: Full recall@10 validation deferred (requires large dataset, estimated 30+ min runtime)
-- **Limitation**: Annoy is mock implementation due to annoy-rs library limitations (only supports loading pre-built indexes, not building). FAISS provides sufficient industry comparison.
+- **Update**: Annoy baseline implemented in pure Rust; benchmarks now exercise Engram vs FAISS vs Annoy.
 
 ## Issues Found and Fixed ⚠️ → ✅
 
@@ -138,19 +135,19 @@ This milestone makes existing infrastructure **operational**.
 
 **3. Task 004 Status Mismatch** ❌
 - FAISS integration was complete but status file said "BLOCKED"
-- Annoy mock not documented as intentional limitation
+- Annoy baseline status drifted (mock references lingering)
 
 **Fixes Applied** ✅
 - Updated TASK_004_STATUS.md to reflect FAISS completion
-- Documented Annoy mock as acceptable limitation (annoy-rs API constraint)
-- Clarified that FAISS provides sufficient industry comparison
+- Documented the new pure-Rust Annoy baseline and removed legacy mock references
+- Clarified that benchmarks now exercise Engram vs FAISS vs Annoy
 
 ## Risk Mitigation
 
 - **WAL overhead**: Batch commits to stay <10ms P99 (already implemented in wal.rs)
 - **Tier query latency**: Use tier budgets from LatencyBudgetManager
 - **HNSW blocking**: Document sync design if async proves complex
-- **FFI complexity**: Use existing rust bindings (faiss-rs, annoy-rs) not raw C++
+- **FFI complexity**: Use existing FAISS bindings; Annoy baseline stays in-tree Rust to avoid C++
 
 ## Notes
 

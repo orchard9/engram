@@ -25,7 +25,7 @@ These tests spawn worker threads (2-4 threads each) that perform CPU-intensive g
 4. Combined effect: workers can't complete within timeout
 
 ### Fix Applied
-All affected tests now use `#[serial(parallel_engine)]` annotation from the `serial_test` crate, forcing them to run sequentially. This significantly reduces flakiness but occasional failures may still occur when running the full test suite due to resource pressure from other concurrent tests.
+All affected tests now use `#[serial(parallel_engine)]` annotation from the `serial_test` crate, forcing them to run sequentially. This significantly reduces flakiness but occasional failures may still occur when running the full test suite due to resource pressure from other concurrent tests. In addition, lightweight deterministic test configurations (added 2025-10-09) cap thread counts and max depth so the suite stays under a few milliseconds per test when run locally.
 
 ### Workaround (if flakiness persists)
 Run parallel tests in isolation:

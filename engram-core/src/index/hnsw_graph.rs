@@ -198,13 +198,14 @@ impl HnswGraph {
         let mut distances = Vec::new();
 
         for candidate in current_nearest.into_iter().take(k) {
-            if candidate.confidence.raw() >= threshold.raw() {
+            let similarity = (1.0 - candidate.distance).clamp(-1.0, 1.0);
+            if similarity >= threshold.raw() {
                 if let Ok(node) = self.get_node(candidate.node_id, &guard) {
                     distances.push(candidate.distance);
                     hits.push(SearchResult::new(
                         candidate.node_id,
                         candidate.distance,
-                        candidate.confidence,
+                        Confidence::exact(similarity.max(0.0)),
                         node.memory.id.clone(),
                     ));
                 }

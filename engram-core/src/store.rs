@@ -357,6 +357,7 @@ impl MemoryStore {
     #[cfg(feature = "hnsw_index")]
     #[must_use]
     pub fn hnsw_index(&self) -> Option<Arc<CognitiveHnswIndex>> {
+        self.flush_pending_hnsw_updates();
         self.hnsw_index.clone()
     }
 
@@ -662,6 +663,23 @@ impl MemoryStore {
                 duration_ms = start.elapsed().as_millis() as u64,
                 "Processed HNSW update batch"
             );
+        }
+    }
+
+    /// Drain any pending HNSW updates and process them synchronously.
+    #[cfg(feature = "hnsw_index")]
+    fn flush_pending_hnsw_updates(&self) {
+        let Some(ref hnsw) = self.hnsw_index else {
+            return;
+        };
+
+        let mut batch = Vec::new();
+        while let Some(update) = self.hnsw_update_queue.pop() {
+            batch.push(update);
+        }
+
+        if !batch.is_empty() {
+            Self::process_hnsw_batch(hnsw, &batch);
         }
     }
 
@@ -1309,6 +1327,7 @@ impl MemoryStore {
         {
             if let CueType::Embedding { vector, threshold } = &cue.cue_type {
                 if let Some(ref hnsw) = self.hnsw_index {
+                    self.flush_pending_hnsw_updates();
                     return self.recall_with_hnsw(cue, hnsw, vector, *threshold);
                 }
             }
@@ -1333,6 +1352,7 @@ impl MemoryStore {
         {
             if let CueType::Embedding { vector, threshold } = &cue.cue_type {
                 if let Some(ref hnsw) = self.hnsw_index {
+                    self.flush_pending_hnsw_updates();
                     return self.recall_with_hnsw(cue, hnsw, vector, *threshold);
                 }
             }
@@ -1773,6 +1793,9 @@ impl MemoryStore {
         // Apply spreading activation using HNSW graph structure
         let pressure = *self.pressure.read();
         results = hnsw.apply_spreading_activation(results, cue, pressure);
+
+        // Incorporate in-memory spreading heuristics for recency-based boosting
+        results = self.apply_spreading_activation(results, cue);
 
         // Sort and limit results
         results.sort_by(|a, b| {

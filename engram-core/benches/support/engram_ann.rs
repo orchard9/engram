@@ -15,6 +15,9 @@ pub struct EngramOptimizedAnnIndex {
     ef_search: usize,
 }
 
+/// Convenient alias used by benchmark harnesses.
+pub type EngramAnnIndex = EngramOptimizedAnnIndex;
+
 impl EngramOptimizedAnnIndex {
     pub const fn new() -> Self {
         Self {

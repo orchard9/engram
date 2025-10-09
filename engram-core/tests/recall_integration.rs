@@ -256,11 +256,17 @@ mod tests {
             .confidence(Confidence::MEDIUM)
             .build();
 
+        let mut old_embedding = [0.5f32; 768];
+        let split = old_embedding.len() / 2;
+        for value in &mut old_embedding[split..] {
+            *value = 0.24;
+        }
+
         let old_episode = EpisodeBuilder::new()
             .id("old".to_string())
             .when(now - chrono::Duration::hours(2))
             .what("Old memory".to_string())
-            .embedding([0.5f32; 768]) // Same embedding
+            .embedding(old_embedding)
             .confidence(Confidence::MEDIUM)
             .build();
 

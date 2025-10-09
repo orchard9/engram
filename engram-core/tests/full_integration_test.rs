@@ -143,7 +143,11 @@ fn test_activation_spreading() {
     );
     assert!(
         results.iter().any(|(episode, _)| episode.id == "episode_0"),
-        "recall results should contain the closest episode"
+        "recall results should contain the closest episode; results: {:?}",
+        results
+            .iter()
+            .map(|(episode, confidence)| (episode.id.clone(), confidence.raw()))
+            .collect::<Vec<_>>()
     );
 
     let confidences: Vec<f32> = results

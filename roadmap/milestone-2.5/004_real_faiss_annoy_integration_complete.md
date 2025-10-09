@@ -9,6 +9,11 @@
 
 Replace mock FAISS/Annoy implementations with real library bindings to validate Engram's 90% recall@10 performance claim against industry-standard ANN systems.
 
+> **Note**: The historical plan below referenced an Annoy mock. The codebase now ships
+> `engram-core/benches/support/faiss_ann.rs` for FAISS and a pure-Rust Annoy-style
+> implementation in `engram-core/benches/support/annoy_ann.rs` that builds real
+> random-projection forests for benchmarking.
+
 ## Completion Summary
 
 **What Was Completed:**
@@ -17,14 +22,15 @@ Replace mock FAISS/Annoy implementations with real library bindings to validate 
 3. ✅ Implemented `FaissAnnIndex` with Flat, HNSW, and IVF index types
 4. ✅ Created comprehensive benchmark suite (`ann_comparison.rs`)
 5. ✅ Created recall validation tests (`ann_validation.rs`)
-6. ✅ Updated all implementations (Engram, Annoy mock) to match new trait
+6. ✅ Updated all implementations (Engram, Annoy baseline) to match new trait
 7. ✅ Documented system dependencies and installation instructions
 8. ✅ Verified FAISS integration compiles and links successfully
 
 **Annoy Status:**
-- The `annoy-rs` crate only supports loading pre-built indexes, not building new ones
-- Created simplified mock implementation for benchmarking
-- FAISS provides sufficient industry-standard comparison
+- Implemented `AnnoyAnnIndex` as a pure-Rust random projection forest so benchmarks exercise
+  true approximate search rather than mocks
+- Provides deterministic builds without external native dependencies
+- Benchmarks now cover Engram vs FAISS vs Annoy-inspired baseline
 
 **Key Technical Decisions:**
 1. Changed `AnnIndex::search()` to require `&mut self` - proper long-term solution
@@ -34,25 +40,10 @@ Replace mock FAISS/Annoy implementations with real library bindings to validate 
 
 ## Current State
 
-**Framework EXISTS but Uses MOCKS:**
-- ✅ `engram-core/benches/ann_comparison.rs:1-197` - Full benchmark framework
-- ✅ `engram-core/benches/datasets.rs:1-178` - Dataset loaders
-- ❌ `engram-core/benches/mock_faiss.rs:1-126` - **Fake FAISS** (exact search + noise)
-- ❌ `engram-core/benches/mock_annoy.rs:1-133` - **Fake Annoy** (exact search + noise)
-- ❌ Roadmap claims "complete" but mocks can't validate real performance
-
-**Current Mock Implementation:**
-```rust
-// engram-core/benches/mock_faiss.rs:80-95 (CURRENT)
-fn search(&self, query: &[f32; 768], k: usize) -> Vec<(usize, f32)> {
-    // FAKE: Exact search with random perturbation
-    let mut results = exact_search(query, &self.data);
-    results.iter_mut().for_each(|(_, dist)| {
-        *dist += rand::random::<f32>() * 0.1; // Fake ANN error
-    });
-    results
-}
-```
+- ✅ `engram-core/benches/ann_comparison.rs` / `ann_validation.rs` compare Engram vs FAISS
+- ✅ `engram-core/benches/support/faiss_ann.rs` - Real FAISS wrapper compiled behind the `ann_benchmarks` feature
+- ✅ Secondary baseline documented in `005_secondary_ann_baseline_complete.md`
+- ⚠️ Full recall@10 dataset runs and automated CI coverage still pending
 
 ## Implementation Steps
 
@@ -60,20 +51,19 @@ fn search(&self, query: &[f32; 768], k: usize) -> Vec<(usize, f32)> {
 
 **File**: `engram-core/Cargo.toml`
 
-**Line 45** - Add FAISS/Annoy dependencies:
+**Line 45** - Add FAISS dependency (secondary baseline tracked separately):
 ```toml
 [dev-dependencies]
 # ... existing dev deps ...
 
-# ANN library bindings for benchmarks
+# ANN library binding for benchmarks
 faiss = { version = "0.11", optional = true }
-annoy = { version = "0.2", optional = true }
 
 [features]
 # ... existing features ...
 
 # Benchmark features
-ann_benchmarks = ["faiss", "annoy"]
+ann_benchmarks = ["faiss"]
 ```
 
 ### Step 2: Implement Real FAISS Wrapper (3 hours)
@@ -245,117 +235,14 @@ mod tests {
 
 ### Step 3: Implement Real Annoy Wrapper (2 hours)
 
-**File**: `engram-core/benches/annoy_ann.rs` (create new)
+**File**: `engram-core/benches/support/annoy_ann.rs`
 
-```rust
-//! Real Annoy implementation for ANN benchmarks
-
-use crate::ann_comparison::{AnnIndex, Result};
-use annoy::{Annoy, IndexBuilder, Search};
-
-pub struct AnnoyAnnIndex {
-    index: Option<Annoy>,
-    dimension: usize,
-    n_trees: usize,
-    builder: IndexBuilder,
-}
-
-impl AnnoyAnnIndex {
-    pub fn new(dimension: usize, n_trees: usize) -> Result<Self> {
-        Ok(Self {
-            index: None,
-            dimension,
-            n_trees,
-            builder: IndexBuilder::new(dimension),
-        })
-    }
-}
-
-impl AnnIndex for AnnoyAnnIndex {
-    fn build(&mut self, vectors: &[[f32; 768]]) -> Result<()> {
-        // Add vectors to builder
-        for (idx, vector) in vectors.iter().enumerate() {
-            self.builder.add_item(idx, vector)?;
-        }
-
-        // Build index with specified number of trees
-        let index = self.builder.build(self.n_trees)?;
-        self.index = Some(index);
-
-        Ok(())
-    }
-
-    fn search(&self, query: &[f32; 768], k: usize) -> Vec<(usize, f32)> {
-        let index = match &self.index {
-            Some(idx) => idx,
-            None => return Vec::new(),
-        };
-
-        // Annoy search returns indices and distances
-        match index.search(query, k, Search::MaxNodes(1000)) {
-            Ok(results) => {
-                results
-                    .into_iter()
-                    .map(|(idx, dist)| {
-                        // Convert angular distance to similarity
-                        // Angular distance ∈ [0, 2], similarity ∈ [0, 1]
-                        let similarity = 1.0 - (dist / 2.0);
-                        (idx, similarity)
-                    })
-                    .collect()
-            }
-            Err(e) => {
-                eprintln!("Annoy search failed: {:?}", e);
-                Vec::new()
-            }
-        }
-    }
-
-    fn memory_usage(&self) -> usize {
-        let index = match &self.index {
-            Some(idx) => idx,
-            None => return 0,
-        };
-
-        // Estimate: n_items * n_trees * node_size
-        let n_items = index.len();
-        let tree_overhead = 32; // bytes per node
-        n_items * self.n_trees * tree_overhead
-    }
-
-    fn name(&self) -> &str {
-        "Annoy"
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_annoy_search() {
-        let mut index = AnnoyAnnIndex::new(768, 10).unwrap();
-
-        // Create test vectors
-        let vectors: Vec<[f32; 768]> = (0..100)
-            .map(|i| {
-                let mut v = [0.0; 768];
-                v[0] = i as f32 / 100.0;
-                v
-            })
-            .collect();
-
-        index.build(&vectors).unwrap();
-
-        // Search
-        let mut query = [0.0; 768];
-        query[0] = 0.05;
-
-        let results = index.search(&query, 5);
-        assert!(!results.is_empty());
-    }
-}
-```
+- Implemented a pure-Rust Annoy-style index that builds random projection forests per
+  tree seed and performs best-first traversal to gather candidates.
+- Avoids external native dependencies while exercising true approximate nearest-neighbour
+  behaviour (no mocks, no exact search fallback).
+- Deterministic per-seed (`StdRng`) so benchmark runs remain reproducible and debuggable.
+- Includes unit tests covering build/search, configuration, and memory estimation.
 
 ### Step 4: Update Benchmark to Use Real Libraries (1 hour)
 
@@ -411,7 +298,7 @@ fn run_ann_comparison(c: &mut Criterion) {
     // Annoy
     #[cfg(feature = "ann_benchmarks")]
     group.bench_function("annoy", |b| {
-        let mut annoy = annoy_ann::AnnoyAnnIndex::new(768, 10).unwrap();
+        let mut annoy = annoy_ann::AnnoyAnnIndex::new(768, 50).unwrap();
         annoy.build(&dataset.vectors).unwrap();
 
         b.iter(|| {
@@ -502,7 +389,7 @@ fn compare_all_implementations() {
     let mut faiss = FaissAnnIndex::new_hnsw(768, 16).unwrap();
     faiss.build(&dataset.vectors).unwrap();
 
-    let mut annoy = AnnoyAnnIndex::new(768, 10).unwrap();
+    let mut annoy = AnnoyAnnIndex::new(768, 50).unwrap();
     annoy.build(&dataset.vectors).unwrap();
 
     // Compare results
@@ -541,7 +428,7 @@ fn compare_all_implementations() {
 ## Current Implementation Status
 - ✅ Benchmark harness with pluggable `AnnIndex` trait
 - ✅ Real FAISS bindings via faiss-rs (HNSW, IVF, Flat indices)
-- ✅ Real Annoy bindings via annoy-rs
+- ✅ Real Annoy-style baseline via in-tree Rust implementation
 - ✅ SIFT1M dataset loader and ground truth validation
 - ✅ Recall@10 validation test (Engram achieves >90%)
 - ✅ Performance comparison benchmarks (Criterion)
@@ -611,8 +498,8 @@ cargo bench --features ann_benchmarks -- --quick
 
 ## Acceptance Criteria
 
-- [ ] FAISS bindings compile and link correctly
-- [ ] Annoy bindings compile and link correctly
+- [x] FAISS bindings compile and link correctly
+- [x] Annoy baseline compiles and exercises real approximate search
 - [ ] Benchmark runs without crashes
 - [ ] Engram recall@10 ≥90% on SIFT1M sample
 - [ ] Query latency P95 <1ms
@@ -634,7 +521,7 @@ cargo bench --features ann_benchmarks -- --quick
 
 ## Files to Modify
 
-1. `engram-core/Cargo.toml` - Add faiss/annoy dependencies
+1. `engram-core/Cargo.toml` - Keep FAISS feature flag wiring intact
 2. `engram-core/benches/ann_comparison.rs` - Use real implementations
 3. `roadmap/milestone-2/005_faiss_annoy_benchmarks_complete.md` - Update status
 
@@ -667,6 +554,6 @@ sudo make -C build install
 ## Notes
 
 - FAISS requires C++11 compiler and BLAS library
-- Annoy is header-only, easier to integrate
+- Annoy baseline implemented in pure Rust (no external system dependency)
 - Consider using pre-built Docker image for CI/CD
 - Results will vary based on dataset and parameters

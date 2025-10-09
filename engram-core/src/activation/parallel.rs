@@ -16,7 +16,7 @@ use crate::activation::{
 use dashmap::DashMap;
 use std::cell::Cell;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -42,56 +42,85 @@ pub struct ParallelSpreadingEngine {
 }
 
 /// Synchronization barrier for deterministic parallel execution
+///
+/// Uses parking_lot's Condvar for efficient OS-level blocking instead of spin-waiting.
+/// This eliminates CPU burn during synchronization and improves behavior under contention.
 pub struct PhaseBarrier {
-    worker_count: AtomicUsize,
-    phase_counter: AtomicU64,
-    waiting: AtomicUsize,
-    enabled: AtomicBool,
+    state: parking_lot::Mutex<BarrierState>,
+    condvar: parking_lot::Condvar,
+}
+
+struct BarrierState {
+    worker_count: usize,
+    waiting: usize,
+    phase_counter: u64,
+    enabled: bool,
 }
 
 impl PhaseBarrier {
-    const fn new(worker_count: usize) -> Self {
+    fn new(worker_count: usize) -> Self {
         Self {
-            worker_count: AtomicUsize::new(worker_count),
-            phase_counter: AtomicU64::new(0),
-            waiting: AtomicUsize::new(0),
-            enabled: AtomicBool::new(true),
+            state: parking_lot::Mutex::new(BarrierState {
+                worker_count,
+                waiting: 0,
+                phase_counter: 0,
+                enabled: true,
+            }),
+            condvar: parking_lot::Condvar::new(),
         }
     }
 
     /// Disable the barrier, allowing workers to pass through without waiting
     fn disable(&self) {
-        self.enabled.store(false, Ordering::SeqCst);
+        let mut state = self.state.lock();
+        state.enabled = false;
+        // Wake all waiting threads
+        self.condvar.notify_all();
+    }
+
+    /// Enable the barrier for synchronization
+    fn enable(&self) {
+        let mut state = self.state.lock();
+        state.enabled = true;
+        // Reset phase counter for new spreading operation
+        state.phase_counter = 0;
+        state.waiting = 0;
+        drop(state);
+        // Wake any threads that might be waiting
+        self.condvar.notify_all();
     }
 
     /// Wait for all workers to reach this barrier point
     fn wait(&self) {
+        let mut state = self.state.lock();
+
         // If barrier is disabled, return immediately
-        if !self.enabled.load(Ordering::Relaxed) {
+        if !state.enabled {
             return;
         }
 
-        let total_workers = self.worker_count.load(Ordering::Relaxed);
-        let current_waiting = self.waiting.fetch_add(1, Ordering::SeqCst);
+        state.waiting += 1;
+        let current_phase = state.phase_counter;
 
-        if current_waiting + 1 == total_workers {
-            // Last worker to arrive - reset and advance phase
-            self.waiting.store(0, Ordering::Relaxed);
-            self.phase_counter.fetch_add(1, Ordering::SeqCst);
+        if state.waiting == state.worker_count {
+            // Last worker to arrive - advance phase and wake everyone
+            state.waiting = 0;
+            state.phase_counter += 1;
+            drop(state); // Release lock before notifying
+            self.condvar.notify_all();
         } else {
             // Wait for phase to advance or barrier to be disabled
-            // Use exponential backoff to reduce CPU contention under load
-            let current_phase = self.phase_counter.load(Ordering::Relaxed);
-            let mut backoff = Duration::from_micros(1);
-
-            while self.phase_counter.load(Ordering::Relaxed) == current_phase
-                && self.enabled.load(Ordering::Relaxed)
-            {
-                thread::sleep(backoff);
-                // Exponentially increase backoff, capped at 10ms to prevent excessive delays
-                backoff = (backoff * 2).min(Duration::from_millis(10));
+            // OS-level blocking - no CPU burn!
+            while state.phase_counter == current_phase && state.enabled {
+                self.condvar.wait(&mut state);
             }
         }
+    }
+
+    /// Get the current phase count
+    fn phase_count(&self) -> u64 {
+        let state = self.state.lock();
+        state.phase_counter
     }
 }
 
@@ -256,7 +285,7 @@ impl ParallelSpreadingEngine {
     fn process_neighbors_batch(
         context: &WorkerContext,
         task: &ActivationTask,
-        record: &Arc<ActivationRecord>,
+        applied_delta: f32,
         neighbors: &[WeightedEdge],
         next_tier: StorageTier,
         decay_factor: f32,
@@ -268,7 +297,14 @@ impl ParallelSpreadingEngine {
         // Get current node's embedding from the graph
         let Some(current_embedding) = context.memory_graph.get_embedding(&task.target_node) else {
             // No embedding for current node, fallback to scalar
-            Self::fallback_to_scalar(context, task, record, neighbors, next_tier, decay_factor);
+            Self::fallback_to_scalar(
+                context,
+                task,
+                applied_delta,
+                neighbors,
+                next_tier,
+                decay_factor,
+            );
             return;
         };
 
@@ -280,7 +316,14 @@ impl ParallelSpreadingEngine {
 
         // Ensure we have all embeddings before using SIMD
         if neighbor_embeddings.is_empty() || neighbor_embeddings.len() != neighbors.len() {
-            Self::fallback_to_scalar(context, task, record, neighbors, next_tier, decay_factor);
+            Self::fallback_to_scalar(
+                context,
+                task,
+                applied_delta,
+                neighbors,
+                next_tier,
+                decay_factor,
+            );
             return;
         }
 
@@ -301,7 +344,7 @@ impl ParallelSpreadingEngine {
             next_path.push(edge.target.clone());
             let new_task = ActivationTask::new(
                 edge.target.clone(),
-                record.get_activation(),
+                applied_delta,
                 activation_weight,
                 decay_factor,
                 task.depth + 1,
@@ -318,7 +361,7 @@ impl ParallelSpreadingEngine {
     fn fallback_to_scalar(
         context: &WorkerContext,
         task: &ActivationTask,
-        record: &Arc<ActivationRecord>,
+        applied_delta: f32,
         neighbors: &[WeightedEdge],
         next_tier: StorageTier,
         decay_factor: f32,
@@ -328,7 +371,7 @@ impl ParallelSpreadingEngine {
             next_path.push(edge.target.clone());
             let new_task = ActivationTask::new(
                 edge.target.clone(),
-                record.get_activation(),
+                applied_delta,
                 edge.weight,
                 decay_factor,
                 task.depth + 1,
@@ -355,7 +398,9 @@ impl ParallelSpreadingEngine {
                 continue;
             }
 
-            if context.config.deterministic {
+            // Only wait at barrier if there might be more tasks coming
+            // If scheduler is idle, skip barrier to avoid unnecessary synchronization
+            if context.config.deterministic && !context.scheduler.is_idle() {
                 context.phase_barrier.wait();
             }
 
@@ -387,12 +432,14 @@ impl ParallelSpreadingEngine {
             })
             .clone();
 
-        // Accumulate activation with threshold check
+        // Accumulate activation with threshold check and capture applied delta
         let contribution = task.contribution();
-        if !record.accumulate_activation(contribution) {
+        let Some((updated_activation, applied_delta)) =
+            record.accumulate_activation_with_result(contribution)
+        else {
             guard.finish();
             return; // Below threshold
-        }
+        };
 
         // Capture trace entry if deterministic tracing is enabled
         if context.config.trace_activation_flow && context.config.deterministic {
@@ -405,7 +452,7 @@ impl ParallelSpreadingEngine {
             let trace_entry = TraceEntry {
                 depth: task.depth,
                 target_node: target_clone.clone(),
-                activation: record.get_activation(),
+                activation: updated_activation,
                 confidence: record.get_confidence(),
                 source_node,
             };
@@ -475,7 +522,7 @@ impl ParallelSpreadingEngine {
                 Self::process_neighbors_batch(
                     context,
                     &task,
-                    &record,
+                    applied_delta,
                     &neighbors,
                     next_tier,
                     decay_factor,
@@ -487,7 +534,7 @@ impl ParallelSpreadingEngine {
                     next_path.push(edge.target.clone());
                     let new_task = ActivationTask::new(
                         edge.target.clone(),
-                        record.get_activation(),
+                        applied_delta,
                         edge.weight,
                         decay_factor,
                         task.depth + 1,
@@ -539,7 +586,7 @@ impl ParallelSpreadingEngine {
         self.metrics.reset();
         self.scheduler.reset(&self.config);
         self.cycle_detector.reset();
-        self.phase_barrier.enabled.store(true, Ordering::SeqCst);
+        self.phase_barrier.enable();
         if let Ok(mut trace) = self.deterministic_trace.lock() {
             trace.clear();
         }
@@ -586,7 +633,7 @@ impl ParallelSpreadingEngine {
         // Adaptive timeout based on available system parallelism
         // Base: 30s + 10s per available core (accounts for contention)
         let available_parallelism = std::thread::available_parallelism()
-            .map(|n| n.get())
+            .map(std::num::NonZero::get)
             .unwrap_or(4);
         let timeout = Duration::from_secs(30 + (available_parallelism as u64 * 10));
         let start = Instant::now();
@@ -750,28 +797,49 @@ mod tests {
     use std::collections::HashMap;
     use std::time::Duration;
 
-    fn create_test_graph() -> Arc<MemoryGraph> {
+    /// Create a test graph with unique node IDs to prevent cross-test interference
+    ///
+    /// Each test invocation gets a unique prefix based on thread ID and timestamp,
+    /// ensuring node IDs don't collide in the shared DashMap even when tests run concurrently.
+    ///
+    /// Returns (graph, node_a, node_b, node_c)
+    fn create_test_graph() -> (Arc<MemoryGraph>, NodeId, NodeId, NodeId) {
         let graph = Arc::new(create_activation_graph());
+
+        // Generate unique prefix for this test invocation
+        // Format: ThreadId_Timestamp to ensure uniqueness across concurrent tests
+        let prefix = format!(
+            "{:?}_{}",
+            std::thread::current().id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+
+        let node_a = format!("{}_A", prefix);
+        let node_b = format!("{}_B", prefix);
+        let node_c = format!("{}_C", prefix);
 
         // Create a simple test graph: A -> B -> C, A -> C
         ActivationGraphExt::add_edge(
             &*graph,
-            "A".to_string(),
-            "B".to_string(),
+            node_a.clone(),
+            node_b.clone(),
             0.8,
             EdgeType::Excitatory,
         );
         ActivationGraphExt::add_edge(
             &*graph,
-            "B".to_string(),
-            "C".to_string(),
+            node_b.clone(),
+            node_c.clone(),
             0.6,
             EdgeType::Excitatory,
         );
         ActivationGraphExt::add_edge(
             &*graph,
-            "A".to_string(),
-            "C".to_string(),
+            node_a.clone(),
+            node_c.clone(),
             0.4,
             EdgeType::Excitatory,
         );
@@ -781,40 +849,40 @@ mod tests {
         let embedding_b = [0.2f32; 768];
         let embedding_c = [0.3f32; 768];
 
-        ActivationGraphExt::set_embedding(&*graph, &"A".to_string(), &embedding_a);
-        ActivationGraphExt::set_embedding(&*graph, &"B".to_string(), &embedding_b);
-        ActivationGraphExt::set_embedding(&*graph, &"C".to_string(), &embedding_c);
+        ActivationGraphExt::set_embedding(&*graph, &node_a, &embedding_a);
+        ActivationGraphExt::set_embedding(&*graph, &node_b, &embedding_b);
+        ActivationGraphExt::set_embedding(&*graph, &node_c, &embedding_c);
 
         // Fix 2: Diagnostic verification of edge addition
-        let neighbors_a = ActivationGraphExt::get_neighbors(&*graph, &"A".to_string());
+        let neighbors_a = ActivationGraphExt::get_neighbors(&*graph, &node_a);
         assert!(
             neighbors_a.is_some(),
             "Node A should have neighbors after adding edges"
         );
-        let neighbors_a = neighbors_a.expect("node A should have neighbors");
+        let neighbors_a_unwrapped = neighbors_a.expect("node A should have neighbors");
         assert_eq!(
-            neighbors_a.len(),
+            neighbors_a_unwrapped.len(),
             2,
             "Node A should have 2 outgoing edges (A->B, A->C)"
         );
 
-        let neighbors_b = ActivationGraphExt::get_neighbors(&*graph, &"B".to_string());
+        let neighbors_b = ActivationGraphExt::get_neighbors(&*graph, &node_b);
         assert!(
             neighbors_b.is_some(),
             "Node B should have neighbors after adding edges"
         );
-        let neighbors_b = neighbors_b.expect("node B should have neighbors");
+        let neighbors_b_unwrapped = neighbors_b.expect("node B should have neighbors");
         assert_eq!(
-            neighbors_b.len(),
+            neighbors_b_unwrapped.len(),
             1,
             "Node B should have 1 outgoing edge (B->C)"
         );
 
-        let _neighbors_c = ActivationGraphExt::get_neighbors(&*graph, &"C".to_string());
+        let _neighbors_c = ActivationGraphExt::get_neighbors(&*graph, &node_c);
         // C might not have outgoing edges, but should exist in the graph
         // If it has no neighbors, that's expected for a leaf node
 
-        graph
+        (graph, node_a, node_b, node_c)
     }
 
     /// Compute resource-aware thread count for tests
@@ -825,6 +893,33 @@ mod tests {
             .unwrap_or(1)
     }
 
+    const TEST_MAX_DEPTH: u16 = 2;
+
+    fn fast_parallel_config() -> ParallelSpreadingConfig {
+        let num_threads = test_thread_count().clamp(1, 2);
+        ParallelSpreadingConfig {
+            num_threads,
+            max_depth: TEST_MAX_DEPTH,
+            batch_size: 8,
+            simd_batch_size: 4,
+            prefetch_distance: 16,
+            enable_memory_pool: false,
+            ..ParallelSpreadingConfig::default()
+        }
+    }
+
+    fn fast_deterministic_config(seed: u64, threads: usize) -> ParallelSpreadingConfig {
+        ParallelSpreadingConfig {
+            num_threads: threads.clamp(1, 4),
+            max_depth: TEST_MAX_DEPTH,
+            batch_size: 8,
+            simd_batch_size: 4,
+            prefetch_distance: 16,
+            enable_memory_pool: false,
+            ..ParallelSpreadingConfig::deterministic(seed)
+        }
+    }
+
     #[test]
     fn test_parallel_engine_creation() {
         let config = ParallelSpreadingConfig {
@@ -833,7 +928,7 @@ mod tests {
             ..Default::default()
         };
 
-        let graph = create_test_graph();
+        let (graph, _node_a, _node_b, _node_c) = create_test_graph();
         let engine =
             ParallelSpreadingEngine::new(config, graph).expect("engine creation should succeed");
 
@@ -846,19 +941,15 @@ mod tests {
     #[test]
     #[serial(parallel_engine)]
     fn test_activation_spreading() {
-        let config = ParallelSpreadingConfig {
-            num_threads: test_thread_count(),
-            max_depth: 2,
-            threshold: 0.01,
-            ..Default::default()
-        };
+        let config = fast_parallel_config();
 
-        let graph = create_test_graph();
+        let (graph, node_a, _node_b, _node_c) = create_test_graph();
+
         let engine =
             ParallelSpreadingEngine::new(config, graph).expect("engine creation should succeed");
 
         // Spread activation from node A
-        let seed_activations = vec![("A".to_string(), 1.0)];
+        let seed_activations = vec![(node_a.clone(), 1.0)];
         let results = engine
             .spread_activation(&seed_activations)
             .expect("spread should succeed");
@@ -872,7 +963,7 @@ mod tests {
         let node_a_activation = results
             .activations
             .iter()
-            .find(|activation| activation.memory_id == "A")
+            .find(|activation| activation.memory_id == node_a)
             .map(|activation| activation.activation_level.load(Ordering::Relaxed));
         assert!(node_a_activation.is_some());
         assert!(node_a_activation.expect("activation should exist") >= 1.0);
@@ -882,32 +973,36 @@ mod tests {
 
     #[test]
     fn test_deterministic_spreading() {
-        let config1 = ParallelSpreadingConfig::deterministic(42);
-        let config2 = ParallelSpreadingConfig::deterministic(42);
+        let threads = test_thread_count().clamp(1, 2);
+        let config1 = fast_deterministic_config(42, threads);
+        let config2 = fast_deterministic_config(42, threads);
 
-        let graph1 = create_test_graph();
-        let graph2 = create_test_graph();
+        let (graph1, node_a1, _node_b1, _node_c1) = create_test_graph();
+        let (graph2, node_a2, _node_b2, _node_c2) = create_test_graph();
 
         let engine1 =
             ParallelSpreadingEngine::new(config1, graph1).expect("engine1 creation should succeed");
         let engine2 =
             ParallelSpreadingEngine::new(config2, graph2).expect("engine2 creation should succeed");
 
-        let seed_activations = vec![("A".to_string(), 1.0)];
+        let seed_activations1 = vec![(node_a1, 1.0)];
+        let seed_activations2 = vec![(node_a2, 1.0)];
 
         let results1 = engine1
-            .spread_activation(&seed_activations)
+            .spread_activation(&seed_activations1)
             .expect("spread1 should succeed");
         let results2 = engine2
-            .spread_activation(&seed_activations)
+            .spread_activation(&seed_activations2)
             .expect("spread2 should succeed");
 
+        // Extract node suffixes (A, B, C) and activation values
         let mut activations1: Vec<_> = results1
             .activations
             .iter()
             .map(|activation| {
+                let suffix = activation.memory_id.split('_').last().unwrap_or("");
                 (
-                    activation.memory_id.clone(),
+                    suffix.to_string(),
                     activation.activation_level.load(Ordering::Relaxed),
                 )
             })
@@ -916,8 +1011,9 @@ mod tests {
             .activations
             .iter()
             .map(|activation| {
+                let suffix = activation.memory_id.split('_').last().unwrap_or("");
                 (
-                    activation.memory_id.clone(),
+                    suffix.to_string(),
                     activation.activation_level.load(Ordering::Relaxed),
                 )
             })
@@ -928,8 +1024,12 @@ mod tests {
 
         assert_eq!(activations1.len(), activations2.len());
         for (a1, a2) in activations1.iter().zip(activations2.iter()) {
-            assert_eq!(a1.0, a2.0);
-            assert!((a1.1 - a2.1).abs() < 1e-6);
+            assert_eq!(a1.0, a2.0, "Node suffix mismatch");
+            assert!(
+                (a1.1 - a2.1).abs() < 1e-6,
+                "Activation value mismatch for node {}",
+                a1.0
+            );
         }
 
         // Verify trace is captured
@@ -946,111 +1046,78 @@ mod tests {
     #[test]
     #[serial(parallel_engine)]
     fn test_deterministic_across_thread_counts() {
-        let seed_activations = vec![("A".to_string(), 1.0)];
+        let mut thread_counts = vec![1usize, 2, test_thread_count().saturating_mul(2).min(4)];
+        thread_counts.sort_unstable();
+        thread_counts.dedup();
 
-        // Run with 1 thread
-        let config1 = ParallelSpreadingConfig {
-            num_threads: 1,
-            ..ParallelSpreadingConfig::deterministic(123)
-        };
-        let graph1 = create_test_graph();
-        let engine1 =
-            ParallelSpreadingEngine::new(config1, graph1).expect("engine1 should succeed");
-        let results1 = engine1
-            .spread_activation(&seed_activations)
-            .expect("spread1 should succeed");
+        let mut activations_by_threads = Vec::new();
 
-        // Run with 2 threads
-        let config2 = ParallelSpreadingConfig {
-            num_threads: 2,
-            ..ParallelSpreadingConfig::deterministic(123)
-        };
-        let graph2 = create_test_graph();
-        let engine2 =
-            ParallelSpreadingEngine::new(config2, graph2).expect("engine2 should succeed");
-        let results2 = engine2
-            .spread_activation(&seed_activations)
-            .expect("spread2 should succeed");
+        for threads in thread_counts {
+            let (graph, node_a, _node_b, _node_c) = create_test_graph();
+            let seed_activations = vec![(node_a, 1.0)];
 
-        // Run with 4 threads
-        let config3 = ParallelSpreadingConfig {
-            num_threads: 4,
-            ..ParallelSpreadingConfig::deterministic(123)
-        };
-        let graph3 = create_test_graph();
-        let engine3 =
-            ParallelSpreadingEngine::new(config3, graph3).expect("engine3 should succeed");
-        let results3 = engine3
-            .spread_activation(&seed_activations)
-            .expect("spread3 should succeed");
+            let engine =
+                ParallelSpreadingEngine::new(fast_deterministic_config(123, threads), graph)
+                    .expect("engine should succeed");
+            let results = engine
+                .spread_activation(&seed_activations)
+                .expect("spread should succeed");
 
-        // Compare results
-        let mut act1: Vec<_> = results1
-            .activations
-            .iter()
-            .map(|a| {
-                (
-                    a.memory_id.clone(),
-                    a.activation_level.load(Ordering::Relaxed),
-                )
-            })
-            .collect();
-        let mut act2: Vec<_> = results2
-            .activations
-            .iter()
-            .map(|a| {
-                (
-                    a.memory_id.clone(),
-                    a.activation_level.load(Ordering::Relaxed),
-                )
-            })
-            .collect();
-        let mut act3: Vec<_> = results3
-            .activations
-            .iter()
-            .map(|a| {
-                (
-                    a.memory_id.clone(),
-                    a.activation_level.load(Ordering::Relaxed),
-                )
-            })
-            .collect();
+            // Extract node suffixes (A, B, C) for comparison across different graph instances
+            let mut activations: Vec<_> = results
+                .activations
+                .iter()
+                .map(|a| {
+                    let suffix = a.memory_id.split('_').last().unwrap_or("");
+                    (
+                        suffix.to_string(),
+                        a.activation_level.load(Ordering::Relaxed),
+                    )
+                })
+                .collect();
+            activations.sort_by(|a, b| a.0.cmp(&b.0));
+            let trace_len = results.deterministic_trace.len();
 
-        act1.sort_by(|a, b| a.0.cmp(&b.0));
-        act2.sort_by(|a, b| a.0.cmp(&b.0));
-        act3.sort_by(|a, b| a.0.cmp(&b.0));
-
-        assert_eq!(act1.len(), act2.len());
-        assert_eq!(act2.len(), act3.len());
-
-        for i in 0..act1.len() {
-            assert_eq!(act1[i].0, act2[i].0);
-            assert_eq!(act2[i].0, act3[i].0);
-            assert!(
-                (act1[i].1 - act2[i].1).abs() < 1e-6,
-                "Thread count 1 vs 2 mismatch for node {}",
-                act1[i].0
-            );
-            assert!(
-                (act2[i].1 - act3[i].1).abs() < 1e-6,
-                "Thread count 2 vs 4 mismatch for node {}",
-                act2[i].0
-            );
+            engine.shutdown().expect("shutdown should succeed");
+            activations_by_threads.push((threads, activations, trace_len));
         }
 
-        engine1.shutdown().expect("shutdown1 should succeed");
-        engine2.shutdown().expect("shutdown2 should succeed");
-        engine3.shutdown().expect("shutdown3 should succeed");
+        assert!(activations_by_threads.len() >= 2);
+        let (baseline_threads, baseline_activations, baseline_trace) = &activations_by_threads[0];
+        for (threads, activations, trace_len) in &activations_by_threads[1..] {
+            assert_eq!(
+                activations.len(),
+                baseline_activations.len(),
+                "Activation count mismatch for {threads} threads vs baseline {baseline_threads}"
+            );
+
+            for (baseline, candidate) in baseline_activations.iter().zip(activations.iter()) {
+                assert_eq!(baseline.0, candidate.0, "Node suffix mismatch");
+                assert!(
+                    (baseline.1 - candidate.1).abs() < 1e-6,
+                    "Activation mismatch for node {} between thread counts {} and {}",
+                    baseline.0,
+                    baseline_threads,
+                    threads
+                );
+            }
+
+            assert_eq!(
+                *baseline_trace, *trace_len,
+                "Trace length mismatch for {threads} threads vs baseline {baseline_threads}"
+            );
+        }
     }
 
     #[test]
     #[serial(parallel_engine)]
     fn test_deterministic_trace_capture() {
-        let config = ParallelSpreadingConfig::deterministic(999);
-        let graph = create_test_graph();
+        let config = fast_deterministic_config(999, test_thread_count().clamp(1, 2));
+        let (graph, node_a, _node_b, _node_c) = create_test_graph();
+
         let engine = ParallelSpreadingEngine::new(config, graph).expect("engine should succeed");
 
-        let seed_activations = vec![("A".to_string(), 1.0)];
+        let seed_activations = vec![(node_a, 1.0)];
         let results = engine
             .spread_activation(&seed_activations)
             .expect("spread should succeed");
@@ -1069,23 +1136,25 @@ mod tests {
 
     #[test]
     fn test_deterministic_vs_performance_mode() {
-        let seed_activations = vec![("A".to_string(), 1.0)];
-
         // Deterministic mode
-        let det_config = ParallelSpreadingConfig::deterministic(555);
-        let det_graph = create_test_graph();
+        let det_config = fast_deterministic_config(555, test_thread_count().clamp(1, 2));
+        let (det_graph, node_a_det, _node_b_det, _node_c_det) = create_test_graph();
+        let seed_activations_det = vec![(node_a_det, 1.0)];
+
         let det_engine = ParallelSpreadingEngine::new(det_config, det_graph).unwrap();
-        let det_results = det_engine.spread_activation(&seed_activations).unwrap();
+        let det_results = det_engine.spread_activation(&seed_activations_det).unwrap();
 
         // Performance mode (non-deterministic)
-        let perf_config = ParallelSpreadingConfig {
-            deterministic: false,
-            trace_activation_flow: false,
-            ..ParallelSpreadingConfig::default()
-        };
-        let perf_graph = create_test_graph();
+        let mut perf_config = fast_parallel_config();
+        perf_config.deterministic = false;
+        perf_config.trace_activation_flow = false;
+        let (perf_graph, node_a_perf, _node_b_perf, _node_c_perf) = create_test_graph();
+        let seed_activations_perf = vec![(node_a_perf, 1.0)];
+
         let perf_engine = ParallelSpreadingEngine::new(perf_config, perf_graph).unwrap();
-        let perf_results = perf_engine.spread_activation(&seed_activations).unwrap();
+        let perf_results = perf_engine
+            .spread_activation(&seed_activations_perf)
+            .unwrap();
 
         // Both should activate nodes, but deterministic should have trace
         assert!(!det_results.activations.is_empty());
@@ -1100,16 +1169,14 @@ mod tests {
     #[test]
     #[serial(parallel_engine)]
     fn test_metrics_tracking() {
-        let config = ParallelSpreadingConfig {
-            num_threads: test_thread_count(),
-            max_depth: 3,
-            ..Default::default()
-        };
+        let mut config = fast_parallel_config();
+        config.enable_metrics = true;
 
-        let graph = create_test_graph();
+        let (graph, node_a, _node_b, _node_c) = create_test_graph();
+
         let engine = ParallelSpreadingEngine::new(config, graph).expect("engine should succeed");
 
-        let seed_activations = vec![("A".to_string(), 1.0)];
+        let seed_activations = vec![(node_a, 1.0)];
         let results = engine
             .spread_activation(&seed_activations)
             .expect("spread should succeed");
@@ -1127,17 +1194,14 @@ mod tests {
     #[test]
     #[serial(parallel_engine)]
     fn test_threshold_filtering() {
-        let config = ParallelSpreadingConfig {
-            num_threads: test_thread_count(),
-            max_depth: 2,
-            threshold: 0.5, // High threshold
-            ..Default::default()
-        };
+        let mut config = fast_parallel_config();
+        config.threshold = 0.5; // High threshold
 
-        let graph = create_test_graph();
+        let (graph, node_a, _node_b, _node_c) = create_test_graph();
+
         let engine = ParallelSpreadingEngine::new(config, graph).expect("engine should succeed");
 
-        let seed_activations = vec![("A".to_string(), 0.3)]; // Low seed
+        let seed_activations = vec![(node_a, 0.3)]; // Low seed
         let results = engine
             .spread_activation(&seed_activations)
             .expect("spread should succeed");
@@ -1153,38 +1217,47 @@ mod tests {
     #[test]
     #[serial(parallel_engine)]
     fn cycle_detection_penalises_revisits() {
-        let config = ParallelSpreadingConfig {
-            num_threads: test_thread_count(),
-            max_depth: 3,
-            cycle_detection: true,
-            cycle_penalty_factor: 0.5,
-            tier_cycle_budgets: HashMap::from([
-                (StorageTier::Hot, 1),
-                (StorageTier::Warm, 1),
-                (StorageTier::Cold, 1),
-            ]),
-            trace_activation_flow: true, // Enable tracing
-            ..Default::default()
-        };
+        let mut config = fast_parallel_config();
+        config.max_depth = 3;
+        config.cycle_detection = true;
+        config.cycle_penalty_factor = 0.5;
+        config.tier_cycle_budgets = HashMap::from([
+            (StorageTier::Hot, 1),
+            (StorageTier::Warm, 1),
+            (StorageTier::Cold, 1),
+        ]);
+        config.trace_activation_flow = true;
+
+        // Generate unique node IDs for this test to prevent cross-test interference
+        let prefix = format!(
+            "{:?}_{}",
+            std::thread::current().id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let node_a = format!("{}_A", prefix);
+        let node_b = format!("{}_B", prefix);
 
         let graph = Arc::new(create_activation_graph());
         ActivationGraphExt::add_edge(
             &*graph,
-            "A".to_string(),
-            "B".to_string(),
+            node_a.clone(),
+            node_b.clone(),
             0.9,
             EdgeType::Excitatory,
         );
         ActivationGraphExt::add_edge(
             &*graph,
-            "B".to_string(),
-            "A".to_string(),
+            node_b.clone(),
+            node_a.clone(),
             0.9,
             EdgeType::Excitatory,
         );
 
         let engine = ParallelSpreadingEngine::new(config, graph).expect("engine should succeed");
-        let seed_activations = vec![("A".to_string(), 1.0)];
+        let seed_activations = vec![(node_a.clone(), 1.0)];
         let results = engine
             .spread_activation(&seed_activations)
             .expect("spread should succeed");
@@ -1209,7 +1282,7 @@ mod tests {
         let activation_b = results
             .activations
             .iter()
-            .find(|activation| activation.memory_id == "B")
+            .find(|activation| activation.memory_id == node_b)
             .map(|activation| activation.activation_level.load(Ordering::Relaxed))
             .unwrap_or_default();
         assert!(
@@ -1242,6 +1315,6 @@ mod tests {
             handle.join().expect("thread should complete");
         }
 
-        assert_eq!(barrier_arc.phase_counter.load(Ordering::Relaxed), 1);
+        assert_eq!(barrier_arc.phase_count(), 1);
     }
 }

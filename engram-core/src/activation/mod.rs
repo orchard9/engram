@@ -106,8 +106,9 @@ impl ActivationRecord {
         }
     }
 
-    /// Atomically accumulate activation with memory ordering
-    pub fn accumulate_activation(&self, contribution: f32) -> bool {
+    /// Atomically accumulate activation with memory ordering, returning both the
+    /// updated activation level and the delta actually applied.
+    pub fn accumulate_activation_with_result(&self, contribution: f32) -> Option<(f32, f32)> {
         let threshold = self
             .storage_tier
             .map_or(0.01, storage_aware::StorageTier::activation_threshold);
@@ -117,7 +118,7 @@ impl ActivationRecord {
 
             // Only update if above threshold to reduce contention
             if new_activation < threshold {
-                return false;
+                return None;
             }
 
             if self
@@ -138,9 +139,16 @@ impl ActivationRecord {
                     .try_into()
                     .unwrap_or(u64::MAX);
                 self.timestamp.store(now, Ordering::Relaxed);
-                return true;
+                let applied_delta = new_activation - current;
+                return Some((new_activation, applied_delta));
             }
         }
+    }
+
+    /// Atomically accumulate activation with memory ordering
+    pub fn accumulate_activation(&self, contribution: f32) -> bool {
+        self.accumulate_activation_with_result(contribution)
+            .is_some()
     }
 
     /// Get current activation level
@@ -765,10 +773,44 @@ pub trait ActivationGraphExt {
     fn edge_count(&self) -> usize;
 
     /// Store embedding for a node
+    ///
+    /// Embeddings are cached per-node and do not automatically sync with the HNSW index.
+    /// Call this method when:
+    /// - Adding a new node to the graph
+    /// - An episode's embedding is updated in the HNSW index
+    /// - Rebuilding the graph after memory consolidation
+    ///
+    /// # Memory Usage
+    /// Each embedding consumes 3KB (768 × f32). Memory grows linearly:
+    /// - 100K nodes = 300MB
+    /// - 1M nodes = 3GB
+    /// - 10M nodes = 30GB
+    ///
+    /// # Thread Safety
+    /// This method is thread-safe and can be called concurrently. Last write wins.
     fn set_embedding(&self, node_id: &NodeId, embedding: &[f32; 768]);
 
     /// Retrieve embedding for a node
+    ///
+    /// Returns a copy of the embedding (3KB) if present, or `None` if the node
+    /// has no cached embedding. When this returns `None`, SIMD batch spreading
+    /// will gracefully fall back to scalar operations.
+    ///
+    /// # Performance Note
+    /// This method copies the 3KB embedding array. For batch operations processing
+    /// 8 neighbors, this results in ~27KB of copies (current node + 8 neighbors).
+    /// This overhead is typically negligible compared to the 2-3× SIMD speedup gain.
     fn get_embedding(&self, node_id: &NodeId) -> Option<[f32; 768]>;
+
+    /// Get all node IDs in the graph
+    ///
+    /// Returns a vector of all node IDs that have been added to the graph.
+    /// This is useful for testing and diagnostics.
+    ///
+    /// # Performance Note
+    /// This method performs a full scan of the graph's UUID mappings and allocates
+    /// a new vector. Use sparingly in performance-critical paths.
+    fn get_all_nodes(&self) -> Vec<NodeId>;
 }
 
 impl ActivationGraphExt for ActivationGraph {
@@ -827,6 +869,13 @@ impl ActivationGraphExt for ActivationGraph {
 
     fn get_embedding(&self, node_id: &NodeId) -> Option<[f32; 768]> {
         self.embeddings.get(node_id).map(|entry| *entry.value())
+    }
+
+    fn get_all_nodes(&self) -> Vec<NodeId> {
+        self.uuid_mappings
+            .iter()
+            .map(|entry| entry.value().clone())
+            .collect()
     }
 }
 

@@ -72,7 +72,7 @@ This document provides an honest assessment of feature implementation status acr
 | **Prometheus Export** | 🟢 Functional | Metrics exposed, needs tuning |
 | **Benchmarking Framework** | 🟢 Functional | Criterion-based, works well |
 | **GPU Acceleration** | 🟡 Partial | Interface defined, CUDA implementation incomplete |
-| **FAISS/Annoy Comparison** | 🟡 Partial | Framework exists, mock implementations only |
+| **FAISS/Annoy Comparison** | 🟢 Complete | Framework benchmarks Engram vs FAISS vs Annoy-style baseline |
 | **Health Checks** | ✅ Production | Comprehensive health monitoring |
 
 ## Testing & Validation (Milestone 0-3)

@@ -25,27 +25,37 @@ pub async fn is_port_available(port: u16) -> bool {
 ///
 /// Returns error if no available ports can be found
 pub async fn find_available_port(preferred_port: u16) -> Result<u16> {
-    // Try the preferred port first
+    // Allow callers to request an OS-assigned ephemeral port by passing 0.
+    if preferred_port == 0 {
+        return reserve_ephemeral_port().await;
+    }
+
+    // Try the preferred port first.
     if is_port_available(preferred_port).await {
         return Ok(preferred_port);
     }
 
-    // If preferred port is taken, try nearby ports
+    // If preferred port is taken, try nearby ports.
     for offset in 1..=100 {
-        let port = preferred_port.saturating_add(offset);
+        let port = preferred_port.wrapping_add(offset);
         if port == 0 {
-            // Handle wraparound
-            break;
+            // Skip wraparound to preserve the semantics of requesting an ephemeral port explicitly.
+            continue;
         }
         if is_port_available(port).await {
             return Ok(port);
         }
     }
 
-    Err(anyhow::anyhow!(
-        "No available ports found near {}",
-        preferred_port
-    ))
+    // Fallback: ask the OS for an ephemeral port so tests and constrained environments succeed.
+    reserve_ephemeral_port().await
+}
+
+async fn reserve_ephemeral_port() -> Result<u16> {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let port = listener.local_addr()?.port();
+    drop(listener);
+    Ok(port)
 }
 
 /// Start a test server on a specific port for integration tests

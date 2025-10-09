@@ -40,6 +40,10 @@ P0 (Critical Path)
 - Expose helpers in `activation/test_support.rs` for constructing `ParallelSpreadingConfig` with deterministic + metrics instrumentation.
 - Capture metrics snapshots (`ActivationMetrics::export`) and assert on latency, cycle detection, cache hit rate.
 
+### Preparation Notes
+- `engram-core/tests/spreading_validation_prep.rs` seeds deterministic configs and triangle graph fixtures for upcoming snapshot generation.
+- `engram-core/tests/data/spreading_snapshots/` now holds documentation for storing golden traces; populate YAML fixtures once Task 010 completes.
+
 ### Acceptance Criteria
 - [ ] Golden snapshots captured for canonical graphs and stored in repo
 - [ ] Property tests cover ≥1 000 random graphs per run with invariants enforced

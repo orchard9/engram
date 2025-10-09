@@ -376,8 +376,15 @@ impl CognitiveRecall {
 
     /// Seed activation from cue using vector similarity
     fn seed_from_cue(&self, cue: &Cue) -> Result<Vec<SeededActivation>, seeding::SeedingError> {
-        let outcome = self.vector_seeder.seed_from_cue(cue)?;
-        Ok(outcome.seeds)
+        let outcome = self.vector_seeder.seed_from_cue(cue);
+        match outcome {
+            Ok(outcome) => Ok(outcome.seeds),
+            Err(seeding::SeedingError::MissingEmbedding) => {
+                // No embedding provided; return empty seed set so caller can fallback
+                Ok(Vec::new())
+            }
+            Err(err) => Err(err),
+        }
     }
 
     /// Spread activation through the memory graph
