@@ -10,6 +10,7 @@ use engram_cli::{
     api::{ApiState, create_api_routes},
     docs::{DocSection, OperationalDocs},
     find_available_port,
+    grpc::MemoryService,
 };
 use engram_core::MemoryStore;
 use std::fs;
@@ -19,7 +20,7 @@ use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::signal;
 use tower_http::cors::{Any, CorsLayer};
-use tracing::{Level, info, warn};
+use tracing::{Level, error, info, warn};
 use tracing_subscriber::FmtSubscriber;
 
 // Import our CLI modules
@@ -153,6 +154,10 @@ async fn start_server(port: u16, grpc_port: u16) -> Result<()> {
             .map_err(|e| anyhow::anyhow!("Failed to start persistence workers: {}", e))?;
     }
 
+    // Enable event streaming for real-time observability
+    let _event_rx = store.enable_event_streaming(1000);
+    info!(" Event streaming enabled (buffer size: 1000)");
+
     let memory_store = Arc::new(store);
 
     // Start background tier migration task if persistence is enabled
@@ -172,6 +177,9 @@ async fn start_server(port: u16, grpc_port: u16) -> Result<()> {
     // Create API state
     let api_state = ApiState::new(memory_store);
 
+    // Clone memory store for gRPC before moving api_state into router
+    let grpc_memory_store = Arc::clone(&api_state.store);
+
     // Build HTTP API routes
     let app = create_api_routes().with_state(api_state).layer(
         CorsLayer::new()
@@ -188,13 +196,18 @@ async fn start_server(port: u16, grpc_port: u16) -> Result<()> {
         " HTTP API server listening on http://127.0.0.1:{}",
         actual_port
     );
-    info!(
-        " gRPC server would listen on 127.0.0.1:{}",
-        actual_grpc_port
-    );
+    info!(" Starting gRPC server on 127.0.0.1:{}", actual_grpc_port);
 
     // Write PID file for server management
     write_pid_file(actual_port)?;
+
+    // Start gRPC server in background task
+    let grpc_service = MemoryService::new(grpc_memory_store);
+    let grpc_handle = tokio::spawn(async move {
+        if let Err(e) = grpc_service.serve(actual_grpc_port).await {
+            error!(" gRPC server error: {}", e);
+        }
+    });
 
     println!(" Engram server started successfully!");
     println!(" HTTP API: http://127.0.0.1:{actual_port}");
@@ -205,10 +218,14 @@ async fn start_server(port: u16, grpc_port: u16) -> Result<()> {
     println!(" Use 'engram status' to check server health");
     println!(" Use 'engram stop' to shutdown the server");
 
-    // Start server with graceful shutdown
+    // Start HTTP server with graceful shutdown, alongside gRPC
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
+
+    // gRPC server will be cancelled when the tokio runtime shuts down
+    // Explicitly abort to ensure clean shutdown
+    grpc_handle.abort();
 
     // Cleanup on exit
     remove_pid_file()?;

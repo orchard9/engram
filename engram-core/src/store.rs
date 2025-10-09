@@ -102,6 +102,39 @@ impl Activation {
     }
 }
 
+/// Events emitted by the memory store for observability
+///
+/// These events allow real-time monitoring of memory operations,
+/// enabling observability into the cognitive dynamics of the system.
+#[derive(Debug, Clone)]
+pub enum MemoryEvent {
+    /// A memory was stored with the given ID, confidence, and timestamp
+    Stored {
+        /// Unique identifier of the stored memory
+        id: String,
+        /// Confidence score of the memory encoding (0.0 to 1.0)
+        confidence: f32,
+        /// Unix timestamp when the memory was created
+        timestamp: f64,
+    },
+    /// A memory was recalled with the given ID and activation level
+    Recalled {
+        /// Unique identifier of the recalled memory
+        id: String,
+        /// Activation level during recall (0.0 to 1.0)
+        activation: f32,
+        /// Confidence score of the memory (0.0 to 1.0)
+        confidence: f32,
+    },
+    /// Multiple memories were activated during spreading activation
+    ActivationSpread {
+        /// Number of memories activated
+        count: usize,
+        /// Average activation level across all activated memories
+        avg_activation: f32,
+    },
+}
+
 /// Memory store that never fails, degrading gracefully under pressure
 ///
 /// # Cognitive Design
@@ -120,6 +153,9 @@ pub struct MemoryStore {
 
     /// Write-ahead log for durability (non-blocking)
     pub(crate) wal_buffer: Arc<DashMap<String, Episode>>,
+
+    /// Event broadcaster for real-time observability (optional)
+    event_tx: Option<tokio::sync::broadcast::Sender<MemoryEvent>>,
 
     /// Maximum number of memories before eviction
     max_memories: usize,
@@ -305,6 +341,7 @@ impl MemoryStore {
             graph,
             hot_memories: DashMap::new(),
             wal_buffer: Arc::new(DashMap::new()),
+            event_tx: None,
             max_memories,
             memory_count: AtomicUsize::new(0),
             pressure: RwLock::new(0.0),
@@ -359,6 +396,34 @@ impl MemoryStore {
     pub fn hnsw_index(&self) -> Option<Arc<CognitiveHnswIndex>> {
         self.flush_pending_hnsw_updates();
         self.hnsw_index.clone()
+    }
+
+    /// Enable event broadcasting for real-time observability
+    ///
+    /// Creates a broadcast channel with the specified capacity and returns
+    /// a receiver for subscribing to memory events.
+    ///
+    /// # Returns
+    ///
+    /// A receiver that can be used to subscribe to memory events.
+    #[must_use]
+    pub fn enable_event_streaming(
+        &mut self,
+        capacity: usize,
+    ) -> tokio::sync::broadcast::Receiver<MemoryEvent> {
+        let (tx, rx) = tokio::sync::broadcast::channel(capacity);
+        self.event_tx = Some(tx);
+        rx
+    }
+
+    /// Get a subscriber for memory events
+    ///
+    /// Returns None if event streaming is not enabled.
+    #[must_use]
+    pub fn subscribe_to_events(&self) -> Option<tokio::sync::broadcast::Receiver<MemoryEvent>> {
+        self.event_tx
+            .as_ref()
+            .map(tokio::sync::broadcast::Sender::subscribe)
     }
 
     /// Set cognitive recall pipeline for spreading activation
@@ -958,6 +1023,16 @@ impl MemoryStore {
             metrics::record_cognitive(&metric);
         }
 
+        // Publish event for real-time observability
+        if let Some(ref tx) = self.event_tx {
+            let event = MemoryEvent::Stored {
+                id: memory_id,
+                confidence: activation,
+                timestamp: memory_arc.created_at.timestamp() as f64,
+            };
+            let _ = tx.send(event); // Ignore send errors (no receivers)
+        }
+
         Activation::new(activation)
     }
 
@@ -1082,6 +1157,32 @@ impl MemoryStore {
         self.count() < self.max_memories
     }
 
+    /// Publish recall events for observability
+    fn publish_recall_events(&self, results: &[(Episode, Confidence)]) {
+        if let Some(ref tx) = self.event_tx {
+            // Publish individual recall events for each memory
+            for (episode, confidence) in results {
+                let event = MemoryEvent::Recalled {
+                    id: episode.id.clone(),
+                    activation: confidence.raw(),
+                    confidence: episode.encoding_confidence.raw(),
+                };
+                let _ = tx.send(event); // Ignore send errors
+            }
+
+            // Publish aggregated activation spread event
+            if !results.is_empty() {
+                let avg_activation =
+                    results.iter().map(|(_, c)| c.raw()).sum::<f32>() / results.len() as f32;
+                let event = MemoryEvent::ActivationSpread {
+                    count: results.len(),
+                    avg_activation,
+                };
+                let _ = tx.send(event);
+            }
+        }
+    }
+
     /// Get all episodes stored in the memory store
     /// Returns an iterator over (id, episode) pairs
     pub fn get_all_episodes(&self) -> impl Iterator<Item = (String, Episode)> + '_ {
@@ -1130,7 +1231,7 @@ impl MemoryStore {
                 RecallMode::Spreading if self.cognitive_recall.is_some() => {
                     // Use spreading activation pipeline
                     if let Some(ref cognitive_recall) = self.cognitive_recall {
-                        return match cognitive_recall.recall(cue, self) {
+                        let results = match cognitive_recall.recall(cue, self) {
                             Ok(ranked_memories) => ranked_memories
                                 .into_iter()
                                 .map(|r| (r.episode, r.confidence))
@@ -1141,6 +1242,8 @@ impl MemoryStore {
                                 self.recall_similarity_only(cue)
                             }
                         };
+                        self.publish_recall_events(&results);
+                        return results;
                     }
                 }
                 RecallMode::Hybrid if self.cognitive_recall.is_some() => {
@@ -1148,14 +1251,18 @@ impl MemoryStore {
                     if let Some(ref cognitive_recall) = self.cognitive_recall {
                         match cognitive_recall.recall(cue, self) {
                             Ok(ranked_memories) if !ranked_memories.is_empty() => {
-                                return ranked_memories
+                                let results: Vec<(Episode, Confidence)> = ranked_memories
                                     .into_iter()
                                     .map(|r| (r.episode, r.confidence))
                                     .collect();
+                                self.publish_recall_events(&results);
+                                return results;
                             }
                             Ok(_) | Err(_) => {
                                 // Empty results or error - fallback to similarity
-                                return self.recall_similarity_only(cue);
+                                let results = self.recall_similarity_only(cue);
+                                self.publish_recall_events(&results);
+                                return results;
                             }
                         }
                     }
@@ -1805,6 +1912,10 @@ impl MemoryStore {
         });
 
         results.truncate(cue.max_results);
+
+        // Publish events for observability
+        self.publish_recall_events(&results);
+
         results
     }
 
@@ -1829,6 +1940,38 @@ impl MemoryStore {
                 );
                 return Some(episode);
             }
+        }
+
+        None
+    }
+
+    /// Retrieve a memory by its unique ID
+    ///
+    /// This is an O(1) lookup operation using the hot memories index.
+    ///
+    /// # Returns
+    ///
+    /// `Some(Episode)` if the memory exists, `None` otherwise.
+    ///
+    /// # Cognitive Design
+    ///
+    /// Direct ID lookup is like accessing a memory by its unique identifier,
+    /// similar to recalling a specific event when you have its exact "address"
+    /// in your memory system. This is much faster than semantic search.
+    #[must_use]
+    pub fn get_by_id(&self, id: &str) -> Option<Episode> {
+        if let Some(memory) = self.hot_memories.get(id) {
+            let episode = Episode::new(
+                memory.id.clone(),
+                memory.created_at,
+                memory
+                    .content
+                    .clone()
+                    .unwrap_or_else(|| format!("Memory {}", memory.id)),
+                memory.embedding,
+                memory.confidence,
+            );
+            return Some(episode);
         }
 
         None

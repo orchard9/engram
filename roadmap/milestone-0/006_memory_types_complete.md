@@ -1,6 +1,6 @@
 # Design Memory, Episode, Cue types with probabilistic confidence
 
-## Status: PENDING
+## Status: COMPLETE
 
 ## Description
 Implement core memory types (Memory, Episode, Cue) with cognitive confidence as first-class properties. All types must use the cognitive Confidence type (Task 005) and support confidence propagation through memory operations, following the architecture defined in vision.md.

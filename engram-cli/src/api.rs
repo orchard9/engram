@@ -25,7 +25,7 @@ use crate::grpc::MemoryService;
 use crate::openapi::create_swagger_ui;
 use engram_core::{
     Confidence as CoreConfidence, Cue as CoreCue, Episode, MemoryStore,
-    memory::EpisodeBuilder as CoreEpisodeBuilder,
+    memory::EpisodeBuilder as CoreEpisodeBuilder, store::MemoryEvent,
 };
 
 /// Shared application state
@@ -850,6 +850,157 @@ pub async fn recognize_pattern(
     Ok(Json(response))
 }
 
+// ============================================================================
+// REST-style endpoints for CLI compatibility
+// ============================================================================
+
+/// POST /api/v1/memories - Simple memory creation (CLI-compatible)
+///
+/// This endpoint provides a simpler REST-style interface for the CLI,
+/// forwarding requests to the cognitive remember_memory handler.
+pub async fn create_memory_rest(
+    State(state): State<ApiState>,
+    Json(payload): Json<serde_json::Value>,
+) -> Result<impl IntoResponse, ApiError> {
+    // Extract content and optional confidence from simple CLI payload
+    let content = payload
+        .get("content")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ApiError::InvalidInput("Missing 'content' field".to_string()))?
+        .to_string();
+
+    let confidence = payload
+        .get("confidence")
+        .and_then(|v| v.as_f64())
+        .map(|v| v as f32);
+
+    // Build RememberMemoryRequest from CLI payload
+    let request = RememberMemoryRequest {
+        id: None,
+        content,
+        embedding: None,
+        confidence,
+        confidence_reasoning: None,
+        memory_type: Some("semantic".to_string()),
+        tags: None,
+        auto_link: Some(false),
+        link_threshold: None,
+    };
+
+    // Forward to the cognitive handler
+    let response = remember_memory(State(state), Json(request)).await?;
+    Ok(response)
+}
+
+/// GET /api/v1/memories/{id} - Retrieve memory by ID (CLI-compatible)
+pub async fn get_memory_by_id(
+    State(state): State<ApiState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    // Direct O(1) lookup by ID
+    if let Some(episode) = state.store.get_by_id(&id) {
+        let memory_data = json!({
+            "id": episode.id,
+            "content": episode.what,
+            "confidence": episode.encoding_confidence.raw(),
+            "timestamp": episode.when.to_rfc3339(),
+            "memory_type": "episodic"
+        });
+        return Ok(Json(memory_data));
+    }
+
+    // Memory not found
+    Err(ApiError::MemoryNotFound(format!(
+        "Memory with ID '{id}' not found"
+    )))
+}
+
+/// GET /api/v1/memories/search - Search memories (CLI-compatible)
+pub async fn search_memories_rest(
+    State(state): State<ApiState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<impl IntoResponse, ApiError> {
+    let query = params
+        .get("query")
+        .ok_or_else(|| ApiError::InvalidInput("Missing 'query' parameter".to_string()))?;
+
+    let limit = params
+        .get("limit")
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(10);
+
+    // Call recall directly on store for simple CLI response
+    let cue = CoreCue::semantic(query.clone(), query.clone(), CoreConfidence::exact(0.7));
+    let recall_results = state.store.recall(&cue);
+
+    let memories: Vec<serde_json::Value> = recall_results
+        .iter()
+        .take(limit)
+        .map(|(episode, confidence)| {
+            json!({
+                "id": episode.id,
+                "content": episode.what,
+                "confidence": confidence.raw(),
+                "memory_type": "episodic",
+                "timestamp": episode.when.to_rfc3339()
+            })
+        })
+        .collect();
+
+    Ok(Json(json!({
+        "memories": memories,
+        "total": memories.len()
+    })))
+}
+
+/// DELETE /api/v1/memories/{id} - Delete memory by ID (CLI-compatible)
+///
+/// # Cognitive Design Note
+///
+/// Memory "deletion" is not supported in Engram by design, as it conflicts with
+/// cognitive principles of biological memory systems. In human memory:
+/// - Memories naturally decay rather than being instantly erased
+/// - Forgotten memories remain accessible but with reduced activation
+/// - Suppression is a gradual process, not instantaneous removal
+///
+/// ## Alternative Approaches
+///
+/// 1. **Natural Decay**: Memories that aren't recalled naturally lose activation over time
+/// 2. **Suppression** (future): Actively reduce memory activation without deletion
+/// 3. **Confidence Adjustment**: Lower the confidence score to reduce recall likelihood
+///
+/// ## Why This Matters
+///
+/// Instant deletion would break:
+/// - Spreading activation paths (memories that link to deleted content)
+/// - Consolidation processes (replay requires stable memory graphs)
+/// - Temporal coherence (memory timelines become fragmented)
+///
+/// If you need to "forget" something, consider adjusting its recall threshold or
+/// waiting for natural decay rather than requesting deletion.
+pub async fn delete_memory_by_id(
+    State(_state): State<ApiState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    info!(
+        "Delete request for memory ID: {} - not supported due to cognitive design principles",
+        id
+    );
+
+    Ok(Json(json!({
+        "status": "not_supported",
+        "message": "Memory deletion is not supported in Engram due to cognitive design principles",
+        "memory_id": id,
+        "rationale": "Human memory systems don't support instant deletion - memories naturally decay over time or can be suppressed, but instant removal would break spreading activation paths and consolidation processes",
+        "alternatives": [
+            "Allow natural decay (memories not recalled lose activation over time)",
+            "Adjust recall thresholds to reduce retrieval likelihood",
+            "Future: Use suppression mechanisms to gradually reduce activation"
+        ],
+        "documentation": "See https://github.com/anthropics/engram for cognitive architecture details"
+    })))
+}
+
 /// GET /health - Simple health check
 #[utoipa::path(
     get,
@@ -1087,7 +1238,7 @@ impl IntoResponse for ApiError {
     )
 )]
 pub async fn stream_activities(
-    State(_state): State<ApiState>,
+    State(state): State<ApiState>,
     Query(params): Query<StreamActivityQuery>,
 ) -> impl IntoResponse {
     let session_id = params
@@ -1116,8 +1267,14 @@ pub async fn stream_activities(
         },
     );
 
-    // Create activity stream
-    let stream = create_activity_stream(session_id, event_types, min_importance, buffer_size);
+    // Create activity stream with real events from memory store
+    let stream = create_activity_stream(
+        state.store.clone(),
+        session_id,
+        event_types,
+        min_importance,
+        buffer_size,
+    );
 
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
@@ -1137,7 +1294,7 @@ pub async fn stream_activities(
     )
 )]
 pub async fn stream_memories(
-    State(_state): State<ApiState>,
+    State(state): State<ApiState>,
     Query(params): Query<StreamMemoryQuery>,
 ) -> impl IntoResponse {
     let session_id = params
@@ -1167,6 +1324,7 @@ pub async fn stream_memories(
     );
 
     let stream = create_memory_stream(
+        state.store.clone(),
         session_id,
         include_formation,
         include_retrieval,
@@ -1193,7 +1351,7 @@ pub async fn stream_memories(
     )
 )]
 pub async fn stream_consolidation(
-    State(_state): State<ApiState>,
+    State(state): State<ApiState>,
     Query(params): Query<StreamConsolidationQuery>,
 ) -> impl IntoResponse {
     let session_id = params
@@ -1206,6 +1364,7 @@ pub async fn stream_consolidation(
     let include_progress = params.include_progress.unwrap_or(false);
 
     let stream = create_consolidation_stream(
+        state.store.clone(),
         session_id,
         include_replay,
         include_insights,
@@ -1220,8 +1379,9 @@ pub async fn stream_consolidation(
 // Stream Creation Functions
 // ================================================================================================
 
-/// Create activity event stream with cognitive-friendly organization
+/// Create activity event stream with real memory store events
 fn create_activity_stream(
+    store: Arc<MemoryStore>,
     session_id: String,
     event_types: Vec<String>,
     min_importance: f32,
@@ -1230,59 +1390,146 @@ fn create_activity_stream(
     let (tx, rx) = tokio::sync::mpsc::channel(buffer_size);
 
     tokio::spawn(async move {
+        // Subscribe to real memory events
+        let mut event_rx = match store.subscribe_to_events() {
+            Some(rx) => rx,
+            None => {
+                // Event streaming not enabled, send error event and close
+                let error_event = Event::default().event("error").data(
+                    json!({
+                        "error": "Event streaming not enabled on server",
+                        "session_id": session_id,
+                    })
+                    .to_string(),
+                );
+                let _ = tx.send(Ok(error_event)).await;
+                return;
+            }
+        };
+
         let mut event_id = 0u64;
-        let events = vec![
-            ("activation", "Memory node activated for pattern matching"),
-            ("storage", "New memory encoded with contextual associations"),
-            ("recall", "Memory retrieval triggered by recognition cue"),
-            (
-                "consolidation",
-                "Memory consolidation strengthening associations",
-            ),
-            (
-                "association",
-                "New associative link formed between memories",
-            ),
-            ("decay", "Memory activation decaying due to inactivity"),
-        ];
 
         loop {
-            for (event_type, description) in &events {
-                if !event_types.contains(&(*event_type).to_string()) {
-                    continue;
-                }
+            match event_rx.recv().await {
+                Ok(memory_event) => {
+                    // Map MemoryEvent to SSE event format
+                    let (event_type, _description, importance, event_data) = match memory_event {
+                        MemoryEvent::Stored {
+                            id,
+                            confidence,
+                            timestamp,
+                        } => {
+                            if !event_types.contains(&"storage".to_string()) {
+                                continue;
+                            }
+                            (
+                                "storage",
+                                "New memory encoded with contextual associations",
+                                confidence,
+                                json!({
+                                    "event_type": "storage",
+                                    "description": "New memory encoded",
+                                    "memory_id": id,
+                                    "confidence": confidence,
+                                    "importance": confidence,
+                                    "timestamp": timestamp,
+                                    "session_id": session_id,
+                                    "metadata": {
+                                        "cognitive_load": if confidence > 0.8 { "high" } else { "normal" },
+                                        "attention_required": confidence > 0.9
+                                    }
+                                }),
+                            )
+                        }
+                        MemoryEvent::Recalled {
+                            id,
+                            activation,
+                            confidence,
+                        } => {
+                            if !event_types.contains(&"recall".to_string()) {
+                                continue;
+                            }
+                            let importance = (activation + confidence) / 2.0;
+                            (
+                                "recall",
+                                "Memory retrieval triggered by recognition cue",
+                                importance,
+                                json!({
+                                    "event_type": "recall",
+                                    "description": "Memory recalled",
+                                    "memory_id": id,
+                                    "activation": activation,
+                                    "confidence": confidence,
+                                    "importance": importance,
+                                    "timestamp": Utc::now().to_rfc3339(),
+                                    "session_id": session_id,
+                                    "metadata": {
+                                        "cognitive_load": if importance > 0.8 { "high" } else { "normal" },
+                                        "attention_required": importance > 0.9
+                                    }
+                                }),
+                            )
+                        }
+                        MemoryEvent::ActivationSpread {
+                            count,
+                            avg_activation,
+                        } => {
+                            if !event_types.contains(&"activation".to_string()) {
+                                continue;
+                            }
+                            (
+                                "activation",
+                                "Memory nodes activated for pattern matching",
+                                avg_activation,
+                                json!({
+                                    "event_type": "activation",
+                                    "description": "Spreading activation across memory graph",
+                                    "memories_activated": count,
+                                    "avg_activation": avg_activation,
+                                    "importance": avg_activation,
+                                    "timestamp": Utc::now().to_rfc3339(),
+                                    "session_id": session_id,
+                                    "metadata": {
+                                        "cognitive_load": if avg_activation > 0.8 { "high" } else { "normal" },
+                                        "attention_required": count > 10
+                                    }
+                                }),
+                            )
+                        }
+                    };
 
-                event_id += 1;
-                let importance = rand::random::<f32>().mul_add(0.7, 0.3); // Random importance 0.3-1.0
-
-                if importance < min_importance {
-                    continue;
-                }
-
-                let event_data = json!({
-                    "event_type": event_type,
-                    "description": description,
-                    "importance": importance,
-                    "timestamp": Utc::now().to_rfc3339(),
-                    "session_id": session_id,
-                    "metadata": {
-                        "cognitive_load": if importance > 0.8 { "high" } else { "normal" },
-                        "attention_required": importance > 0.9
+                    // Filter by importance threshold
+                    if importance < min_importance {
+                        continue;
                     }
-                });
 
-                let sse_event = Event::default()
-                    .id(event_id.to_string())
-                    .event(event_type)
-                    .data(event_data.to_string());
+                    event_id += 1;
+                    let sse_event = Event::default()
+                        .id(event_id.to_string())
+                        .event(event_type)
+                        .data(event_data.to_string());
 
-                if tx.send(Ok(sse_event)).await.is_err() {
-                    return; // Client disconnected
+                    if tx.send(Ok(sse_event)).await.is_err() {
+                        return; // Client disconnected
+                    }
                 }
-
-                // Cognitive-friendly pacing: 200ms to 2s intervals based on importance
-                let delay_ms = importance.mul_add(-1800.0, 2000.0).max(0.0) as u64;
-                tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                    // Client is lagging, send warning event
+                    let warning_event = Event::default().event("warning").data(
+                        json!({
+                            "warning": format!("Lagged behind, {} events skipped", skipped),
+                            "session_id": session_id,
+                        })
+                        .to_string(),
+                    );
+                    if tx.send(Ok(warning_event)).await.is_err() {
+                        return;
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                    // Channel closed, end stream
+                    return;
+                }
             }
         }
     });
@@ -1290,73 +1537,127 @@ fn create_activity_stream(
     ReceiverStream::new(rx)
 }
 
-/// Create memory operation stream
+/// Create memory operation stream with real memory events
 fn create_memory_stream(
+    store: Arc<MemoryStore>,
     session_id: String,
     include_formation: bool,
     include_retrieval: bool,
-    include_completion: bool,
+    _include_completion: bool,
     min_confidence: f32,
-    memory_types: Vec<String>,
+    _memory_types: Vec<String>,
 ) -> impl Stream<Item = Result<Event, std::convert::Infallible>> {
     let (tx, rx) = tokio::sync::mpsc::channel(32);
 
     tokio::spawn(async move {
+        // Subscribe to real memory events
+        let mut event_rx = match store.subscribe_to_events() {
+            Some(rx) => rx,
+            None => {
+                let error_event = Event::default().event("error").data(
+                    json!({
+                        "error": "Event streaming not enabled on server",
+                        "session_id": session_id,
+                    })
+                    .to_string(),
+                );
+                let _ = tx.send(Ok(error_event)).await;
+                return;
+            }
+        };
+
         let mut event_id = 0u64;
-        let operations = vec![
-            (
-                "formation",
-                "New memory formation with encoding confidence",
-                include_formation,
-            ),
-            (
-                "retrieval",
-                "Memory retrieval with activation spreading",
-                include_retrieval,
-            ),
-            (
-                "completion",
-                "Pattern completion reconstructing partial memories",
-                include_completion,
-            ),
-        ];
 
         loop {
-            for (op_type, description, enabled) in &operations {
-                if !enabled {
-                    continue;
+            match event_rx.recv().await {
+                Ok(memory_event) => {
+                    // Map MemoryEvent to memory operation events
+                    let (operation, _confidence, event_data) = match memory_event {
+                        MemoryEvent::Stored {
+                            id,
+                            confidence,
+                            timestamp,
+                        } => {
+                            if !include_formation {
+                                continue;
+                            }
+                            if confidence < min_confidence {
+                                continue;
+                            }
+                            (
+                                "formation",
+                                confidence,
+                                json!({
+                                    "operation": "formation",
+                                    "description": "New memory formation with encoding confidence",
+                                    "memory_type": "episodic",
+                                    "confidence": confidence,
+                                    "timestamp": timestamp,
+                                    "session_id": session_id,
+                                    "memory_id": id,
+                                    "consolidation_state": if confidence > 0.8 { "Stable" } else { "Recent" }
+                                }),
+                            )
+                        }
+                        MemoryEvent::Recalled {
+                            id,
+                            activation,
+                            confidence,
+                        } => {
+                            if !include_retrieval {
+                                continue;
+                            }
+                            let avg_confidence = (activation + confidence) / 2.0;
+                            if avg_confidence < min_confidence {
+                                continue;
+                            }
+                            (
+                                "retrieval",
+                                avg_confidence,
+                                json!({
+                                    "operation": "retrieval",
+                                    "description": "Memory retrieval with activation spreading",
+                                    "memory_type": "episodic",
+                                    "confidence": avg_confidence,
+                                    "activation": activation,
+                                    "timestamp": Utc::now().to_rfc3339(),
+                                    "session_id": session_id,
+                                    "memory_id": id,
+                                    "consolidation_state": "Retrieved"
+                                }),
+                            )
+                        }
+                        MemoryEvent::ActivationSpread { .. } => {
+                            // Skip activation spread events for memory stream
+                            continue;
+                        }
+                    };
+
+                    event_id += 1;
+                    let sse_event = Event::default()
+                        .id(event_id.to_string())
+                        .event(operation)
+                        .data(event_data.to_string());
+
+                    if tx.send(Ok(sse_event)).await.is_err() {
+                        return; // Client disconnected
+                    }
                 }
-
-                event_id += 1;
-                let confidence = rand::random::<f32>().mul_add(0.8, 0.2); // Random confidence 0.2-1.0
-
-                if confidence < min_confidence {
-                    continue;
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                    let warning_event = Event::default().event("warning").data(
+                        json!({
+                            "warning": format!("Lagged behind, {} events skipped", skipped),
+                            "session_id": session_id,
+                        })
+                        .to_string(),
+                    );
+                    if tx.send(Ok(warning_event)).await.is_err() {
+                        return;
+                    }
                 }
-
-                let memory_type = &memory_types[rand::random::<usize>() % memory_types.len()];
-
-                let event_data = json!({
-                    "operation": op_type,
-                    "description": description,
-                    "memory_type": memory_type,
-                    "confidence": confidence,
-                    "timestamp": Utc::now().to_rfc3339(),
-                    "session_id": session_id,
-                    "memory_id": format!("mem_{}", event_id),
-                    "consolidation_state": if confidence > 0.8 { "Stable" } else { "Recent" }
-                });
-
-                let sse_event = Event::default()
-                    .id(event_id.to_string())
-                    .event("memory")
-                    .data(event_data.to_string());
-
-                if tx.send(Ok(sse_event)).await.is_err() {
-                    return; // Client disconnected
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                    return;
                 }
-
-                tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
             }
         }
     });
@@ -1364,72 +1665,45 @@ fn create_memory_stream(
     ReceiverStream::new(rx)
 }
 
-/// Create consolidation stream with dream-like replay sequences
+/// Create consolidation stream (future work - not yet implemented with real events)
 fn create_consolidation_stream(
+    _store: Arc<MemoryStore>,
     session_id: String,
-    include_replay: bool,
-    include_insights: bool,
-    include_progress: bool,
-    min_novelty: f32,
+    _include_replay: bool,
+    _include_insights: bool,
+    _include_progress: bool,
+    _min_novelty: f32,
 ) -> impl Stream<Item = Result<Event, std::convert::Infallible>> {
     let (tx, rx) = tokio::sync::mpsc::channel(32);
 
     tokio::spawn(async move {
-        let mut event_id = 0u64;
-        let consolidation_types = vec![
-            (
-                "replay",
-                "Memory replay sequence consolidating associations",
-                include_replay,
-            ),
-            (
-                "insight",
-                "Novel connection discovered during consolidation",
-                include_insights,
-            ),
-            (
-                "progress",
-                "Consolidation progress with strength metrics",
-                include_progress,
-            ),
-        ];
+        // Send informational message about consolidation streaming status
+        let info_event = Event::default()
+            .event("info")
+            .data(json!({
+                "message": "Consolidation streaming not yet implemented with real events",
+                "status": "future_work",
+                "description": "Memory consolidation (replay, insights, progress) will be available in a future release. Currently, only storage and recall events are streamed in real-time.",
+                "session_id": session_id,
+                "available_streams": ["activities", "memories"],
+                "timestamp": Utc::now().to_rfc3339(),
+                "recommendation": "Use /api/v1/stream/activities or /api/v1/stream/memories for real-time event monitoring"
+            }).to_string());
 
+        if tx.send(Ok(info_event)).await.is_err() {
+            return;
+        }
+
+        // Keep connection alive but don't send more events
         loop {
-            for (cons_type, description, enabled) in &consolidation_types {
-                if !enabled {
-                    continue;
-                }
+            tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
 
-                event_id += 1;
-                let novelty = rand::random::<f32>(); // Random novelty 0.0-1.0
+            // Send keepalive comment
+            let keepalive = Event::default()
+                .comment("Consolidation streaming will be available in future release");
 
-                if novelty < min_novelty {
-                    continue;
-                }
-
-                let event_data = json!({
-                    "consolidation_type": cons_type,
-                    "description": description,
-                    "novelty": novelty,
-                    "timestamp": Utc::now().to_rfc3339(),
-                    "session_id": session_id,
-                    "sequence_id": format!("seq_{}", event_id),
-                    "connections_formed": rand::random::<u32>() % 10,
-                    "replay_strength": novelty.mul_add(0.5, 0.5)
-                });
-
-                let sse_event = Event::default()
-                    .id(event_id.to_string())
-                    .event("consolidation")
-                    .data(event_data.to_string());
-
-                if tx.send(Ok(sse_event)).await.is_err() {
-                    return; // Client disconnected
-                }
-
-                // Longer intervals for consolidation (1-5 seconds)
-                let delay_ms = 1000 + (rand::random::<u64>() % 4000);
-                tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
+            if tx.send(Ok(keepalive)).await.is_err() {
+                return;
             }
         }
     });
@@ -1836,6 +2110,14 @@ pub fn create_api_routes() -> Router<ApiState> {
         .route("/api/v1/memories/remember", post(remember_memory))
         .route("/api/v1/memories/recall", get(recall_memories))
         .route("/api/v1/memories/recognize", post(recognize_pattern))
+        // REST-style endpoints for CLI compatibility
+        .route("/api/v1/memories", post(create_memory_rest))
+        .route("/api/v1/memories/{id}", get(get_memory_by_id))
+        .route(
+            "/api/v1/memories/{id}",
+            axum::routing::delete(delete_memory_by_id),
+        )
+        .route("/api/v1/memories/search", get(search_memories_rest))
         // System health and introspection
         .route("/api/v1/system/health", get(system_health))
         .route("/api/v1/system/introspect", get(system_introspect))

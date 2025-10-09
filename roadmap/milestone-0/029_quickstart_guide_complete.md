@@ -1,6 +1,6 @@
 # Add quickstart guide achieving <60s to first query
 
-## Status: PENDING
+## Status: COMPLETE
 
 ## Description
 Create quickstart guide that gets new users from zero to their first successful query in under 60 seconds.

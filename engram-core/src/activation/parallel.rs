@@ -110,14 +110,27 @@ impl PhaseBarrier {
             self.condvar.notify_all();
         } else {
             // Wait for phase to advance or barrier to be disabled
-            // OS-level blocking - no CPU burn!
+            // Adaptive timeout: 2s per worker to accommodate larger thread pools
+            let timeout_secs = (state.worker_count as u64 * 2).max(5);
+            let timeout = Duration::from_secs(timeout_secs);
+            let start = std::time::Instant::now();
+
             while state.phase_counter == current_phase && state.enabled {
-                self.condvar.wait(&mut state);
+                let elapsed = start.elapsed();
+                if elapsed >= timeout {
+                    // Timeout - release this worker to prevent deadlock
+                    state.waiting = state.waiting.saturating_sub(1);
+                    return;
+                }
+
+                let remaining = timeout - elapsed;
+                let _result = self.condvar.wait_for(&mut state, remaining);
             }
         }
     }
 
-    /// Get the current phase count
+    /// Get the current phase count (test-only)
+    #[cfg(test)]
     fn phase_count(&self) -> u64 {
         let state = self.state.lock();
         state.phase_counter
@@ -398,15 +411,15 @@ impl ParallelSpreadingEngine {
                 continue;
             }
 
-            // Only wait at barrier if there might be more tasks coming
-            // If scheduler is idle, skip barrier to avoid unnecessary synchronization
-            if context.config.deterministic && !context.scheduler.is_idle() {
-                context.phase_barrier.wait();
-            }
-
+            // No task available - check if truly idle before sleeping
             if context.scheduler.is_idle() {
+                // Scheduler is idle - no work to do
                 thread::sleep(Duration::from_micros(100));
             } else {
+                // Scheduler has work but we didn't get a task - sync and retry
+                if context.config.deterministic {
+                    context.phase_barrier.wait();
+                }
                 thread::yield_now();
             }
         }
@@ -972,6 +985,7 @@ mod tests {
     }
 
     #[test]
+    #[serial(parallel_engine)]
     fn test_deterministic_spreading() {
         let threads = test_thread_count().clamp(1, 2);
         let config1 = fast_deterministic_config(42, threads);

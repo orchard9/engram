@@ -1,6 +1,6 @@
-# Milestone 3.5: Runtime & Roadmap Alignment Proposal
+# Milestone 3.5: Runtime & Roadmap Alignment
 
-## Status: PENDING
+## Status: COMPLETE
 
 ## Objective
 Bring the shipped runtime surface back in sync with the roadmap by aligning client/Server APIs, activating the gRPC layer, grounding observability streams in real data, and reconciling roadmap bookkeeping. This milestone focuses on corrective integration, not net-new features.
@@ -37,11 +37,14 @@ Bring the shipped runtime surface back in sync with the roadmap by aligning clie
   - Review each `_complete` file, adjust status blocks, and ensure acceptance criteria accurately reflect the shipping functionality once Workstreams 1–3 land.
   - If deliverables remain incomplete, rename files back to `_pending` per `CLAUDE.md` process and capture blockers inline.
 
-### 5. Decide on `engram-storage` usage
+### 5. Decide on `engram-storage` usage - RESOLVED
 - **Symptom**: The active server path never touches `engram-storage`; only `main_backup.rs` wires it in (`engram-cli/src/main_backup.rs:14`-`38`).
-- **Implementation specifics**:
-  - Either integrate the tiered storage abstractions into `start_server` (behind feature flags) or document that `engram-storage` is deprecated and update the roadmap/milestones to avoid confusion.
-  - If integrating, audit `MemoryStore::with_persistence` (`engram-core/src/store.rs:381`-`414`) to ensure the crates remain coherent.
+- **Decision**: Document as experimental, defer integration to Milestone 4+
+- **Rationale**: The tiered storage architecture is working code but not production-integrated. Current runtime uses in-memory with optional persistence via MemoryStore features. Full tiered storage integration requires additional testing and feature flag coordination, which is better suited for a dedicated milestone.
+- **Implementation completed**:
+  - Added comment in `Cargo.toml` marking `engram-storage` as experimental and deferred to Milestone 4+
+  - Current runtime continues using `MemoryStore::with_persistence` for WAL-based persistence
+  - Full three-tier storage (hot/warm/cold) planned for future integration with `--experimental-tiered-storage` flag
 
 ## Validation Checklist
 - `cargo fmt --all`, `cargo clippy --workspace --all-targets --all-features`, and `cargo test --workspace` succeed.

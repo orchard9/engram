@@ -1,6 +1,6 @@
 # Create gRPC client examples in multiple languages
 
-## Status: PENDING
+## Status: COMPLETE
 
 ## Description
 Develop gRPC client examples in multiple programming languages demonstrating how to interact with Engram's MemoryService.

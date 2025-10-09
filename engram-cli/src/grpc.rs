@@ -161,18 +161,111 @@ impl EngramService for MemoryService {
             )
         })?;
 
-        // For now, return empty results with medium confidence
-        // Real implementation would search the graph
+        // Perform actual recall from memory store
+        use engram_core::{Confidence as CoreConfidence, Cue as CoreCue};
+        use engram_proto::cue::CueType;
+
+        // Parse the cue type and create appropriate CoreCue
+        let core_cue = match &_cue.cue_type {
+            Some(CueType::Semantic(semantic)) => {
+                let query = semantic.query.clone();
+                let confidence = _cue.threshold.as_ref().map_or(0.7, |c| c.value);
+                CoreCue::semantic(query.clone(), query, CoreConfidence::exact(confidence))
+            }
+            Some(CueType::Embedding(embedding)) => {
+                let embedding_vec = embedding.vector.clone();
+                let confidence = _cue.threshold.as_ref().map_or(0.7, |c| c.value);
+
+                // Convert Vec<f32> to [f32; 768]
+                if embedding_vec.len() != 768 {
+                    return Err(Status::invalid_argument(format!(
+                        "Embedding vector must be exactly 768 dimensions, got {}. \
+                            Engram uses 768-dimensional embeddings (matching sentence-transformers).",
+                        embedding_vec.len()
+                    )));
+                }
+                let embedding_array: [f32; 768] = embedding_vec
+                    .try_into()
+                    .map_err(|_| Status::internal("Failed to convert embedding vector to array"))?;
+
+                CoreCue::embedding(
+                    "embedding_query".to_string(),
+                    embedding_array,
+                    CoreConfidence::exact(confidence),
+                )
+            }
+            Some(CueType::Context(context)) => {
+                let query = format!(
+                    "Context: location={}, participants={}",
+                    context.location,
+                    context.participants.join(", ")
+                );
+                CoreCue::semantic(query.clone(), query, CoreConfidence::exact(0.7))
+            }
+            Some(CueType::Temporal(_)) => {
+                return Err(Status::unimplemented(
+                    "Temporal cues not yet implemented. \
+                    Use semantic or embedding cues instead.",
+                ));
+            }
+            Some(CueType::Pattern(_)) => {
+                return Err(Status::unimplemented(
+                    "Pattern completion cues not yet implemented. \
+                    Use semantic or embedding cues instead.",
+                ));
+            }
+            None => {
+                return Err(Status::invalid_argument(
+                    "Cue type is missing. \
+                    Provide a semantic query, embedding vector, or context cue.",
+                ));
+            }
+        };
+
+        let recall_results = self.store.recall(&core_cue);
+        let total_activated = recall_results.len();
+
+        // Convert recalled episodes to Memory proto messages
+        let mut memories = vec![];
+        let mut total_confidence = 0.0f32;
+
+        let max_results = if req.max_results > 0 {
+            req.max_results
+        } else {
+            10
+        };
+        for (episode, confidence) in recall_results.iter().take(max_results as usize) {
+            let memory = engram_proto::Memory::new(
+                episode.id.clone(),
+                vec![0.0; 768], // placeholder embedding
+            )
+            .with_content(&episode.what)
+            .with_confidence(
+                Confidence::new(confidence.raw())
+                    .with_reasoning("Recalled from memory store via spreading activation"),
+            );
+
+            memories.push(memory);
+            total_confidence += confidence.raw();
+        }
+
+        let memories_count = memories.len();
+        let avg_activation = if memories_count > 0 {
+            total_confidence / memories_count as f32
+        } else {
+            0.0
+        };
+
         let response = RecallResponse {
-            memories: vec![],
+            memories,
             recall_confidence: Some(
-                Confidence::new(0.5)
-                    .with_reasoning("No matching memories found in current activation state"),
+                Confidence::new(avg_activation)
+                    .with_reasoning("Aggregate confidence from recalled memories"),
             ),
             metadata: Some(RecallMetadata {
-                total_activated: 0,
-                above_threshold: 0,
-                avg_activation: 0.0,
+                total_activated: total_activated as i32,
+                above_threshold: memories_count as i32,
+                avg_activation,
                 recall_time_ms: 10,
                 activation_path: vec![],
             }),

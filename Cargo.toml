@@ -2,7 +2,7 @@
 resolver = "2"
 members = [
     "engram-core",
-    "engram-storage",
+    "engram-storage",  # Experimental tiered storage - deferred to Milestone 4+
     "engram-cli",
     "engram-proto",
 ]
