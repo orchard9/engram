@@ -75,10 +75,6 @@ z3 = { version = "0.12", optional = true }
 nalgebra = { version = "0.32", optional = true }
 
 # Production monitoring dependencies
-prometheus = { version = "0.13", optional = true }
-metrics = { version = "0.23", optional = true }
-metrics-exporter-prometheus = { version = "0.15", optional = true, default-features = false, features = ["http-listener"] }
-metrics-util = { version = "0.17", optional = true }
 hwloc = { version = "0.5", optional = true }
 uuid = { version = "1.6.1", features = ["v4", "v5"] }
 
@@ -154,16 +150,11 @@ smt_verification = [
 ]
 
 # Production monitoring with lock-free metrics
-monitoring = [
-    "metrics",
-    "metrics-exporter-prometheus",
-    "metrics-util",
-    "prometheus",
-    "hwloc"
-]
+monitoring = ["hwloc"]
 
 # Development and testing features
 testing = []
+long_running_tests = []  # Enable psychology validations and multi-hour scenarios
 
 # Benchmark features for ANN comparison
 ann_benchmarks = ["faiss"]
