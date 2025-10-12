@@ -97,10 +97,16 @@ indoc = "2.0"
 utoipa = { version = "4", features = ["axum_extras"] }
 utoipa-swagger-ui = { version = "6", features = ["axum"] }
 
-# [patch.crates-io] section REMOVED 2025-10-05
-# All vendored patches eliminated - using upstream versions
-# Testing showed patches were unnecessary and potentially harmful
-# See third_party/PATCHES.md for full analysis
+# [patch.crates-io] section intentionally omitted
+#
+# Note: hwloc v0.5.0 uses bitflags v0.7.0 which has a future incompatibility warning.
+# This warning is harmless - the code works fine with current Rust versions.
+# Options to resolve (if needed):
+#   1. Disable "monitoring" feature to exclude hwloc (loses NUMA support)
+#   2. Wait for hwloc upstream to update (crate hasn't been updated since 2017)
+#   3. Replace hwloc with custom NUMA detection (significant work)
+# Decision: Accept the warning - it's just a heads-up about future Rust versions
+# See: https://github.com/rust-lang/rust/issues/127909
 
 [workspace.lints.rust]
 unsafe_code = "warn"
