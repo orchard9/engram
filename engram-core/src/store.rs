@@ -76,6 +76,70 @@ pub struct HnswQueueStats {
     pub utilization: f32,
 }
 
+/// Result of a store operation including streaming status
+#[derive(Debug, Clone, Copy)]
+pub struct StoreResult {
+    /// Activation level indicating store quality (0.0 to 1.0)
+    pub activation: Activation,
+    /// Whether the event was successfully delivered to SSE subscribers
+    pub streaming_delivered: bool,
+}
+
+impl StoreResult {
+    /// Create a new store result with the given activation and streaming status
+    #[must_use]
+    pub const fn new(activation: Activation, streaming_delivered: bool) -> Self {
+        Self {
+            activation,
+            streaming_delivered,
+        }
+    }
+
+    /// Check if both storage and streaming succeeded
+    #[must_use]
+    pub const fn is_fully_successful(self) -> bool {
+        self.streaming_delivered && self.activation.is_successful()
+    }
+
+    /// Check if storage succeeded but streaming failed
+    #[must_use]
+    pub const fn is_partially_successful(self) -> bool {
+        !self.streaming_delivered && self.activation.is_successful()
+    }
+}
+
+/// Result of a recall operation including streaming status
+#[derive(Debug, Clone)]
+pub struct RecallResult {
+    /// Recalled episodes with confidence scores
+    pub results: Vec<(Episode, Confidence)>,
+    /// Whether recall events were successfully delivered to SSE subscribers
+    pub streaming_delivered: bool,
+}
+
+impl RecallResult {
+    /// Create a new recall result with the given results and streaming status
+    #[must_use]
+    pub const fn new(results: Vec<(Episode, Confidence)>, streaming_delivered: bool) -> Self {
+        Self {
+            results,
+            streaming_delivered,
+        }
+    }
+
+    /// Check if both recall and streaming succeeded
+    #[must_use]
+    pub const fn is_fully_successful(&self) -> bool {
+        self.streaming_delivered
+    }
+
+    /// Check if recall succeeded but streaming failed
+    #[must_use]
+    pub const fn is_partially_successful(&self) -> bool {
+        !self.streaming_delivered && !self.results.is_empty()
+    }
+}
+
 impl Activation {
     /// Create a new activation level
     #[must_use]
@@ -91,13 +155,13 @@ impl Activation {
 
     /// Check if activation indicates successful store
     #[must_use]
-    pub fn is_successful(self) -> bool {
+    pub const fn is_successful(self) -> bool {
         self.0 > 0.5
     }
 
     /// Check if activation indicates degraded store
     #[must_use]
-    pub fn is_degraded(self) -> bool {
+    pub const fn is_degraded(self) -> bool {
         self.0 < 0.8
     }
 }
@@ -900,9 +964,12 @@ impl MemoryStore {
     /// Never returns errors because human memory formation doesn't "fail" -
     /// it degrades. Under stress or fatigue, memories form with lower
     /// confidence and are more likely to be forgotten.
-    pub fn store(&self, episode: Episode) -> Activation {
+    pub fn store(&self, episode: Episode) -> StoreResult {
         #[cfg(feature = "monitoring")]
         let start = Instant::now();
+
+        // Track whether event streaming succeeds
+        let mut streaming_delivered = true;
 
         let current_count = self.memory_count.load(Ordering::Relaxed);
         let pressure = Self::pressure_ratio(current_count, self.max_memories);
@@ -942,7 +1009,7 @@ impl MemoryStore {
         match dedup_result.action {
             DeduplicationAction::Skip => {
                 if dedup_result.existing_id.is_some() {
-                    return Activation::new(activation * 0.9);
+                    return StoreResult::new(Activation::new(activation * 0.9), true);
                 }
             }
             DeduplicationAction::Replace(existing_id) => {
@@ -958,7 +1025,7 @@ impl MemoryStore {
                     let merged_arc = Arc::new(merged);
                     self.hot_memories
                         .insert(existing_id.clone(), Arc::clone(&merged_arc));
-                    return Activation::new(activation * 0.95);
+                    return StoreResult::new(Activation::new(activation * 0.95), true);
                 }
                 memory_id = existing_id;
             }
@@ -1026,14 +1093,29 @@ impl MemoryStore {
         // Publish event for real-time observability
         if let Some(ref tx) = self.event_tx {
             let event = MemoryEvent::Stored {
-                id: memory_id,
+                id: memory_id.clone(),
                 confidence: activation,
                 timestamp: memory_arc.created_at.timestamp() as f64,
             };
-            let _ = tx.send(event); // Ignore send errors (no receivers)
+
+            match tx.send(event) {
+                Ok(_) => {
+                    streaming_delivered = true;
+                }
+                Err(e) => {
+                    streaming_delivered = false;
+                    let subscriber_count = tx.receiver_count();
+                    tracing::error!(
+                        memory_id = %memory_id,
+                        subscriber_count = %subscriber_count,
+                        error = ?e,
+                        "CRITICAL streaming failure - event could not be delivered to SSE subscribers"
+                    );
+                }
+            }
         }
 
-        Activation::new(activation)
+        StoreResult::new(Activation::new(activation), streaming_delivered)
     }
 
     /// Evict the memory with lowest activation
@@ -1158,7 +1240,11 @@ impl MemoryStore {
     }
 
     /// Publish recall events for observability
-    fn publish_recall_events(&self, results: &[(Episode, Confidence)]) {
+    ///
+    /// Returns true if all events were delivered successfully, false if any failed
+    fn publish_recall_events(&self, results: &[(Episode, Confidence)]) -> bool {
+        let mut all_delivered = true;
+
         if let Some(ref tx) = self.event_tx {
             // Publish individual recall events for each memory
             for (episode, confidence) in results {
@@ -1167,7 +1253,17 @@ impl MemoryStore {
                     activation: confidence.raw(),
                     confidence: episode.encoding_confidence.raw(),
                 };
-                let _ = tx.send(event); // Ignore send errors
+
+                if let Err(e) = tx.send(event) {
+                    all_delivered = false;
+                    let subscriber_count = tx.receiver_count();
+                    tracing::error!(
+                        memory_id = %episode.id,
+                        subscriber_count = %subscriber_count,
+                        error = ?e,
+                        "CRITICAL streaming failure - recall event could not be delivered to SSE subscribers"
+                    );
+                }
             }
 
             // Publish aggregated activation spread event
@@ -1178,9 +1274,20 @@ impl MemoryStore {
                     count: results.len(),
                     avg_activation,
                 };
-                let _ = tx.send(event);
+
+                if let Err(e) = tx.send(event) {
+                    all_delivered = false;
+                    let subscriber_count = tx.receiver_count();
+                    tracing::error!(
+                        subscriber_count = %subscriber_count,
+                        error = ?e,
+                        "CRITICAL streaming failure - activation spread event could not be delivered to SSE subscribers"
+                    );
+                }
             }
         }
+
+        all_delivered
     }
 
     /// Get all episodes stored in the memory store
@@ -1205,20 +1312,22 @@ impl MemoryStore {
             }))
     }
 
-    /// Recall memories based on a cue, returning episodes with confidence scores
+    /// Recall memories based on a cue, returning episodes with confidence scores and streaming status
     ///
     /// # Returns
     ///
-    /// Vector of (Episode, Confidence) tuples, sorted by confidence
-    /// - Empty vector if no matches found
-    /// - Low confidence results for partial matches
-    /// - Higher confidence for better matches
+    /// RecallResult containing:
+    /// - results: Vector of (Episode, Confidence) tuples, sorted by confidence
+    ///   - Empty vector if no matches found
+    ///   - Low confidence results for partial matches
+    ///   - Higher confidence for better matches
+    /// - streaming_delivered: Whether recall events were successfully delivered to SSE subscribers
     ///
     /// # Cognitive Design
     ///
     /// Never returns errors because human recall doesn't "fail" - it returns
     /// nothing, partial matches, or reconstructed memories with varying confidence.
-    pub fn recall(&self, cue: &Cue) -> Vec<(Episode, Confidence)> {
+    pub fn recall(&self, cue: &Cue) -> RecallResult {
         #[cfg(feature = "monitoring")]
         let start = Instant::now();
 
@@ -1242,8 +1351,8 @@ impl MemoryStore {
                                 self.recall_similarity_only(cue)
                             }
                         };
-                        self.publish_recall_events(&results);
-                        return results;
+                        let streaming_delivered = self.publish_recall_events(&results);
+                        return RecallResult::new(results, streaming_delivered);
                     }
                 }
                 RecallMode::Hybrid if self.cognitive_recall.is_some() => {
@@ -1255,14 +1364,14 @@ impl MemoryStore {
                                     .into_iter()
                                     .map(|r| (r.episode, r.confidence))
                                     .collect();
-                                self.publish_recall_events(&results);
-                                return results;
+                                let streaming_delivered = self.publish_recall_events(&results);
+                                return RecallResult::new(results, streaming_delivered);
                             }
                             Ok(_) | Err(_) => {
                                 // Empty results or error - fallback to similarity
                                 let results = self.recall_similarity_only(cue);
-                                self.publish_recall_events(&results);
-                                return results;
+                                let streaming_delivered = self.publish_recall_events(&results);
+                                return RecallResult::new(results, streaming_delivered);
                             }
                         }
                     }
@@ -1299,7 +1408,8 @@ impl MemoryStore {
                     // metrics.observe_histogram("query_result_count", results.len() as f64);
                 }
 
-                return results;
+                let streaming_delivered = self.publish_recall_events(&results);
+                return RecallResult::new(results, streaming_delivered);
             }
         }
 
@@ -1316,7 +1426,8 @@ impl MemoryStore {
             }
         }
 
-        results
+        let streaming_delivered = self.publish_recall_events(&results);
+        RecallResult::new(results, streaming_delivered)
     }
 
     /// Recall with persistent backend integration
@@ -1435,7 +1546,7 @@ impl MemoryStore {
             if let CueType::Embedding { vector, threshold } = &cue.cue_type {
                 if let Some(ref hnsw) = self.hnsw_index {
                     self.flush_pending_hnsw_updates();
-                    return self.recall_with_hnsw(cue, hnsw, vector, *threshold);
+                    return self.recall_with_hnsw(cue, hnsw, vector, *threshold).results;
                 }
             }
         }
@@ -1460,7 +1571,7 @@ impl MemoryStore {
             if let CueType::Embedding { vector, threshold } = &cue.cue_type {
                 if let Some(ref hnsw) = self.hnsw_index {
                     self.flush_pending_hnsw_updates();
-                    return self.recall_with_hnsw(cue, hnsw, vector, *threshold);
+                    return self.recall_with_hnsw(cue, hnsw, vector, *threshold).results;
                 }
             }
         }
@@ -1867,7 +1978,7 @@ impl MemoryStore {
         hnsw: &CognitiveHnswIndex,
         vector: &[f32; 768],
         threshold: Confidence,
-    ) -> Vec<(Episode, Confidence)> {
+    ) -> RecallResult {
         // Use HNSW for fast similarity search
         let candidates = hnsw.search_with_confidence(
             vector,
@@ -1914,9 +2025,9 @@ impl MemoryStore {
         results.truncate(cue.max_results);
 
         // Publish events for observability
-        self.publish_recall_events(&results);
+        let streaming_delivered = self.publish_recall_events(&results);
 
-        results
+        RecallResult::new(results, streaming_delivered)
     }
 
     /// Recall memory by content address
@@ -2135,11 +2246,11 @@ mod tests {
             .confidence(Confidence::HIGH)
             .build();
 
-        let activation = store.store(episode);
+        let store_result = store.store(episode);
 
         // Should return high activation with no pressure
-        assert!(activation.value() > 0.8);
-        assert!(activation.value() <= 1.0);
+        assert!(store_result.activation.value() > 0.8);
+        assert!(store_result.activation.value() <= 1.0);
     }
 
     // test_store_never_panics removed as redundant with test_eviction_of_low_activation
@@ -2189,10 +2300,13 @@ mod tests {
 
         // All stores should complete without blocking
         for handle in handles {
-            let activation = handle
+            let store_result = handle
                 .join()
                 .map_err(|err| format!("store thread panicked: {err:?}"))?;
-            ensure(activation.value() > 0.0, "activation should be positive")?;
+            ensure(
+                store_result.activation.value() > 0.0,
+                "activation should be positive",
+            )?;
         }
 
         // Should have stored 10 unique memories
@@ -2234,13 +2348,13 @@ mod tests {
             .confidence(Confidence::HIGH)
             .build();
 
-        let activation = store.store(high_pressure_episode);
+        let store_result = store.store(high_pressure_episode);
 
         // Activation should be degraded due to pressure
         assert!(
-            activation.value() < 0.5,
+            store_result.activation.value() < 0.5,
             "Activation should be degraded under pressure, got {}",
-            activation.value()
+            store_result.activation.value()
         );
     }
 
@@ -2266,7 +2380,7 @@ mod tests {
             Confidence::HIGH,
         );
 
-        let results = store.recall(&cue);
+        let results = store.recall(&cue).results;
 
         // Should return empty vector, not error
         assert_eq!(results.len(), 0);
@@ -2305,7 +2419,7 @@ mod tests {
         // Search with embedding similar to first
         let cue = Cue::embedding("cue1".to_string(), embedding1, Confidence::exact(0.9));
 
-        let results = store.recall(&cue);
+        let results = store.recall(&cue).results;
 
         // Should find the matching episode
         assert!(!results.is_empty());
@@ -2351,7 +2465,7 @@ mod tests {
             Confidence::MEDIUM,
         );
 
-        let results = store.recall(&cue);
+        let results = store.recall(&cue).results;
 
         // Should find only today's office memory
         assert_eq!(results.len(), 1);
@@ -2396,7 +2510,7 @@ mod tests {
         // Search for "meeting" should find ep1 and ep3
         let cue = Cue::semantic("cue1".to_string(), "meeting".to_string(), Confidence::LOW);
 
-        let results = store.recall(&cue);
+        let results = store.recall(&cue).results;
 
         // Should find both meeting-related episodes
         assert_eq!(results.len(), 2, "Should find both meeting episodes");
@@ -2437,7 +2551,7 @@ mod tests {
 
         let cue = Cue::embedding("cue1".to_string(), partial_embedding, Confidence::LOW);
 
-        let results = store.recall(&cue);
+        let results = store.recall(&cue).results;
 
         // Should return with confidence in valid range
         assert!(!results.is_empty());
@@ -2486,7 +2600,10 @@ mod tests {
                 .join()
                 .map_err(|err| format!("recall thread panicked: {err:?}"))?;
             // Each should find at least one match
-            ensure(!results.is_empty(), "recall results should not be empty")?;
+            ensure(
+                !results.results.is_empty(),
+                "recall results should not be empty",
+            )?;
         }
 
         Ok(())
@@ -2530,7 +2647,7 @@ mod tests {
         // Search for meeting - should also pull in related discussion
         let cue = Cue::semantic("cue1".to_string(), "meeting".to_string(), Confidence::LOW);
 
-        let results = store.recall(&cue);
+        let results = store.recall(&cue).results;
 
         // Should find meeting directly and possibly discussion through spreading
         assert!(!results.is_empty());

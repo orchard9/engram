@@ -3,7 +3,10 @@
 //! Provides cognitive-friendly service interface with natural language method names
 //! and educational error messages that teach memory system concepts.
 
-use engram_core::MemoryStore;
+use engram_core::{
+    Confidence as CoreConfidence, Cue as CoreCue, Episode, MemoryStore, metrics::MetricsRegistry,
+};
+use engram_proto::cue::CueType;
 use engram_proto::engram_service_server::{EngramService, EngramServiceServer};
 use engram_proto::{
     AssociateRequest, AssociateResponse, CompleteRequest, CompleteResponse, Confidence,
@@ -16,6 +19,7 @@ use engram_proto::{
     StreamEventType, StreamRequest, StreamResponse, dream_response, flow_control, flow_status,
     memory_flow_request, memory_flow_response, remember_request,
 };
+use serde_json::json;
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -30,12 +34,14 @@ use tonic::{Request, Response, Status, transport::Server};
 /// API discovery through semantic priming.
 pub struct MemoryService {
     store: Arc<MemoryStore>,
+    metrics: Arc<MetricsRegistry>,
 }
 
 impl MemoryService {
     /// Create a new memory service with the given memory store.
-    pub const fn new(store: Arc<MemoryStore>) -> Self {
-        Self { store }
+    #[allow(clippy::missing_const_for_fn)]
+    pub fn new(store: Arc<MemoryStore>, metrics: Arc<MetricsRegistry>) -> Self {
+        Self { store, metrics }
     }
 
     /// Start the gRPC server on the specified port.
@@ -72,9 +78,6 @@ impl EngramService for MemoryService {
         // Extract memory from request and store to MemoryStore
         let (memory_id, confidence_value) = match req.memory_type {
             Some(remember_request::MemoryType::Memory(memory)) => {
-                use chrono::Utc;
-                use engram_core::{Confidence as CoreConfidence, Episode};
-
                 let id = memory.id.clone();
                 let embedding = memory.embedding.clone().try_into().map_err(|_| {
                     Status::invalid_argument("Embedding must be exactly 768 dimensions")
@@ -91,13 +94,20 @@ impl EngramService for MemoryService {
                     confidence,
                 );
 
-                // Store and get activation
-                let activation = self.store.store(episode);
-                (id, activation.value())
+                // Store and check streaming status
+                let store_result = self.store.store(episode);
+
+                // Check if streaming failed - return gRPC error
+                if !store_result.streaming_delivered {
+                    return Err(Status::internal(format!(
+                        "Memory '{id}' was stored but event streaming failed. \
+                         SSE subscribers did not receive the storage event."
+                    )));
+                }
+
+                (id, store_result.activation.value())
             }
             Some(remember_request::MemoryType::Episode(proto_episode)) => {
-                use engram_core::{Confidence as CoreConfidence, Episode};
-
                 let id = proto_episode.id.clone();
                 let embedding = proto_episode.embedding.clone().try_into().map_err(|_| {
                     Status::invalid_argument("Embedding must be exactly 768 dimensions")
@@ -115,9 +125,18 @@ impl EngramService for MemoryService {
                 let episode =
                     Episode::new(id.clone(), when, proto_episode.what, embedding, confidence);
 
-                // Store and get activation
-                let activation = self.store.store(episode);
-                (id, activation.value())
+                // Store and check streaming status
+                let store_result = self.store.store(episode);
+
+                // Check if streaming failed - return gRPC error
+                if !store_result.streaming_delivered {
+                    return Err(Status::internal(format!(
+                        "Episode '{id}' was stored but event streaming failed. \
+                         SSE subscribers did not receive the storage event."
+                    )));
+                }
+
+                (id, store_result.activation.value())
             }
             None => {
                 return Err(Status::invalid_argument(
@@ -160,10 +179,6 @@ impl EngramService for MemoryService {
                 Provide an embedding, semantic query, or context cue.",
             )
         })?;
-
-        // Perform actual recall from memory store
-        use engram_core::{Confidence as CoreConfidence, Cue as CoreCue};
-        use engram_proto::cue::CueType;
 
         // Parse the cue type and create appropriate CoreCue
         let core_cue = match &_cue.cue_type {
@@ -222,8 +237,17 @@ impl EngramService for MemoryService {
             }
         };
 
-        let recall_results = self.store.recall(&core_cue);
-        let total_activated = recall_results.len();
+        let recall_result = self.store.recall(&core_cue);
+
+        // Check if streaming failed - return gRPC error
+        if !recall_result.streaming_delivered {
+            return Err(Status::internal(
+                "Recall completed but event streaming failed. \
+                 SSE subscribers did not receive the recall events.",
+            ));
+        }
+
+        let total_activated = recall_result.results.len();
 
         // Convert recalled episodes to Memory proto messages
         let mut memories = vec![];
@@ -234,7 +258,7 @@ impl EngramService for MemoryService {
         } else {
             10
         };
-        for (episode, confidence) in recall_results.iter().take(max_results as usize) {
+        for (episode, confidence) in recall_result.results.iter().take(max_results as usize) {
             let memory = engram_proto::Memory::new(
                 episode.id.clone(),
                 vec![0.0; 768], // placeholder embedding
@@ -549,8 +573,34 @@ impl EngramService for MemoryService {
     ) -> Result<Response<IntrospectResponse>, Status> {
         let _req = request.into_inner();
 
+        let snapshot = self.metrics.streaming_snapshot();
+        let export_stats = self.metrics.streaming_stats();
+        let metrics_payload = json!({
+            "snapshot": snapshot,
+            "export": export_stats,
+        });
+        let metrics_snapshot_json =
+            serde_json::to_string(&metrics_payload).unwrap_or_else(|_| "{}".to_string());
+
+        let mut metrics_map = HashMap::default();
+        #[allow(clippy::cast_precision_loss)]
+        {
+            metrics_map.insert(
+                "streaming_queue_depth".to_string(),
+                export_stats.queue_depth as f32,
+            );
+            metrics_map.insert(
+                "streaming_updates_exported".to_string(),
+                export_stats.exported as f32,
+            );
+            metrics_map.insert(
+                "streaming_updates_dropped".to_string(),
+                export_stats.dropped as f32,
+            );
+        }
+
         let response = IntrospectResponse {
-            metrics: HashMap::default(),
+            metrics: metrics_map,
             health: Some(HealthStatus {
                 healthy: true,
                 components: HashMap::default(),
@@ -566,6 +616,7 @@ impl EngramService for MemoryService {
                 newest_memory: None,
             }),
             active_processes: vec!["consolidation".to_string(), "decay".to_string()],
+            metrics_snapshot_json,
         };
 
         Ok(Response::new(response))
@@ -904,3 +955,4 @@ impl EngramService for MemoryService {
         Ok(Response::new(Box::pin(response_stream)))
     }
 }
+use chrono::Utc;

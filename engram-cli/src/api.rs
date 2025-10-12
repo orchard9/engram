@@ -25,7 +25,7 @@ use crate::grpc::MemoryService;
 use crate::openapi::create_swagger_ui;
 use engram_core::{
     Confidence as CoreConfidence, Cue as CoreCue, Episode, MemoryStore,
-    memory::EpisodeBuilder as CoreEpisodeBuilder, store::MemoryEvent,
+    memory::EpisodeBuilder as CoreEpisodeBuilder, metrics::MetricsRegistry, store::MemoryEvent,
 };
 
 /// Shared application state
@@ -35,15 +35,18 @@ pub struct ApiState {
     pub store: Arc<MemoryStore>,
     /// gRPC memory service for complex operations
     pub memory_service: Arc<MemoryService>,
+    /// Global metrics registry for streaming/log export
+    pub metrics: Arc<MetricsRegistry>,
 }
 
 impl ApiState {
     /// Create new API state with memory store
-    pub fn new(store: Arc<MemoryStore>) -> Self {
-        let memory_service = Arc::new(MemoryService::new(Arc::clone(&store)));
+    pub fn new(store: Arc<MemoryStore>, metrics: Arc<MetricsRegistry>) -> Self {
+        let memory_service = Arc::new(MemoryService::new(Arc::clone(&store), Arc::clone(&metrics)));
         Self {
             store,
             memory_service,
+            metrics,
         }
     }
 }
@@ -491,7 +494,21 @@ pub async fn remember_memory(
         core_confidence,
     );
 
-    let activation = state.store.store(episode);
+    let store_result = state.store.store(episode);
+
+    // Check if streaming failed - this is a critical failure that should be surfaced
+    if !store_result.streaming_delivered {
+        tracing::warn!(
+            memory_id = %memory_id,
+            "Memory stored successfully but event streaming failed - SSE subscribers not notified"
+        );
+        // Return 500 to indicate partial failure - storage succeeded but streaming failed
+        return Err(ApiError::SystemError(format!(
+            "Memory '{memory_id}' was stored but event notification failed. \
+             SSE subscribers did not receive the storage event. \
+             Check /api/v1/system/health for streaming status."
+        )));
+    }
 
     // Create auto-links if enabled
     let auto_links = if request.auto_link.unwrap_or(false) {
@@ -506,7 +523,7 @@ pub async fn remember_memory(
         vec![]
     };
 
-    let actual_confidence = activation.value();
+    let actual_confidence = store_result.activation.value();
     let response = RememberResponse {
         memory_id: memory_id.clone(),
         storage_confidence: ConfidenceInfo {
@@ -601,9 +618,23 @@ pub async fn remember_episode(
     let core_episode = builder.build();
 
     // Store in MemoryStore
-    let activation = state.store.store(core_episode);
+    let store_result = state.store.store(core_episode);
 
-    let actual_confidence = activation.value();
+    // Check if streaming failed - this is a critical failure that should be surfaced
+    if !store_result.streaming_delivered {
+        tracing::warn!(
+            episode_id = %episode_id,
+            "Episode stored successfully but event streaming failed - SSE subscribers not notified"
+        );
+        // Return 500 to indicate partial failure - storage succeeded but streaming failed
+        return Err(ApiError::SystemError(format!(
+            "Episode '{episode_id}' was stored but event notification failed. \
+             SSE subscribers did not receive the storage event. \
+             Check /api/v1/system/health for streaming status."
+        )));
+    }
+
+    let actual_confidence = store_result.activation.value();
     let response = RememberResponse {
         memory_id: episode_id.clone(),
         storage_confidence: ConfidenceInfo {
@@ -696,14 +727,32 @@ pub async fn recall_memories(
     };
 
     // Perform actual recall using MemoryStore
-    let recall_results = state.store.recall(&cue);
+    let recall_result = state.store.recall(&cue);
+
+    // Check if streaming failed
+    if !recall_result.streaming_delivered {
+        tracing::warn!(
+            "Recall completed successfully but event streaming failed - SSE subscribers not notified"
+        );
+        return Err(ApiError::SystemError(
+            "Recall completed but event notification failed. \
+             SSE subscribers did not receive the recall events. \
+             Check /api/v1/system/health for streaming status."
+                .to_string(),
+        ));
+    }
+
     let total_memories = state.store.count();
 
     // Convert results to API response format
     let mut vivid_results = Vec::new();
     let mut associated_results = Vec::new();
 
-    for (episode, confidence) in recall_results.iter().take(params.max_results.unwrap_or(10)) {
+    for (episode, confidence) in recall_result
+        .results
+        .iter()
+        .take(params.max_results.unwrap_or(10))
+    {
         let result = MemoryResult {
             id: episode.id.clone(),
             content: episode.what.clone(),
@@ -871,7 +920,7 @@ pub async fn create_memory_rest(
 
     let confidence = payload
         .get("confidence")
-        .and_then(|v| v.as_f64())
+        .and_then(serde_json::Value::as_f64)
         .map(|v| v as f32);
 
     // Build RememberMemoryRequest from CLI payload
@@ -916,6 +965,7 @@ pub async fn get_memory_by_id(
 }
 
 /// GET /api/v1/memories/search - Search memories (CLI-compatible)
+#[allow(clippy::implicit_hasher)]
 pub async fn search_memories_rest(
     State(state): State<ApiState>,
     Query(params): Query<HashMap<String, String>>,
@@ -931,9 +981,23 @@ pub async fn search_memories_rest(
 
     // Call recall directly on store for simple CLI response
     let cue = CoreCue::semantic(query.clone(), query.clone(), CoreConfidence::exact(0.7));
-    let recall_results = state.store.recall(&cue);
+    let recall_result = state.store.recall(&cue);
 
-    let memories: Vec<serde_json::Value> = recall_results
+    // Check if streaming failed
+    if !recall_result.streaming_delivered {
+        tracing::warn!(
+            "Search completed successfully but event streaming failed - SSE subscribers not notified"
+        );
+        return Err(ApiError::SystemError(
+            "Search completed but event notification failed. \
+             SSE subscribers did not receive the recall events. \
+             Check /api/v1/system/health for streaming status."
+                .to_string(),
+        ));
+    }
+
+    let memories: Vec<serde_json::Value> = recall_result
+        .results
         .iter()
         .take(limit)
         .map(|(episode, confidence)| {
@@ -1107,6 +1171,27 @@ pub async fn system_introspect(
     Ok(Json(introspection_data))
 }
 
+/// GET /metrics - Streaming metrics snapshot
+#[utoipa::path(
+    get,
+    path = "/metrics",
+    tag = "system",
+    responses(
+        (status = 200, description = "Aggregated streaming metrics snapshot", body = serde_json::Value)
+    )
+)]
+pub async fn metrics_snapshot(
+    State(state): State<ApiState>,
+) -> Result<impl IntoResponse, ApiError> {
+    let snapshot = state.metrics.streaming_snapshot();
+    let export = state.metrics.streaming_stats();
+
+    Ok(Json(json!({
+        "snapshot": snapshot,
+        "export": export,
+    })))
+}
+
 /// GET /api/v1/episodes/replay - Replay episode memories
 #[utoipa::path(
     get,
@@ -1241,6 +1326,7 @@ pub async fn stream_activities(
     State(state): State<ApiState>,
     Query(params): Query<StreamActivityQuery>,
 ) -> impl IntoResponse {
+    let ApiState { store, .. } = state;
     let session_id = params
         .session_id
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
@@ -1268,13 +1354,8 @@ pub async fn stream_activities(
     );
 
     // Create activity stream with real events from memory store
-    let stream = create_activity_stream(
-        state.store.clone(),
-        session_id,
-        event_types,
-        min_importance,
-        buffer_size,
-    );
+    let stream =
+        create_activity_stream(store, session_id, event_types, min_importance, buffer_size);
 
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
@@ -1297,6 +1378,7 @@ pub async fn stream_memories(
     State(state): State<ApiState>,
     Query(params): Query<StreamMemoryQuery>,
 ) -> impl IntoResponse {
+    let ApiState { store, .. } = state;
     let session_id = params
         .session_id
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
@@ -1324,7 +1406,7 @@ pub async fn stream_memories(
     );
 
     let stream = create_memory_stream(
-        state.store.clone(),
+        store,
         session_id,
         include_formation,
         include_retrieval,
@@ -1354,6 +1436,7 @@ pub async fn stream_consolidation(
     State(state): State<ApiState>,
     Query(params): Query<StreamConsolidationQuery>,
 ) -> impl IntoResponse {
+    let ApiState { store, .. } = state;
     let session_id = params
         .session_id
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
@@ -1364,7 +1447,7 @@ pub async fn stream_consolidation(
     let include_progress = params.include_progress.unwrap_or(false);
 
     let stream = create_consolidation_stream(
-        state.store.clone(),
+        store,
         session_id,
         include_replay,
         include_insights,
@@ -1391,20 +1474,17 @@ fn create_activity_stream(
 
     tokio::spawn(async move {
         // Subscribe to real memory events
-        let mut event_rx = match store.subscribe_to_events() {
-            Some(rx) => rx,
-            None => {
-                // Event streaming not enabled, send error event and close
-                let error_event = Event::default().event("error").data(
-                    json!({
-                        "error": "Event streaming not enabled on server",
-                        "session_id": session_id,
-                    })
-                    .to_string(),
-                );
-                let _ = tx.send(Ok(error_event)).await;
-                return;
-            }
+        let Some(mut event_rx) = store.subscribe_to_events() else {
+            // Event streaming not enabled, send error event and close
+            let error_event = Event::default().event("error").data(
+                json!({
+                    "error": "Event streaming not enabled on server",
+                    "session_id": session_id,
+                })
+                .to_string(),
+            );
+            let _ = tx.send(Ok(error_event)).await;
+            return;
         };
 
         let mut event_id = 0u64;
@@ -1449,7 +1529,7 @@ fn create_activity_stream(
                             if !event_types.contains(&"recall".to_string()) {
                                 continue;
                             }
-                            let importance = (activation + confidence) / 2.0;
+                            let importance = f32::midpoint(activation, confidence);
                             (
                                 "recall",
                                 "Memory retrieval triggered by recognition cue",
@@ -1551,19 +1631,16 @@ fn create_memory_stream(
 
     tokio::spawn(async move {
         // Subscribe to real memory events
-        let mut event_rx = match store.subscribe_to_events() {
-            Some(rx) => rx,
-            None => {
-                let error_event = Event::default().event("error").data(
-                    json!({
-                        "error": "Event streaming not enabled on server",
-                        "session_id": session_id,
-                    })
-                    .to_string(),
-                );
-                let _ = tx.send(Ok(error_event)).await;
-                return;
-            }
+        let Some(mut event_rx) = store.subscribe_to_events() else {
+            let error_event = Event::default().event("error").data(
+                json!({
+                    "error": "Event streaming not enabled on server",
+                    "session_id": session_id,
+                })
+                .to_string(),
+            );
+            let _ = tx.send(Ok(error_event)).await;
+            return;
         };
 
         let mut event_id = 0u64;
@@ -1607,7 +1684,7 @@ fn create_memory_stream(
                             if !include_retrieval {
                                 continue;
                             }
-                            let avg_confidence = (activation + confidence) / 2.0;
+                            let avg_confidence = f32::midpoint(activation, confidence);
                             if avg_confidence < min_confidence {
                                 continue;
                             }
@@ -2121,6 +2198,7 @@ pub fn create_api_routes() -> Router<ApiState> {
         // System health and introspection
         .route("/api/v1/system/health", get(system_health))
         .route("/api/v1/system/introspect", get(system_introspect))
+        .route("/metrics", get(metrics_snapshot))
         // Episode-specific operations
         .route("/api/v1/episodes/remember", post(remember_episode))
         .route("/api/v1/episodes/replay", get(replay_episodes))
