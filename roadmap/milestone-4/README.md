@@ -211,22 +211,22 @@ Task 002 (1d) → Task 003 (2d) → Task 004 (1.5d) → Task 005 (2d) → Task 0
 
 ## Status
 
-**Current Status**: 🚧 **IN PROGRESS** (28% - 2/7 tasks)
+**Current Status**: 🚧 **IN PROGRESS** (43% - 3/7 tasks)
 
 **Completed Tasks**:
 - ✅ Task 001: Content Creation (research, Medium article, Twitter thread)
 - ✅ Task 002: Last Access Tracking (added access_count to Memory, 7 unit tests)
+- ✅ Task 003: Lazy Decay Integration (compute_decayed_confidence, CognitiveRecall integration, 7 integration tests)
 
 **In Progress**:
-- 🔄 Task 003: Lazy Decay Integration (2 days) ← **NEXT**
+- 🔄 Task 004: Decay Configuration API (1.5 days) ← **NEXT**
 
 **Pending Tasks**:
-- ⏸️ Task 004: Decay Configuration API (1.5 days)
 - ⏸️ Task 005: Forgetting Curve Validation (2 days)
 - ⏸️ Task 006: Comprehensive Testing (1.5 days)
 - ⏸️ Task 007: Documentation (1 day)
 
-**Phase 1 Status**: Task 002 complete ✅, Task 003 next (Foundation phase 50% complete)
+**Phase 1 Status**: Tasks 002 & 003 complete ✅ (Foundation phase 100% complete)
 
 ## Related Documentation
 
