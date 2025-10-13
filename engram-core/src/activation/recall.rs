@@ -4,10 +4,12 @@
 //! confidence aggregation, and result ranking into a production-ready recall API.
 
 use super::{
-    ActivationError, ActivationResult, ConfidenceAggregator, NodeId,
+    ActivationError, ActivationResult, BreakerSettings, ConfidenceAggregator, NodeId,
+    SpreadingCircuitBreaker,
     cycle_detector::CycleDetector,
     parallel::ParallelSpreadingEngine,
     seeding::{self, SeededActivation, VectorActivationSeeder},
+    semantic_seeder::{SemanticActivationSeeder, SemanticError},
 };
 use crate::{Confidence, Cue, Episode, MemoryStore};
 use chrono::Utc;
@@ -254,6 +256,8 @@ impl RankedMemory {
 pub struct CognitiveRecall {
     /// Vector seeder for initial activation
     vector_seeder: Arc<VectorActivationSeeder>,
+    /// Semantic seeder for text-based queries (optional)
+    semantic_seeder: Option<Arc<SemanticActivationSeeder>>,
     /// Parallel spreading engine
     spreading_engine: Arc<ParallelSpreadingEngine>,
     /// Confidence aggregator reserved for future multi-path confidence calibration
@@ -266,6 +270,8 @@ pub struct CognitiveRecall {
     config: RecallConfig,
     /// Metrics for monitoring recall operations
     metrics: Arc<RecallMetrics>,
+    /// Circuit breaker guarding spreading activation
+    breaker: Arc<SpreadingCircuitBreaker>,
 }
 
 impl CognitiveRecall {
@@ -278,13 +284,20 @@ impl CognitiveRecall {
         cycle_detector: Arc<CycleDetector>,
         config: RecallConfig,
     ) -> Self {
+        let breaker = Arc::new(SpreadingCircuitBreaker::new(
+            spreading_engine.metrics_handle(),
+            &BreakerSettings::default(),
+        ));
+
         Self {
             vector_seeder,
+            semantic_seeder: None,
             spreading_engine,
             confidence_aggregator,
             cycle_detector,
             config,
             metrics: Arc::new(RecallMetrics::new()),
+            breaker,
         }
     }
 
@@ -298,6 +311,17 @@ impl CognitiveRecall {
     #[must_use]
     pub fn metrics(&self) -> &RecallMetrics {
         &self.metrics
+    }
+
+    /// Access the underlying spreading engine.
+    #[must_use]
+    pub fn spreading_engine(&self) -> Arc<ParallelSpreadingEngine> {
+        Arc::clone(&self.spreading_engine)
+    }
+
+    /// Set the semantic seeder for text-based queries
+    pub fn set_semantic_seeder(&mut self, seeder: Arc<SemanticActivationSeeder>) {
+        self.semantic_seeder = Some(seeder);
     }
 
     /// Main recall method that orchestrates the pipeline
@@ -314,6 +338,9 @@ impl CognitiveRecall {
                 warn!(target: "engram::recall", error = ?e, "Failed to seed activation");
                 self.metrics.record_seeding_failure();
                 self.metrics.record_fallback();
+                self.spreading_engine.get_metrics().record_fallback();
+                self.breaker
+                    .on_result(false, start_time.elapsed(), self.config.time_budget);
                 return self.fallback_to_similarity(cue, store);
             }
         };
@@ -327,6 +354,19 @@ impl CognitiveRecall {
             warn!(target: "engram::recall", "Time budget exceeded during seeding");
             self.metrics.record_time_budget_violation();
             self.metrics.record_fallback();
+            self.spreading_engine.get_metrics().record_fallback();
+            self.breaker
+                .on_result(false, start_time.elapsed(), self.config.time_budget);
+            return Ok(self.rank_seeded_results(seeded_activations, store));
+        }
+
+        if !self.breaker.should_attempt() {
+            warn!(
+                target: "engram::recall",
+                "Circuit breaker open - using similarity fallback"
+            );
+            self.metrics.record_fallback();
+            self.spreading_engine.get_metrics().record_fallback();
             return Ok(self.rank_seeded_results(seeded_activations, store));
         }
 
@@ -336,7 +376,11 @@ impl CognitiveRecall {
             Err(e) => {
                 error!(target: "engram::recall", error = ?e, "Spreading activation failed");
                 self.metrics.record_spreading_failure();
+                self.spreading_engine.get_metrics().record_spread_failure();
                 self.metrics.record_fallback();
+                self.spreading_engine.get_metrics().record_fallback();
+                self.breaker
+                    .on_result(false, start_time.elapsed(), self.config.time_budget);
                 return Ok(self.rank_seeded_results(seeded_activations, store));
             }
         };
@@ -346,8 +390,15 @@ impl CognitiveRecall {
             warn!(target: "engram::recall", "Time budget exceeded during spreading");
             self.metrics.record_time_budget_violation();
             self.metrics.record_fallback();
+            self.spreading_engine.get_metrics().record_fallback();
+            self.breaker
+                .on_result(false, start_time.elapsed(), self.config.time_budget);
             return Ok(self.rank_seeded_results(seeded_activations, store));
         }
+
+        let spread_latency = start_time.elapsed();
+        self.breaker
+            .on_result(true, spread_latency, self.config.time_budget);
 
         // Step 3: Aggregate confidence scores
         let aggregated_results = Self::aggregate_confidence(spreading_results, seeded_activations);
@@ -534,16 +585,178 @@ impl CognitiveRecall {
 
         ranked
     }
+
+    /// Semantic recall from text query
+    ///
+    /// This method provides a natural language interface to the recall system.
+    /// It converts the text query to an embedding using the semantic seeder,
+    /// then follows the same pipeline as the vector-based recall.
+    ///
+    /// # Arguments
+    ///
+    /// * `query` - The text query from the user
+    /// * `language` - Optional ISO 639-1 language code (e.g., "en", "es")
+    /// * `store` - Memory store to retrieve episodes from
+    ///
+    /// # Returns
+    ///
+    /// Ranked list of memories matching the query
+    ///
+    /// # Errors
+    ///
+    /// Returns error if:
+    /// - Semantic seeder is not configured
+    /// - Embedding generation fails
+    /// - Spreading activation fails
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let results = recall.recall_semantic(
+    ///     "automobile safety features",
+    ///     Some("en"),
+    ///     &store
+    /// ).await?;
+    /// ```
+    pub async fn recall_semantic(
+        &self,
+        query: &str,
+        language: Option<&str>,
+        store: &MemoryStore,
+    ) -> ActivationResult<Vec<RankedMemory>> {
+        let start_time = Instant::now();
+
+        // Check if semantic seeder is available
+        let semantic_seeder = self.semantic_seeder.as_ref().ok_or_else(|| {
+            ActivationError::InvalidConfig(
+                "Semantic seeder not configured. Use set_semantic_seeder() first.".to_string(),
+            )
+        })?;
+
+        // Record recall operation
+        self.metrics.record_recall(self.config.recall_mode);
+
+        // Step 1: Seed activation from text query
+        let seeding_outcome = semantic_seeder
+            .seed_from_query(
+                query,
+                language,
+                self.config.min_confidence,
+                self.config.max_results,
+            )
+            .await
+            .map_err(|e| match e {
+                SemanticError::EmbeddingFailed(err) => {
+                    warn!(target: "engram::recall::semantic", error = ?err, "Embedding generation failed");
+                    self.metrics.record_seeding_failure();
+                    ActivationError::InvalidConfig(format!("Embedding generation failed: {err}"))
+                }
+                SemanticError::NoEmbeddings => {
+                    warn!(target: "engram::recall::semantic", "No embeddings available");
+                    self.metrics.record_seeding_failure();
+                    ActivationError::InvalidConfig("No embeddings available".to_string())
+                }
+                SemanticError::SeedingFailed(err) => {
+                    warn!(target: "engram::recall::semantic", error = ?err, "Seeding failed");
+                    self.metrics.record_seeding_failure();
+                    ActivationError::InvalidConfig(format!("Seeding failed: {err}"))
+                }
+            })?;
+
+        let seeded_activations = seeding_outcome.seeds;
+
+        if seeded_activations.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Check time budget after seeding
+        if start_time.elapsed() > self.config.time_budget {
+            warn!(target: "engram::recall::semantic", "Time budget exceeded during seeding");
+            self.metrics.record_time_budget_violation();
+            self.metrics.record_fallback();
+            self.spreading_engine.get_metrics().record_fallback();
+            self.breaker
+                .on_result(false, start_time.elapsed(), self.config.time_budget);
+            return Ok(self.rank_seeded_results(seeded_activations, store));
+        }
+
+        // Check circuit breaker
+        if !self.breaker.should_attempt() {
+            warn!(
+                target: "engram::recall::semantic",
+                "Circuit breaker open - using similarity fallback"
+            );
+            self.metrics.record_fallback();
+            self.spreading_engine.get_metrics().record_fallback();
+            return Ok(self.rank_seeded_results(seeded_activations, store));
+        }
+
+        // Step 2: Spread activation through graph
+        let spreading_results = match self.spread_activation(&seeded_activations) {
+            Ok(results) => results,
+            Err(e) => {
+                error!(target: "engram::recall::semantic", error = ?e, "Spreading activation failed");
+                self.metrics.record_spreading_failure();
+                self.spreading_engine.get_metrics().record_spread_failure();
+                self.metrics.record_fallback();
+                self.spreading_engine.get_metrics().record_fallback();
+                self.breaker
+                    .on_result(false, start_time.elapsed(), self.config.time_budget);
+                return Ok(self.rank_seeded_results(seeded_activations, store));
+            }
+        };
+
+        // Check time budget after spreading
+        if start_time.elapsed() > self.config.time_budget {
+            warn!(target: "engram::recall::semantic", "Time budget exceeded during spreading");
+            self.metrics.record_time_budget_violation();
+            self.metrics.record_fallback();
+            self.spreading_engine.get_metrics().record_fallback();
+            self.breaker
+                .on_result(false, start_time.elapsed(), self.config.time_budget);
+            return Ok(self.rank_seeded_results(seeded_activations, store));
+        }
+
+        let spread_latency = start_time.elapsed();
+        self.breaker
+            .on_result(true, spread_latency, self.config.time_budget);
+
+        // Step 3: Aggregate confidence scores
+        let aggregated_results = Self::aggregate_confidence(spreading_results, seeded_activations);
+
+        // Step 4: Rank and filter results
+        let ranked_results = self.rank_results(aggregated_results, store);
+
+        // Record activation mass
+        let total_activation: f32 = ranked_results.iter().map(|r| r.activation).sum();
+        self.metrics.record_activation_mass(total_activation);
+
+        // Record metrics
+        let elapsed = start_time.elapsed();
+        if elapsed > self.config.time_budget {
+            warn!(
+                target: "engram::recall::semantic::performance",
+                elapsed_ms = elapsed.as_millis(),
+                budget_ms = self.config.time_budget.as_millis(),
+                "Semantic recall exceeded time budget"
+            );
+            self.metrics.record_time_budget_violation();
+        }
+
+        Ok(ranked_results)
+    }
 }
 
 /// Builder for CognitiveRecall with sensible defaults
 pub struct CognitiveRecallBuilder {
     vector_seeder: Option<Arc<VectorActivationSeeder>>,
+    semantic_seeder: Option<Arc<SemanticActivationSeeder>>,
     spreading_engine: Option<Arc<ParallelSpreadingEngine>>,
     confidence_aggregator: Option<Arc<ConfidenceAggregator>>,
     cycle_detector: Option<Arc<CycleDetector>>,
     config: RecallConfig,
     metrics: Option<Arc<RecallMetrics>>,
+    breaker: Option<Arc<SpreadingCircuitBreaker>>,
 }
 
 impl Default for CognitiveRecallBuilder {
@@ -558,11 +771,13 @@ impl CognitiveRecallBuilder {
     pub fn new() -> Self {
         Self {
             vector_seeder: None,
+            semantic_seeder: None,
             spreading_engine: None,
             confidence_aggregator: None,
             cycle_detector: None,
             config: RecallConfig::default(),
             metrics: None,
+            breaker: None,
         }
     }
 
@@ -573,10 +788,24 @@ impl CognitiveRecallBuilder {
         self
     }
 
+    /// Set the semantic seeder for text-based queries
+    #[must_use]
+    pub fn semantic_seeder(mut self, seeder: Arc<SemanticActivationSeeder>) -> Self {
+        self.semantic_seeder = Some(seeder);
+        self
+    }
+
     /// Set custom metrics instance
     #[must_use]
     pub fn metrics(mut self, metrics: Arc<RecallMetrics>) -> Self {
         self.metrics = Some(metrics);
+        self
+    }
+
+    /// Configure the spreading circuit breaker
+    #[must_use]
+    pub fn breaker(mut self, breaker: Arc<SpreadingCircuitBreaker>) -> Self {
+        self.breaker = Some(breaker);
         self
     }
 
@@ -634,13 +863,22 @@ impl CognitiveRecallBuilder {
             .metrics
             .unwrap_or_else(|| Arc::new(RecallMetrics::new()));
 
+        let breaker = self.breaker.unwrap_or_else(|| {
+            Arc::new(SpreadingCircuitBreaker::new(
+                spreading_engine.metrics_handle(),
+                &BreakerSettings::default(),
+            ))
+        });
+
         Ok(CognitiveRecall {
             vector_seeder,
+            semantic_seeder: self.semantic_seeder,
             spreading_engine,
             confidence_aggregator,
             cycle_detector,
             config: self.config,
             metrics,
+            breaker,
         })
     }
 }

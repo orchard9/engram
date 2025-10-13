@@ -6,9 +6,30 @@
 
 use atomic_float::AtomicF32;
 use dashmap::DashMap;
+use serde::Serialize;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
+
+const METRIC_SPREADING_LATENCY_HOT: &str = "engram_spreading_latency_hot_seconds";
+const METRIC_SPREADING_LATENCY_WARM: &str = "engram_spreading_latency_warm_seconds";
+const METRIC_SPREADING_LATENCY_COLD: &str = "engram_spreading_latency_cold_seconds";
+const METRIC_SPREADING_ACTIVATIONS_TOTAL: &str = "engram_spreading_activations_total";
+const METRIC_SPREADING_LATENCY_BUDGET_VIOLATIONS_TOTAL: &str =
+    "engram_spreading_latency_budget_violations_total";
+const METRIC_SPREADING_FALLBACK_TOTAL: &str = "engram_spreading_fallback_total";
+const METRIC_SPREADING_FAILURES_TOTAL: &str = "engram_spreading_failures_total";
+const METRIC_SPREADING_BREAKER_STATE: &str = "engram_spreading_breaker_state";
+const METRIC_SPREADING_BREAKER_TRANSITIONS_TOTAL: &str =
+    "engram_spreading_breaker_transitions_total";
+const METRIC_SPREADING_GPU_LAUNCH_TOTAL: &str = "engram_spreading_gpu_launch_total";
+const METRIC_SPREADING_GPU_FALLBACK_TOTAL: &str = "engram_spreading_gpu_fallback_total";
+const METRIC_SPREADING_POOL_UTILIZATION: &str = "engram_spreading_pool_utilization";
+const METRIC_SPREADING_POOL_HIT_RATE: &str = "engram_spreading_pool_hit_rate";
+const METRIC_SPREADING_AUTOTUNE_CHANGES_TOTAL: &str = "engram_spreading_autotune_changes_total";
+const METRIC_SPREADING_AUTOTUNE_LAST_IMPROVEMENT: &str =
+    "engram_spreading_autotune_last_improvement";
 
 /// Latency budget management for activation spreading
 pub mod latency_budget;
@@ -16,10 +37,18 @@ pub mod latency_budget;
 pub mod storage_aware;
 
 pub mod accumulator;
+/// Adaptive batch sizing for spreading optimization
+pub mod adaptive_batcher;
+/// Auto-tuning utilities for spreading configuration
+pub mod auto_tuning;
+/// Circuit breaker for spreading resilience
+pub mod circuit_breaker;
 pub mod confidence_aggregation;
 pub mod cycle_detector;
 /// GPU abstraction layer for acceleration
 pub mod gpu_interface;
+/// Health monitoring probes for activation subsystems
+pub mod health_checks;
 /// Multi-cue activation spreading support
 pub mod multi_cue;
 /// Lock-free parallel activation spreading engine
@@ -31,12 +60,20 @@ pub mod scheduler;
 #[cfg(feature = "hnsw_index")]
 /// Vector similarity-based activation seeding
 pub mod seeding;
+#[cfg(feature = "hnsw_index")]
+/// Semantic search integration with spreading activation
+pub mod semantic_seeder;
 /// SIMD-optimized batch activation spreading
 pub mod simd_optimization;
 /// Configuration for similarity-based activation
 pub mod similarity_config;
+pub mod test_support;
 pub mod traversal;
 
+pub mod visualization;
+
+pub use auto_tuning::{AutoTuneAuditEntry, SpreadingAutoTuner};
+pub use circuit_breaker::{BreakerSettings, BreakerState, SpreadingCircuitBreaker};
 pub use confidence_aggregation::{
     ConfidenceAggregationOutcome, ConfidenceAggregator, ConfidenceContribution, ConfidencePath,
 };
@@ -44,6 +81,7 @@ pub use gpu_interface::{
     AdaptiveConfig, AdaptiveSpreadingEngine, BatchMetadata, CpuFallback, GPUActivationBatch,
     GPUSpreadingInterface, GpuCapabilities, GpuLaunchFuture, MockGpuInterface,
 };
+pub use health_checks::SpreadingHealthProbe;
 pub use multi_cue::CueAggregationStrategy;
 pub use parallel::ParallelSpreadingEngine;
 pub use recall::{
@@ -54,9 +92,21 @@ pub use scheduler::{SchedulerSnapshot, TierAwareSpreadingScheduler, TierQueueSta
 pub use seeding::{
     ActivationTier, SeededActivation, SeedingError, SeedingOutcome, VectorActivationSeeder,
 };
+#[cfg(feature = "hnsw_index")]
+pub use semantic_seeder::{
+    ActivationSource, FigurativeInterpreter, QueryExpander, SemanticActivationSeeder,
+    SemanticError,
+};
 pub use similarity_config::SimilarityConfig;
 pub mod memory_pool;
-pub use memory_pool::{ActivationMemoryPool, LocalMemoryPool, PoolStats};
+pub use adaptive_batcher::{
+    AdaptiveBatcher, AdaptiveBatcherConfig, AdaptiveBatcherMetrics, AdaptiveBatcherSnapshot,
+    AdaptiveMode, BandwidthClass, Observation, TopologyFingerprint,
+};
+pub use memory_pool::{
+    ActivationMemoryPool, ActivationRecordPool, ActivationRecordPoolStats, LocalMemoryPool,
+    PoolStats,
+};
 
 // HNSW integration
 #[cfg(feature = "hnsw_index")]
@@ -69,23 +119,77 @@ pub use hnsw_integration::{
 /// Node identifier for graph traversal
 pub type NodeId = String;
 
-/// Lock-free activation record with atomic operations  
-#[repr(align(64))] // Cache line alignment
+/// Cache-aligned hot fields reused across activation records.
+#[repr(C, align(64))]
+#[derive(Debug)]
+pub struct CacheOptimizedNode {
+    activation: AtomicF32,
+    confidence: AtomicF32,
+    visits: AtomicUsize,
+    source_count: AtomicUsize,
+}
+
+impl Default for CacheOptimizedNode {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl CacheOptimizedNode {
+    /// Create a cache-aligned hot field container with zeroed state.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            activation: AtomicF32::new(0.0),
+            confidence: AtomicF32::new(0.0),
+            visits: AtomicUsize::new(0),
+            source_count: AtomicUsize::new(0),
+        }
+    }
+
+    /// Reset hot fields to their initial state.
+    pub fn reset(&self) {
+        self.activation.store(0.0, Ordering::Relaxed);
+        self.confidence.store(0.0, Ordering::Relaxed);
+        self.visits.store(0, Ordering::Relaxed);
+        self.source_count.store(0, Ordering::Relaxed);
+    }
+
+    /// Access the activation atomic for this node.
+    #[must_use]
+    pub const fn activation(&self) -> &AtomicF32 {
+        &self.activation
+    }
+
+    /// Access the confidence atomic for this node.
+    #[must_use]
+    pub const fn confidence(&self) -> &AtomicF32 {
+        &self.confidence
+    }
+
+    /// Access the visit counter for this node.
+    #[must_use]
+    pub const fn visits(&self) -> &AtomicUsize {
+        &self.visits
+    }
+
+    /// Access the source count atomic for this node.
+    #[must_use]
+    pub const fn source_count(&self) -> &AtomicUsize {
+        &self.source_count
+    }
+}
+
+/// Lock-free activation record that shares cache-optimized hot fields.
+#[repr(align(64))]
 pub struct ActivationRecord {
     /// Unique identifier for this node
     pub node_id: NodeId,
-    /// Current activation level (0.0 to 1.0)
-    pub activation: AtomicF32,
-    /// Confidence score accumulated for this activation
-    pub confidence: AtomicF32,
+    hot: Arc<CacheOptimizedNode>,
     /// Last update timestamp for ordering
     pub timestamp: AtomicU64,
     /// Node-specific decay coefficient
     pub decay_rate: f32,
-    /// Visit count for cycle detection
-    pub visits: AtomicUsize,
-    /// Number of pending source updates
-    pub source_count: AtomicUsize,
     /// Optional storage tier classification for this activation.
     pub storage_tier: Option<storage_aware::StorageTier>,
 }
@@ -93,17 +197,26 @@ pub struct ActivationRecord {
 impl ActivationRecord {
     /// Create a new activation record with zero initial activation
     #[must_use]
-    pub const fn new(node_id: NodeId, decay_rate: f32) -> Self {
+    pub fn new(node_id: NodeId, decay_rate: f32) -> Self {
         Self {
             node_id,
-            activation: AtomicF32::new(0.0),
-            confidence: AtomicF32::new(0.0),
+            hot: Arc::new(CacheOptimizedNode::new()),
             timestamp: AtomicU64::new(0),
             decay_rate,
-            visits: AtomicUsize::new(0),
-            source_count: AtomicUsize::new(0),
             storage_tier: None,
         }
+    }
+
+    /// Borrow the cache-optimized hot fields for external consumers.
+    #[must_use]
+    pub fn hot_fields(&self) -> &CacheOptimizedNode {
+        &self.hot
+    }
+
+    /// Clone the shared handle to the hot fields for caching elsewhere.
+    #[must_use]
+    pub fn hot_handle(&self) -> Arc<CacheOptimizedNode> {
+        Arc::clone(&self.hot)
     }
 
     /// Atomically accumulate activation with memory ordering, returning both the
@@ -112,8 +225,9 @@ impl ActivationRecord {
         let threshold = self
             .storage_tier
             .map_or(0.01, storage_aware::StorageTier::activation_threshold);
+        let activation = self.hot.activation();
         loop {
-            let current = self.activation.load(Ordering::Relaxed);
+            let current = activation.load(Ordering::Relaxed);
             let new_activation = (current + contribution).min(1.0);
 
             // Only update if above threshold to reduce contention
@@ -121,8 +235,7 @@ impl ActivationRecord {
                 return None;
             }
 
-            if self
-                .activation
+            if activation
                 .compare_exchange_weak(
                     current,
                     new_activation,
@@ -131,7 +244,9 @@ impl ActivationRecord {
                 )
                 .is_ok()
             {
-                self.confidence.store(new_activation, Ordering::Relaxed);
+                self.hot
+                    .confidence()
+                    .store(new_activation, Ordering::Relaxed);
                 // Update timestamp for cycle detection
                 let now = Instant::now()
                     .elapsed()
@@ -153,40 +268,57 @@ impl ActivationRecord {
 
     /// Get current activation level
     pub fn get_activation(&self) -> f32 {
-        self.activation.load(Ordering::Relaxed)
+        self.hot.activation().load(Ordering::Relaxed)
     }
 
     /// Reset activation and counters to zero
     pub fn reset(&self) {
-        self.activation.store(0.0, Ordering::Relaxed);
-        self.confidence.store(0.0, Ordering::Relaxed);
-        self.visits.store(0, Ordering::Relaxed);
-        self.source_count.store(0, Ordering::Relaxed);
+        self.hot.reset();
+        self.timestamp.store(0, Ordering::Relaxed);
+    }
+
+    /// Reinitialise the record for a new node before reuse.
+    pub fn reinitialize(
+        &mut self,
+        node_id: NodeId,
+        decay_rate: f32,
+        storage_tier: Option<storage_aware::StorageTier>,
+    ) {
+        self.node_id = node_id;
+        self.decay_rate = decay_rate;
+        self.storage_tier = storage_tier;
+        self.reset();
+    }
+
+    /// Prepare the record for returning to the pool.
+    pub fn prepare_for_pool(&mut self) {
+        self.reset();
+        self.node_id.clear();
+        self.storage_tier = None;
     }
 
     /// Set activation level directly
     pub fn set_activation(&self, value: f32) {
-        self.activation
-            .store(value.clamp(0.0, 1.0), Ordering::Relaxed);
-        self.confidence
-            .store(value.clamp(0.0, 1.0), Ordering::Relaxed);
+        let clamped = value.clamp(0.0, 1.0);
+        self.hot.activation().store(clamped, Ordering::Relaxed);
+        self.hot.confidence().store(clamped, Ordering::Relaxed);
     }
 
     /// Retrieve the current confidence score associated with the record.
     pub fn get_confidence(&self) -> f32 {
-        self.confidence.load(Ordering::Relaxed)
+        self.hot.confidence().load(Ordering::Relaxed)
     }
 
     /// Apply a multiplicative penalty to activation and confidence when a cycle is detected.
     pub fn apply_cycle_penalty(&self, factor: f32) {
         let penalty = factor.clamp(0.0, 1.0);
+        let activation = self.hot.activation();
 
         // Scale activation
         loop {
-            let current = self.activation.load(Ordering::Relaxed);
+            let current = activation.load(Ordering::Relaxed);
             let updated = (current * penalty).clamp(0.0, 1.0);
-            if self
-                .activation
+            if activation
                 .compare_exchange_weak(current, updated, Ordering::Relaxed, Ordering::Relaxed)
                 .is_ok()
             {
@@ -194,18 +326,42 @@ impl ActivationRecord {
             }
         }
 
+        let confidence = self.hot.confidence();
         // Scale confidence to mirror activation decay.
         loop {
-            let current = self.confidence.load(Ordering::Relaxed);
+            let current = confidence.load(Ordering::Relaxed);
             let updated = (current * penalty).clamp(0.0, 1.0);
-            if self
-                .confidence
+            if confidence
                 .compare_exchange_weak(current, updated, Ordering::Relaxed, Ordering::Relaxed)
                 .is_ok()
             {
                 break;
             }
         }
+    }
+
+    /// Access the activation atomic for downstream consumers.
+    #[must_use]
+    pub fn activation_atomic(&self) -> &AtomicF32 {
+        self.hot.activation()
+    }
+
+    /// Access the confidence atomic for downstream consumers.
+    #[must_use]
+    pub fn confidence_atomic(&self) -> &AtomicF32 {
+        self.hot.confidence()
+    }
+
+    /// Access the visit counter for downstream consumers.
+    #[must_use]
+    pub fn visits_atomic(&self) -> &AtomicUsize {
+        self.hot.visits()
+    }
+
+    /// Access the source-count atomic for downstream consumers.
+    #[must_use]
+    pub fn source_count_atomic(&self) -> &AtomicUsize {
+        self.hot.source_count()
     }
 
     /// Assign a storage tier to the activation record.
@@ -231,7 +387,6 @@ impl ActivationRecord {
         self.storage_tier
     }
 }
-
 /// Work-stealing task for parallel activation spreading
 #[derive(Clone, Debug)]
 pub struct ActivationTask {
@@ -330,6 +485,8 @@ pub struct WeightedEdge {
     pub weight: f32,
     /// Type of neural connection
     pub edge_type: EdgeType,
+    /// Cache-optimized hot fields for the target when available.
+    pub hot_handle: Option<Arc<CacheOptimizedNode>>,
 }
 
 /// Edge types for Dale's law compliance
@@ -394,7 +551,7 @@ impl Default for DecayFunction {
 }
 
 /// Performance metrics collection for optimization
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct SpreadingMetrics {
     /// Total number of activation operations performed
     pub total_activations: AtomicU64,
@@ -410,15 +567,268 @@ pub struct SpreadingMetrics {
     pub average_latency: AtomicU64,
     /// Count of operations exceeding tier latency budget
     pub latency_budget_violations: AtomicU64,
+    /// Total number of latency budget violations tracked for export
+    pub latency_budget_violations_total: AtomicU64,
     /// Peak memory usage in bytes
     pub peak_memory_usage: AtomicU64,
     /// Parallel efficiency ratio (0.0 to 1.0)
     pub parallel_efficiency: AtomicF32,
     /// Tier-specific cycle detection counts
     pub cycle_counts: dashmap::DashMap<storage_aware::StorageTier, AtomicU64>,
+    /// Rolling latency accumulators per tier (nanoseconds)
+    tier_latency: dashmap::DashMap<storage_aware::StorageTier, TierLatencyStats>,
+    /// Sampling counter used to throttle telemetry in high-throughput scenarios
+    telemetry_sample_counter: AtomicU64,
+    /// Current sampling rate (1 = sample every event, 10 = every tenth, etc.)
+    telemetry_sample_rate: AtomicU64,
+    /// Whether we have already detected high-throughput mode to avoid repeated toggles
+    high_throughput_mode: AtomicBool,
+    /// Total number of times recall fell back from spreading
+    pub fallback_total: AtomicU64,
+    /// Total number of spreading failures recorded
+    pub failure_total: AtomicU64,
+    /// Current state of the spreading circuit breaker (0=Closed,1=HalfOpen,2=Open)
+    pub breaker_state: AtomicU64,
+    /// Total breaker state transitions observed
+    pub breaker_transitions: AtomicU64,
+    /// Total GPU launch attempts
+    pub gpu_launch_total: AtomicU64,
+    /// Total GPU fallbacks to CPU
+    pub gpu_fallback_total: AtomicU64,
+    /// Total number of auto-tuner adjustments recorded
+    pub autotune_changes: AtomicU64,
+    /// Last recorded improvement estimate from auto-tuner (0.0-1.0)
+    pub autotune_last_improvement: AtomicF32,
+    /// Records currently available for reuse in the activation pool
+    pub pool_available: AtomicU64,
+    /// Records currently checked out of the activation pool
+    pub pool_in_flight: AtomicU64,
+    /// Highest observed availability for the activation pool
+    pub pool_high_water_mark: AtomicU64,
+    /// Total activation records created by the pool
+    pub pool_total_created: AtomicU64,
+    /// Total activation records reused from the pool
+    pub pool_total_reused: AtomicU64,
+    /// Number of misses that required allocating fresh activation records
+    pub pool_miss_count: AtomicU64,
+    /// Pool release attempts that failed due to outstanding references
+    pub pool_release_failures: AtomicU64,
+    /// Current activation pool hit rate (0.0 – 1.0)
+    pub pool_hit_rate: AtomicF32,
+    /// Activation pool utilization ratio (0.0 – 1.0)
+    pub pool_utilization: AtomicF32,
+    /// Adaptive batcher: total batch size update operations performed
+    pub adaptive_batch_updates: AtomicU64,
+    /// Adaptive batcher: guardrail activations preventing oscillation
+    pub adaptive_guardrail_hits: AtomicU64,
+    /// Adaptive batcher: topology changes detected (CPU core count, bandwidth class)
+    pub adaptive_topology_changes: AtomicU64,
+    /// Adaptive batcher: fallback activations due to high variance
+    pub adaptive_fallback_count: AtomicU64,
+    /// Adaptive batcher: latency EWMA (nanoseconds)
+    pub adaptive_latency_ewma_ns: AtomicU64,
+    /// Adaptive batcher: last recommended batch size for the hot tier
+    pub adaptive_hot_batch_size: AtomicU64,
+    /// Adaptive batcher: last recommended batch size for the warm tier
+    pub adaptive_warm_batch_size: AtomicU64,
+    /// Adaptive batcher: last recommended batch size for the cold tier
+    pub adaptive_cold_batch_size: AtomicU64,
+    /// Adaptive batcher: convergence confidence for the hot tier
+    pub adaptive_hot_confidence: AtomicF32,
+    /// Adaptive batcher: convergence confidence for the warm tier
+    pub adaptive_warm_confidence: AtomicF32,
+    /// Adaptive batcher: convergence confidence for the cold tier
+    pub adaptive_cold_confidence: AtomicF32,
+}
+
+/// Rolling statistics for tier-specific latency tracking.
+#[derive(Debug)]
+struct TierLatencyStats {
+    total_ns: AtomicU64,
+    samples: AtomicU64,
+    max_ns: AtomicU64,
+}
+
+impl TierLatencyStats {
+    const fn new() -> Self {
+        Self {
+            total_ns: AtomicU64::new(0),
+            samples: AtomicU64::new(0),
+            max_ns: AtomicU64::new(0),
+        }
+    }
+
+    fn record(&self, latency_ns: u64) {
+        self.total_ns.fetch_add(latency_ns, Ordering::Relaxed);
+        self.samples.fetch_add(1, Ordering::Relaxed);
+        self.max_ns.fetch_max(latency_ns, Ordering::Relaxed);
+    }
+}
+
+impl Default for TierLatencyStats {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Snapshot view of tier latency aggregates for summaries and auto-tuning.
+#[derive(Debug, Clone, Serialize)]
+pub struct TierLatencySnapshot {
+    /// Total latency accumulated for the tier (nanoseconds).
+    pub total_ns: u64,
+    /// Number of samples contributing to the total.
+    pub samples: u64,
+    /// Maximum latency observed for the tier (nanoseconds).
+    pub max_ns: u64,
 }
 
 impl SpreadingMetrics {
+    #[inline]
+    const fn histogram_name_for_tier(tier: storage_aware::StorageTier) -> &'static str {
+        match tier {
+            storage_aware::StorageTier::Hot => METRIC_SPREADING_LATENCY_HOT,
+            storage_aware::StorageTier::Warm => METRIC_SPREADING_LATENCY_WARM,
+            storage_aware::StorageTier::Cold => METRIC_SPREADING_LATENCY_COLD,
+        }
+    }
+
+    #[inline]
+    fn should_sample_for_streaming(&self) -> bool {
+        let count = self
+            .telemetry_sample_counter
+            .fetch_add(1, Ordering::Relaxed)
+            + 1;
+        let rate = self.telemetry_sample_rate.load(Ordering::Relaxed).max(1);
+
+        if rate == 1
+            && count >= 32_768
+            && self
+                .high_throughput_mode
+                .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
+                .is_ok()
+        {
+            self.telemetry_sample_rate.store(10, Ordering::Relaxed);
+        }
+
+        count % rate == 0
+    }
+
+    /// Record an activation latency observation for a tier and export telemetry.
+    pub fn record_activation_latency(&self, tier: storage_aware::StorageTier, duration: Duration) {
+        let duration_ns = duration.as_nanos().min(u128::from(u64::MAX));
+        #[allow(clippy::cast_possible_truncation)]
+        let duration_u64 = duration_ns as u64;
+
+        self.total_activations.fetch_add(1, Ordering::Relaxed);
+        self.average_latency.store(duration_u64, Ordering::Relaxed);
+
+        self.tier_latency
+            .entry(tier)
+            .or_default()
+            .record(duration_u64);
+
+        if self.should_sample_for_streaming() {
+            crate::metrics::observe_histogram(
+                Self::histogram_name_for_tier(tier),
+                duration.as_secs_f64(),
+            );
+            let total = self.total_activations.load(Ordering::Relaxed);
+            crate::metrics::record_gauge(METRIC_SPREADING_ACTIVATIONS_TOTAL, total as f64);
+        }
+    }
+
+    /// Record a latency budget violation, updating both counters and export gauges.
+    pub fn record_latency_budget_violation(&self) {
+        self.latency_budget_violations
+            .fetch_add(1, Ordering::Relaxed);
+        let total = self
+            .latency_budget_violations_total
+            .fetch_add(1, Ordering::Relaxed)
+            + 1;
+        crate::metrics::record_gauge(
+            METRIC_SPREADING_LATENCY_BUDGET_VIOLATIONS_TOTAL,
+            total as f64,
+        );
+    }
+
+    /// Record a spreading failure for observability.
+    pub fn record_spread_failure(&self) {
+        let total = self.failure_total.fetch_add(1, Ordering::Relaxed) + 1;
+        crate::metrics::record_gauge(METRIC_SPREADING_FAILURES_TOTAL, total as f64);
+    }
+
+    /// Record a fallback from spreading to similarity.
+    pub fn record_fallback(&self) {
+        let total = self.fallback_total.fetch_add(1, Ordering::Relaxed) + 1;
+        crate::metrics::record_gauge(METRIC_SPREADING_FALLBACK_TOTAL, total as f64);
+    }
+
+    /// Record an auto-tuner adjustment for observability.
+    pub fn record_autotune_change(&self, improvement: f64) {
+        let total = self.autotune_changes.fetch_add(1, Ordering::Relaxed) + 1;
+        crate::metrics::record_gauge(METRIC_SPREADING_AUTOTUNE_CHANGES_TOTAL, total as f64);
+        let clamped = improvement.max(0.0);
+        self.autotune_last_improvement
+            .store(clamped as f32, Ordering::Relaxed);
+        crate::metrics::record_gauge(METRIC_SPREADING_AUTOTUNE_LAST_IMPROVEMENT, clamped);
+    }
+
+    /// Record the current breaker state (0 = Closed, 1 = HalfOpen, 2 = Open).
+    pub fn record_breaker_state(&self, state: u64) {
+        self.breaker_state.store(state, Ordering::Relaxed);
+        crate::metrics::record_gauge(METRIC_SPREADING_BREAKER_STATE, state as f64);
+    }
+
+    /// Record a breaker state transition to feed dashboards and audits.
+    pub fn record_breaker_transition(&self, new_state: u64) {
+        let transitions = self.breaker_transitions.fetch_add(1, Ordering::Relaxed) + 1;
+        crate::metrics::record_gauge(
+            METRIC_SPREADING_BREAKER_TRANSITIONS_TOTAL,
+            transitions as f64,
+        );
+        self.record_breaker_state(new_state);
+    }
+
+    /// Record that a GPU launch path was taken.
+    pub fn record_gpu_launch(&self) {
+        let total = self.gpu_launch_total.fetch_add(1, Ordering::Relaxed) + 1;
+        crate::metrics::record_gauge(METRIC_SPREADING_GPU_LAUNCH_TOTAL, total as f64);
+    }
+
+    /// Record that a GPU path fell back to CPU execution.
+    pub fn record_gpu_fallback(&self) {
+        let total = self.gpu_fallback_total.fetch_add(1, Ordering::Relaxed) + 1;
+        crate::metrics::record_gauge(METRIC_SPREADING_GPU_FALLBACK_TOTAL, total as f64);
+    }
+
+    /// Snapshot tier latency accumulators for external consumers.
+    pub fn tier_latency_snapshot(&self) -> Vec<(storage_aware::StorageTier, TierLatencySnapshot)> {
+        self.tier_latency
+            .iter()
+            .map(|entry| {
+                let stats = entry.value();
+                (
+                    *entry.key(),
+                    TierLatencySnapshot {
+                        total_ns: stats.total_ns.load(Ordering::Relaxed),
+                        samples: stats.samples.load(Ordering::Relaxed),
+                        max_ns: stats.max_ns.load(Ordering::Relaxed),
+                    },
+                )
+            })
+            .collect()
+    }
+
+    /// Current breaker state snapshot.
+    pub fn breaker_state(&self) -> u64 {
+        self.breaker_state.load(Ordering::Relaxed)
+    }
+
+    /// Total breaker transitions observed.
+    pub fn breaker_transitions(&self) -> u64 {
+        self.breaker_transitions.load(Ordering::Relaxed)
+    }
+
     /// Calculate cache hit rate (0.0 to 1.0)
     pub fn cache_hit_rate(&self) -> f32 {
         let hits = self.cache_hits.load(Ordering::Relaxed);
@@ -474,6 +884,30 @@ impl SpreadingMetrics {
         self.peak_memory_usage.store(0, Ordering::Relaxed);
         self.parallel_efficiency.store(0.0, Ordering::Relaxed);
         self.cycle_counts.clear();
+        self.tier_latency.clear();
+        self.telemetry_sample_counter.store(0, Ordering::Relaxed);
+        self.telemetry_sample_rate.store(1, Ordering::Relaxed);
+        self.high_throughput_mode.store(false, Ordering::Relaxed);
+        self.pool_available.store(0, Ordering::Relaxed);
+        self.pool_in_flight.store(0, Ordering::Relaxed);
+        self.pool_high_water_mark.store(0, Ordering::Relaxed);
+        self.pool_total_created.store(0, Ordering::Relaxed);
+        self.pool_total_reused.store(0, Ordering::Relaxed);
+        self.pool_miss_count.store(0, Ordering::Relaxed);
+        self.pool_release_failures.store(0, Ordering::Relaxed);
+        self.pool_hit_rate.store(0.0, Ordering::Relaxed);
+        self.pool_utilization.store(0.0, Ordering::Relaxed);
+        self.adaptive_batch_updates.store(0, Ordering::Relaxed);
+        self.adaptive_guardrail_hits.store(0, Ordering::Relaxed);
+        self.adaptive_topology_changes.store(0, Ordering::Relaxed);
+        self.adaptive_fallback_count.store(0, Ordering::Relaxed);
+        self.adaptive_latency_ewma_ns.store(0, Ordering::Relaxed);
+        self.adaptive_hot_batch_size.store(0, Ordering::Relaxed);
+        self.adaptive_warm_batch_size.store(0, Ordering::Relaxed);
+        self.adaptive_cold_batch_size.store(0, Ordering::Relaxed);
+        self.adaptive_hot_confidence.store(0.0, Ordering::Relaxed);
+        self.adaptive_warm_confidence.store(0.0, Ordering::Relaxed);
+        self.adaptive_cold_confidence.store(0.0, Ordering::Relaxed);
     }
 
     /// Increment a per-tier cycle counter and return the updated total.
@@ -487,6 +921,211 @@ impl SpreadingMetrics {
         self.cycle_counts
             .get(&tier)
             .map_or(0, |count| count.load(Ordering::Relaxed))
+    }
+
+    /// Record a snapshot of activation pool statistics for observability.
+    pub fn record_pool_snapshot(&self, stats: &ActivationRecordPoolStats) {
+        self.pool_available
+            .store(stats.available as u64, Ordering::Relaxed);
+        self.pool_in_flight
+            .store(stats.in_flight, Ordering::Relaxed);
+        self.pool_high_water_mark
+            .store(stats.high_water_mark as u64, Ordering::Relaxed);
+        self.pool_total_created
+            .store(stats.total_created, Ordering::Relaxed);
+        self.pool_total_reused
+            .store(stats.total_reused, Ordering::Relaxed);
+        self.pool_miss_count.store(stats.misses, Ordering::Relaxed);
+        self.pool_release_failures
+            .store(stats.release_failures, Ordering::Relaxed);
+        self.pool_hit_rate.store(stats.hit_rate, Ordering::Relaxed);
+        self.pool_utilization
+            .store(stats.utilization, Ordering::Relaxed);
+
+        #[allow(clippy::cast_precision_loss)]
+        {
+            crate::metrics::record_gauge(
+                "activation_pool_available_records",
+                stats.available as f64,
+            );
+            crate::metrics::record_gauge(
+                "activation_pool_in_flight_records",
+                stats.in_flight as f64,
+            );
+            crate::metrics::record_gauge(
+                "activation_pool_high_water_mark",
+                stats.high_water_mark as f64,
+            );
+            crate::metrics::record_gauge(
+                "activation_pool_total_created",
+                stats.total_created as f64,
+            );
+            crate::metrics::record_gauge("activation_pool_total_reused", stats.total_reused as f64);
+            crate::metrics::record_gauge("activation_pool_miss_count", stats.misses as f64);
+            crate::metrics::record_gauge(
+                "activation_pool_release_failures",
+                stats.release_failures as f64,
+            );
+        }
+        crate::metrics::record_gauge("activation_pool_hit_rate", f64::from(stats.hit_rate));
+        crate::metrics::record_gauge("activation_pool_utilization", f64::from(stats.utilization));
+        crate::metrics::record_gauge(METRIC_SPREADING_POOL_HIT_RATE, f64::from(stats.hit_rate));
+        crate::metrics::record_gauge(
+            METRIC_SPREADING_POOL_UTILIZATION,
+            f64::from(stats.utilization),
+        );
+    }
+
+    /// Latest activation pool hit rate (0.0 – 1.0).
+    pub fn pool_hit_rate(&self) -> f32 {
+        self.pool_hit_rate.load(Ordering::Relaxed)
+    }
+
+    /// Latest activation pool utilization (0.0 – 1.0).
+    pub fn pool_utilization(&self) -> f32 {
+        self.pool_utilization.load(Ordering::Relaxed)
+    }
+
+    /// Record a snapshot of adaptive batcher metrics for observability.
+    pub fn record_adaptive_batcher_snapshot(&self, snapshot: &AdaptiveBatcherSnapshot) {
+        self.adaptive_batch_updates
+            .store(snapshot.update_count, Ordering::Relaxed);
+        self.adaptive_guardrail_hits
+            .store(snapshot.guardrail_hits, Ordering::Relaxed);
+        self.adaptive_topology_changes
+            .store(snapshot.topology_changes, Ordering::Relaxed);
+        self.adaptive_fallback_count
+            .store(snapshot.fallback_activations, Ordering::Relaxed);
+        self.adaptive_latency_ewma_ns
+            .store(snapshot.latency_ewma_ns, Ordering::Relaxed);
+        self.adaptive_hot_batch_size
+            .store(snapshot.hot_batch_size, Ordering::Relaxed);
+        self.adaptive_warm_batch_size
+            .store(snapshot.warm_batch_size, Ordering::Relaxed);
+        self.adaptive_cold_batch_size
+            .store(snapshot.cold_batch_size, Ordering::Relaxed);
+        self.adaptive_hot_confidence
+            .store(snapshot.hot_confidence, Ordering::Relaxed);
+        self.adaptive_warm_confidence
+            .store(snapshot.warm_confidence, Ordering::Relaxed);
+        self.adaptive_cold_confidence
+            .store(snapshot.cold_confidence, Ordering::Relaxed);
+
+        // Export to global metrics pipeline
+        #[allow(clippy::cast_precision_loss)]
+        {
+            crate::metrics::record_gauge(
+                "adaptive_batch_updates_total",
+                snapshot.update_count as f64,
+            );
+            crate::metrics::record_gauge(
+                "adaptive_guardrail_hits_total",
+                snapshot.guardrail_hits as f64,
+            );
+            crate::metrics::record_gauge(
+                "adaptive_topology_changes_total",
+                snapshot.topology_changes as f64,
+            );
+            crate::metrics::record_gauge(
+                "adaptive_fallback_activations_total",
+                snapshot.fallback_activations as f64,
+            );
+            crate::metrics::record_gauge(
+                "adaptive_batch_latency_ewma_ns",
+                snapshot.latency_ewma_ns as f64,
+            );
+            crate::metrics::record_gauge("adaptive_batch_hot_size", snapshot.hot_batch_size as f64);
+            crate::metrics::record_gauge(
+                "adaptive_batch_warm_size",
+                snapshot.warm_batch_size as f64,
+            );
+            crate::metrics::record_gauge(
+                "adaptive_batch_cold_size",
+                snapshot.cold_batch_size as f64,
+            );
+            crate::metrics::record_gauge(
+                "adaptive_batch_hot_confidence",
+                f64::from(snapshot.hot_confidence),
+            );
+            crate::metrics::record_gauge(
+                "adaptive_batch_warm_confidence",
+                f64::from(snapshot.warm_confidence),
+            );
+            crate::metrics::record_gauge(
+                "adaptive_batch_cold_confidence",
+                f64::from(snapshot.cold_confidence),
+            );
+        }
+    }
+
+    /// Get current adaptive batch update count.
+    pub fn adaptive_batch_updates(&self) -> u64 {
+        self.adaptive_batch_updates.load(Ordering::Relaxed)
+    }
+
+    /// Get current adaptive guardrail hit count.
+    pub fn adaptive_guardrail_hits(&self) -> u64 {
+        self.adaptive_guardrail_hits.load(Ordering::Relaxed)
+    }
+
+    /// Get current adaptive topology change count.
+    pub fn adaptive_topology_changes(&self) -> u64 {
+        self.adaptive_topology_changes.load(Ordering::Relaxed)
+    }
+
+    /// Get current adaptive fallback count.
+    pub fn adaptive_fallback_count(&self) -> u64 {
+        self.adaptive_fallback_count.load(Ordering::Relaxed)
+    }
+}
+
+impl Default for SpreadingMetrics {
+    fn default() -> Self {
+        Self {
+            total_activations: AtomicU64::new(0),
+            cache_hits: AtomicU64::new(0),
+            cache_misses: AtomicU64::new(0),
+            work_steals: AtomicU64::new(0),
+            cycles_detected: AtomicU64::new(0),
+            average_latency: AtomicU64::new(0),
+            latency_budget_violations: AtomicU64::new(0),
+            latency_budget_violations_total: AtomicU64::new(0),
+            peak_memory_usage: AtomicU64::new(0),
+            parallel_efficiency: AtomicF32::new(0.0),
+            cycle_counts: DashMap::new(),
+            tier_latency: DashMap::new(),
+            telemetry_sample_counter: AtomicU64::new(0),
+            telemetry_sample_rate: AtomicU64::new(1),
+            high_throughput_mode: AtomicBool::new(false),
+            fallback_total: AtomicU64::new(0),
+            failure_total: AtomicU64::new(0),
+            breaker_state: AtomicU64::new(0),
+            breaker_transitions: AtomicU64::new(0),
+            gpu_launch_total: AtomicU64::new(0),
+            gpu_fallback_total: AtomicU64::new(0),
+            autotune_changes: AtomicU64::new(0),
+            autotune_last_improvement: AtomicF32::new(0.0),
+            pool_available: AtomicU64::new(0),
+            pool_in_flight: AtomicU64::new(0),
+            pool_high_water_mark: AtomicU64::new(0),
+            pool_total_created: AtomicU64::new(0),
+            pool_total_reused: AtomicU64::new(0),
+            pool_miss_count: AtomicU64::new(0),
+            pool_release_failures: AtomicU64::new(0),
+            pool_hit_rate: AtomicF32::new(0.0),
+            pool_utilization: AtomicF32::new(0.0),
+            adaptive_batch_updates: AtomicU64::new(0),
+            adaptive_guardrail_hits: AtomicU64::new(0),
+            adaptive_topology_changes: AtomicU64::new(0),
+            adaptive_fallback_count: AtomicU64::new(0),
+            adaptive_latency_ewma_ns: AtomicU64::new(0),
+            adaptive_hot_batch_size: AtomicU64::new(0),
+            adaptive_warm_batch_size: AtomicU64::new(0),
+            adaptive_cold_batch_size: AtomicU64::new(0),
+            adaptive_hot_confidence: AtomicF32::new(0.0),
+            adaptive_warm_confidence: AtomicF32::new(0.0),
+            adaptive_cold_confidence: AtomicF32::new(0.0),
+        }
     }
 }
 
@@ -553,6 +1192,7 @@ impl SpreadingResults {
     }
 }
 
+#[doc = include_str!("doc/parallel_spreading_config.md")]
 /// Configuration for high-performance parallel spreading
 #[derive(Clone, Debug)]
 #[allow(clippy::struct_excessive_bools)]
@@ -628,6 +1268,10 @@ pub struct ParallelSpreadingConfig {
     pub pool_chunk_size: usize,
     /// Maximum number of memory pool chunks
     pub pool_max_chunks: usize,
+
+    // Adaptive batching configuration
+    /// Adaptive batching mode and configuration
+    pub adaptive_batcher_config: Option<AdaptiveBatcherConfig>,
 }
 
 impl Default for ParallelSpreadingConfig {
@@ -668,8 +1312,9 @@ impl Default for ParallelSpreadingConfig {
             enable_gpu: false,
             gpu_threshold: 64,
             enable_memory_pool: true,
-            pool_chunk_size: 8192, // 8KB per chunk
-            pool_max_chunks: 16,   // Max 128KB total
+            pool_chunk_size: 8192,         // 8KB per chunk
+            pool_max_chunks: 16,           // Max 128KB total
+            adaptive_batcher_config: None, // Disabled by default
         }
     }
 }
@@ -731,6 +1376,7 @@ pub struct ActivationGraph {
     graph: UnifiedMemoryGraph<DashMapBackend>,
     uuid_mappings: DashMap<uuid::Uuid, NodeId>,
     embeddings: DashMap<NodeId, [f32; 768]>,
+    hot_handles: DashMap<NodeId, Arc<CacheOptimizedNode>>,
 }
 
 impl std::ops::Deref for ActivationGraph {
@@ -758,6 +1404,7 @@ pub fn create_activation_graph() -> MemoryGraph {
         graph: UnifiedMemoryGraph::new(DashMapBackend::default(), config),
         uuid_mappings: DashMap::new(),
         embeddings: DashMap::new(),
+        hot_handles: DashMap::new(),
     }
 }
 
@@ -811,6 +1458,15 @@ pub trait ActivationGraphExt {
     /// This method performs a full scan of the graph's UUID mappings and allocates
     /// a new vector. Use sparingly in performance-critical paths.
     fn get_all_nodes(&self) -> Vec<NodeId>;
+
+    /// Register a cache-optimized hot node handle for reuse.
+    fn register_hot_handle(&self, node_id: NodeId, handle: Arc<CacheOptimizedNode>);
+
+    /// Remove a cached hot node handle when the activation record is released.
+    fn clear_hot_handle(&self, node_id: &NodeId);
+
+    /// Retrieve the cached hot node handle for a node if present.
+    fn get_hot_handle(&self, node_id: &NodeId) -> Option<Arc<CacheOptimizedNode>>;
 }
 
 impl ActivationGraphExt for ActivationGraph {
@@ -844,10 +1500,16 @@ impl ActivationGraphExt for ActivationGraph {
                         .get(&neighbor_id)
                         .map_or_else(|| neighbor_id.to_string(), |entry| entry.value().clone());
 
+                    let hot_handle = self
+                        .hot_handles
+                        .get(&target)
+                        .map(|entry| entry.value().clone());
+
                     WeightedEdge {
                         target,
                         weight,
                         edge_type: EdgeType::Excitatory, // Default for now
+                        hot_handle,
                     }
                 })
                 .collect()
@@ -877,13 +1539,29 @@ impl ActivationGraphExt for ActivationGraph {
             .map(|entry| entry.value().clone())
             .collect()
     }
+
+    fn register_hot_handle(&self, node_id: NodeId, handle: Arc<CacheOptimizedNode>) {
+        self.hot_handles.insert(node_id, handle);
+    }
+
+    fn clear_hot_handle(&self, node_id: &NodeId) {
+        self.hot_handles.remove(node_id);
+    }
+
+    fn get_hot_handle(&self, node_id: &NodeId) -> Option<Arc<CacheOptimizedNode>> {
+        self.hot_handles
+            .get(node_id)
+            .map(|entry| entry.value().clone())
+    }
 }
 
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
     use super::storage_aware::StorageTier;
-    use super::{ActivationGraphExt, create_activation_graph};
+    use super::{
+        ActivationGraphExt, ActivationRecord, ActivationRecordPoolStats, create_activation_graph,
+    };
 
     #[test]
     fn test_embedding_storage_and_retrieval() {
@@ -907,6 +1585,24 @@ mod tests {
                 "Mismatch at index {i}"
             );
         }
+    }
+
+    #[test]
+    fn test_hot_handle_registration_lifecycle() {
+        let graph = create_activation_graph();
+        let mut record = ActivationRecord::new("hot-node".to_string(), 0.1);
+        record.set_storage_tier(StorageTier::Hot);
+        let handle = record.hot_handle();
+
+        graph.register_hot_handle("hot-node".to_string(), handle);
+        let retrieved = graph.get_hot_handle(&"hot-node".to_string());
+        assert!(retrieved.is_some(), "handle should be retrievable");
+
+        graph.clear_hot_handle(&"hot-node".to_string());
+        assert!(
+            graph.get_hot_handle(&"hot-node".to_string()).is_none(),
+            "handle should be cleared"
+        );
     }
 
     #[test]
@@ -1034,7 +1730,7 @@ mod tests {
         assert!(!record.accumulate_activation(0.03));
         assert!(record.accumulate_activation(0.06));
         assert!((record.get_activation() - 0.06).abs() < 1e-6);
-        record.visits.fetch_add(2, AtomicOrdering::Relaxed);
+        record.visits_atomic().fetch_add(2, AtomicOrdering::Relaxed);
 
         let storage_aware = record.to_storage_aware();
         assert_eq!(storage_aware.storage_tier, StorageTier::Warm);
@@ -1133,9 +1829,57 @@ mod tests {
         assert!((metrics.cache_hit_rate() - 0.8).abs() < 1e-6);
         assert!((metrics.work_stealing_rate() - 0.15).abs() < 1e-6);
 
+        let stats = ActivationRecordPoolStats {
+            available: 12,
+            in_flight: 8,
+            high_water_mark: 20,
+            total_created: 32,
+            total_reused: 24,
+            misses: 8,
+            hit_rate: 0.75,
+            utilization: 0.4,
+            release_failures: 1,
+        };
+
+        metrics.record_pool_snapshot(&stats);
+        assert_eq!(
+            metrics.pool_available.load(Ordering::Relaxed),
+            stats.available as u64
+        );
+        assert_eq!(
+            metrics.pool_in_flight.load(Ordering::Relaxed),
+            stats.in_flight
+        );
+        assert_eq!(
+            metrics.pool_high_water_mark.load(Ordering::Relaxed),
+            stats.high_water_mark as u64
+        );
+        assert_eq!(
+            metrics.pool_total_created.load(Ordering::Relaxed),
+            stats.total_created
+        );
+        assert_eq!(
+            metrics.pool_total_reused.load(Ordering::Relaxed),
+            stats.total_reused
+        );
+        assert_eq!(
+            metrics.pool_miss_count.load(Ordering::Relaxed),
+            stats.misses
+        );
+        assert_eq!(
+            metrics.pool_release_failures.load(Ordering::Relaxed),
+            stats.release_failures
+        );
+        assert!((metrics.pool_hit_rate() - stats.hit_rate).abs() < f32::EPSILON);
+        assert!((metrics.pool_utilization() - stats.utilization).abs() < f32::EPSILON);
+
         metrics.reset();
         assert!(metrics.cache_hit_rate().abs() < f32::EPSILON);
         assert!(metrics.work_stealing_rate().abs() < f32::EPSILON);
+        assert!(metrics.pool_hit_rate().abs() < f32::EPSILON);
+        assert!(metrics.pool_utilization().abs() < f32::EPSILON);
+        assert_eq!(metrics.pool_available.load(Ordering::Relaxed), 0);
+        assert_eq!(metrics.pool_in_flight.load(Ordering::Relaxed), 0);
     }
 
     #[test]
