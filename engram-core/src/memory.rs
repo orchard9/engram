@@ -46,6 +46,9 @@ pub struct Memory {
     /// When this memory was last accessed
     pub last_access: DateTime<Utc>,
 
+    /// Number of times this memory has been accessed
+    pub access_count: u64,
+
     /// When this memory was created/encoded
     pub created_at: DateTime<Utc>,
 
@@ -102,6 +105,7 @@ impl Memory {
             activation_value: 0.0,
             confidence,
             last_access: now,
+            access_count: 0,
             created_at: now,
             decay_rate: 0.1, // Default decay rate
             content: None,
@@ -116,7 +120,8 @@ impl Memory {
         memory.set_activation(activation);
         memory.content = Some(episode.what);
         memory.created_at = episode.when;
-        memory.last_access = episode.when;
+        memory.last_access = episode.last_recall;
+        memory.access_count = u64::from(episode.recall_count);
         memory.embedding_provenance = episode.embedding_provenance; // Copy provenance from episode
         memory
     }
@@ -188,6 +193,7 @@ impl Clone for Memory {
             activation_value: self.activation_value,
             confidence: self.confidence,
             last_access: self.last_access,
+            access_count: self.access_count,
             created_at: self.created_at,
             decay_rate: self.decay_rate,
             content: self.content.clone(),
@@ -1655,6 +1661,142 @@ mod tests {
             .id("valid".to_string())
             .embedding_search([0.1; 768], Confidence::MEDIUM)
             .build();
+    }
+
+    // ========================================================================
+    // Access Tracking Tests (Milestone 4: Temporal Dynamics)
+    // ========================================================================
+
+    #[test]
+    fn test_memory_access_count_initialized_to_zero() {
+        let embedding = [0.1; 768];
+        let memory = Memory::new("test".to_string(), embedding, Confidence::HIGH);
+
+        assert_eq!(memory.access_count, 0, "New memory should have zero access count");
+    }
+
+    #[test]
+    fn test_memory_last_access_initialized_to_creation_time() {
+        let embedding = [0.1; 768];
+        let memory = Memory::new("test".to_string(), embedding, Confidence::HIGH);
+
+        // last_access should equal created_at for new memories
+        assert_eq!(
+            memory.last_access, memory.created_at,
+            "New memory last_access should equal created_at"
+        );
+    }
+
+    #[test]
+    fn test_episode_recall_count_initialized_to_zero() {
+        let embedding = [0.2; 768];
+        let when = Utc::now();
+        let episode = Episode::new(
+            "test_episode".to_string(),
+            when,
+            "test content".to_string(),
+            embedding,
+            Confidence::HIGH,
+        );
+
+        assert_eq!(episode.recall_count, 0, "New episode should have zero recall count");
+    }
+
+    #[test]
+    fn test_episode_record_recall_increments_count() {
+        let embedding = [0.2; 768];
+        let when = Utc::now();
+        let mut episode = Episode::new(
+            "test_episode".to_string(),
+            when,
+            "test content".to_string(),
+            embedding,
+            Confidence::HIGH,
+        );
+
+        let initial_recall = episode.last_recall;
+        let initial_count = episode.recall_count;
+
+        // Simulate small delay
+        std::thread::sleep(std::time::Duration::from_millis(10));
+
+        episode.record_recall();
+
+        assert_eq!(
+            episode.recall_count,
+            initial_count + 1,
+            "Recall count should increment"
+        );
+        assert!(
+            episode.last_recall > initial_recall,
+            "Last recall time should be updated"
+        );
+    }
+
+    #[test]
+    fn test_memory_from_episode_preserves_access_tracking() {
+        let embedding = [0.3; 768];
+        let when = Utc::now();
+        let mut episode = Episode::new(
+            "test_episode".to_string(),
+            when,
+            "test content".to_string(),
+            embedding,
+            Confidence::HIGH,
+        );
+
+        // Record some recalls
+        episode.record_recall();
+        episode.record_recall();
+        episode.record_recall();
+
+        let memory = Memory::from_episode(episode.clone(), 0.5);
+
+        assert_eq!(
+            memory.access_count, 3,
+            "Memory should inherit access count from episode recall count"
+        );
+        assert_eq!(
+            memory.last_access, episode.last_recall,
+            "Memory should inherit last access from episode last recall"
+        );
+    }
+
+    #[test]
+    fn test_memory_builder_initializes_access_count() {
+        let embedding = [0.4; 768];
+        let memory = MemoryBuilder::new()
+            .id("built_memory".to_string())
+            .embedding(embedding)
+            .confidence(Confidence::HIGH)
+            .build();
+
+        assert_eq!(
+            memory.access_count, 0,
+            "Builder-created memory should have zero access count"
+        );
+    }
+
+    #[test]
+    fn test_memory_clone_preserves_access_tracking() {
+        let embedding = [0.5; 768];
+        let mut memory = Memory::new("test".to_string(), embedding, Confidence::HIGH);
+
+        // Simulate some access (in real usage this would happen during recall)
+        memory.access_count = 5;
+        let earlier_time = Utc::now() - chrono::Duration::hours(1);
+        memory.last_access = earlier_time;
+
+        let cloned = memory.clone();
+
+        assert_eq!(
+            cloned.access_count, 5,
+            "Cloned memory should preserve access count"
+        );
+        assert_eq!(
+            cloned.last_access, earlier_time,
+            "Cloned memory should preserve last access time"
+        );
     }
 
     #[test]
