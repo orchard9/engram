@@ -352,12 +352,16 @@ impl ConfidenceBudget {
             }
 
             // Try to update atomically
-            if self.consumed.compare_exchange(
-                current,
-                new_value,
-                std::sync::atomic::Ordering::Release,
-                std::sync::atomic::Ordering::Acquire,
-            ).is_ok() {
+            if self
+                .consumed
+                .compare_exchange(
+                    current,
+                    new_value,
+                    std::sync::atomic::Ordering::Release,
+                    std::sync::atomic::Ordering::Acquire,
+                )
+                .is_ok()
+            {
                 return true;
             }
             // CAS failed, retry
@@ -448,13 +452,15 @@ pub use memory::{
     Cue, CueBuilder, CueType, Episode, EpisodeBuilder, Memory, MemoryBuilder, TemporalPattern,
 };
 pub use query::{
+    ConfidenceInterval, Evidence, EvidenceSource, MatchType, ProbabilisticError,
+    ProbabilisticQueryResult, ProbabilisticRecall, ProbabilisticResult, UncertaintySource,
+    analogy::{AnalogyEngine, AnalogyError, AnalogyPattern, AnalogyRelation},
     expansion::{
         ExpandedQuery, ExpansionError, ExpansionMetadata, QueryExpander, QueryExpanderBuilder,
         QueryVariant, VariantType,
     },
+    figurative::{FigurativeInterpreter, IdiomLexicon, InterpretationError},
     lexicon::{AbbreviationLexicon, CompositeLexicon, Lexicon, SynonymLexicon},
-    ConfidenceInterval, Evidence, EvidenceSource, MatchType, ProbabilisticError,
-    ProbabilisticQueryResult, ProbabilisticRecall, ProbabilisticResult, UncertaintySource,
 };
 pub use store::{Activation, MemoryStore, RecallResult, StoreResult};
 pub use streaming_health::{StreamingHealthMetrics, StreamingHealthStatus, StreamingHealthTracker};

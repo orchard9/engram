@@ -32,6 +32,10 @@ pub(crate) const fn clamp_probability_to_f32(value: f64) -> f32 {
 pub mod expansion;
 pub mod lexicon;
 
+// Figurative language interpretation (Milestone 3.6 Task 004)
+pub mod analogy;
+pub mod figurative;
+
 // Conditional compilation for SMT verification features
 #[cfg(feature = "probabilistic_queries")]
 pub mod evidence;
