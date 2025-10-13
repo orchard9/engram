@@ -83,6 +83,11 @@ uuid = { version = "1.6.1", features = ["v4", "v5"] }
 # ANN library bindings for benchmarks
 faiss = { version = "0.11", optional = true }
 
+# Embedding infrastructure dependencies
+tokenizers = { version = "0.19", optional = true }
+ndarray = { version = "0.16", optional = true }
+ort = { version = "2.0.0-rc.10", optional = true }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 perf-event = { version = "0.4", optional = true }
 
@@ -163,6 +168,9 @@ long_running_tests = []  # Enable psychology validations and multi-hour scenario
 
 # Benchmark features for ANN comparison
 ann_benchmarks = ["faiss"]
+
+# Multilingual embedding support with ONNX Runtime
+multilingual_embeddings = ["tokenizers", "ndarray", "ort"]
 
 # Fallback modes for compatibility
 force_scalar_compute = []

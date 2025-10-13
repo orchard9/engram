@@ -30,6 +30,11 @@
 
 pub mod provenance;
 pub mod provider;
+pub mod tokenizer;
+
+#[cfg(feature = "multilingual_embeddings")]
+pub mod multilingual;
 
 pub use provenance::{EmbeddingProvenance, EmbeddingWithProvenance, ModelVersion};
 pub use provider::{EmbeddingError, EmbeddingProvider};
+pub use tokenizer::{SentenceTokenizer, TokenizationResult};

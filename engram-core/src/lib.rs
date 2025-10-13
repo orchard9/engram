@@ -284,7 +284,11 @@ pub use cue::{
 };
 pub use embedding::{
     EmbeddingError, EmbeddingProvenance, EmbeddingProvider, EmbeddingWithProvenance, ModelVersion,
+    SentenceTokenizer, TokenizationResult,
 };
+
+#[cfg(feature = "multilingual_embeddings")]
+pub use embedding::multilingual::MultilingualEncoder;
 pub use memory::{
     Cue, CueBuilder, CueType, Episode, EpisodeBuilder, Memory, MemoryBuilder, TemporalPattern,
 };
