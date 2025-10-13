@@ -272,6 +272,8 @@ pub struct CognitiveRecall {
     metrics: Arc<RecallMetrics>,
     /// Circuit breaker guarding spreading activation
     breaker: Arc<SpreadingCircuitBreaker>,
+    /// Optional temporal decay system (Milestone 4)
+    decay_system: Option<Arc<crate::decay::BiologicalDecaySystem>>,
 }
 
 impl CognitiveRecall {
@@ -298,6 +300,7 @@ impl CognitiveRecall {
             config,
             metrics: Arc::new(RecallMetrics::new()),
             breaker,
+            decay_system: None,
         }
     }
 
@@ -517,12 +520,29 @@ impl CognitiveRecall {
         aggregated: Vec<(String, f32, Confidence, Option<f32>)>,
         store: &MemoryStore,
     ) -> Vec<RankedMemory> {
+        let now = Utc::now();
+
         let mut ranked: Vec<RankedMemory> = aggregated
             .into_iter()
             .filter_map(|(node_id, activation, confidence, similarity)| {
                 // Try to retrieve the episode from store
                 store.get_episode(&node_id).map(|episode| {
-                    RankedMemory::new(episode, activation, confidence, similarity, &self.config)
+                    // Apply temporal decay lazily if decay system is configured
+                    let final_confidence = if let Some(decay_system) = &self.decay_system {
+                        let elapsed = now.signed_duration_since(episode.last_recall);
+                        let elapsed_std = elapsed.to_std().unwrap_or_default();
+
+                        decay_system.compute_decayed_confidence(
+                            confidence,
+                            elapsed_std,
+                            u64::from(episode.recall_count),
+                            episode.when,
+                        )
+                    } else {
+                        confidence
+                    };
+
+                    RankedMemory::new(episode, activation, final_confidence, similarity, &self.config)
                 })
             })
             .filter(|r| r.confidence.raw() >= self.config.min_confidence)
@@ -757,6 +777,7 @@ pub struct CognitiveRecallBuilder {
     config: RecallConfig,
     metrics: Option<Arc<RecallMetrics>>,
     breaker: Option<Arc<SpreadingCircuitBreaker>>,
+    decay_system: Option<Arc<crate::decay::BiologicalDecaySystem>>,
 }
 
 impl Default for CognitiveRecallBuilder {
@@ -778,6 +799,7 @@ impl CognitiveRecallBuilder {
             config: RecallConfig::default(),
             metrics: None,
             breaker: None,
+            decay_system: None,
         }
     }
 
@@ -806,6 +828,27 @@ impl CognitiveRecallBuilder {
     #[must_use]
     pub fn breaker(mut self, breaker: Arc<SpreadingCircuitBreaker>) -> Self {
         self.breaker = Some(breaker);
+        self
+    }
+
+    /// Set temporal decay system (Milestone 4)
+    ///
+    /// Enables lazy temporal decay during recall operations. Decay is computed
+    /// at query time based on time since last access, not via background threads.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use engram_core::decay::BiologicalDecaySystem;
+    ///
+    /// let decay_system = Arc::new(BiologicalDecaySystem::default());
+    /// let recall = CognitiveRecallBuilder::new()
+    ///     .decay_system(decay_system)
+    ///     .build()?;
+    /// ```
+    #[must_use]
+    pub fn decay_system(mut self, system: Arc<crate::decay::BiologicalDecaySystem>) -> Self {
+        self.decay_system = Some(system);
         self
     }
 
@@ -879,6 +922,7 @@ impl CognitiveRecallBuilder {
             config: self.config,
             metrics,
             breaker,
+            decay_system: self.decay_system,
         })
     }
 }

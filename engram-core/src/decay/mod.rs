@@ -195,6 +195,55 @@ impl BiologicalDecaySystem {
         )
     }
 
+    /// Compute decayed confidence without mutating the episode (lazy evaluation)
+    ///
+    /// This is the entry point for lazy decay evaluation during recall operations.
+    /// Unlike `apply_to_episode`, this method does not mutate the episode and only
+    /// computes the decayed confidence value for view-time transformation.
+    ///
+    /// # Arguments
+    ///
+    /// * `base_confidence` - Original confidence before decay
+    /// * `elapsed_time` - Time since last access
+    /// * `access_count` - Number of times memory has been accessed
+    /// * `created_at` - When the memory was created
+    ///
+    /// # Returns
+    ///
+    /// Decayed confidence value taking into account hippocampal/neocortical systems
+    #[must_use]
+    pub fn compute_decayed_confidence(
+        &self,
+        base_confidence: Confidence,
+        elapsed_time: StdDuration,
+        access_count: u64,
+        _created_at: DateTime<Utc>,
+    ) -> Confidence {
+        // Select decay function based on access pattern
+        // Frequently accessed (≥3 times) use slower neocortical decay
+        // Infrequently accessed use faster hippocampal decay
+        let consolidation_threshold = 3;
+
+        if access_count >= consolidation_threshold {
+            // Neocortical system: slow decay for consolidated memories
+            let schema_overlap = 0.6; // Reasonable default for general memories
+            crate::decay::neocortical::apply_neocortical_decay(
+                base_confidence,
+                elapsed_time,
+                &self.neocortical,
+                schema_overlap,
+            )
+        } else {
+            // Hippocampal system: fast decay for unconsolidated memories
+            let hippocampal_retention = self.hippocampal.compute_retention(elapsed_time);
+            let decayed_confidence = base_confidence.raw() * hippocampal_retention;
+
+            // Apply individual differences calibration
+            self.individual_profile
+                .calibrate_confidence(Confidence::exact(decayed_confidence))
+        }
+    }
+
     fn len_to_f32(len: usize) -> Option<f32> {
         u32::try_from(len).ok().map(|value| {
             let value_f64 = f64::from(value);
