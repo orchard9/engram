@@ -176,12 +176,29 @@ Task 001 (2d) → Task 002 (2.5d) → Task 005 (2d) → Task 006 (2d)
 
 ## Status
 
-**Current Status**: Planning Complete
+**Current Status**: Phase 2 In Progress (60% complete)
+
+**Completed Tasks**:
+- ✅ Task 001: Embedding Infrastructure and Provenance Tracking (2 days)
+- ✅ Task 002: Multilingual Sentence Encoder Implementation (2.5 days)
+- ✅ Task 005: Semantic Search Integration with Spreading Activation (2 days)
+
+**In Progress**:
+- None
+
+**Remaining Tasks**:
+- Task 003: Query Expansion with Confidence Budgets (P1, 2 days)
+- Task 004: Figurative Language Interpretation (P2, 3 days)
+- Task 006: Multilingual Validation and Benchmarking (P1, 2 days)
 
 **Next Steps**:
-1. Begin Task 001: Embedding Infrastructure and Provenance Tracking
-2. Set up ONNX model export tooling
-3. Acquire MTEB test corpus
+1. **Task 003**: Query Expansion with Confidence Budgets (unlocks Task 004)
+   - Implement QueryExpander with synonym/abbreviation lexicons
+   - Add ConfidenceBudget tracking
+   - Create FST-based lexicon infrastructure
+2. **Alternative**: Task 006 (Validation) can proceed in parallel if desired
+   - Validate existing semantic recall against benchmarks
+   - Establish baseline metrics before query expansion
 
 ## Related Documentation
 
