@@ -176,29 +176,37 @@ Task 001 (2d) → Task 002 (2.5d) → Task 005 (2d) → Task 006 (2d)
 
 ## Status
 
-**Current Status**: Phase 2 In Progress (60% complete)
+**Current Status**: Phase 3 Ready to Start (67% complete)
 
 **Completed Tasks**:
 - ✅ Task 001: Embedding Infrastructure and Provenance Tracking (2 days)
 - ✅ Task 002: Multilingual Sentence Encoder Implementation (2.5 days)
+- ✅ Task 003: Query Expansion with Confidence Budgets (2 days) ← **JUST COMPLETED**
 - ✅ Task 005: Semantic Search Integration with Spreading Activation (2 days)
+
+**Completed Phases**:
+- ✅ Phase 1: Foundation (Tasks 001-002)
+- ✅ Phase 2: Search Capabilities (Tasks 003, 005)
 
 **In Progress**:
 - None
 
 **Remaining Tasks**:
-- Task 003: Query Expansion with Confidence Budgets (P1, 2 days)
-- Task 004: Figurative Language Interpretation (P2, 3 days)
+- Task 004: Figurative Language Interpretation (P2, 3 days) ← **READY TO START**
 - Task 006: Multilingual Validation and Benchmarking (P1, 2 days)
 
 **Next Steps**:
-1. **Task 003**: Query Expansion with Confidence Budgets (unlocks Task 004)
-   - Implement QueryExpander with synonym/abbreviation lexicons
-   - Add ConfidenceBudget tracking
-   - Create FST-based lexicon infrastructure
-2. **Alternative**: Task 006 (Validation) can proceed in parallel if desired
-   - Validate existing semantic recall against benchmarks
-   - Establish baseline metrics before query expansion
+1. **Task 004**: Figurative Language Interpretation (Phase 3) ← **RECOMMENDED NEXT**
+   - All dependencies complete (Tasks 001, 002, 003)
+   - Implement FigurativeInterpreter with idiom lexicon
+   - Vector analogy operations (e.g., "king - man + woman = queen")
+   - Hallucination prevention (require ≥3 memory matches >0.7 similarity)
+   - Integrate with QueryExpander for metaphor/simile expansion
+
+2. **Alternative**: Task 006 (Validation) can wait until Task 004 complete
+   - Comprehensive validation against MTEB benchmarks
+   - Synonym/abbreviation recall parity testing
+   - Figurative language human evaluation
 
 ## Related Documentation
 
