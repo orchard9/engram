@@ -51,6 +51,7 @@ pub mod types;
 
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
+use std::sync::Arc;
 use std::time::SystemTime;
 
 /// Cognitive confidence type with human-centered design for probabilistic reasoning.
@@ -258,6 +259,160 @@ impl Confidence {
     }
 }
 
+/// Confidence budget for tracking expansion costs across async operations.
+///
+/// Used in query expansion to ensure embedding computation and variant generation
+/// never exceed latency budgets. Thread-safe with atomic operations.
+///
+/// ## Design Principles
+///
+/// - **Strict Enforcement**: Budget exhaustion returns error, never silently truncates
+/// - **Async-Safe**: Uses atomics for tracking consumption across async boundaries
+/// - **Observable**: Provides remaining() method for observability
+///
+/// ## Usage
+///
+/// ```rust
+/// use engram_core::ConfidenceBudget;
+///
+/// let budget = ConfidenceBudget::new(1.0);
+/// assert!(budget.consume(0.3)); // succeeds
+/// assert!(budget.consume(0.8)); // fails, would exceed budget
+/// assert_eq!(budget.remaining(), 0.7);
+/// ```
+#[derive(Debug, Clone)]
+pub struct ConfidenceBudget {
+    /// Initial budget allocation
+    initial: f32,
+
+    /// Consumed amount tracked atomically for async safety
+    consumed: Arc<std::sync::atomic::AtomicU32>,
+}
+
+impl ConfidenceBudget {
+    /// Create a new confidence budget with initial allocation.
+    ///
+    /// # Arguments
+    ///
+    /// * `initial` - Initial budget (typically 0.0-1.0)
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use engram_core::ConfidenceBudget;
+    ///
+    /// let budget = ConfidenceBudget::new(1.0);
+    /// ```
+    #[must_use]
+    pub fn new(initial: f32) -> Self {
+        Self {
+            initial: initial.clamp(0.0, f32::MAX),
+            consumed: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+        }
+    }
+
+    /// Attempt to consume budget amount.
+    ///
+    /// Returns `true` if consumption succeeded (budget sufficient), `false` otherwise.
+    /// Uses atomic compare-and-swap for thread-safety.
+    ///
+    /// # Arguments
+    ///
+    /// * `amount` - Amount to consume (typically 0.0-1.0)
+    ///
+    /// # Returns
+    ///
+    /// `true` if budget was sufficient and consumption succeeded, `false` if insufficient.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use engram_core::ConfidenceBudget;
+    ///
+    /// let budget = ConfidenceBudget::new(1.0);
+    /// assert!(budget.consume(0.3)); // succeeds
+    /// assert!(budget.consume(0.5)); // succeeds
+    /// assert!(!budget.consume(0.3)); // fails, would exceed
+    /// ```
+    pub fn consume(&self, amount: f32) -> bool {
+        if amount < 0.0 {
+            return false;
+        }
+
+        // Convert to u32 for atomic operations (store as fixed-point * 1000)
+        let amount_fixed = (amount * 1000.0) as u32;
+        let initial_fixed = (self.initial * 1000.0) as u32;
+
+        loop {
+            let current = self.consumed.load(std::sync::atomic::Ordering::Acquire);
+            let new_value = current.saturating_add(amount_fixed);
+
+            if new_value > initial_fixed {
+                return false; // Would exceed budget
+            }
+
+            // Try to update atomically
+            if self.consumed.compare_exchange(
+                current,
+                new_value,
+                std::sync::atomic::Ordering::Release,
+                std::sync::atomic::Ordering::Acquire,
+            ).is_ok() {
+                return true;
+            }
+            // CAS failed, retry
+        }
+    }
+
+    /// Get remaining budget.
+    ///
+    /// # Returns
+    ///
+    /// Amount of budget remaining (never negative).
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use engram_core::ConfidenceBudget;
+    ///
+    /// let budget = ConfidenceBudget::new(1.0);
+    /// budget.consume(0.3);
+    /// assert!((budget.remaining() - 0.7).abs() < 0.01);
+    /// ```
+    #[must_use]
+    pub fn remaining(&self) -> f32 {
+        let consumed_fixed = self.consumed.load(std::sync::atomic::Ordering::Acquire);
+        let consumed = (consumed_fixed as f32) / 1000.0;
+        (self.initial - consumed).max(0.0)
+    }
+
+    /// Get initial budget allocation.
+    #[must_use]
+    pub const fn initial(&self) -> f32 {
+        self.initial
+    }
+
+    /// Get consumed amount.
+    #[must_use]
+    pub fn consumed(&self) -> f32 {
+        let consumed_fixed = self.consumed.load(std::sync::atomic::Ordering::Acquire);
+        (consumed_fixed as f32) / 1000.0
+    }
+
+    /// Check if budget is exhausted.
+    #[must_use]
+    pub fn is_exhausted(&self) -> bool {
+        self.remaining() < 0.001 // Within epsilon of zero
+    }
+
+    /// Reset the budget to initial value.
+    ///
+    /// Useful for reusing the same budget tracker across multiple operations.
+    pub fn reset(&self) {
+        self.consumed.store(0, std::sync::atomic::Ordering::Release);
+    }
+}
+
 // Custom serde validation to maintain [0,1] invariant
 fn validate_confidence<'de, D>(deserializer: D) -> Result<f32, D::Error>
 where
@@ -293,6 +448,11 @@ pub use memory::{
     Cue, CueBuilder, CueType, Episode, EpisodeBuilder, Memory, MemoryBuilder, TemporalPattern,
 };
 pub use query::{
+    expansion::{
+        ExpandedQuery, ExpansionError, ExpansionMetadata, QueryExpander, QueryExpanderBuilder,
+        QueryVariant, VariantType,
+    },
+    lexicon::{AbbreviationLexicon, CompositeLexicon, Lexicon, SynonymLexicon},
     ConfidenceInterval, Evidence, EvidenceSource, MatchType, ProbabilisticError,
     ProbabilisticQueryResult, ProbabilisticRecall, ProbabilisticResult, UncertaintySource,
 };

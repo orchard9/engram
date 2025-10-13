@@ -261,10 +261,11 @@ impl SemanticActivationSeeder {
     }
 }
 
-/// Query expander trait (placeholder for Task 003).
+/// Query expander trait (COMPLETED in Task 003).
 ///
-/// This trait will be implemented in Task 003 to provide synonym and
-/// abbreviation expansion. For now, it's just a placeholder.
+/// This trait is now implemented by `crate::query::expansion::QueryExpander`.
+/// Use that implementation for full query expansion with confidence budgets.
+#[deprecated(since = "0.1.0", note = "Use crate::query::expansion::QueryExpander instead")]
 pub trait QueryExpander: Send + Sync {
     /// Expand a query into multiple variants
     fn expand(&self, query: &str) -> Vec<(String, f32)>;

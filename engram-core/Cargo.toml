@@ -88,6 +88,10 @@ tokenizers = { version = "0.19", optional = true }
 ndarray = { version = "0.16", optional = true }
 ort = { version = "2.0.0-rc.10", optional = true }
 
+# Query expansion dependencies (Milestone 3.6 Task 003)
+unicode-segmentation = { version = "1.11", optional = true }
+fst = { version = "0.4", optional = true }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 perf-event = { version = "0.4", optional = true }
 
@@ -170,7 +174,10 @@ long_running_tests = []  # Enable psychology validations and multi-hour scenario
 ann_benchmarks = ["faiss"]
 
 # Multilingual embedding support with ONNX Runtime
-multilingual_embeddings = ["tokenizers", "ndarray", "ort"]
+multilingual_embeddings = ["tokenizers", "ndarray", "ort", "unicode-segmentation"]
+
+# Query expansion with confidence budgets (Milestone 3.6 Task 003)
+query_expansion = ["unicode-segmentation", "fst"]
 
 # Fallback modes for compatibility
 force_scalar_compute = []

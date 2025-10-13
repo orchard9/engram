@@ -8,7 +8,7 @@
 //! ## Design Principles
 //!
 //! 1. **Cognitive Compatibility**: Seamless integration with existing Confidence type
-//! 2. **Formal Verification**: All probability operations verified with SMT solvers  
+//! 2. **Formal Verification**: All probability operations verified with SMT solvers
 //! 3. **Bias Prevention**: Systematic prevention of cognitive biases in reasoning
 //! 4. **Performance**: Lock-free operations optimized for cognitive memory workloads
 //! 5. **Uncertainty Tracking**: Comprehensive tracking of uncertainty sources
@@ -27,6 +27,10 @@ pub(crate) const fn clamp_probability_to_f32(value: f64) -> f32 {
         value.clamp(0.0, 1.0) as f32
     }
 }
+
+// Query expansion modules (Milestone 3.6 Task 003)
+pub mod expansion;
+pub mod lexicon;
 
 // Conditional compilation for SMT verification features
 #[cfg(feature = "probabilistic_queries")]
