@@ -18,14 +18,40 @@ pub mod streaming;
 #[cfg(feature = "monitoring")]
 pub mod numa_aware;
 
-#[cfg(feature = "monitoring")]
-pub mod prometheus;
-
 pub use cognitive::{CognitiveInsight, CognitiveMetrics, ConsolidationState};
 pub use hardware::{CacheLevel, HardwareMetrics, SimdOperation};
+use health::HealthProbe;
 pub use health::{HealthCheck, HealthStatus, SystemHealth};
 pub use lockfree::{LockFreeCounter, LockFreeGauge, LockFreeHistogram};
-pub use streaming::{MetricUpdate, StreamingAggregator};
+pub use streaming::{
+    AggregatedMetrics, ExportStats, MetricAggregate, MetricUpdate, SpreadingSummary,
+    StreamingAggregator, TierLatencySummary,
+};
+
+const SPREADING_ACTIVATIONS_TOTAL: &str = "engram_spreading_activations_total";
+const SPREADING_LATENCY_BUDGET_VIOLATIONS_TOTAL: &str =
+    "engram_spreading_latency_budget_violations_total";
+const SPREADING_FALLBACK_TOTAL: &str = "engram_spreading_fallback_total";
+const SPREADING_FAILURE_TOTAL: &str = "engram_spreading_failures_total";
+const SPREADING_BREAKER_STATE: &str = "engram_spreading_breaker_state";
+const SPREADING_BREAKER_TRANSITIONS_TOTAL: &str = "engram_spreading_breaker_transitions_total";
+const SPREADING_GPU_LAUNCH_TOTAL: &str = "engram_spreading_gpu_launch_total";
+const SPREADING_GPU_FALLBACK_TOTAL: &str = "engram_spreading_gpu_fallback_total";
+const SPREADING_POOL_UTILIZATION: &str = "engram_spreading_pool_utilization";
+const SPREADING_POOL_HIT_RATE: &str = "engram_spreading_pool_hit_rate";
+const SPREADING_LATENCY_HOT: &str = "engram_spreading_latency_hot_seconds";
+const SPREADING_LATENCY_WARM: &str = "engram_spreading_latency_warm_seconds";
+const SPREADING_LATENCY_COLD: &str = "engram_spreading_latency_cold_seconds";
+
+// Embedding infrastructure metrics
+/// Counter tracking episodes stored with embedding provenance.
+///
+/// This metric enables monitoring of embedding coverage across the memory store.
+/// Label `model_version` allows tracking which embedding models are in use.
+///
+/// Usage: `increment_counter("engram_episodes_with_embeddings_total", 1)` when
+/// storing an episode with `embedding_provenance.is_some()`.
+const EMBEDDING_COVERAGE_TOTAL: &str = "engram_episodes_with_embeddings_total";
 
 /// Global metrics registry for the Engram system
 pub struct MetricsRegistry {
@@ -34,6 +60,9 @@ pub struct MetricsRegistry {
 
     /// Lock-free histograms for latency distributions
     histograms: Arc<LockFreeHistograms>,
+
+    /// Lock-free gauges for instantaneous measurements
+    gauges: Arc<LockFreeGauges>,
 
     /// Cognitive architecture specific metrics
     cognitive: Arc<CognitiveMetrics>,
@@ -56,17 +85,32 @@ impl MetricsRegistry {
     /// Create a new metrics registry with default configuration
     #[must_use]
     pub fn new() -> Self {
-        Self {
+        let health = Arc::new(SystemHealth::new());
+
+        let registry = Self {
             counters: Arc::new(LockFreeCounters::new()),
             histograms: Arc::new(LockFreeHistograms::new()),
+            gauges: Arc::new(LockFreeGauges::new()),
             cognitive: Arc::new(CognitiveMetrics::new()),
             hardware: Arc::new(HardwareMetrics::new()),
             streaming: Arc::new(StreamingAggregator::new()),
-            health: Arc::new(SystemHealth::new()),
+            health: Arc::clone(&health),
             // NUMA collectors temporarily disabled
             // #[cfg(feature = "monitoring")]
             // numa_collectors: numa_aware::NumaCollectors::new().map(Arc::new),
+        };
+
+        if let Ok(probe) = crate::activation::health_checks::SpreadingHealthProbe::default_probe() {
+            let hysteresis = probe.hysteresis();
+            health.register_probe_with_hysteresis(probe, hysteresis);
+        } else {
+            tracing::warn!(
+                target = "engram::health",
+                "Failed to initialise spreading health probe"
+            );
         }
+
+        registry
     }
 
     /// Record a counter increment with <50ns overhead
@@ -93,6 +137,17 @@ impl MetricsRegistry {
         });
     }
 
+    /// Record an instantaneous gauge measurement.
+    pub fn record_gauge(&self, name: &'static str, value: f64) {
+        self.gauges.set(name, value);
+
+        self.streaming.queue_update(MetricUpdate::Gauge {
+            name,
+            value,
+            timestamp: Instant::now(),
+        });
+    }
+
     /// Record cognitive architecture metrics
     pub fn record_cognitive(&self, metric: &cognitive::CognitiveMetric) {
         self.cognitive.record(metric);
@@ -109,12 +164,181 @@ impl MetricsRegistry {
         self.health.check_all()
     }
 
-    /// Export metrics in Prometheus format
-    #[cfg(feature = "monitoring")]
+    /// Obtain a handle to the health registry for direct probe management.
     #[must_use]
-    pub fn export_prometheus(&self) -> String {
-        prometheus::export_all(self)
+    pub fn health_registry(&self) -> Arc<SystemHealth> {
+        Arc::clone(&self.health)
     }
+
+    /// Retrieve the current value of a counter metric if recorded.
+    #[must_use]
+    pub fn counter_value(&self, name: &'static str) -> u64 {
+        self.counters.get(name)
+    }
+
+    /// Retrieve the latest gauge reading if available.
+    #[must_use]
+    pub fn gauge_value(&self, name: &'static str) -> Option<f64> {
+        self.gauges.get(name)
+    }
+
+    /// Retrieve histogram quantiles for the provided buckets.
+    #[must_use]
+    pub fn histogram_quantiles(&self, name: &'static str, quantiles: &[f64]) -> Vec<f64> {
+        self.histograms.quantiles(name, quantiles)
+    }
+
+    /// Drain pending streaming updates into aggregated windows.
+    #[must_use]
+    pub fn streaming_snapshot(&self) -> AggregatedMetrics {
+        let mut snapshot = self.streaming.process_updates();
+        snapshot.spreading = Self::summarise_spreading(&snapshot);
+        snapshot
+    }
+
+    /// Get statistics about streaming export throughput.
+    #[must_use]
+    pub fn streaming_stats(&self) -> ExportStats {
+        self.streaming.export_stats()
+    }
+
+    /// Clone the underlying streaming aggregator for external polling.
+    #[must_use]
+    pub fn streaming_aggregator(&self) -> Arc<StreamingAggregator> {
+        Arc::clone(&self.streaming)
+    }
+
+    /// Emit a structured log line with the latest streaming snapshot.
+    pub fn log_streaming_snapshot(&self, label: &str) {
+        let snapshot = self.streaming_snapshot();
+        match serde_json::to_string(&snapshot) {
+            Ok(payload) => {
+                tracing::info!(target = "engram::metrics::stream", label, snapshot = %payload, "streaming metrics snapshot");
+            }
+            Err(err) => {
+                tracing::warn!(target = "engram::metrics::stream", label, error = %err, "failed to serialize metrics snapshot");
+            }
+        }
+    }
+}
+
+impl MetricsRegistry {
+    fn summarise_spreading(snapshot: &AggregatedMetrics) -> Option<SpreadingSummary> {
+        let mut summary = SpreadingSummary::default();
+
+        for (label, metric) in [
+            ("hot", SPREADING_LATENCY_HOT),
+            ("warm", SPREADING_LATENCY_WARM),
+            ("cold", SPREADING_LATENCY_COLD),
+        ] {
+            if let Some(aggregate) = metric_from_latency_windows(snapshot, metric) {
+                if aggregate.count > 0 {
+                    let p95 = percentile_interpolate(aggregate.p90, aggregate.p99, 0.5);
+                    summary.per_tier.insert(
+                        label.to_string(),
+                        TierLatencySummary {
+                            samples: aggregate.count,
+                            mean_seconds: aggregate.mean,
+                            p50_seconds: aggregate.p50,
+                            p95_seconds: p95,
+                            p99_seconds: aggregate.p99,
+                        },
+                    );
+                }
+            }
+        }
+
+        summary.activations_total = metric_from_any_window(snapshot, SPREADING_ACTIVATIONS_TOTAL)
+            .map(metric_as_u64)
+            .filter(|value| *value > 0);
+        summary.latency_budget_violations_total =
+            metric_from_any_window(snapshot, SPREADING_LATENCY_BUDGET_VIOLATIONS_TOTAL)
+                .map(metric_as_u64);
+        summary.fallback_total =
+            metric_from_any_window(snapshot, SPREADING_FALLBACK_TOTAL).map(metric_as_u64);
+        summary.failure_total =
+            metric_from_any_window(snapshot, SPREADING_FAILURE_TOTAL).map(metric_as_u64);
+        summary.breaker_state =
+            metric_from_any_window(snapshot, SPREADING_BREAKER_STATE).map(metric_as_u64);
+        summary.breaker_transitions_total =
+            metric_from_any_window(snapshot, SPREADING_BREAKER_TRANSITIONS_TOTAL)
+                .map(metric_as_u64);
+        summary.gpu_launch_total =
+            metric_from_any_window(snapshot, SPREADING_GPU_LAUNCH_TOTAL).map(metric_as_u64);
+        summary.gpu_fallback_total =
+            metric_from_any_window(snapshot, SPREADING_GPU_FALLBACK_TOTAL).map(metric_as_u64);
+
+        summary.pool_utilization = metric_from_any_window(snapshot, SPREADING_POOL_UTILIZATION)
+            .and_then(metric_as_f64)
+            .filter(|value| value.is_finite());
+        summary.pool_hit_rate = metric_from_any_window(snapshot, SPREADING_POOL_HIT_RATE)
+            .and_then(metric_as_f64)
+            .filter(|value| value.is_finite());
+
+        let has_any = !summary.per_tier.is_empty()
+            || summary.activations_total.is_some()
+            || summary.latency_budget_violations_total.is_some()
+            || summary.fallback_total.is_some()
+            || summary.failure_total.is_some()
+            || summary.breaker_state.is_some()
+            || summary.gpu_launch_total.is_some()
+            || summary.gpu_fallback_total.is_some()
+            || summary.pool_utilization.is_some()
+            || summary.pool_hit_rate.is_some();
+
+        if has_any { Some(summary) } else { None }
+    }
+}
+
+fn metric_from_any_window<'a>(
+    snapshot: &'a AggregatedMetrics,
+    name: &str,
+) -> Option<&'a MetricAggregate> {
+    snapshot
+        .one_second
+        .get(name)
+        .or_else(|| snapshot.ten_seconds.get(name))
+        .or_else(|| snapshot.one_minute.get(name))
+        .or_else(|| snapshot.five_minutes.get(name))
+}
+
+fn metric_from_latency_windows<'a>(
+    snapshot: &'a AggregatedMetrics,
+    name: &str,
+) -> Option<&'a MetricAggregate> {
+    snapshot
+        .ten_seconds
+        .get(name)
+        .or_else(|| snapshot.one_minute.get(name))
+        .or_else(|| snapshot.five_minutes.get(name))
+        .or_else(|| snapshot.one_second.get(name))
+}
+
+fn metric_as_u64(metric: &MetricAggregate) -> u64 {
+    if metric.max.is_finite() && metric.max >= 0.0 {
+        metric.max.round() as u64
+    } else {
+        0
+    }
+}
+
+const fn metric_as_f64(metric: &MetricAggregate) -> Option<f64> {
+    if metric.max.is_finite() {
+        Some(metric.max)
+    } else {
+        None
+    }
+}
+
+fn percentile_interpolate(lower: f64, upper: f64, weight: f64) -> f64 {
+    if !lower.is_finite() {
+        return 0.0;
+    }
+    if !upper.is_finite() {
+        return lower;
+    }
+    let clamped_weight = weight.clamp(0.0, 1.0);
+    lower + (upper - lower) * clamped_weight
 }
 
 /// Lock-free counter collection with cache-line alignment
@@ -181,6 +405,44 @@ impl LockFreeHistograms {
     }
 }
 
+/// Lock-free collection of gauges storing the latest observation per metric.
+pub struct LockFreeGauges {
+    gauges: dashmap::DashMap<&'static str, CachePadded<AtomicU64>>,
+}
+
+impl Default for LockFreeGauges {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl LockFreeGauges {
+    /// Create a new gauge collection.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            gauges: dashmap::DashMap::new(),
+        }
+    }
+
+    /// Set the gauge to the provided floating-point value.
+    pub fn set(&self, name: &'static str, value: f64) {
+        let bits = value.to_bits();
+        self.gauges
+            .entry(name)
+            .or_insert_with(|| CachePadded::new(AtomicU64::new(0)))
+            .store(bits, Ordering::Release);
+    }
+
+    /// Retrieve the gauge value if present.
+    #[must_use]
+    pub fn get(&self, name: &'static str) -> Option<f64> {
+        self.gauges
+            .get(name)
+            .map(|g| f64::from_bits(g.load(Ordering::Acquire)))
+    }
+}
+
 /// Metric recording macros for zero-overhead when disabled
 #[macro_export]
 macro_rules! record_counter {
@@ -199,6 +461,17 @@ macro_rules! record_histogram {
         #[cfg(feature = "monitoring")]
         {
             $registry.observe_histogram($name, $value);
+        }
+    };
+}
+
+/// Macro to record gauge metrics
+#[macro_export]
+macro_rules! record_gauge {
+    ($registry:expr, $name:literal, $value:expr) => {
+        #[cfg(feature = "monitoring")]
+        {
+            $registry.record_gauge($name, $value);
         }
     };
 }
@@ -254,11 +527,36 @@ pub fn observe_histogram(name: &'static str, value: f64) {
     }
 }
 
+/// Record a gauge metric value
+pub fn record_gauge(name: &'static str, value: f64) {
+    if let Some(metrics) = metrics() {
+        metrics.record_gauge(name, value);
+    }
+}
+
 /// Record a cognitive metric
 pub fn record_cognitive(metric: &cognitive::CognitiveMetric) {
     if let Some(metrics) = metrics() {
         metrics.record_cognitive(metric);
     }
+}
+
+/// Record when an episode is stored with embedding provenance.
+///
+/// This increments the `engram_episodes_with_embeddings_total` counter to track
+/// embedding coverage across the memory store.
+///
+/// # Example
+/// ```ignore
+/// use engram_core::metrics;
+///
+/// // When storing an episode with embedding provenance
+/// if episode.embedding_provenance.is_some() {
+///     metrics::record_embedding_coverage();
+/// }
+/// ```
+pub fn record_embedding_coverage() {
+    increment_counter(EMBEDDING_COVERAGE_TOTAL, 1);
 }
 
 impl Default for MetricsRegistry {

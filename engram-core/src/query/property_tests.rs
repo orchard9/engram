@@ -408,6 +408,7 @@ mod integration_tests {
             who: Some(vec!["test_person".to_string()]),
             what: format!("test content for {id}"),
             embedding: [0.5f32; 768],
+            embedding_provenance: None, // Test episode doesn't need provenance
             encoding_confidence: Confidence::HIGH,
             vividness_confidence: Confidence::MEDIUM,
             reliability_confidence: Confidence::HIGH,

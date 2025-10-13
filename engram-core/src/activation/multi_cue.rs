@@ -152,6 +152,7 @@ mod tests {
             cue_confidence: Confidence::HIGH,
             result_threshold: Confidence::MEDIUM,
             max_results: 32,
+            embedding_provenance: None, // Test cue doesn't need provenance
         }
     }
 

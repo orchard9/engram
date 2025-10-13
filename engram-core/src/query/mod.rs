@@ -262,8 +262,8 @@ pub type EvidenceId = u64;
 /// Error types for probabilistic operations
 #[derive(Debug, thiserror::Error)]
 pub enum ProbabilisticError {
-    /// Provided probability is outside the valid [0,1] interval.
-    #[error("Invalid probability value: {value} (must be in range [0,1])")]
+    /// Provided probability is outside the valid 0..=1 interval.
+    #[error("Invalid probability value: {value} (must be in range 0..=1)")]
     InvalidProbability {
         /// Value that violated probability bounds.
         value: f32,
@@ -399,6 +399,7 @@ mod tests {
             who: None,
             what: "test episode".to_string(),
             embedding: [0.5f32; 768],
+            embedding_provenance: None, // Test episode doesn't need provenance
             encoding_confidence: Confidence::HIGH,
             vividness_confidence: Confidence::HIGH,
             reliability_confidence: Confidence::HIGH,
@@ -414,6 +415,7 @@ mod tests {
             who: None,
             what: "test episode 2".to_string(),
             embedding: [0.3f32; 768],
+            embedding_provenance: None, // Test episode doesn't need provenance
             encoding_confidence: Confidence::MEDIUM,
             vividness_confidence: Confidence::MEDIUM,
             reliability_confidence: Confidence::MEDIUM,

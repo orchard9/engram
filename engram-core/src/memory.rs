@@ -5,6 +5,7 @@
 //! All types support confidence propagation and follow forgetting curve research.
 
 use crate::Confidence;
+use crate::embedding::EmbeddingProvenance;
 use crate::numeric::saturating_f32_from_f64;
 use atomic_float::AtomicF32;
 use chrono::{DateTime, Utc};
@@ -53,6 +54,10 @@ pub struct Memory {
 
     /// Optional content for human-readable debugging
     pub content: Option<String>,
+
+    /// Optional provenance metadata for the embedding (model version, language, etc.)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embedding_provenance: Option<EmbeddingProvenance>,
 }
 
 // Custom serialization for large arrays
@@ -100,6 +105,7 @@ impl Memory {
             created_at: now,
             decay_rate: 0.1, // Default decay rate
             content: None,
+            embedding_provenance: None, // Provenance is optional
         }
     }
 
@@ -111,6 +117,7 @@ impl Memory {
         memory.content = Some(episode.what);
         memory.created_at = episode.when;
         memory.last_access = episode.when;
+        memory.embedding_provenance = episode.embedding_provenance; // Copy provenance from episode
         memory
     }
 
@@ -184,6 +191,7 @@ impl Clone for Memory {
             created_at: self.created_at,
             decay_rate: self.decay_rate,
             content: self.content.clone(),
+            embedding_provenance: self.embedding_provenance.clone(),
         }
     }
 }
@@ -212,6 +220,10 @@ pub struct Episode {
     /// Embedding representation of the episode
     #[serde(with = "embedding_serde")]
     pub embedding: [f32; 768],
+
+    /// Optional provenance metadata for the embedding (model version, language, etc.)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embedding_provenance: Option<EmbeddingProvenance>,
 
     /// Confidence in episode encoding quality
     pub encoding_confidence: Confidence,
@@ -250,12 +262,41 @@ impl Episode {
             who: None,
             what,
             embedding,
+            embedding_provenance: None, // Provenance is optional
             encoding_confidence,
             vividness_confidence: encoding_confidence, // Start with same confidence
             reliability_confidence: encoding_confidence,
             last_recall: Utc::now(),
             recall_count: 0,
             decay_rate: 0.05, // Episodes decay slower than individual memories
+        }
+    }
+
+    /// Creates a new episode with embedding provenance
+    #[must_use]
+    #[allow(clippy::large_types_passed_by_value)]
+    pub fn with_provenance(
+        id: String,
+        when: DateTime<Utc>,
+        what: String,
+        embedding: [f32; 768],
+        provenance: EmbeddingProvenance,
+        encoding_confidence: Confidence,
+    ) -> Self {
+        Self {
+            id,
+            when,
+            where_location: None,
+            who: None,
+            what,
+            embedding,
+            embedding_provenance: Some(provenance),
+            encoding_confidence,
+            vividness_confidence: encoding_confidence,
+            reliability_confidence: encoding_confidence,
+            last_recall: Utc::now(),
+            recall_count: 0,
+            decay_rate: 0.05,
         }
     }
 
@@ -460,6 +501,10 @@ pub struct Cue {
 
     /// Maximum number of results to return
     pub max_results: usize,
+
+    /// Optional provenance metadata for embedding-based cues
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embedding_provenance: Option<EmbeddingProvenance>,
 }
 
 impl Cue {
@@ -473,6 +518,7 @@ impl Cue {
             cue_confidence: Confidence::HIGH,
             result_threshold: threshold,
             max_results: 100,
+            embedding_provenance: None, // Provenance is optional
         }
     }
 
@@ -495,6 +541,7 @@ impl Cue {
             cue_confidence: Confidence::HIGH,
             result_threshold: confidence_threshold,
             max_results: 50,
+            embedding_provenance: None, // Not applicable for context cues
         }
     }
 
@@ -511,6 +558,7 @@ impl Cue {
             cue_confidence: Confidence::HIGH,
             result_threshold: fuzzy_threshold,
             max_results: 75,
+            embedding_provenance: None, // Not applicable for semantic cues
         }
     }
 
@@ -560,6 +608,7 @@ pub mod memory_builder_states {
 pub struct MemoryBuilder<State> {
     id: Option<String>,
     embedding: Option<[f32; 768]>,
+    embedding_provenance: Option<EmbeddingProvenance>,
     confidence: Option<Confidence>,
     content: Option<String>,
     decay_rate: f32,
@@ -579,6 +628,7 @@ impl MemoryBuilder<memory_builder_states::NoId> {
         Self {
             id: None,
             embedding: None,
+            embedding_provenance: None,
             confidence: None,
             content: None,
             decay_rate: 0.1,
@@ -594,6 +644,7 @@ impl<State> MemoryBuilder<State> {
         MemoryBuilder {
             id: Some(id),
             embedding: self.embedding,
+            embedding_provenance: self.embedding_provenance,
             confidence: self.confidence,
             content: self.content,
             decay_rate: self.decay_rate,
@@ -613,6 +664,7 @@ impl MemoryBuilder<memory_builder_states::NoEmbedding> {
         MemoryBuilder {
             id: self.id,
             embedding: Some(embedding),
+            embedding_provenance: self.embedding_provenance,
             confidence: self.confidence,
             content: self.content,
             decay_rate: self.decay_rate,
@@ -628,6 +680,7 @@ impl MemoryBuilder<memory_builder_states::NoConfidence> {
         MemoryBuilder {
             id: self.id,
             embedding: self.embedding,
+            embedding_provenance: self.embedding_provenance,
             confidence: Some(confidence),
             content: self.content,
             decay_rate: self.decay_rate,
@@ -651,6 +704,13 @@ impl MemoryBuilder<memory_builder_states::Ready> {
         self
     }
 
+    /// Set embedding provenance (optional)
+    #[must_use]
+    pub fn with_embedding_provenance(mut self, provenance: EmbeddingProvenance) -> Self {
+        self.embedding_provenance = Some(provenance);
+        self
+    }
+
     /// Build the memory.
     ///
     /// # Panics
@@ -663,6 +723,7 @@ impl MemoryBuilder<memory_builder_states::Ready> {
         let Self {
             id,
             embedding,
+            embedding_provenance,
             confidence,
             content,
             decay_rate,
@@ -674,6 +735,7 @@ impl MemoryBuilder<memory_builder_states::Ready> {
         };
 
         let mut memory = Memory::new(id, embedding, confidence);
+        memory.embedding_provenance = embedding_provenance;
         memory.content = content;
         memory.decay_rate = decay_rate;
         memory
@@ -708,6 +770,7 @@ pub struct EpisodeBuilder<State> {
     when: Option<DateTime<Utc>>,
     what: Option<String>,
     embedding: Option<[f32; 768]>,
+    embedding_provenance: Option<EmbeddingProvenance>,
     encoding_confidence: Option<Confidence>,
     where_location: Option<String>,
     who: Option<Vec<String>>,
@@ -730,6 +793,7 @@ impl EpisodeBuilder<episode_builder_states::NoId> {
             when: None,
             what: None,
             embedding: None,
+            embedding_provenance: None,
             encoding_confidence: None,
             where_location: None,
             who: None,
@@ -748,6 +812,7 @@ impl<State> EpisodeBuilder<State> {
             when: self.when,
             what: self.what,
             embedding: self.embedding,
+            embedding_provenance: self.embedding_provenance,
             encoding_confidence: self.encoding_confidence,
             where_location: self.where_location,
             who: self.who,
@@ -766,6 +831,7 @@ impl EpisodeBuilder<episode_builder_states::NoWhen> {
             when: Some(when),
             what: self.what,
             embedding: self.embedding,
+            embedding_provenance: self.embedding_provenance,
             encoding_confidence: self.encoding_confidence,
             where_location: self.where_location,
             who: self.who,
@@ -784,6 +850,7 @@ impl EpisodeBuilder<episode_builder_states::NoWhat> {
             when: self.when,
             what: Some(what),
             embedding: self.embedding,
+            embedding_provenance: self.embedding_provenance,
             encoding_confidence: self.encoding_confidence,
             where_location: self.where_location,
             who: self.who,
@@ -806,6 +873,7 @@ impl EpisodeBuilder<episode_builder_states::NoEmbedding> {
             when: self.when,
             what: self.what,
             embedding: Some(embedding),
+            embedding_provenance: self.embedding_provenance,
             encoding_confidence: self.encoding_confidence,
             where_location: self.where_location,
             who: self.who,
@@ -827,6 +895,7 @@ impl EpisodeBuilder<episode_builder_states::NoConfidence> {
             when: self.when,
             what: self.what,
             embedding: self.embedding,
+            embedding_provenance: self.embedding_provenance,
             encoding_confidence: Some(confidence),
             where_location: self.where_location,
             who: self.who,
@@ -858,6 +927,13 @@ impl EpisodeBuilder<episode_builder_states::Ready> {
         self
     }
 
+    /// Set embedding provenance (optional)
+    #[must_use]
+    pub fn with_embedding_provenance(mut self, provenance: EmbeddingProvenance) -> Self {
+        self.embedding_provenance = Some(provenance);
+        self
+    }
+
     /// Build the episode.
     ///
     /// # Panics
@@ -872,6 +948,7 @@ impl EpisodeBuilder<episode_builder_states::Ready> {
             when,
             what,
             embedding,
+            embedding_provenance,
             encoding_confidence,
             where_location,
             who,
@@ -886,6 +963,7 @@ impl EpisodeBuilder<episode_builder_states::Ready> {
         };
 
         let mut episode = Episode::new(id, when, what, embedding, encoding_confidence);
+        episode.embedding_provenance = embedding_provenance;
         episode.where_location = where_location;
         episode.who = who;
         episode.decay_rate = decay_rate;
@@ -917,6 +995,7 @@ pub struct CueBuilder<State> {
     cue_confidence: Confidence,
     result_threshold: Confidence,
     max_results: usize,
+    embedding_provenance: Option<EmbeddingProvenance>,
     _state: PhantomData<State>,
 }
 
@@ -941,6 +1020,7 @@ impl CueBuilder<cue_builder_states::NoId> {
             cue_confidence: Confidence::MEDIUM,
             result_threshold: Confidence::LOW,
             max_results: 10,
+            embedding_provenance: None,
             _state: PhantomData,
         }
     }
@@ -960,6 +1040,7 @@ impl<State> CueBuilder<State> {
             cue_confidence: self.cue_confidence,
             result_threshold: self.result_threshold,
             max_results: self.max_results,
+            embedding_provenance: self.embedding_provenance,
             _state: PhantomData,
         }
     }
@@ -984,6 +1065,7 @@ impl CueBuilder<cue_builder_states::NoCueType> {
             cue_confidence: self.cue_confidence,
             result_threshold: self.result_threshold,
             max_results: self.max_results,
+            embedding_provenance: self.embedding_provenance,
             _state: PhantomData,
         }
     }
@@ -1010,6 +1092,7 @@ impl CueBuilder<cue_builder_states::NoCueType> {
             cue_confidence: self.cue_confidence,
             result_threshold: self.result_threshold,
             max_results: self.max_results,
+            embedding_provenance: self.embedding_provenance,
             _state: PhantomData,
         }
     }
@@ -1034,6 +1117,7 @@ impl CueBuilder<cue_builder_states::NoCueType> {
             cue_confidence: self.cue_confidence,
             result_threshold: self.result_threshold,
             max_results: self.max_results,
+            embedding_provenance: self.embedding_provenance,
             _state: PhantomData,
         }
     }
@@ -1058,6 +1142,7 @@ impl CueBuilder<cue_builder_states::NoCueType> {
             cue_confidence: self.cue_confidence,
             result_threshold: self.result_threshold,
             max_results: self.max_results,
+            embedding_provenance: self.embedding_provenance,
             _state: PhantomData,
         }
     }
@@ -1097,6 +1182,13 @@ impl CueBuilder<cue_builder_states::Ready> {
         self
     }
 
+    /// Set embedding provenance (optional)
+    #[must_use]
+    pub fn with_embedding_provenance(mut self, provenance: EmbeddingProvenance) -> Self {
+        self.embedding_provenance = Some(provenance);
+        self
+    }
+
     /// Build the cue (only available when all required fields are set).
     ///
     /// # Cognitive Design
@@ -1117,6 +1209,7 @@ impl CueBuilder<cue_builder_states::Ready> {
             cue_confidence,
             result_threshold,
             max_results,
+            embedding_provenance,
             _state: _,
         } = self;
 
@@ -1130,6 +1223,7 @@ impl CueBuilder<cue_builder_states::Ready> {
             cue_confidence,
             result_threshold,
             max_results,
+            embedding_provenance,
         }
     }
 }

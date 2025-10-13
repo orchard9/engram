@@ -17,7 +17,8 @@ impl ProbabilisticRecall for MemoryStore {
     /// Enhanced recall with probabilistic uncertainty propagation
     fn recall_probabilistic(&self, cue: Cue) -> ProbabilisticQueryResult {
         // Start with standard recall
-        let standard_results = self.recall(&cue);
+        let recall_result = self.recall(&cue);
+        let standard_results = recall_result.results;
 
         if standard_results.is_empty() {
             return ProbabilisticQueryResult::from_episodes(Vec::new());
@@ -426,6 +427,7 @@ mod tests {
             who: None,
             what: "Test content for probabilistic recall".to_string(),
             embedding: [0.5f32; 768],
+            embedding_provenance: None, // Test episode doesn't need provenance
             encoding_confidence: Confidence::HIGH,
             vividness_confidence: Confidence::HIGH,
             reliability_confidence: Confidence::HIGH,
@@ -495,6 +497,7 @@ mod tests {
             who: None,
             what: format!("Test episode {id}"),
             embedding: [0.5f32; 768],
+            embedding_provenance: None, // Test episode doesn't need provenance
             encoding_confidence: Confidence::HIGH,
             vividness_confidence: Confidence::HIGH,
             reliability_confidence: Confidence::HIGH,

@@ -95,6 +95,7 @@ fn test_embedding_cue_handler() -> TestResult {
         cue_confidence: Confidence::HIGH,
         result_threshold: Confidence::MEDIUM,
         max_results: 10,
+        embedding_provenance: None, // Test cue doesn't need provenance
     };
 
     let results = handler
@@ -133,6 +134,7 @@ fn test_semantic_cue_handler() -> TestResult {
         cue_confidence: Confidence::HIGH,
         result_threshold: Confidence::MEDIUM,
         max_results: 10,
+        embedding_provenance: None, // Test cue doesn't need provenance
     };
 
     let results = handler
@@ -177,6 +179,7 @@ fn test_temporal_cue_handler() -> TestResult {
         cue_confidence: Confidence::HIGH,
         result_threshold: Confidence::MEDIUM,
         max_results: 10,
+        embedding_provenance: None, // Test cue doesn't need provenance
     };
 
     let results = handler
@@ -220,6 +223,7 @@ fn test_context_cue_handler() -> TestResult {
         cue_confidence: Confidence::HIGH,
         result_threshold: Confidence::MEDIUM,
         max_results: 10,
+        embedding_provenance: None, // Test cue doesn't need provenance
     };
 
     let results = handler
@@ -251,6 +255,7 @@ fn test_cue_dispatcher() -> TestResult {
         cue_confidence: Confidence::HIGH,
         result_threshold: Confidence::MEDIUM,
         max_results: 10,
+        embedding_provenance: None, // Test cue doesn't need provenance
     };
 
     let results = dispatcher
@@ -280,6 +285,7 @@ fn test_unsupported_cue_type() -> TestResult {
         cue_confidence: Confidence::HIGH,
         result_threshold: Confidence::MEDIUM,
         max_results: 10,
+        embedding_provenance: None, // Test cue doesn't need provenance
     };
 
     match handler.handle(&cue, &context) {

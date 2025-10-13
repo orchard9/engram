@@ -367,6 +367,7 @@ mod migration_tests {
             cue_confidence: Confidence::HIGH,
             result_threshold: Confidence::LOW,
             max_results: 3,
+            embedding_provenance: None, // Test cue doesn't need provenance
         };
 
         let recalled = graph

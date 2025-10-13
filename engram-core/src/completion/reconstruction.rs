@@ -357,6 +357,7 @@ impl PatternCompleter for PatternReconstructor {
                     .cloned()
                     .unwrap_or_else(|| "Reconstructed memory".to_string()),
                 embedding,
+                embedding_provenance: None, // Reconstructed episodes don't have provenance
                 encoding_confidence: confidence,
                 vividness_confidence: confidence,
                 reliability_confidence: confidence,

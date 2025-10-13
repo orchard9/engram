@@ -298,6 +298,7 @@ fn test_pattern_reconstruction_with_context() {
             who: Some(vec!["family".to_string()]),
             what: "eating breakfast".to_string(),
             embedding: [0.6; 768],
+            embedding_provenance: None, // Test episode doesn't need provenance
             encoding_confidence: Confidence::exact(0.9),
             vividness_confidence: Confidence::exact(0.8),
             reliability_confidence: Confidence::exact(0.85),
@@ -312,6 +313,7 @@ fn test_pattern_reconstruction_with_context() {
             who: Some(vec!["alone".to_string()]),
             what: "making coffee".to_string(),
             embedding: [0.65; 768],
+            embedding_provenance: None, // Test episode doesn't need provenance
             encoding_confidence: Confidence::exact(0.85),
             vividness_confidence: Confidence::exact(0.75),
             reliability_confidence: Confidence::exact(0.8),
@@ -442,6 +444,7 @@ fn test_full_pattern_completion_pipeline() {
             who: Some(vec!["colleagues".to_string()]),
             what: "team meeting".to_string(),
             embedding: [0.7; 768],
+            embedding_provenance: None, // Test episode doesn't need provenance
             encoding_confidence: Confidence::exact(0.9),
             vividness_confidence: Confidence::exact(0.85),
             reliability_confidence: Confidence::exact(0.9),
@@ -456,6 +459,7 @@ fn test_full_pattern_completion_pipeline() {
             who: Some(vec!["manager".to_string(), "team".to_string()]),
             what: "project planning".to_string(),
             embedding: [0.75; 768],
+            embedding_provenance: None, // Test episode doesn't need provenance
             encoding_confidence: Confidence::exact(0.85),
             vividness_confidence: Confidence::exact(0.8),
             reliability_confidence: Confidence::exact(0.85),

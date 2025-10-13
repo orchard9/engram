@@ -22,7 +22,9 @@ dashmap = { workspace = true }
 parking_lot = { workspace = true }
 mimalloc = { workspace = true }
 atomic_float = { workspace = true }
+async-trait = "0.1"
 syn = { version = "2.0", features = ["full", "visit"] }
+utoipa = { workspace = true }
 
 # Lock-free concurrent data structures for HNSW
 crossbeam-epoch = "0.9"
@@ -88,6 +90,7 @@ perf-event = { version = "0.4", optional = true }
 criterion = { workspace = true }
 proptest = { workspace = true }
 quickcheck = { workspace = true }
+insta = { version = "1.39", features = ["yaml"] }
 bincode = { workspace = true }
 rand = { workspace = true }
 approx = { workspace = true }
@@ -95,6 +98,8 @@ trybuild = "1.0"
 tempfile = "3.0"
 futures = "0.3"
 serial_test = "3.2.0"
+loom = "0.7"
+tokio = { version = "1.0", features = ["test-util", "rt", "time", "sync", "macros", "rt-multi-thread"] }
 
 [features]
 default = ["hnsw_index", "memory_mapped_persistence", "psychological_decay", "probabilistic_queries", "pattern_completion", "monitoring"]

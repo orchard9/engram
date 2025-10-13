@@ -1,5 +1,6 @@
 //! Engram core graph engine with probabilistic operations.
 
+#![cfg_attr(docsrs, feature(doc_cfg))]
 // Safety-focused Clippy lints to prevent unsafe error handling regression
 #![warn(
     clippy::unwrap_used,
@@ -28,6 +29,7 @@ pub mod cue;
 #[cfg(feature = "psychological_decay")]
 pub mod decay;
 pub mod differential;
+pub mod embedding;
 pub mod error;
 pub mod error_review;
 pub mod error_testing;
@@ -44,6 +46,7 @@ pub mod query;
 #[cfg(feature = "memory_mapped_persistence")]
 pub mod storage;
 pub mod store;
+pub mod streaming_health;
 pub mod types;
 
 use serde::{Deserialize, Serialize};
@@ -54,7 +57,7 @@ use std::time::SystemTime;
 ///
 /// This newtype wrapper provides cognitive ergonomics that align with human intuition,
 /// prevent systematic biases, and support natural mental models. Values are always
-/// constrained to [0,1] range with zero-cost abstraction in release builds.
+/// constrained to the 0..=1 range with zero-cost abstraction in release builds.
 ///
 /// Based on research by Gigerenzer & Hoffrage (1995), Kahneman & Tversky (conjunction fallacy),
 /// and dual-process theory from Kahneman (2011).
@@ -74,7 +77,7 @@ impl Confidence {
     /// Minimum confidence (0.0) - complete uncertainty/impossibility
     pub const NONE: Self = Self(0.0);
 
-    /// Creates exact confidence value with automatic clamping to [0,1]
+    /// Creates exact confidence value with automatic clamping to 0..=1
     ///
     /// This is the primary constructor that ensures range invariants.
     #[must_use]
@@ -120,7 +123,7 @@ impl Confidence {
         self.0
     }
 
-    /// Create from raw value (will be clamped to [0,1])
+    /// Create from raw value (will be clamped to 0..=1)
     #[must_use]
     pub const fn from_raw(value: f32) -> Self {
         Self(value.clamp(0.0, 1.0))
@@ -279,6 +282,9 @@ pub use cue::{
     ContextCueHandler, CueContext, CueDispatcher, CueHandler, EmbeddingCueHandler,
     SemanticCueHandler, TemporalCueHandler,
 };
+pub use embedding::{
+    EmbeddingError, EmbeddingProvenance, EmbeddingProvider, EmbeddingWithProvenance, ModelVersion,
+};
 pub use memory::{
     Cue, CueBuilder, CueType, Episode, EpisodeBuilder, Memory, MemoryBuilder, TemporalPattern,
 };
@@ -286,7 +292,8 @@ pub use query::{
     ConfidenceInterval, Evidence, EvidenceSource, MatchType, ProbabilisticError,
     ProbabilisticQueryResult, ProbabilisticRecall, ProbabilisticResult, UncertaintySource,
 };
-pub use store::{Activation, MemoryStore};
+pub use store::{Activation, MemoryStore, RecallResult, StoreResult};
+pub use streaming_health::{StreamingHealthMetrics, StreamingHealthStatus, StreamingHealthTracker};
 
 #[cfg(feature = "psychological_decay")]
 pub use decay::{

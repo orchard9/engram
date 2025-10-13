@@ -52,6 +52,7 @@ fn test_null_index_provider() {
             who: None,
             what: "Test content 1".to_string(),
             embedding: [0.1; 768],
+            embedding_provenance: None, // Test episode doesn't need provenance
             encoding_confidence: Confidence::HIGH,
             vividness_confidence: Confidence::MEDIUM,
             reliability_confidence: Confidence::HIGH,
@@ -66,6 +67,7 @@ fn test_null_index_provider() {
             who: None,
             what: "Test content 2".to_string(),
             embedding: [0.2; 768],
+            embedding_provenance: None, // Test episode doesn't need provenance
             encoding_confidence: Confidence::MEDIUM,
             vividness_confidence: Confidence::LOW,
             reliability_confidence: Confidence::MEDIUM,
@@ -106,6 +108,7 @@ fn test_null_storage_provider() {
         who: None,
         what: "Test content".to_string(),
         embedding: [0.1; 768],
+        embedding_provenance: None, // Test episode doesn't need provenance
         encoding_confidence: Confidence::HIGH,
         vividness_confidence: Confidence::MEDIUM,
         reliability_confidence: Confidence::HIGH,
@@ -149,6 +152,7 @@ fn test_null_decay_provider() {
         who: None,
         what: "Test content".to_string(),
         embedding: [0.1; 768],
+        embedding_provenance: None, // Test episode doesn't need provenance
         encoding_confidence: Confidence::HIGH,
         vividness_confidence: Confidence::MEDIUM,
         reliability_confidence: Confidence::HIGH,
