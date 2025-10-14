@@ -305,6 +305,7 @@ fn test_pattern_reconstruction_with_context() {
             last_recall: Utc::now(),
             recall_count: 3,
             decay_rate: 0.05,
+            decay_function: None, // Use system default
         },
         Episode {
             id: "breakfast2".to_string(),
@@ -320,6 +321,7 @@ fn test_pattern_reconstruction_with_context() {
             last_recall: Utc::now(),
             recall_count: 2,
             decay_rate: 0.05,
+            decay_function: None, // Use system default
         },
     ];
 
@@ -451,6 +453,7 @@ fn test_full_pattern_completion_pipeline() {
             last_recall: Utc::now(),
             recall_count: 5,
             decay_rate: 0.03,
+            decay_function: None, // Use system default
         },
         Episode {
             id: "work2".to_string(),
@@ -466,6 +469,7 @@ fn test_full_pattern_completion_pipeline() {
             last_recall: Utc::now(),
             recall_count: 3,
             decay_rate: 0.04,
+            decay_function: None, // Use system default
         },
     ];
 

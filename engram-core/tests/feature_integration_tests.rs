@@ -59,6 +59,7 @@ fn test_null_index_provider() {
             last_recall: Utc::now(),
             recall_count: 1,
             decay_rate: 1.0,
+            decay_function: None, // Use system default
         },
         Episode {
             id: "test2".to_string(),
@@ -74,6 +75,7 @@ fn test_null_index_provider() {
             last_recall: Utc::now(),
             recall_count: 2,
             decay_rate: 0.9,
+            decay_function: None, // Use system default
         },
     ];
 
@@ -115,6 +117,7 @@ fn test_null_storage_provider() {
         last_recall: Utc::now(),
         recall_count: 1,
         decay_rate: 1.0,
+        decay_function: None, // Use system default
     };
 
     // Test store and retrieve
@@ -159,6 +162,7 @@ fn test_null_decay_provider() {
         last_recall: Utc::now(),
         recall_count: 1,
         decay_rate: 1.0,
+        decay_function: None, // Use system default
     };
 
     decay.apply_decay(&mut episode, elapsed);

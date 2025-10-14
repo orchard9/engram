@@ -4,20 +4,19 @@
 
 #[cfg(feature = "hnsw_index")]
 mod tests {
+    use chrono::Utc;
     use engram_core::{
+        Confidence, Cue, EpisodeBuilder, MemoryStore,
         activation::{
-            recall::{CognitiveRecall, CognitiveRecallBuilder, RecallConfig, RecallMode},
-            ConfidenceAggregator, ParallelSpreadingConfig,
-            create_activation_graph,
+            ConfidenceAggregator, ParallelSpreadingConfig, create_activation_graph,
             cycle_detector::CycleDetector,
             parallel::ParallelSpreadingEngine,
+            recall::{CognitiveRecall, CognitiveRecallBuilder, RecallConfig, RecallMode},
             seeding::VectorActivationSeeder,
             similarity_config::SimilarityConfig,
         },
         decay::BiologicalDecaySystem,
-        Confidence, Cue, EpisodeBuilder, MemoryStore,
     };
-    use chrono::Utc;
     use std::collections::HashMap;
     use std::sync::Arc;
     use std::time::Duration as StdDuration;
@@ -42,9 +41,7 @@ mod tests {
         store: &MemoryStore,
         decay_system: Option<Arc<BiologicalDecaySystem>>,
     ) -> CognitiveRecall {
-        let index = store
-            .hnsw_index()
-            .expect("HNSW index should be available");
+        let index = store.hnsw_index().expect("HNSW index should be available");
         let graph = Arc::new(create_activation_graph());
 
         // Use relaxed similarity config to find more episodes
@@ -66,12 +63,11 @@ mod tests {
             threshold: 0.05, // Lower threshold to allow more spreading
             ..Default::default()
         };
-        let spreading_engine = Arc::new(
-            ParallelSpreadingEngine::new(spreading_config, graph).unwrap(),
-        );
+        let spreading_engine =
+            Arc::new(ParallelSpreadingEngine::new(spreading_config, graph).unwrap());
 
         let confidence_aggregator = Arc::new(ConfidenceAggregator::new(
-            0.7, // Lower decay rate to keep more confidence
+            0.7,                     // Lower decay rate to keep more confidence
             Confidence::exact(0.01), // Very low threshold to see decay effects
             100,
         ));
@@ -123,7 +119,10 @@ mod tests {
         let results = recall.recall(&cue, &store).unwrap();
 
         // Should still work without decay
-        assert!(!results.is_empty(), "Recall should work without decay system");
+        assert!(
+            !results.is_empty(),
+            "Recall should work without decay system"
+        );
     }
 
     #[test]
@@ -154,13 +153,19 @@ mod tests {
         let cue = Cue::embedding("query".to_string(), embedding, Confidence::MEDIUM);
         let results_with_decay = recall_with_decay.recall(&cue, &store).unwrap();
 
-        assert!(!results_with_decay.is_empty(), "Should find the episode with decay");
+        assert!(
+            !results_with_decay.is_empty(),
+            "Should find the episode with decay"
+        );
 
         // Test WITHOUT decay system for comparison
         let recall_no_decay = create_recall_with_decay(&store, None);
         let results_no_decay = recall_no_decay.recall(&cue, &store).unwrap();
 
-        assert!(!results_no_decay.is_empty(), "Should find the episode without decay");
+        assert!(
+            !results_no_decay.is_empty(),
+            "Should find the episode without decay"
+        );
 
         // Confidence with decay should be lower than without decay
         let with_decay_conf = results_with_decay[0].confidence.raw();
@@ -193,6 +198,7 @@ mod tests {
             elapsed,
             1, // recall_count < 3
             Utc::now() - chrono::Duration::hours(6),
+            None, // Use system default decay function
         );
 
         // Frequently accessed memory (neocortical decay)
@@ -201,6 +207,7 @@ mod tests {
             elapsed,
             5, // recall_count >= 3
             Utc::now() - chrono::Duration::hours(6),
+            None, // Use system default decay function
         );
 
         // Frequently accessed should decay slower (neocortical vs hippocampal)
@@ -212,7 +219,10 @@ mod tests {
         );
 
         // Frequently accessed should be significantly higher due to neocortical decay
-        assert!(freq_confidence.raw() >= 0.1, "Frequent confidence should be >= 0.1");
+        assert!(
+            freq_confidence.raw() >= 0.1,
+            "Frequent confidence should be >= 0.1"
+        );
 
         // The key test: neocortical decay should be significantly slower than hippocampal
         // Frequent confidence should be at least 2x higher than rare
@@ -237,6 +247,7 @@ mod tests {
             elapsed,
             3, // At threshold - uses neocortical decay
             Utc::now() - chrono::Duration::hours(6),
+            None, // Use system default decay function
         );
 
         // Memory below threshold (recall_count = 2 uses hippocampal)
@@ -245,6 +256,7 @@ mod tests {
             elapsed,
             2, // Below threshold - uses hippocampal decay
             Utc::now() - chrono::Duration::hours(6),
+            None, // Use system default decay function
         );
 
         // At threshold (3) uses neocortical, below uses hippocampal
@@ -315,6 +327,7 @@ mod tests {
                 elapsed_time,
                 access_count,
                 created_at,
+                None, // Use system default decay function
             );
         }
 

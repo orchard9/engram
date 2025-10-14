@@ -415,6 +415,7 @@ mod integration_tests {
             last_recall: Utc::now(),
             recall_count: 0,
             decay_rate: 0.1,
+            decay_function: None, // Use system default
         }
     }
 }

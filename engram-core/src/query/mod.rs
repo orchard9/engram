@@ -414,6 +414,7 @@ mod tests {
             last_recall: Utc::now(),
             recall_count: 0,
             decay_rate: 0.1,
+            decay_function: None, // Use system default
         };
 
         let episode2 = Episode {
@@ -430,6 +431,7 @@ mod tests {
             last_recall: Utc::now(),
             recall_count: 0,
             decay_rate: 0.1,
+            decay_function: None, // Use system default
         };
 
         let episode_list = vec![(episode1, Confidence::HIGH), (episode2, Confidence::MEDIUM)];

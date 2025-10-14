@@ -27,10 +27,10 @@
 //! // expanded.variants includes: "automobile", "vehicle", etc.
 //! ```
 
+use super::lexicon::Lexicon;
 use crate::embedding::{EmbeddingError, EmbeddingProvider};
 use std::sync::Arc;
 use std::time::Instant;
-use super::lexicon::Lexicon;
 
 /// Result of query expansion with variants and metadata.
 ///
@@ -105,7 +105,12 @@ impl QueryVariant {
 
     /// Create a query variant with embedding.
     #[must_use]
-    pub fn with_embedding(text: String, variant_type: VariantType, confidence: f32, embedding: Vec<f32>) -> Self {
+    pub fn with_embedding(
+        text: String,
+        variant_type: VariantType,
+        confidence: f32,
+        embedding: Vec<f32>,
+    ) -> Self {
         Self {
             text,
             variant_type,
@@ -244,7 +249,11 @@ impl QueryExpander {
     /// assert!(expanded.variants.len() <= 10); // Respects max_variants
     /// assert!(expanded.variants[0].text == "car"); // Original first
     /// ```
-    pub async fn expand(&self, query: &str, language: Option<&str>) -> Result<ExpandedQuery, ExpansionError> {
+    pub async fn expand(
+        &self,
+        query: &str,
+        language: Option<&str>,
+    ) -> Result<ExpandedQuery, ExpansionError> {
         let start = Instant::now();
 
         // Step 1: Start with original query (confidence 1.0)
@@ -266,7 +275,11 @@ impl QueryExpander {
 
         // Step 3: Filter by confidence threshold and deduplicate
         variants.retain(|v| v.confidence >= self.confidence_threshold);
-        variants.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
+        variants.sort_by(|a, b| {
+            b.confidence
+                .partial_cmp(&a.confidence)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         // Deduplicate by text (keep highest confidence)
         let mut seen = std::collections::HashSet::new();
@@ -280,7 +293,9 @@ impl QueryExpander {
         // For now, compute embeddings for all variants
         // TODO: Implement confidence budget tracking for embedding computation
         for variant in &mut variants {
-            if let Ok(embedding_result) = self.embedding_provider.embed(&variant.text, language).await {
+            if let Ok(embedding_result) =
+                self.embedding_provider.embed(&variant.text, language).await
+            {
                 variant.embedding = Some(embedding_result.vector);
             }
         }
@@ -395,7 +410,11 @@ mod tests {
 
     #[async_trait::async_trait]
     impl EmbeddingProvider for MockEmbeddingProvider {
-        async fn embed(&self, text: &str, language: Option<&str>) -> Result<EmbeddingWithProvenance, EmbeddingError> {
+        async fn embed(
+            &self,
+            text: &str,
+            language: Option<&str>,
+        ) -> Result<EmbeddingWithProvenance, EmbeddingError> {
             let value = (text.len() as f32) / 1000.0;
             let vector = vec![value; 768];
             let model = ModelVersion::new("mock-model".to_string(), "1.0.0".to_string(), 768);
@@ -403,7 +422,11 @@ mod tests {
             Ok(EmbeddingWithProvenance::new(vector, provenance))
         }
 
-        async fn embed_batch(&self, texts: &[&str], language: Option<&str>) -> Result<Vec<EmbeddingWithProvenance>, EmbeddingError> {
+        async fn embed_batch(
+            &self,
+            texts: &[&str],
+            language: Option<&str>,
+        ) -> Result<Vec<EmbeddingWithProvenance>, EmbeddingError> {
             let mut results = Vec::new();
             for text in texts {
                 results.push(self.embed(text, language).await?);
@@ -413,7 +436,9 @@ mod tests {
 
         fn model_version(&self) -> &ModelVersion {
             static MODEL: std::sync::OnceLock<ModelVersion> = std::sync::OnceLock::new();
-            MODEL.get_or_init(|| ModelVersion::new("mock-model".to_string(), "1.0.0".to_string(), 768))
+            MODEL.get_or_init(|| {
+                ModelVersion::new("mock-model".to_string(), "1.0.0".to_string(), 768)
+            })
         }
 
         fn max_sequence_length(&self) -> usize {
@@ -424,9 +449,9 @@ mod tests {
     #[tokio::test]
     async fn test_expansion_with_original_only() {
         let provider = Arc::new(MockEmbeddingProvider);
-        let expander = QueryExpander::new(provider);
+        let query_expander = QueryExpander::new(provider);
 
-        let expanded = expander.expand("test query", Some("en")).await;
+        let expanded = query_expander.expand("test query", Some("en")).await;
         assert!(expanded.is_ok());
 
         let result = expanded.unwrap();

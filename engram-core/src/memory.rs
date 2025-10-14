@@ -5,6 +5,7 @@
 //! All types support confidence propagation and follow forgetting curve research.
 
 use crate::Confidence;
+use crate::decay::DecayFunction;
 use crate::embedding::EmbeddingProvenance;
 use crate::numeric::saturating_f32_from_f64;
 use atomic_float::AtomicF32;
@@ -248,6 +249,9 @@ pub struct Episode {
 
     /// Decay rate for this specific episode
     pub decay_rate: f32,
+
+    /// Optional decay function override for this episode (None = use system default)
+    pub decay_function: Option<DecayFunction>,
 }
 
 impl Episode {
@@ -274,7 +278,8 @@ impl Episode {
             reliability_confidence: encoding_confidence,
             last_recall: Utc::now(),
             recall_count: 0,
-            decay_rate: 0.05, // Episodes decay slower than individual memories
+            decay_rate: 0.05,     // Episodes decay slower than individual memories
+            decay_function: None, // Use system default unless overridden
         }
     }
 
@@ -303,6 +308,7 @@ impl Episode {
             last_recall: Utc::now(),
             recall_count: 0,
             decay_rate: 0.05,
+            decay_function: None, // Use system default unless overridden
         }
     }
 
@@ -781,6 +787,7 @@ pub struct EpisodeBuilder<State> {
     where_location: Option<String>,
     who: Option<Vec<String>>,
     decay_rate: f32,
+    decay_function: Option<DecayFunction>,
     _state: PhantomData<State>,
 }
 
@@ -804,6 +811,7 @@ impl EpisodeBuilder<episode_builder_states::NoId> {
             where_location: None,
             who: None,
             decay_rate: 0.05,
+            decay_function: None,
             _state: PhantomData,
         }
     }
@@ -823,6 +831,7 @@ impl<State> EpisodeBuilder<State> {
             where_location: self.where_location,
             who: self.who,
             decay_rate: self.decay_rate,
+            decay_function: self.decay_function,
             _state: PhantomData,
         }
     }
@@ -842,6 +851,7 @@ impl EpisodeBuilder<episode_builder_states::NoWhen> {
             where_location: self.where_location,
             who: self.who,
             decay_rate: self.decay_rate,
+            decay_function: self.decay_function,
             _state: PhantomData,
         }
     }
@@ -861,6 +871,7 @@ impl EpisodeBuilder<episode_builder_states::NoWhat> {
             where_location: self.where_location,
             who: self.who,
             decay_rate: self.decay_rate,
+            decay_function: self.decay_function,
             _state: PhantomData,
         }
     }
@@ -884,6 +895,7 @@ impl EpisodeBuilder<episode_builder_states::NoEmbedding> {
             where_location: self.where_location,
             who: self.who,
             decay_rate: self.decay_rate,
+            decay_function: self.decay_function,
             _state: PhantomData,
         }
     }
@@ -906,6 +918,7 @@ impl EpisodeBuilder<episode_builder_states::NoConfidence> {
             where_location: self.where_location,
             who: self.who,
             decay_rate: self.decay_rate,
+            decay_function: self.decay_function,
             _state: PhantomData,
         }
     }
@@ -940,6 +953,13 @@ impl EpisodeBuilder<episode_builder_states::Ready> {
         self
     }
 
+    /// Set decay function override (optional, None = use system default)
+    #[must_use]
+    pub fn with_decay_function(mut self, function: DecayFunction) -> Self {
+        self.decay_function = Some(function);
+        self
+    }
+
     /// Build the episode.
     ///
     /// # Panics
@@ -959,6 +979,7 @@ impl EpisodeBuilder<episode_builder_states::Ready> {
             where_location,
             who,
             decay_rate,
+            decay_function,
             _state: _,
         } = self;
 
@@ -973,6 +994,7 @@ impl EpisodeBuilder<episode_builder_states::Ready> {
         episode.where_location = where_location;
         episode.who = who;
         episode.decay_rate = decay_rate;
+        episode.decay_function = decay_function;
         episode
     }
 }
@@ -1672,7 +1694,10 @@ mod tests {
         let embedding = [0.1; 768];
         let memory = Memory::new("test".to_string(), embedding, Confidence::HIGH);
 
-        assert_eq!(memory.access_count, 0, "New memory should have zero access count");
+        assert_eq!(
+            memory.access_count, 0,
+            "New memory should have zero access count"
+        );
     }
 
     #[test]
@@ -1699,7 +1724,10 @@ mod tests {
             Confidence::HIGH,
         );
 
-        assert_eq!(episode.recall_count, 0, "New episode should have zero recall count");
+        assert_eq!(
+            episode.recall_count, 0,
+            "New episode should have zero recall count"
+        );
     }
 
     #[test]
@@ -1867,5 +1895,122 @@ mod tests {
         }
 
         Ok(())
+    }
+
+    // ========================================================================
+    // Decay Configuration Tests (Milestone 4: Task 004)
+    // ========================================================================
+
+    #[test]
+    fn test_episode_decay_function_default_is_none() {
+        let embedding = [0.1; 768];
+        let when = Utc::now();
+        let episode = Episode::new(
+            "test".to_string(),
+            when,
+            "content".to_string(),
+            embedding,
+            Confidence::HIGH,
+        );
+
+        assert!(
+            episode.decay_function.is_none(),
+            "New episode should have no decay function override (use system default)"
+        );
+    }
+
+    #[test]
+    fn test_episode_builder_with_decay_function() {
+        let embedding = [0.2; 768];
+        let when = Utc::now();
+
+        let episode = EpisodeBuilder::new()
+            .id("test".to_string())
+            .when(when)
+            .what("content".to_string())
+            .embedding(embedding)
+            .confidence(Confidence::HIGH)
+            .with_decay_function(DecayFunction::exponential())
+            .build();
+
+        assert!(
+            episode.decay_function.is_some(),
+            "Builder should set decay function"
+        );
+        assert_eq!(
+            episode.decay_function.unwrap(),
+            DecayFunction::exponential(),
+            "Decay function should match what was set"
+        );
+    }
+
+    #[test]
+    fn test_episode_builder_without_decay_function() {
+        let embedding = [0.3; 768];
+        let when = Utc::now();
+
+        let episode = EpisodeBuilder::new()
+            .id("test".to_string())
+            .when(when)
+            .what("content".to_string())
+            .embedding(embedding)
+            .confidence(Confidence::HIGH)
+            .build();
+
+        assert!(
+            episode.decay_function.is_none(),
+            "Builder should default to None (system default)"
+        );
+    }
+
+    #[test]
+    fn test_episode_different_decay_functions() {
+        let embedding = [0.4; 768];
+        let when = Utc::now();
+
+        // Test exponential decay function
+        let exp_episode = EpisodeBuilder::new()
+            .id("exp".to_string())
+            .when(when)
+            .what("content".to_string())
+            .embedding(embedding)
+            .confidence(Confidence::HIGH)
+            .with_decay_function(DecayFunction::exponential())
+            .build();
+
+        assert_eq!(
+            exp_episode.decay_function.unwrap(),
+            DecayFunction::exponential()
+        );
+
+        // Test power-law decay function
+        let power_episode = EpisodeBuilder::new()
+            .id("power".to_string())
+            .when(when)
+            .what("content".to_string())
+            .embedding(embedding)
+            .confidence(Confidence::HIGH)
+            .with_decay_function(DecayFunction::power_law())
+            .build();
+
+        assert_eq!(
+            power_episode.decay_function.unwrap(),
+            DecayFunction::power_law()
+        );
+
+        // Test two-component decay function
+        let two_comp_episode = EpisodeBuilder::new()
+            .id("two_comp".to_string())
+            .when(when)
+            .what("content".to_string())
+            .embedding(embedding)
+            .confidence(Confidence::HIGH)
+            .with_decay_function(DecayFunction::two_component())
+            .build();
+
+        assert_eq!(
+            two_comp_episode.decay_function.unwrap(),
+            DecayFunction::two_component()
+        );
     }
 }

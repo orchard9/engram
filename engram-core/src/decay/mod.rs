@@ -122,6 +122,9 @@ pub struct BiologicalDecaySystem {
 
     /// Last sleep-dependent consolidation event
     pub last_sleep_consolidation: Option<DateTime<Utc>>,
+
+    /// System-wide decay configuration
+    pub config: DecayConfig,
 }
 
 impl Default for BiologicalDecaySystem {
@@ -131,9 +134,15 @@ impl Default for BiologicalDecaySystem {
 }
 
 impl BiologicalDecaySystem {
-    /// Creates a new biological decay system with empirically validated parameters
+    /// Creates a new biological decay system with default configuration
     #[must_use]
     pub fn new() -> Self {
+        Self::with_config(DecayConfig::default())
+    }
+
+    /// Creates a new biological decay system with custom configuration
+    #[must_use]
+    pub fn with_config(config: DecayConfig) -> Self {
         Self {
             hippocampal: HippocampalDecayFunction::default(),
             neocortical: NeocorticalDecayFunction::default(),
@@ -142,16 +151,16 @@ impl BiologicalDecaySystem {
             remerge: RemergeProcessor::default(),
             consolidation_threshold: 0.3, // Empirically derived threshold
             last_sleep_consolidation: None,
+            config,
         }
     }
 
     /// Creates system with individual differences sampled from population distribution
     #[cfg(all(feature = "psychological_decay", feature = "testing"))]
     pub fn with_individual_differences<R: rand::Rng>(rng: &mut R) -> Self {
-        Self {
-            individual_profile: IndividualDifferenceProfile::sample_from_population(rng),
-            ..Self::new()
-        }
+        let mut system = Self::new();
+        system.individual_profile = IndividualDifferenceProfile::sample_from_population(rng);
+        system
     }
 
     /// Gets the effective hippocampal decay rate for this individual
@@ -207,6 +216,7 @@ impl BiologicalDecaySystem {
     /// * `elapsed_time` - Time since last access
     /// * `access_count` - Number of times memory has been accessed
     /// * `created_at` - When the memory was created
+    /// * `decay_override` - Optional per-memory decay function override
     ///
     /// # Returns
     ///
@@ -218,29 +228,62 @@ impl BiologicalDecaySystem {
         elapsed_time: StdDuration,
         access_count: u64,
         _created_at: DateTime<Utc>,
+        decay_override: Option<DecayFunction>,
     ) -> Confidence {
-        // Select decay function based on access pattern
-        // Frequently accessed (≥3 times) use slower neocortical decay
-        // Infrequently accessed use faster hippocampal decay
-        let consolidation_threshold = 3;
+        // Check if decay is enabled
+        if !self.config.enabled {
+            return base_confidence;
+        }
 
-        if access_count >= consolidation_threshold {
-            // Neocortical system: slow decay for consolidated memories
-            let schema_overlap = 0.6; // Reasonable default for general memories
-            crate::decay::neocortical::apply_neocortical_decay(
-                base_confidence,
-                elapsed_time,
-                &self.neocortical,
-                schema_overlap,
-            )
+        // Use override if provided, otherwise use system default
+        let decay_function = decay_override.unwrap_or(self.config.default_function);
+
+        // Apply the selected decay function
+        let decayed = match decay_function {
+            DecayFunction::Exponential { tau_hours } => {
+                // Hippocampal fast exponential decay
+                let tau_seconds = tau_hours * 3600.0;
+                let elapsed_seconds = elapsed_time.as_secs_f32();
+                let retention = (-elapsed_seconds / tau_seconds).exp();
+                let decayed_confidence = base_confidence.raw() * retention;
+                Confidence::exact(decayed_confidence)
+            }
+            DecayFunction::PowerLaw { beta } => {
+                // Neocortical slow power-law decay
+                let elapsed_seconds = elapsed_time.as_secs_f32();
+                let time_units = elapsed_seconds / 3600.0; // Convert to hours
+                let retention = (1.0 + time_units).powf(-beta);
+                let decayed_confidence = base_confidence.raw() * retention;
+                Confidence::exact(decayed_confidence)
+            }
+            DecayFunction::TwoComponent {
+                consolidation_threshold,
+            } => {
+                // Automatic hippocampal ↔ neocortical transition
+                if access_count >= consolidation_threshold {
+                    // Neocortical system: slow decay for consolidated memories
+                    let schema_overlap = 0.6; // Reasonable default for general memories
+                    crate::decay::neocortical::apply_neocortical_decay(
+                        base_confidence,
+                        elapsed_time,
+                        &self.neocortical,
+                        schema_overlap,
+                    )
+                } else {
+                    // Hippocampal system: fast decay for unconsolidated memories
+                    let hippocampal_retention = self.hippocampal.compute_retention(elapsed_time);
+                    let decayed_confidence = base_confidence.raw() * hippocampal_retention;
+                    Confidence::exact(decayed_confidence)
+                }
+            }
+        };
+
+        // Apply individual differences calibration and respect minimum confidence threshold
+        let calibrated = self.individual_profile.calibrate_confidence(decayed);
+        if calibrated.raw() < self.config.min_confidence {
+            Confidence::exact(self.config.min_confidence)
         } else {
-            // Hippocampal system: fast decay for unconsolidated memories
-            let hippocampal_retention = self.hippocampal.compute_retention(elapsed_time);
-            let decayed_confidence = base_confidence.raw() * hippocampal_retention;
-
-            // Apply individual differences calibration
-            self.individual_profile
-                .calibrate_confidence(Confidence::exact(decayed_confidence))
+            calibrated
         }
     }
 
@@ -433,6 +476,188 @@ pub enum DecayError {
 /// Result type for decay function operations
 pub type DecayResult<T> = Result<T, DecayError>;
 
+/// Configuration for which decay function to use.
+///
+/// Maps to the underlying biological decay systems while providing
+/// a simplified user-facing API for configuring temporal decay behavior.
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum DecayFunction {
+    /// Exponential decay: R(t) = e^(-t/τ)
+    ///
+    /// Fast hippocampal-style decay following Ebbinghaus curve.
+    /// Best for short-term episodic memories (hours to days).
+    Exponential {
+        /// Time constant in hours (default: 1.96 ~2 hours)
+        tau_hours: f32,
+    },
+
+    /// Power-law decay: R(t) = (1 + t)^(-β)
+    ///
+    /// Slow neocortical-style decay following Bahrick permastore.
+    /// Best for long-term semantic memories (months to years).
+    PowerLaw {
+        /// Power-law exponent (default: 0.18)
+        beta: f32,
+    },
+
+    /// Two-component model: Automatic hippocampal ↔ neocortical transition
+    ///
+    /// Implements complementary learning systems theory.
+    /// Automatically switches from fast hippocampal decay to slow
+    /// neocortical decay based on access patterns.
+    TwoComponent {
+        /// Access count to switch from hippocampal to neocortical (default: 3)
+        consolidation_threshold: u64,
+    },
+}
+
+impl Default for DecayFunction {
+    fn default() -> Self {
+        Self::TwoComponent {
+            consolidation_threshold: 3,
+        }
+    }
+}
+
+impl DecayFunction {
+    /// Creates exponential decay with default parameters
+    #[must_use]
+    pub const fn exponential() -> Self {
+        Self::Exponential {
+            tau_hours: 1.96, // Ebbinghaus 2015 replication
+        }
+    }
+
+    /// Creates power-law decay with default parameters
+    #[must_use]
+    pub const fn power_law() -> Self {
+        Self::PowerLaw {
+            beta: 0.18, // Bahrick permastore
+        }
+    }
+
+    /// Creates two-component decay with default parameters
+    #[must_use]
+    pub const fn two_component() -> Self {
+        Self::TwoComponent {
+            consolidation_threshold: 3,
+        }
+    }
+}
+
+/// System-wide decay configuration.
+///
+/// Controls default decay behavior for all memories, with support
+/// for per-memory overrides via `Episode::decay_function`.
+#[derive(Debug, Clone)]
+pub struct DecayConfig {
+    /// Default decay function for new memories
+    pub default_function: DecayFunction,
+
+    /// Enable automatic decay during recall operations
+    pub enabled: bool,
+
+    /// Minimum confidence threshold (memories below this are effectively forgotten)
+    pub min_confidence: f32,
+}
+
+impl Default for DecayConfig {
+    fn default() -> Self {
+        Self {
+            default_function: DecayFunction::default(),
+            enabled: true,
+            min_confidence: 0.1,
+        }
+    }
+}
+
+/// Builder for ergonomic decay configuration.
+///
+/// Provides a fluent API for configuring decay behavior with sensible defaults.
+///
+/// # Examples
+///
+/// ```
+/// # use engram_core::decay::{DecayConfigBuilder, DecayFunction};
+/// // Exponential decay with custom time constant
+/// let config = DecayConfigBuilder::new()
+///     .exponential(2.5)  // 2.5 hour tau
+///     .enabled(true)
+///     .build();
+///
+/// // Power-law decay for long-term memories
+/// let config = DecayConfigBuilder::new()
+///     .power_law(0.15)
+///     .build();
+///
+/// // Two-component with custom consolidation threshold
+/// let config = DecayConfigBuilder::new()
+///     .two_component(5)  // Require 5 accesses for consolidation
+///     .build();
+/// ```
+pub struct DecayConfigBuilder {
+    config: DecayConfig,
+}
+
+impl Default for DecayConfigBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl DecayConfigBuilder {
+    /// Creates a new builder with default configuration
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            config: DecayConfig::default(),
+        }
+    }
+
+    /// Use exponential decay (hippocampal-style)
+    #[must_use]
+    pub const fn exponential(mut self, tau_hours: f32) -> Self {
+        self.config.default_function = DecayFunction::Exponential { tau_hours };
+        self
+    }
+
+    /// Use power-law decay (neocortical-style)
+    #[must_use]
+    pub const fn power_law(mut self, beta: f32) -> Self {
+        self.config.default_function = DecayFunction::PowerLaw { beta };
+        self
+    }
+
+    /// Use two-component automatic switching
+    #[must_use]
+    pub const fn two_component(mut self, consolidation_threshold: u64) -> Self {
+        self.config.default_function = DecayFunction::TwoComponent {
+            consolidation_threshold,
+        };
+        self
+    }
+
+    /// Enable or disable decay
+    #[must_use]
+    pub const fn enabled(mut self, enabled: bool) -> Self {
+        self.config.enabled = enabled;
+        self
+    }
+
+    /// Set minimum confidence threshold
+    #[must_use]
+    pub const fn min_confidence(mut self, min_confidence: f32) -> Self {
+        self.config.min_confidence = min_confidence;
+        self
+    }
+
+    /// Build the final configuration
+    #[must_use]
+    pub const fn build(self) -> DecayConfig {
+        self.config
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -493,5 +718,288 @@ mod tests {
         // High mean should not trigger (active processing)
         let high_activity = vec![0.9; 10];
         assert!(!system.should_consolidate(&high_activity));
+    }
+
+    // Configuration API tests
+    #[test]
+    fn test_decay_function_defaults() {
+        let default_fn = DecayFunction::default();
+        assert!(matches!(
+            default_fn,
+            DecayFunction::TwoComponent {
+                consolidation_threshold: 3
+            }
+        ));
+
+        let exp = DecayFunction::exponential();
+        assert!(matches!(exp, DecayFunction::Exponential { tau_hours: _ }));
+
+        let power = DecayFunction::power_law();
+        assert!(matches!(power, DecayFunction::PowerLaw { beta: _ }));
+
+        let two = DecayFunction::two_component();
+        assert!(matches!(
+            two,
+            DecayFunction::TwoComponent {
+                consolidation_threshold: 3
+            }
+        ));
+    }
+
+    #[test]
+    fn test_decay_config_default() {
+        let config = DecayConfig::default();
+        assert!(config.enabled);
+        assert!((config.min_confidence - 0.1).abs() < 1e-6);
+        assert!(matches!(
+            config.default_function,
+            DecayFunction::TwoComponent { .. }
+        ));
+    }
+
+    #[test]
+    fn test_decay_config_builder_exponential() {
+        let config = DecayConfigBuilder::new()
+            .exponential(2.5)
+            .enabled(true)
+            .build();
+
+        assert!(config.enabled);
+        assert!(matches!(
+            config.default_function,
+            DecayFunction::Exponential { tau_hours } if (tau_hours - 2.5).abs() < 1e-6
+        ));
+    }
+
+    #[test]
+    fn test_decay_config_builder_power_law() {
+        let config = DecayConfigBuilder::new()
+            .power_law(0.15)
+            .min_confidence(0.05)
+            .build();
+
+        assert!(matches!(
+            config.default_function,
+            DecayFunction::PowerLaw { beta } if (beta - 0.15).abs() < 1e-6
+        ));
+        assert!((config.min_confidence - 0.05).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_decay_config_builder_two_component() {
+        let config = DecayConfigBuilder::new()
+            .two_component(5)
+            .enabled(false)
+            .build();
+
+        assert!(!config.enabled);
+        assert!(matches!(
+            config.default_function,
+            DecayFunction::TwoComponent {
+                consolidation_threshold: 5
+            }
+        ));
+    }
+
+    #[test]
+    fn test_decay_config_builder_chaining() {
+        let config = DecayConfigBuilder::new()
+            .exponential(3.0)
+            .enabled(true)
+            .min_confidence(0.2)
+            .build();
+
+        assert!(config.enabled);
+        assert!((config.min_confidence - 0.2).abs() < 1e-6);
+        assert!(matches!(
+            config.default_function,
+            DecayFunction::Exponential { .. }
+        ));
+    }
+
+    #[test]
+    fn test_decay_function_equality() {
+        let func1 = DecayFunction::Exponential { tau_hours: 2.0 };
+        let func2 = DecayFunction::Exponential { tau_hours: 2.0 };
+        let func3 = DecayFunction::Exponential { tau_hours: 2.5 };
+
+        assert_eq!(func1, func2);
+        assert_ne!(func1, func3);
+    }
+
+    // Tests for updated compute_decayed_confidence with DecayConfig
+
+    #[test]
+    fn test_decay_disabled_when_config_disabled() {
+        let config = DecayConfigBuilder::new().enabled(false).build();
+        let system = BiologicalDecaySystem::with_config(config);
+
+        let base_confidence = Confidence::HIGH;
+        let elapsed = StdDuration::from_secs(3600 * 6); // 6 hours
+        let result =
+            system.compute_decayed_confidence(base_confidence, elapsed, 1, Utc::now(), None);
+
+        // When disabled, confidence should not decay
+        assert_eq!(result.raw(), base_confidence.raw());
+    }
+
+    #[test]
+    fn test_per_memory_decay_override_exponential() {
+        let config = DecayConfigBuilder::new()
+            .two_component(3) // Default: two-component
+            .build();
+        let system = BiologicalDecaySystem::with_config(config);
+
+        let base_confidence = Confidence::HIGH;
+        let elapsed = StdDuration::from_secs(3600 * 2); // 2 hours
+
+        // Without override, should use two-component (access_count=1 uses hippocampal)
+        let default_result =
+            system.compute_decayed_confidence(base_confidence, elapsed, 1, Utc::now(), None);
+
+        // With exponential override (faster decay)
+        let override_result = system.compute_decayed_confidence(
+            base_confidence,
+            elapsed,
+            1,
+            Utc::now(),
+            Some(DecayFunction::Exponential { tau_hours: 1.0 }), // Fast decay
+        );
+
+        // Override should produce different result
+        assert_ne!(default_result.raw(), override_result.raw());
+    }
+
+    #[test]
+    fn test_exponential_decay_function() {
+        let config = DecayConfigBuilder::new().exponential(2.0).build();
+        let system = BiologicalDecaySystem::with_config(config);
+
+        let base_confidence = Confidence::HIGH;
+        let elapsed = StdDuration::from_secs(3600 * 2); // 2 hours = 1 tau
+
+        let result =
+            system.compute_decayed_confidence(base_confidence, elapsed, 1, Utc::now(), None);
+
+        // After 1 tau, retention should be approximately e^(-1) ≈ 0.368
+        let expected_retention = (-1.0_f32).exp();
+        let expected_confidence = base_confidence.raw() * expected_retention;
+
+        // Allow some tolerance for individual differences calibration
+        assert!((result.raw() - expected_confidence).abs() < 0.15);
+    }
+
+    #[test]
+    fn test_power_law_decay_function() {
+        let config = DecayConfigBuilder::new().power_law(0.2).build();
+        let system = BiologicalDecaySystem::with_config(config);
+
+        let base_confidence = Confidence::HIGH;
+        let elapsed = StdDuration::from_secs(3600 * 10); // 10 hours
+
+        let result =
+            system.compute_decayed_confidence(base_confidence, elapsed, 1, Utc::now(), None);
+
+        // Power-law decay should be slower than exponential
+        // After 10 hours with beta=0.2: retention = (1 + 10)^(-0.2) ≈ 0.62
+        let time_units = 10.0_f32;
+        let expected_retention = (1.0 + time_units).powf(-0.2);
+        let expected_confidence = base_confidence.raw() * expected_retention;
+
+        // Allow tolerance for individual differences
+        assert!((result.raw() - expected_confidence).abs() < 0.15);
+    }
+
+    #[test]
+    fn test_two_component_transitions_correctly() {
+        let config = DecayConfigBuilder::new()
+            .two_component(3) // Consolidation at 3 accesses
+            .build();
+        let system = BiologicalDecaySystem::with_config(config);
+
+        let base_confidence = Confidence::HIGH;
+        let elapsed = StdDuration::from_secs(3600 * 6); // 6 hours
+
+        // Below threshold: should use hippocampal (fast) decay
+        let hippocampal_result = system.compute_decayed_confidence(
+            base_confidence,
+            elapsed,
+            2, // Below threshold
+            Utc::now(),
+            None,
+        );
+
+        // At/above threshold: should use neocortical (slow) decay
+        let neocortical_result = system.compute_decayed_confidence(
+            base_confidence,
+            elapsed,
+            3, // At threshold
+            Utc::now(),
+            None,
+        );
+
+        // Neocortical should retain more confidence (slower decay)
+        assert!(
+            neocortical_result.raw() > hippocampal_result.raw(),
+            "Neocortical decay should be slower than hippocampal"
+        );
+    }
+
+    #[test]
+    fn test_min_confidence_threshold_enforced() {
+        let min_confidence = 0.2;
+        let config = DecayConfigBuilder::new()
+            .exponential(0.5) // Very fast decay
+            .min_confidence(min_confidence)
+            .build();
+        let system = BiologicalDecaySystem::with_config(config);
+
+        let base_confidence = Confidence::exact(0.5);
+        let elapsed = StdDuration::from_secs(3600 * 100); // 100 hours (extreme decay)
+
+        let result =
+            system.compute_decayed_confidence(base_confidence, elapsed, 1, Utc::now(), None);
+
+        // Should never go below min_confidence
+        assert!(
+            result.raw() >= min_confidence,
+            "Result {} should be >= min_confidence {}",
+            result.raw(),
+            min_confidence
+        );
+    }
+
+    #[test]
+    fn test_different_decay_functions_produce_different_results() {
+        let base_confidence = Confidence::HIGH;
+        let elapsed = StdDuration::from_secs(3600 * 4); // 4 hours
+
+        // Exponential decay
+        let exp_config = DecayConfigBuilder::new().exponential(2.0).build();
+        let exp_system = BiologicalDecaySystem::with_config(exp_config);
+        let exp_result =
+            exp_system.compute_decayed_confidence(base_confidence, elapsed, 1, Utc::now(), None);
+
+        // Power-law decay
+        let power_config = DecayConfigBuilder::new().power_law(0.18).build();
+        let power_system = BiologicalDecaySystem::with_config(power_config);
+        let power_result =
+            power_system.compute_decayed_confidence(base_confidence, elapsed, 1, Utc::now(), None);
+
+        // Two-component decay
+        let two_comp_config = DecayConfigBuilder::new().two_component(3).build();
+        let two_comp_system = BiologicalDecaySystem::with_config(two_comp_config);
+        let two_comp_result = two_comp_system.compute_decayed_confidence(
+            base_confidence,
+            elapsed,
+            1,
+            Utc::now(),
+            None,
+        );
+
+        // All three should produce different results
+        assert_ne!(exp_result.raw(), power_result.raw());
+        assert_ne!(exp_result.raw(), two_comp_result.raw());
+        assert_ne!(power_result.raw(), two_comp_result.raw());
     }
 }

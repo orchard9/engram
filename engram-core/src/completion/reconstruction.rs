@@ -364,6 +364,7 @@ impl PatternCompleter for PatternReconstructor {
                 last_recall: Utc::now(),
                 recall_count: 0,
                 decay_rate: 0.05,
+                decay_function: None, // Use system default for reconstructed episodes
             };
 
             // Build source map

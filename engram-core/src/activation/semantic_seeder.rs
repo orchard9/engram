@@ -175,7 +175,7 @@ impl SemanticActivationSeeder {
         // Step 3: Create a cue from the embedding
         let confidence = Confidence::from_raw(threshold);
         // Use query text as cue ID for traceability
-        let cue_id = format!("semantic:{}", query);
+        let cue_id = format!("semantic:{query}");
         let cue = Cue::embedding(cue_id, embedding_array, confidence);
 
         // Step 4: Use vector seeder to find similar memories
@@ -233,7 +233,7 @@ impl SemanticActivationSeeder {
             embedding_array.copy_from_slice(&embedding_vec);
 
             let confidence = Confidence::from_raw(threshold);
-            let cue_id = format!("semantic_multi:{}:{}", idx, query);
+            let cue_id = format!("semantic_multi:{idx}:{query}");
             let cue = Cue::embedding(cue_id, embedding_array, confidence);
             cues.push(cue);
         }
@@ -243,10 +243,9 @@ impl SemanticActivationSeeder {
         }
 
         // Use multi-cue aggregation (average strategy for now)
-        let outcome = self.vector_seeder.seed_from_multi_cue(
-            &cues,
-            super::multi_cue::CueAggregationStrategy::Average,
-        )?;
+        let outcome = self
+            .vector_seeder
+            .seed_from_multi_cue(&cues, super::multi_cue::CueAggregationStrategy::Average)?;
 
         Ok(outcome)
     }
@@ -255,7 +254,7 @@ impl SemanticActivationSeeder {
     ///
     /// Returns `true` if the embedding provider is available and functional.
     #[must_use]
-    pub fn is_available(&self) -> bool {
+    pub const fn is_available(&self) -> bool {
         // In the future, we might add runtime checks here
         true
     }
@@ -265,7 +264,10 @@ impl SemanticActivationSeeder {
 ///
 /// This trait is now implemented by `crate::query::expansion::QueryExpander`.
 /// Use that implementation for full query expansion with confidence budgets.
-#[deprecated(since = "0.1.0", note = "Use crate::query::expansion::QueryExpander instead")]
+#[deprecated(
+    since = "0.1.0",
+    note = "Use crate::query::expansion::QueryExpander instead"
+)]
 pub trait QueryExpander: Send + Sync {
     /// Expand a query into multiple variants
     fn expand(&self, query: &str) -> Vec<(String, f32)>;
@@ -303,11 +305,7 @@ mod tests {
             let value = (text.len() as f32) / 1000.0;
             let vector = vec![value; 768];
 
-            let model = ModelVersion::new(
-                "mock-model".to_string(),
-                "1.0.0".to_string(),
-                768,
-            );
+            let model = ModelVersion::new("mock-model".to_string(), "1.0.0".to_string(), 768);
             let provenance = EmbeddingProvenance::new(model, language.map(String::from));
 
             Ok(EmbeddingWithProvenance::new(vector, provenance))

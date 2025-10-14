@@ -537,12 +537,19 @@ impl CognitiveRecall {
                             elapsed_std,
                             u64::from(episode.recall_count),
                             episode.when,
+                            episode.decay_function, // Per-memory decay override
                         )
                     } else {
                         confidence
                     };
 
-                    RankedMemory::new(episode, activation, final_confidence, similarity, &self.config)
+                    RankedMemory::new(
+                        episode,
+                        activation,
+                        final_confidence,
+                        similarity,
+                        &self.config,
+                    )
                 })
             })
             .filter(|r| r.confidence.raw() >= self.config.min_confidence)

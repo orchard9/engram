@@ -94,8 +94,7 @@ pub use seeding::{
 };
 #[cfg(feature = "hnsw_index")]
 pub use semantic_seeder::{
-    ActivationSource, FigurativeInterpreter, QueryExpander, SemanticActivationSeeder,
-    SemanticError,
+    ActivationSource, FigurativeInterpreter, SemanticActivationSeeder, SemanticError,
 };
 pub use similarity_config::SimilarityConfig;
 pub mod memory_pool;
