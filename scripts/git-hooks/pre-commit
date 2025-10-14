@@ -1,0 +1,25 @@
+#!/bin/sh
+# Pre-commit hook to enforce code quality standards
+# This runs `make quality` before allowing commits
+
+set -e
+
+echo "🔍 Running make quality checks before commit..."
+echo ""
+
+# Run quality checks
+if make quality; then
+    echo ""
+    echo "✅ Quality checks passed - proceeding with commit"
+    exit 0
+else
+    echo ""
+    echo "❌ Quality checks failed!"
+    echo ""
+    echo "Please fix the issues above before committing."
+    echo "You can run 'make quality' to see the full output."
+    echo ""
+    echo "To bypass this check (NOT RECOMMENDED):"
+    echo "  git commit --no-verify"
+    exit 1
+fi
