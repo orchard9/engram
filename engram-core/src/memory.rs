@@ -1258,6 +1258,8 @@ impl CueBuilder<cue_builder_states::Ready> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)] // Tests are allowed to use unwrap
+
     use super::*;
     use std::fmt::Debug;
 

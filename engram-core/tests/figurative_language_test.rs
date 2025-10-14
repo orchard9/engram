@@ -148,12 +148,7 @@ async fn test_idiom_case_insensitive() {
 
 #[test]
 fn test_analogy_pattern_detection_as() {
-    let lexicon = IdiomLexicon::with_test_data();
-    let interpreter = FigurativeInterpreter::new(lexicon, Arc::new(MockEmbeddingProvider));
-
-    let pattern = interpreter
-        .detect_analogy_pattern("fast as cheetah")
-        .unwrap();
+    let pattern = FigurativeInterpreter::detect_analogy_pattern("fast as cheetah").unwrap();
     assert_eq!(pattern.target, "fast");
     assert_eq!(pattern.relation, AnalogyRelation::As);
     assert_eq!(pattern.source, "cheetah");
@@ -161,12 +156,7 @@ fn test_analogy_pattern_detection_as() {
 
 #[test]
 fn test_analogy_pattern_detection_like() {
-    let lexicon = IdiomLexicon::with_test_data();
-    let interpreter = FigurativeInterpreter::new(lexicon, Arc::new(MockEmbeddingProvider));
-
-    let pattern = interpreter
-        .detect_analogy_pattern("brave like lion")
-        .unwrap();
+    let pattern = FigurativeInterpreter::detect_analogy_pattern("brave like lion").unwrap();
     assert_eq!(pattern.target, "brave");
     assert_eq!(pattern.relation, AnalogyRelation::Like);
     assert_eq!(pattern.source, "lion");
@@ -174,10 +164,7 @@ fn test_analogy_pattern_detection_like() {
 
 #[test]
 fn test_analogy_pattern_detection_is() {
-    let lexicon = IdiomLexicon::with_test_data();
-    let interpreter = FigurativeInterpreter::new(lexicon, Arc::new(MockEmbeddingProvider));
-
-    let pattern = interpreter.detect_analogy_pattern("time is money").unwrap();
+    let pattern = FigurativeInterpreter::detect_analogy_pattern("time is money").unwrap();
     assert_eq!(pattern.target, "time");
     assert_eq!(pattern.relation, AnalogyRelation::Is);
     assert_eq!(pattern.source, "money");
@@ -185,17 +172,10 @@ fn test_analogy_pattern_detection_is() {
 
 #[test]
 fn test_analogy_pattern_rejects_common_phrases() {
-    let lexicon = IdiomLexicon::with_test_data();
-    let interpreter = FigurativeInterpreter::new(lexicon, Arc::new(MockEmbeddingProvider));
-
     // Should not match trivial phrases
-    assert!(interpreter.detect_analogy_pattern("it is good").is_none());
-    assert!(interpreter.detect_analogy_pattern("this is test").is_none());
-    assert!(
-        interpreter
-            .detect_analogy_pattern("there is problem")
-            .is_none()
-    );
+    assert!(FigurativeInterpreter::detect_analogy_pattern("it is good").is_none());
+    assert!(FigurativeInterpreter::detect_analogy_pattern("this is test").is_none());
+    assert!(FigurativeInterpreter::detect_analogy_pattern("there is problem").is_none());
 }
 
 #[test]

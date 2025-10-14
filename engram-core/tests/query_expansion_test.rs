@@ -7,6 +7,10 @@
 //! - Embedding computation
 //! - Integration with semantic activation seeding
 
+#![allow(clippy::unwrap_used)] // Integration tests may use unwrap
+#![allow(clippy::float_cmp)] // Tests may compare floats directly for exact values
+#![allow(clippy::similar_names)] // Test variables like "expander" and "expanded" are clear in context
+
 use engram_core::{
     ConfidenceBudget,
     embedding::{

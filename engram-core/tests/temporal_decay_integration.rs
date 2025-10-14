@@ -30,8 +30,8 @@ mod tests {
     fn create_varied_embedding(base: f32, variation: usize) -> [f32; 768] {
         let mut embedding = [base; 768];
         // Add some variation to make embeddings distinguishable
-        for i in 0..768 {
-            embedding[i] = base + (i as f32 * variation as f32 * 0.0001);
+        for (i, item) in embedding.iter_mut().enumerate() {
+            *item = base + (i as f32 * variation as f32 * 0.0001);
         }
         embedding
     }

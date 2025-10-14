@@ -319,6 +319,8 @@ impl AnalogyEngine {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)] // Tests are allowed to use unwrap
+
     use super::*;
 
     const EPSILON: f32 = 1e-6;

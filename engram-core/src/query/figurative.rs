@@ -12,7 +12,7 @@
 //!
 //! ## Supported Patterns
 //!
-//! - **Idioms**: "break the ice" → ["initiate conversation", "reduce tension"]
+//! - **Idioms**: "break the ice" → `["initiate conversation", "reduce tension"]`
 //! - **Similes**: "fast as cheetah" → compute speed analogy
 //! - **Simple Metaphors**: "X is Y" → compute equivalence analogy
 //!
@@ -159,7 +159,7 @@ impl IdiomLexicon {
     }
 
     /// Add an idiom with its literal expansions.
-    pub fn add_idiom(&mut self, idiom: String, expansions: Vec<String>) {
+    pub fn add_idiom(&mut self, idiom: &str, expansions: Vec<String>) {
         self.idioms.insert(idiom.to_lowercase(), expansions);
     }
 
@@ -209,6 +209,7 @@ impl IdiomLexicon {
     ///
     /// Note: This is a test helper method for both unit and integration tests.
     #[must_use]
+    #[allow(clippy::expect_used)] // Test helper with hardcoded valid JSON
     pub fn with_test_data() -> Self {
         let json = r#"{
             "version": "1.0-test",
@@ -221,7 +222,7 @@ impl IdiomLexicon {
                 "under the weather": ["ill", "sick", "unwell"]
             }
         }"#;
-        Self::from_json_str(json).unwrap()
+        Self::from_json_str(json).expect("test data is valid JSON")
     }
 }
 
@@ -301,6 +302,7 @@ impl FigurativeInterpreter {
     /// # Errors
     ///
     /// Returns error if embedding generation or analogy computation fails.
+    #[allow(clippy::unused_async)] // Async for future-proofing Task 006 analogy interpretation
     pub async fn interpret(
         &self,
         query: &str,
@@ -321,7 +323,7 @@ impl FigurativeInterpreter {
         }
 
         // Step 2: Detect analogy patterns (similes/metaphors)
-        if let Some(pattern) = self.detect_analogy_pattern(query) {
+        if let Some(pattern) = Self::detect_analogy_pattern(query) {
             // For now, return empty - analogy interpretation requires memory graph access
             // This is a placeholder for Task 006 integration
             tracing::debug!(
@@ -348,7 +350,7 @@ impl FigurativeInterpreter {
     ///
     /// `Some(AnalogyPattern)` if pattern detected, `None` otherwise.
     #[must_use]
-    pub fn detect_analogy_pattern(&self, query: &str) -> Option<AnalogyPattern> {
+    pub fn detect_analogy_pattern(query: &str) -> Option<AnalogyPattern> {
         let query_lower = query.to_lowercase();
 
         // Pattern 1: "X as Y"
@@ -485,14 +487,7 @@ mod tests {
 
     #[test]
     fn test_detect_analogy_pattern_as() {
-        let interpreter = FigurativeInterpreter::new(
-            IdiomLexicon::with_test_data(),
-            Arc::new(MockEmbeddingProvider),
-        );
-
-        let pattern = interpreter
-            .detect_analogy_pattern("fast as cheetah")
-            .unwrap();
+        let pattern = FigurativeInterpreter::detect_analogy_pattern("fast as cheetah").unwrap();
         assert_eq!(pattern.target, "fast");
         assert_eq!(pattern.relation, AnalogyRelation::As);
         assert_eq!(pattern.source, "cheetah");
@@ -500,14 +495,7 @@ mod tests {
 
     #[test]
     fn test_detect_analogy_pattern_like() {
-        let interpreter = FigurativeInterpreter::new(
-            IdiomLexicon::with_test_data(),
-            Arc::new(MockEmbeddingProvider),
-        );
-
-        let pattern = interpreter
-            .detect_analogy_pattern("brave like lion")
-            .unwrap();
+        let pattern = FigurativeInterpreter::detect_analogy_pattern("brave like lion").unwrap();
         assert_eq!(pattern.target, "brave");
         assert_eq!(pattern.relation, AnalogyRelation::Like);
         assert_eq!(pattern.source, "lion");
@@ -515,12 +503,7 @@ mod tests {
 
     #[test]
     fn test_detect_analogy_pattern_is() {
-        let interpreter = FigurativeInterpreter::new(
-            IdiomLexicon::with_test_data(),
-            Arc::new(MockEmbeddingProvider),
-        );
-
-        let pattern = interpreter.detect_analogy_pattern("time is money").unwrap();
+        let pattern = FigurativeInterpreter::detect_analogy_pattern("time is money").unwrap();
         assert_eq!(pattern.target, "time");
         assert_eq!(pattern.relation, AnalogyRelation::Is);
         assert_eq!(pattern.source, "money");
@@ -528,14 +511,9 @@ mod tests {
 
     #[test]
     fn test_detect_analogy_pattern_rejects_common_phrases() {
-        let interpreter = FigurativeInterpreter::new(
-            IdiomLexicon::with_test_data(),
-            Arc::new(MockEmbeddingProvider),
-        );
-
         // Should not match common phrases
-        assert!(interpreter.detect_analogy_pattern("it is good").is_none());
-        assert!(interpreter.detect_analogy_pattern("this is test").is_none());
+        assert!(FigurativeInterpreter::detect_analogy_pattern("it is good").is_none());
+        assert!(FigurativeInterpreter::detect_analogy_pattern("this is test").is_none());
     }
 
     #[tokio::test]

@@ -402,6 +402,9 @@ pub enum ExpansionError {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)] // Tests are allowed to use unwrap
+    #![allow(clippy::float_cmp)] // Tests may compare floats directly for exact values
+
     use super::*;
     use crate::embedding::{EmbeddingProvenance, EmbeddingWithProvenance, ModelVersion};
 

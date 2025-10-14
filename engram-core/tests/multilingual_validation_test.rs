@@ -11,6 +11,7 @@
 
 #![allow(clippy::unwrap_used)] // Tests are allowed to use unwrap
 #![allow(clippy::float_cmp)] // Tests may compare floats directly
+#![allow(clippy::similar_names)] // Test variables like "expander" and "expanded" are clear in context
 
 use engram_core::{
     embedding::{

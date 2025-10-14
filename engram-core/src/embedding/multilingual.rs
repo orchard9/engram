@@ -145,6 +145,7 @@ impl MultilingualEncoder {
     ///
     /// Returns error if tokenization or inference fails.
     #[cfg(feature = "multilingual_embeddings")]
+    #[allow(clippy::significant_drop_tightening)] // MutexGuard must live through .run() call
     fn encode_internal(
         &self,
         text: &str,
@@ -194,8 +195,7 @@ impl MultilingualEncoder {
             EmbeddingError::EncodingFailed(format!("failed to create mask tensor: {e}"))
         })?;
 
-        // Lock session for inference
-        #[allow(clippy::significant_drop_tightening)]
+        // Lock session for inference - mutex guard must live through .run() call
         let mut session = self
             .session
             .lock()
