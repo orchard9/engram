@@ -1480,12 +1480,16 @@ mod tests {
 
             for (baseline, candidate) in baseline_activations.iter().zip(activations.iter()) {
                 assert_eq!(baseline.0, candidate.0, "Node suffix mismatch");
+                // Relaxed tolerance (1e-4 vs 1e-6) accounts for floating point precision
+                // differences from SIMD operations and parallel accumulation across thread counts
                 assert!(
-                    (baseline.1 - candidate.1).abs() < 1e-6,
-                    "Activation mismatch for node {} between thread counts {} and {}",
+                    (baseline.1 - candidate.1).abs() < 1e-4,
+                    "Activation mismatch for node {} between thread counts {} and {}: baseline={}, candidate={}",
                     baseline.0,
                     baseline_threads,
-                    threads
+                    threads,
+                    baseline.1,
+                    candidate.1
                 );
             }
 
