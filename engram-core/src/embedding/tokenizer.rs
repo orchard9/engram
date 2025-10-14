@@ -60,8 +60,8 @@ impl SentenceTokenizer {
         {
             let inner = HfTokenizer::from_file(tokenizer_path).map_err(|e| {
                 EmbeddingError::InitializationFailed(format!(
-                    "failed to load tokenizer from {:?}: {}",
-                    tokenizer_path, e
+                    "failed to load tokenizer from {}: {e}",
+                    tokenizer_path.display()
                 ))
             })?;
 
@@ -96,9 +96,10 @@ impl SentenceTokenizer {
             let original_length = text.chars().count();
 
             // Encode with truncation enabled
-            let encoding = self.inner.encode(text, true).map_err(|e| {
-                EmbeddingError::EncodingFailed(format!("tokenization failed: {}", e))
-            })?;
+            let encoding = self
+                .inner
+                .encode(text, true)
+                .map_err(|e| EmbeddingError::EncodingFailed(format!("tokenization failed: {e}")))?;
 
             let token_ids = encoding.get_ids().to_vec();
             let attention_mask = encoding.get_attention_mask().to_vec();
@@ -149,7 +150,7 @@ impl SentenceTokenizer {
 
             // Batch encode
             let encodings = self.inner.encode_batch(inputs, true).map_err(|e| {
-                EmbeddingError::EncodingFailed(format!("batch tokenization failed: {}", e))
+                EmbeddingError::EncodingFailed(format!("batch tokenization failed: {e}"))
             })?;
 
             // Convert encodings to results

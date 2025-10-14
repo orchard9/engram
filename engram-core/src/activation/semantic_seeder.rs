@@ -81,6 +81,7 @@ pub struct SemanticActivationSeeder {
     /// Optional query expander (placeholder for Task 003)
     /// In the future, this will expand queries with synonyms and abbreviations
     #[allow(dead_code)]
+    #[allow(deprecated)]
     query_expander: Option<Arc<dyn QueryExpander>>,
 
     /// Optional figurative interpreter (placeholder for Task 004)
@@ -254,7 +255,7 @@ impl SemanticActivationSeeder {
     ///
     /// Returns `true` if the embedding provider is available and functional.
     #[must_use]
-    pub const fn is_available(&self) -> bool {
+    pub const fn is_available() -> bool {
         // In the future, we might add runtime checks here
         true
     }
@@ -350,7 +351,7 @@ mod tests {
     #[tokio::test]
     async fn test_semantic_seeder_basic() {
         let seeder = create_test_seeder();
-        assert!(seeder.is_available());
+        assert!(SemanticActivationSeeder::is_available());
 
         // This will return empty seeds since we have no memories in the index
         let result = seeder

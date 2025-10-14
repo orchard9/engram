@@ -77,7 +77,7 @@ pub struct AnalogyPattern {
 impl AnalogyPattern {
     /// Create a new analogy pattern.
     #[must_use]
-    pub fn new(target: String, relation: AnalogyRelation, source: String) -> Self {
+    pub const fn new(target: String, relation: AnalogyRelation, source: String) -> Self {
         Self {
             target,
             relation,

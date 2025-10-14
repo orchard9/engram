@@ -68,7 +68,7 @@ fn test_idiom_lexicon_from_json_file() {
 
     if !path.exists() {
         // Skip test if file doesn't exist (CI environment may not have data files)
-        println!("Skipping test: idiom lexicon file not found at {:?}", path);
+        println!("Skipping test: idiom lexicon file not found at {path:?}");
         return;
     }
 

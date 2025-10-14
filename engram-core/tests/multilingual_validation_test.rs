@@ -236,8 +236,7 @@ async fn test_multiple_idioms_all_interpreted() {
         let variants = interpreter.interpret(idiom, Some("en")).await.unwrap();
         assert!(
             !variants.is_empty(),
-            "Expected interpretation for idiom '{}'",
-            idiom
+            "Expected interpretation for idiom '{idiom}'"
         );
     }
 }
@@ -356,7 +355,7 @@ async fn test_expander_handles_empty_query() {
 
     // Should handle empty query gracefully - at least returns original
     assert!(
-        expanded.variants.len() >= 1,
+        !expanded.variants.is_empty(),
         "Should produce at least original variant"
     );
     assert_eq!(expanded.variants[0].text, "");
@@ -443,8 +442,7 @@ async fn test_expansion_completes_within_reasonable_time() {
     // Should complete in reasonable time (< 100ms for mock provider)
     assert!(
         elapsed.as_millis() < 100,
-        "Expansion took too long: {:?}",
-        elapsed
+        "Expansion took too long: {elapsed:?}"
     );
 }
 
@@ -468,7 +466,6 @@ async fn test_batch_expansion_efficiency() {
     // Batch should be efficient (< 500ms for 5 queries with mock provider)
     assert!(
         elapsed.as_millis() < 500,
-        "Batch expansion took too long: {:?}",
-        elapsed
+        "Batch expansion took too long: {elapsed:?}"
     );
 }

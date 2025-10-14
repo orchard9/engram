@@ -334,6 +334,7 @@ impl ConfidenceBudget {
     /// assert!(budget.consume(0.5)); // succeeds
     /// assert!(!budget.consume(0.3)); // fails, would exceed
     /// ```
+    #[must_use]
     pub fn consume(&self, amount: f32) -> bool {
         if amount < 0.0 {
             return false;

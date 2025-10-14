@@ -26,12 +26,12 @@ const EBBINGHAUS_DATA: &[(u64, f32)] = &[
 /// Wickelgren (1974) power-law forgetting data: (time in seconds, retention 0.0-1.0)
 /// Source: Word recognition memory study
 const WICKELGREN_DATA: &[(u64, f32)] = &[
-    (1, 0.97),   // 1 second: 97% retention
-    (2, 0.94),   // 2 seconds: 94% retention
-    (4, 0.91),   // 4 seconds: 91% retention
-    (8, 0.87),   // 8 seconds: 87% retention
-    (16, 0.83),  // 16 seconds: 83% retention
-    (32, 0.78),  // 32 seconds: 78% retention
+    (1, 0.97),  // 1 second: 97% retention
+    (2, 0.94),  // 2 seconds: 94% retention
+    (4, 0.91),  // 4 seconds: 91% retention
+    (8, 0.87),  // 8 seconds: 87% retention
+    (16, 0.83), // 16 seconds: 83% retention
+    (32, 0.78), // 32 seconds: 78% retention
 ];
 
 /// Helper function to compute pure mathematical decay without biological enhancements
@@ -56,7 +56,9 @@ fn compute_retention_pure(
             let t = elapsed_seconds as f32;
             (1.0 + t).powf(-beta)
         }
-        DecayFunction::TwoComponent { consolidation_threshold } => {
+        DecayFunction::TwoComponent {
+            consolidation_threshold,
+        } => {
             // Switch between hippocampal and neocortical based on access count
             if access_count >= consolidation_threshold {
                 // Neocortical: slow power-law decay (β ≈ 0.18)
@@ -93,7 +95,9 @@ fn compute_retention_pure(
 #[test]
 fn test_exponential_decay_matches_ebbinghaus_within_5_percent() {
     println!("\n=== Ebbinghaus Exponential Forgetting Curve Validation ===");
-    println!("Reference: Ebbinghaus, H. (1885). Memory: A Contribution to Experimental Psychology\n");
+    println!(
+        "Reference: Ebbinghaus, H. (1885). Memory: A Contribution to Experimental Psychology\n"
+    );
 
     // Exponential decay: R(t) = e^(-t/τ)
     // We need to find τ (tau) in hours that best fits Ebbinghaus data
@@ -104,8 +108,10 @@ fn test_exponential_decay_matches_ebbinghaus_within_5_percent() {
     let mut max_error: f32 = 0.0;
     let mut errors = Vec::new();
 
-    println!("{:<15} {:<12} {:<12} {:<12} {:<10}",
-             "Time", "Expected", "Computed", "Abs Error", "Error %");
+    println!(
+        "{:<15} {:<12} {:<12} {:<12} {:<10}",
+        "Time", "Expected", "Computed", "Abs Error", "Error %"
+    );
     println!("{}", "-".repeat(65));
 
     for &(seconds, expected_retention) in EBBINGHAUS_DATA {
@@ -118,13 +124,14 @@ fn test_exponential_decay_matches_ebbinghaus_within_5_percent() {
         let time_str = if hours < 1 {
             format!("{} min", seconds / 60)
         } else if hours < 48 {
-            format!("{} hours", hours)
+            format!("{hours} hours")
         } else {
             format!("{} days", hours / 24)
         };
 
-        println!("{:<15} {:<12.3} {:<12.3} {:<12.3} {:<10.2}%",
-                 time_str, expected_retention, computed_retention, error, percent_error);
+        println!(
+            "{time_str:<15} {expected_retention:<12.3} {computed_retention:<12.3} {error:<12.3} {percent_error:<10.2}%"
+        );
 
         total_error += error;
         max_error = max_error.max(error);
@@ -132,9 +139,7 @@ fn test_exponential_decay_matches_ebbinghaus_within_5_percent() {
 
         assert!(
             percent_error < 5.0,
-            "Error at t={} exceeds 5%: {:.1}%",
-            time_str,
-            percent_error
+            "Error at t={time_str} exceeds 5%: {percent_error:.1}%"
         );
     }
 
@@ -142,15 +147,14 @@ fn test_exponential_decay_matches_ebbinghaus_within_5_percent() {
     let mean_percent = (mean_error / 0.35) * 100.0; // Mean retention ~0.35
 
     println!("\n{}", "-".repeat(65));
-    println!("Mean absolute error: {:.4} ({:.2}%)", mean_error, mean_percent);
-    println!("Max error: {:.4}", max_error);
+    println!("Mean absolute error: {mean_error:.4} ({mean_percent:.2}%)");
+    println!("Max error: {max_error:.4}");
     println!("\n✓ All data points within 5% error threshold");
 
     // Overall mean error should be <3% of mean retention
     assert!(
         mean_error < 0.03,
-        "Mean error {:.4} exceeds target of <0.03",
-        mean_error
+        "Mean error {mean_error:.4} exceeds target of <0.03"
     );
 }
 
@@ -167,8 +171,10 @@ fn test_power_law_decay_matches_wickelgren_within_5_percent() {
     let mut total_error: f32 = 0.0;
     let mut max_error: f32 = 0.0;
 
-    println!("{:<15} {:<12} {:<12} {:<12} {:<10}",
-             "Time", "Expected", "Computed", "Abs Error", "Error %");
+    println!(
+        "{:<15} {:<12} {:<12} {:<12} {:<10}",
+        "Time", "Expected", "Computed", "Abs Error", "Error %"
+    );
     println!("{}", "-".repeat(65));
 
     for &(seconds, expected_retention) in WICKELGREN_DATA {
@@ -177,18 +183,21 @@ fn test_power_law_decay_matches_wickelgren_within_5_percent() {
         let error = (computed_retention - expected_retention).abs();
         let percent_error = (error / expected_retention) * 100.0;
 
-        println!("{:<15} {:<12.3} {:<12.3} {:<12.3} {:<10.2}%",
-                 format!("{} sec", seconds), expected_retention, computed_retention,
-                 error, percent_error);
+        println!(
+            "{:<15} {:<12.3} {:<12.3} {:<12.3} {:<10.2}%",
+            format!("{} sec", seconds),
+            expected_retention,
+            computed_retention,
+            error,
+            percent_error
+        );
 
         total_error += error;
         max_error = max_error.max(error);
 
         assert!(
             percent_error < 5.0,
-            "Error at t={}s exceeds 5%: {:.1}%",
-            seconds,
-            percent_error
+            "Error at t={seconds}s exceeds 5%: {percent_error:.1}%"
         );
     }
 
@@ -196,14 +205,13 @@ fn test_power_law_decay_matches_wickelgren_within_5_percent() {
     let mean_percent = (mean_error / 0.88) * 100.0; // Mean retention ~0.88
 
     println!("\n{}", "-".repeat(65));
-    println!("Mean absolute error: {:.4} ({:.2}%)", mean_error, mean_percent);
-    println!("Max error: {:.4}", max_error);
+    println!("Mean absolute error: {mean_error:.4} ({mean_percent:.2}%)");
+    println!("Max error: {max_error:.4}");
     println!("\n✓ All data points within 5% error threshold");
 
     assert!(
         mean_error < 0.03,
-        "Mean error {:.4} exceeds target of <0.03",
-        mean_error
+        "Mean error {mean_error:.4} exceeds target of <0.03"
     );
 }
 
@@ -225,28 +233,25 @@ fn test_two_component_model_consolidation_effect() {
     let neocortical_retention = compute_retention_pure(decay_func, time_24h, 5);
 
     println!("After 24 hours:");
-    println!("  Hippocampal (1 access):  {:.3}", hippocampal_retention);
-    println!("  Neocortical (5 accesses): {:.3}", neocortical_retention);
+    println!("  Hippocampal (1 access):  {hippocampal_retention:.3}");
+    println!("  Neocortical (5 accesses): {neocortical_retention:.3}");
 
     // Consolidated memories should decay slower
     assert!(
         neocortical_retention > hippocampal_retention,
-        "Consolidated memories should have higher retention: {} vs {}",
-        neocortical_retention,
-        hippocampal_retention
+        "Consolidated memories should have higher retention: {neocortical_retention} vs {hippocampal_retention}"
     );
 
     // Validate consolidation benefit matches cognitive psychology
     // Consolidated memories retain ~1.5-2.5x better after 1 day
     let benefit_ratio = neocortical_retention / hippocampal_retention;
 
-    println!("\nConsolidation benefit ratio: {:.2}x", benefit_ratio);
+    println!("\nConsolidation benefit ratio: {benefit_ratio:.2}x");
     println!("Expected range: 1.5x - 2.5x");
 
     assert!(
-        benefit_ratio >= 1.5 && benefit_ratio <= 2.5,
-        "Consolidation benefit ratio {:.2} outside expected range [1.5, 2.5]",
-        benefit_ratio
+        (1.5..=2.5).contains(&benefit_ratio),
+        "Consolidation benefit ratio {benefit_ratio:.2} outside expected range [1.5, 2.5]"
     );
 
     println!("\n✓ Consolidation effect validated");
@@ -258,15 +263,19 @@ fn test_decay_function_comparison() {
 
     let exponential = DecayFunction::Exponential { tau_hours: 1.44 };
     let power_law = DecayFunction::PowerLaw { beta: 0.25 };
-    let two_component = DecayFunction::TwoComponent { consolidation_threshold: 3 };
+    let two_component = DecayFunction::TwoComponent {
+        consolidation_threshold: 3,
+    };
     let hybrid = DecayFunction::Hybrid {
         short_term_tau: 5.0,
         long_term_beta: 0.30,
         transition_point: 6 * 3600,
     };
 
-    println!("{:<15} {:<12} {:<12} {:<12} {:<12} {:<12}",
-             "Time", "Exponential", "Power-Law", "Two-Comp", "Hybrid", "Ebbinghaus");
+    println!(
+        "{:<15} {:<12} {:<12} {:<12} {:<12} {:<12}",
+        "Time", "Exponential", "Power-Law", "Two-Comp", "Hybrid", "Ebbinghaus"
+    );
     println!("{}", "-".repeat(80));
 
     for &(seconds, expected) in EBBINGHAUS_DATA {
@@ -279,13 +288,14 @@ fn test_decay_function_comparison() {
         let time_str = if hours < 1 {
             format!("{} min", seconds / 60)
         } else if hours < 48 {
-            format!("{} hrs", hours)
+            format!("{hours} hrs")
         } else {
             format!("{} days", hours / 24)
         };
 
-        println!("{:<15} {:<12.3} {:<12.3} {:<12.3} {:<12.3} {:<12.3}",
-                 time_str, exp_decay, pow_decay, two_decay, hybrid_decay, expected);
+        println!(
+            "{time_str:<15} {exp_decay:<12.3} {pow_decay:<12.3} {two_decay:<12.3} {hybrid_decay:<12.3} {expected:<12.3}"
+        );
     }
 
     println!("\n✓ Comparison table generated");
@@ -309,8 +319,8 @@ fn test_spaced_repetition_reduces_decay() {
     let retention_multiple = compute_retention_pure(decay_func, time_7d, 5);
 
     println!("After 7 days:");
-    println!("  Single retrieval:     {:.3}", retention_single);
-    println!("  Multiple retrievals:  {:.3}", retention_multiple);
+    println!("  Single retrieval:     {retention_single:.3}");
+    println!("  Multiple retrievals:  {retention_multiple:.3}");
 
     let improvement = (retention_multiple / retention_single) - 1.0;
     println!("\nRetention improvement: {:.1}%", improvement * 100.0);
@@ -346,8 +356,8 @@ fn test_no_systematic_bias_in_errors() {
         }
     }
 
-    println!("Positive errors (over-prediction): {}", positive_errors);
-    println!("Negative errors (under-prediction): {}", negative_errors);
+    println!("Positive errors (over-prediction): {positive_errors}");
+    println!("Negative errors (under-prediction): {negative_errors}");
 
     // Errors should be reasonably balanced (not all one direction)
     // Allow up to 70% skew in either direction
@@ -357,7 +367,7 @@ fn test_no_systematic_bias_in_errors() {
     println!("Positive error ratio: {:.2}%", pos_ratio * 100.0);
 
     assert!(
-        pos_ratio >= 0.3 && pos_ratio <= 0.7,
+        (0.3..=0.7).contains(&pos_ratio),
         "Systematic bias detected: {:.1}% errors are positive (should be 30-70%)",
         pos_ratio * 100.0
     );
@@ -386,14 +396,13 @@ fn test_mean_absolute_error_under_3_percent() {
     let mean_error = total_error / total_points as f32;
     let mean_percent = (mean_error / 0.35) * 100.0; // Relative to mean retention
 
-    println!("Total validation points: {}", total_points);
-    println!("Mean absolute error: {:.4}", mean_error);
-    println!("Mean percent error: {:.2}%", mean_percent);
+    println!("Total validation points: {total_points}");
+    println!("Mean absolute error: {mean_error:.4}");
+    println!("Mean percent error: {mean_percent:.2}%");
 
     assert!(
         mean_error < 0.03,
-        "Mean error {:.4} exceeds 3% threshold",
-        mean_error
+        "Mean error {mean_error:.4} exceeds 3% threshold"
     );
 
     println!("\n✓ Mean absolute error is <3%");
@@ -409,17 +418,19 @@ fn test_hybrid_decay_matches_ebbinghaus_within_5_percent() {
     // Parameters from empirical fitting (see /tmp/fit_hybrid.py)
     // Best achievable: mean error ~15%, significantly better than pure exponential (~24%)
     let decay_func = DecayFunction::Hybrid {
-        short_term_tau: 5.0,         // 5 hours for early decay
-        long_term_beta: 0.30,        // Power-law for late decay
-        transition_point: 6 * 3600,  // Transition at 6 hours
+        short_term_tau: 5.0,        // 5 hours for early decay
+        long_term_beta: 0.30,       // Power-law for late decay
+        transition_point: 6 * 3600, // Transition at 6 hours
     };
 
     let mut total_error: f32 = 0.0;
     let mut max_error: f32 = 0.0;
     let mut max_percent_error: f32 = 0.0;
 
-    println!("{:<15} {:<12} {:<12} {:<12} {:<10}",
-             "Time", "Expected", "Computed", "Abs Error", "Error %");
+    println!(
+        "{:<15} {:<12} {:<12} {:<12} {:<10}",
+        "Time", "Expected", "Computed", "Abs Error", "Error %"
+    );
     println!("{}", "-".repeat(65));
 
     for &(seconds, expected_retention) in EBBINGHAUS_DATA {
@@ -432,13 +443,14 @@ fn test_hybrid_decay_matches_ebbinghaus_within_5_percent() {
         let time_str = if hours < 1 {
             format!("{} min", seconds / 60)
         } else if hours < 48 {
-            format!("{} hours", hours)
+            format!("{hours} hours")
         } else {
             format!("{} days", hours / 24)
         };
 
-        println!("{:<15} {:<12.3} {:<12.3} {:<12.3} {:<10.2}%",
-                 time_str, expected_retention, computed_retention, error, percent_error);
+        println!(
+            "{time_str:<15} {expected_retention:<12.3} {computed_retention:<12.3} {error:<12.3} {percent_error:<10.2}%"
+        );
 
         total_error += error;
         max_error = max_error.max(error);
@@ -449,22 +461,21 @@ fn test_hybrid_decay_matches_ebbinghaus_within_5_percent() {
     let mean_percent = (mean_error / 0.35) * 100.0; // Mean retention ~0.35
 
     println!("\n{}", "-".repeat(65));
-    println!("Mean absolute error: {:.4} ({:.2}%)", mean_error, mean_percent);
-    println!("Max error: {:.4}", max_error);
-    println!("Max percent error: {:.2}%", max_percent_error);
+    println!("Mean absolute error: {mean_error:.4} ({mean_percent:.2}%)");
+    println!("Max error: {max_error:.4}");
+    println!("Max percent error: {max_percent_error:.2}%");
 
     // Hybrid provides significantly better fit than pure exponential (~24% mean error)
     // Realistic threshold based on empirical fitting: mean error ~15%
     assert!(
         mean_error < 0.20,
-        "Mean error {:.4} exceeds 0.20 threshold (empirical best is ~0.15)",
-        mean_error
+        "Mean error {mean_error:.4} exceeds 0.20 threshold (empirical best is ~0.15)"
     );
 
     // Document that hybrid outperforms pure exponential
     println!("\n✓ Hybrid decay provides improved fit over pure exponential");
     println!("  Pure exponential mean error: ~24%");
-    println!("  Hybrid mean error: {:.2}%", mean_percent);
+    println!("  Hybrid mean error: {mean_percent:.2}%");
 }
 
 #[test]
@@ -480,23 +491,23 @@ fn test_hybrid_transition_continuity() {
 
     // Test points around the 6-hour transition
     let pre_transition = 5 * 3600; // 5 hours
-    let at_transition = 6 * 3600;  // 6 hours
+    let at_transition = 6 * 3600; // 6 hours
     let post_transition = 7 * 3600; // 7 hours
 
     let retention_pre = compute_retention_pure(decay_func, pre_transition, 1);
     let retention_at = compute_retention_pure(decay_func, at_transition, 1);
     let retention_post = compute_retention_pure(decay_func, post_transition, 1);
 
-    println!("5 hours (exponential): {:.4}", retention_pre);
-    println!("6 hours (transition):  {:.4}", retention_at);
-    println!("7 hours (power-law):   {:.4}", retention_post);
+    println!("5 hours (exponential): {retention_pre:.4}");
+    println!("6 hours (transition):  {retention_at:.4}");
+    println!("7 hours (power-law):   {retention_post:.4}");
 
     // Document the transition behavior
     let jump_pre_to_at = (retention_pre - retention_at).abs();
     let jump_at_to_post = (retention_at - retention_post).abs();
 
-    println!("\nJump from 5h to 6h: {:.4}", jump_pre_to_at);
-    println!("Jump from 6h to 7h: {:.4}", jump_at_to_post);
+    println!("\nJump from 5h to 6h: {jump_pre_to_at:.4}");
+    println!("Jump from 6h to 7h: {jump_at_to_post:.4}");
 
     // The discontinuity is inherent to switching between functional forms
     // Document it rather than treating it as a bug
@@ -506,26 +517,21 @@ fn test_hybrid_transition_continuity() {
     // Verify the model doesn't produce nonsensical values
     assert!(
         retention_pre > 0.0 && retention_pre <= 1.0,
-        "Pre-transition retention {} outside valid range [0,1]",
-        retention_pre
+        "Pre-transition retention {retention_pre} outside valid range [0,1]"
     );
     assert!(
         retention_at > 0.0 && retention_at <= 1.0,
-        "At-transition retention {} outside valid range [0,1]",
-        retention_at
+        "At-transition retention {retention_at} outside valid range [0,1]"
     );
     assert!(
         retention_post > 0.0 && retention_post <= 1.0,
-        "Post-transition retention {} outside valid range [0,1]",
-        retention_post
+        "Post-transition retention {retention_post} outside valid range [0,1]"
     );
 
     // Verify monotonic decrease (no increases in retention over time)
     assert!(
         retention_post < retention_at,
-        "Retention increased after transition: {} -> {}",
-        retention_at,
-        retention_post
+        "Retention increased after transition: {retention_at} -> {retention_post}"
     );
 
     println!("\n✓ Hybrid transition validated (produces reasonable values)");

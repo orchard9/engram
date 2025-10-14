@@ -102,7 +102,7 @@ impl SynonymLexicon {
         let confidence = confidence.clamp(0.0, 1.0);
         self.synonyms
             .entry(term)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push((synonym, confidence));
     }
 
@@ -113,10 +113,7 @@ impl SynonymLexicon {
     /// * `term` - The original term
     /// * `synonyms` - List of (synonym, confidence) pairs
     pub fn add_synonyms(&mut self, term: String, synonyms: Vec<(String, f32)>) {
-        self.synonyms
-            .entry(term)
-            .or_insert_with(Vec::new)
-            .extend(synonyms);
+        self.synonyms.entry(term).or_default().extend(synonyms);
     }
 
     /// Create a lexicon with default English synonyms for testing.
@@ -179,7 +176,7 @@ impl Lexicon for SynonymLexicon {
     }
 
     fn supports_language(&self, language: &str) -> bool {
-        self.language.as_ref().map_or(true, |lang| lang == language)
+        self.language.as_ref().is_none_or(|lang| lang == language)
     }
 }
 
@@ -234,7 +231,7 @@ impl AbbreviationLexicon {
         let confidence = confidence.clamp(0.0, 1.0);
         self.abbreviations
             .entry(abbreviation)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push((expansion, confidence));
     }
 
@@ -249,7 +246,7 @@ impl AbbreviationLexicon {
     pub fn add_expansions(&mut self, abbreviation: String, expansions: Vec<(String, f32)>) {
         self.abbreviations
             .entry(abbreviation)
-            .or_insert_with(Vec::new)
+            .or_default()
             .extend(expansions);
     }
 
@@ -348,7 +345,7 @@ impl Lexicon for CompositeLexicon {
 
         for lexicon in &self.lexicons {
             // Only consult lexicons that support this language
-            if language.map_or(true, |lang| lexicon.supports_language(lang)) {
+            if language.is_none_or(|lang| lexicon.supports_language(lang)) {
                 all_variants.extend(lexicon.lookup(query, language));
             }
         }
@@ -369,8 +366,7 @@ impl Lexicon for CompositeLexicon {
                 let variant_type = all_variants
                     .iter()
                     .find(|v| v.text == text)
-                    .map(|v| v.variant_type)
-                    .unwrap_or(VariantType::Synonym);
+                    .map_or(VariantType::Synonym, |v| v.variant_type);
 
                 QueryVariant::new(text, variant_type, confidence)
             })

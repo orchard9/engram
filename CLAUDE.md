@@ -17,7 +17,7 @@ roadmap/milestone-0/: Tasks are stored as 001*{task_name}*{task_status}.md files
 6. Review the code to ensure it works properly and adheres to the system architecture
 7. Make any necessary changes based on review
 8. Follow the Pareto principle to integration test and fix any issues
-9. Run `make quality` before handing off changes
+9. **CRITICAL**: Run `make quality` and fix ALL clippy warnings before proceeding - zero warnings allowed
 10. Verify implementation matches task requirements. Re-read the task file and compare against your changes to ensure full alignment with specifications. If requirements are not met, create a follow-up task in the same milestone using the original task name as a prefix.
 11. Rename the task file from \_in_progress to \_complete
 12. Use git status to add/ignore/remove what should be removed, then commit your work

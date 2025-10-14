@@ -67,7 +67,7 @@ impl ExpandedQuery {
 
     /// Get number of variants generated.
     #[must_use]
-    pub fn variant_count(&self) -> usize {
+    pub const fn variant_count(&self) -> usize {
         self.variants.len()
     }
 }
@@ -94,7 +94,7 @@ pub struct QueryVariant {
 impl QueryVariant {
     /// Create a new query variant without embedding.
     #[must_use]
-    pub fn new(text: String, variant_type: VariantType, confidence: f32) -> Self {
+    pub const fn new(text: String, variant_type: VariantType, confidence: f32) -> Self {
         Self {
             text,
             variant_type,
@@ -105,7 +105,7 @@ impl QueryVariant {
 
     /// Create a query variant with embedding.
     #[must_use]
-    pub fn with_embedding(
+    pub const fn with_embedding(
         text: String,
         variant_type: VariantType,
         confidence: f32,
@@ -473,12 +473,8 @@ mod tests {
     #[test]
     fn test_variant_with_embedding() {
         let embedding = vec![0.5; 768];
-        let variant = QueryVariant::with_embedding(
-            "test".to_string(),
-            VariantType::Synonym,
-            0.8,
-            embedding.clone(),
-        );
+        let variant =
+            QueryVariant::with_embedding("test".to_string(), VariantType::Synonym, 0.8, embedding);
         assert!(variant.has_embedding());
         assert_eq!(variant.embedding.as_ref().unwrap().len(), 768);
     }

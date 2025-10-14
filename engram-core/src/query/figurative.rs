@@ -110,7 +110,7 @@ impl IdiomLexicon {
     /// Returns error if file cannot be read or JSON is malformed.
     pub fn from_json_file(path: &Path) -> Result<Self, InterpretationError> {
         let content = std::fs::read_to_string(path).map_err(|e| {
-            InterpretationError::LexiconLoadFailed(format!("failed to read file: {}", e))
+            InterpretationError::LexiconLoadFailed(format!("failed to read file: {e}"))
         })?;
 
         Self::from_json_str(&content)
@@ -123,7 +123,7 @@ impl IdiomLexicon {
     /// Returns error if JSON is malformed.
     pub fn from_json_str(json: &str) -> Result<Self, InterpretationError> {
         let value: serde_json::Value = serde_json::from_str(json)
-            .map_err(|e| InterpretationError::LexiconLoadFailed(format!("invalid JSON: {}", e)))?;
+            .map_err(|e| InterpretationError::LexiconLoadFailed(format!("invalid JSON: {e}")))?;
 
         let version = value
             .get("version")
@@ -176,7 +176,9 @@ impl IdiomLexicon {
     /// `Some(expansions)` if idiom is found, `None` otherwise.
     #[must_use]
     pub fn lookup(&self, query: &str) -> Option<&[String]> {
-        self.idioms.get(&query.to_lowercase()).map(|v| v.as_slice())
+        self.idioms
+            .get(&query.to_lowercase())
+            .map(std::vec::Vec::as_slice)
     }
 
     /// Get the number of idioms in the lexicon.

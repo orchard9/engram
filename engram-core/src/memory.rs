@@ -955,7 +955,7 @@ impl EpisodeBuilder<episode_builder_states::Ready> {
 
     /// Set decay function override (optional, None = use system default)
     #[must_use]
-    pub fn with_decay_function(mut self, function: DecayFunction) -> Self {
+    pub const fn with_decay_function(mut self, function: DecayFunction) -> Self {
         self.decay_function = Some(function);
         self
     }
@@ -1815,7 +1815,7 @@ mod tests {
         let earlier_time = Utc::now() - chrono::Duration::hours(1);
         memory.last_access = earlier_time;
 
-        let cloned = memory.clone();
+        let cloned = memory;
 
         assert_eq!(
             cloned.access_count, 5,

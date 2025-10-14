@@ -173,16 +173,13 @@ mod tests {
 
         assert!(
             with_decay_conf < no_decay_conf,
-            "Confidence with decay ({}) should be less than without decay ({})",
-            with_decay_conf,
-            no_decay_conf
+            "Confidence with decay ({with_decay_conf}) should be less than without decay ({no_decay_conf})"
         );
 
         // With decay should be measurably lower but still above minimum threshold
         assert!(
             with_decay_conf >= 0.1,
-            "Confidence with decay should be >= 0.1, got {}",
-            with_decay_conf
+            "Confidence with decay should be >= 0.1, got {with_decay_conf}"
         );
     }
 
@@ -301,8 +298,7 @@ mod tests {
         // Note: Decay still happens even after 1 minute, so we check for >0.75 instead of >0.85
         assert!(
             result_confidence >= 0.75,
-            "Recent memory should have minimal decay, got {}",
-            result_confidence
+            "Recent memory should have minimal decay, got {result_confidence}"
         );
     }
 
@@ -335,15 +331,13 @@ mod tests {
         let per_call = elapsed / iterations;
 
         println!(
-            "Decay computation: {} iterations in {:?} ({:?} per call)",
-            iterations, elapsed, per_call
+            "Decay computation: {iterations} iterations in {elapsed:?} ({per_call:?} per call)"
         );
 
         // Should be well under 1ms per call
         assert!(
             per_call.as_micros() < 1000,
-            "Decay computation should be <1ms, got {:?}",
-            per_call
+            "Decay computation should be <1ms, got {per_call:?}"
         );
     }
 
@@ -391,9 +385,7 @@ mod tests {
         // Decay overhead should be minimal (< 2x baseline)
         assert!(
             with_decay < baseline * 2,
-            "Decay overhead too high: baseline={:?}, with_decay={:?}",
-            baseline,
-            with_decay
+            "Decay overhead too high: baseline={baseline:?}, with_decay={with_decay:?}"
         );
     }
 }
