@@ -1,0 +1,13 @@
+# Ebbinghaus Forgetting Curve Data (1885)
+# Original replication data showing exponential forgetting
+# time_seconds,retention_percent
+# Source: Ebbinghaus, H. (1885). Memory: A Contribution to Experimental Psychology
+
+time_seconds,retention
+1200,0.58
+3600,0.44
+32400,0.36
+86400,0.33
+172800,0.28
+518400,0.25
+2678400,0.21

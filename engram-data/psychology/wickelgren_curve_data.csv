@@ -1,0 +1,12 @@
+# Wickelgren Power-Law Forgetting Data (1974)
+# Word recognition memory study showing power-law decay
+# time_seconds,retention
+# Source: Wickelgren, W. A. (1974). Single-trace fragility theory of memory dynamics
+
+time_seconds,retention
+1,0.97
+2,0.94
+4,0.91
+8,0.87
+16,0.83
+32,0.78
