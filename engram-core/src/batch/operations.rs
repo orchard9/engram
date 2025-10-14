@@ -17,7 +17,7 @@ impl BatchOperations for MemoryStore {
         // Process episodes in parallel while maintaining cognitive semantics
         let activations: Vec<Activation> = episodes
             .into_par_iter()
-            .map(|episode| self.store(episode))
+            .map(|episode| self.store(episode).activation)
             .collect();
 
         // Get peak pressure after all operations
@@ -55,7 +55,7 @@ impl BatchOperations for MemoryStore {
         } else {
             let embedding_results: Vec<_> = embedding_cues
                 .into_par_iter()
-                .map(|cue| self.recall(&cue))
+                .map(|cue| self.recall(&cue).results)
                 .collect();
             results.extend(embedding_results);
             0
@@ -65,7 +65,7 @@ impl BatchOperations for MemoryStore {
         if !other_cues.is_empty() {
             let other_results: Vec<_> = other_cues
                 .into_par_iter()
-                .map(|cue| self.recall(&cue))
+                .map(|cue| self.recall(&cue).results)
                 .collect();
             results.extend(other_results);
         }

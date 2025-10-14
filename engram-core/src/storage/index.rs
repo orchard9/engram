@@ -23,7 +23,7 @@ impl LockFreeHashIndex {
     ///
     /// # Errors
     ///
-    /// Returns [`StorageError`](super::StorageError) when an empty key is provided.
+    /// Returns [`StorageError`] when an empty key is provided.
     pub fn insert(&self, key: &str, value: u64) -> StorageResult<()> {
         if key.trim().is_empty() {
             return Err(StorageError::Configuration(

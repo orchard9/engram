@@ -1,0 +1,99 @@
+---
+source: engram-core/tests/spreading_validation.rs
+expression: "FixtureSnapshot { metadata: metadata.clone(), snapshot: normalized, }"
+---
+metadata:
+  name: cycle
+  description: Directed cycle graph stressing cycle detection
+  seeds:
+    - - Cycle_0
+      - 1
+  node_count: 5
+  edge_count: 5
+  average_out_degree: 1
+  adjacency:
+    Cycle_0:
+      - target: Cycle_1
+        weight: 0.85
+        edge_type: Excitatory
+    Cycle_1:
+      - target: Cycle_2
+        weight: 0.85
+        edge_type: Excitatory
+    Cycle_2:
+      - target: Cycle_3
+        weight: 0.85
+        edge_type: Excitatory
+    Cycle_3:
+      - target: Cycle_4
+        weight: 0.85
+        edge_type: Excitatory
+    Cycle_4:
+      - target: Cycle_0
+        weight: 0.85
+        edge_type: Excitatory
+snapshot:
+  seeds:
+    - - Cycle_0
+      - 1
+  activations:
+    - memory_id: Cycle_0
+      activation: 1
+      confidence: 1
+      hop_count: 0
+      storage_tier: Hot
+      flags: 0b00000000
+    - memory_id: Cycle_1
+      activation: 0.422
+      confidence: 0.401
+      hop_count: 1
+      storage_tier: Warm
+      flags: 0b00000000
+    - memory_id: Cycle_2
+      activation: 0.088
+      confidence: 0.084
+      hop_count: 1
+      storage_tier: Warm
+      flags: 0b00000000
+    - memory_id: Cycle_3
+      activation: 0
+      confidence: 0
+      hop_count: 0
+      storage_tier: Cold
+      flags: 0b00000000
+  tier_summaries:
+    - - Cold
+      - node_count: 1
+        total_activation: 0
+        average_confidence: 0
+    - - Hot
+      - node_count: 1
+        total_activation: 1
+        average_confidence: 1
+    - - Warm
+      - node_count: 2
+        total_activation: 0.511
+        average_confidence: 0.243
+  cycle_paths: []
+  deterministic_trace:
+    - depth: 1
+      target_node: Cycle_1
+      activation: 0.422
+      confidence: 0.422
+      source_node: Cycle_0
+    - depth: 2
+      target_node: Cycle_2
+      activation: 0.088
+      confidence: 0.088
+      source_node: Cycle_1
+  metrics:
+    total_activations: 2
+    cache_hits: 0
+    cache_misses: 0
+    average_latency_ns: 0
+    latency_budget_violations: 0
+    cycles_detected: 0
+    parallel_efficiency: 0
+    pool_available: 10000
+    pool_in_flight: 0
+    pool_high_water_mark: 10000

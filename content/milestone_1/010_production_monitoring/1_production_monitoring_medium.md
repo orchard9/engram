@@ -2,6 +2,8 @@
 
 *How we achieved <1% monitoring overhead at 100K operations/second while tracking the health of an artificial memory system inspired by neuroscience*
 
+> Update (2025-10-09): The production monitoring stack now streams metrics internally and emits structured logs; Prometheus references below reflect the former adapter layer and can be mapped onto the streaming feed.
+
 ## The Challenge: Observing Without Disturbing
 
 Imagine trying to measure the performance of a Formula 1 car during a race. Add too many sensors, and you've changed the aerodynamics. Make the telemetry system too heavy, and you've affected acceleration. This is the fundamental challenge of production monitoring—how do you observe a system without affecting its behavior?

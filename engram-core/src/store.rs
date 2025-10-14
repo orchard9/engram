@@ -501,11 +501,26 @@ impl MemoryStore {
         self
     }
 
+    /// Expose the configured spreading engine when cognitive recall is enabled.
+    #[cfg(feature = "hnsw_index")]
+    #[must_use]
+    pub fn spreading_engine(&self) -> Option<Arc<crate::activation::ParallelSpreadingEngine>> {
+        self.cognitive_recall
+            .as_ref()
+            .map(|recall| recall.spreading_engine())
+    }
+
     /// Set recall configuration
     #[must_use]
     pub const fn with_recall_config(mut self, config: crate::activation::RecallConfig) -> Self {
         self.recall_config = config;
         self
+    }
+
+    /// Retrieve the current recall mode configured for the store.
+    #[must_use]
+    pub const fn recall_mode(&self) -> crate::activation::RecallMode {
+        self.recall_config.recall_mode
     }
 
     /// Create a memory store with persistent backend enabled
@@ -1328,6 +1343,23 @@ impl MemoryStore {
     /// Never returns errors because human recall doesn't "fail" - it returns
     /// nothing, partial matches, or reconstructed memories with varying confidence.
     pub fn recall(&self, cue: &Cue) -> RecallResult {
+        self.recall_internal(cue, None)
+    }
+
+    /// Recall memories using a specific mode, bypassing the store's configured mode.
+    ///
+    /// This allows API callers to experiment with different recall strategies without
+    /// mutating the store-wide configuration or requiring a restart.
+    #[must_use]
+    pub fn recall_with_mode(&self, cue: &Cue, mode: crate::activation::RecallMode) -> RecallResult {
+        self.recall_internal(cue, Some(mode))
+    }
+
+    fn recall_internal(
+        &self,
+        cue: &Cue,
+        override_mode: Option<crate::activation::RecallMode>,
+    ) -> RecallResult {
         #[cfg(feature = "monitoring")]
         let start = Instant::now();
 
@@ -1336,7 +1368,9 @@ impl MemoryStore {
         {
             use crate::activation::RecallMode;
 
-            match self.recall_config.recall_mode {
+            let effective_mode = override_mode.unwrap_or(self.recall_config.recall_mode);
+
+            match effective_mode {
                 RecallMode::Spreading if self.cognitive_recall.is_some() => {
                     // Use spreading activation pipeline
                     if let Some(ref cognitive_recall) = self.cognitive_recall {
@@ -1382,6 +1416,9 @@ impl MemoryStore {
                 }
             }
         }
+
+        #[cfg(not(feature = "hnsw_index"))]
+        let _ = override_mode;
 
         // Try persistent backend first if available
         #[cfg(feature = "memory_mapped_persistence")]

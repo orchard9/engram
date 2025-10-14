@@ -1,0 +1,14 @@
+{
+  "export": {
+    "dropped": 0,
+    "exported": 0,
+    "queue_depth": 0
+  },
+  "snapshot": {
+    "five_minutes": {},
+    "one_minute": {},
+    "one_second": {},
+    "schema_version": "1.0.0",
+    "ten_seconds": {}
+  }
+}

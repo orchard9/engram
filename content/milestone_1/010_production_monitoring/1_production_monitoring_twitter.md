@@ -1,5 +1,7 @@
 # Zero-Overhead Monitoring: A Twitter Thread
 
+> Update (2025-10-09): Observability now relies on Engram's internal streaming/log stack; Prometheus mentions below refer to legacy adapters or optional downstream bridges.
+
 ## Thread: The Art of Zero-Overhead Monitoring
 
 **1/**

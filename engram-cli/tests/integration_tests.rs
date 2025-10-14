@@ -352,16 +352,19 @@ async fn test_cli_config_list_section() {
     let mut cmd = Command::cargo_bin("engram").unwrap();
     let output = cmd
         .env("ENGRAM_CONFIG_PATH", config_path.to_str().unwrap())
-        .args(&["config", "list", "--section", "memory"])
+        .args(&["config", "list", "--section", "feature_flags"])
         .output()
         .unwrap();
 
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    // Should contain memory section
-    assert!(stdout.contains("memory"), "Should show memory section");
+    // Should contain spreading_api_beta setting
+    assert!(
+        stdout.contains("spreading_api_beta"),
+        "Should show feature_flags settings"
+    );
 
-    // Should NOT contain other sections when filtering
+    // Should NOT contain section headers when filtering to specific section
     assert!(
         !stdout.contains("[network]") && !stdout.contains("[performance]"),
         "Should filter out other sections"
@@ -377,11 +380,11 @@ async fn test_cli_config_get_default_value() {
     // Set config directory via environment variable
     let mut cmd = Command::cargo_bin("engram").unwrap();
     cmd.env("ENGRAM_CONFIG_PATH", config_path.to_str().unwrap())
-        .args(&["config", "get", "network.port"])
+        .args(&["config", "get", "feature_flags.spreading_api_beta"])
         .assert()
         .success()
-        // Test that we get a numeric port value (not hardcoding the exact value)
-        .stdout(predicate::str::is_match(r"^\d+\n?$").unwrap());
+        // Test that we get a boolean value (true or false)
+        .stdout(predicate::str::is_match(r"^(true|false)\n?$").unwrap());
 }
 
 #[tokio::test]
@@ -390,7 +393,7 @@ async fn test_cli_config_get_unknown_key() {
     cmd.args(&["config", "get", "unknown.key"])
         .assert()
         .failure()
-        .stdout(predicate::str::contains("Unknown configuration key"));
+        .stderr(predicate::str::contains("unknown configuration key"));
 }
 
 #[tokio::test]

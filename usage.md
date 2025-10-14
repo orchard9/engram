@@ -194,7 +194,7 @@ Response: 200 OK
 
 ### Server-Sent Events Streaming
 ```javascript
-const eventSource = new EventSource('/api/v1/monitor/events?min_activation=0.7');
+const eventSource = new EventSource('/api/v1/monitoring/events?min_activation=0.7');
 
 eventSource.addEventListener('activation', (event) => {
   const activation = JSON.parse(event.data);

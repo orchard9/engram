@@ -1,0 +1,177 @@
+---
+source: engram-core/tests/spreading_validation.rs
+expression: "FixtureSnapshot { metadata: metadata.clone(), snapshot: normalized, }"
+---
+metadata:
+  name: clique
+  description: Complete graph exploring uniform activation distribution
+  seeds:
+    - - Clique_0
+      - 1
+  node_count: 4
+  edge_count: 12
+  average_out_degree: 3
+  adjacency:
+    Clique_0:
+      - target: Clique_1
+        weight: 0.333
+        edge_type: Excitatory
+      - target: Clique_2
+        weight: 0.333
+        edge_type: Excitatory
+      - target: Clique_3
+        weight: 0.333
+        edge_type: Excitatory
+    Clique_1:
+      - target: Clique_0
+        weight: 0.333
+        edge_type: Excitatory
+      - target: Clique_2
+        weight: 0.333
+        edge_type: Excitatory
+      - target: Clique_3
+        weight: 0.333
+        edge_type: Excitatory
+    Clique_2:
+      - target: Clique_0
+        weight: 0.333
+        edge_type: Excitatory
+      - target: Clique_1
+        weight: 0.333
+        edge_type: Excitatory
+      - target: Clique_3
+        weight: 0.333
+        edge_type: Excitatory
+    Clique_3:
+      - target: Clique_0
+        weight: 0.333
+        edge_type: Excitatory
+      - target: Clique_1
+        weight: 0.333
+        edge_type: Excitatory
+      - target: Clique_2
+        weight: 0.333
+        edge_type: Excitatory
+snapshot:
+  seeds:
+    - - Clique_0
+      - 1
+  activations:
+    - memory_id: Clique_0
+      activation: 0.93
+      confidence: 0.93
+      hop_count: 3
+      storage_tier: Hot
+      flags: 0b00000000
+    - memory_id: Clique_1
+      activation: 0.179
+      confidence: 0.17
+      hop_count: 3
+      storage_tier: Warm
+      flags: 0b00000000
+    - memory_id: Clique_2
+      activation: 0.179
+      confidence: 0.17
+      hop_count: 3
+      storage_tier: Warm
+      flags: 0b00000000
+    - memory_id: Clique_3
+      activation: 0.179
+      confidence: 0.17
+      hop_count: 3
+      storage_tier: Warm
+      flags: 0b00000000
+  tier_summaries:
+    - - Hot
+      - node_count: 1
+        total_activation: 0.93
+        average_confidence: 0.93
+    - - Warm
+      - node_count: 3
+        total_activation: 0.538
+        average_confidence: 0.17
+  cycle_paths:
+    - - Clique_0
+      - Clique_2
+      - Clique_3
+    - - Clique_0
+      - Clique_3
+      - Clique_0
+    - - Clique_0
+      - Clique_3
+      - Clique_1
+    - - Clique_0
+      - Clique_3
+      - Clique_2
+  deterministic_trace:
+    - depth: 1
+      target_node: Clique_1
+      activation: 0.166
+      confidence: 0.166
+      source_node: Clique_0
+    - depth: 1
+      target_node: Clique_2
+      activation: 0.166
+      confidence: 0.166
+      source_node: Clique_0
+    - depth: 1
+      target_node: Clique_3
+      activation: 0.166
+      confidence: 0.166
+      source_node: Clique_0
+    - depth: 2
+      target_node: Clique_0
+      activation: 1
+      confidence: 1
+      source_node: Clique_1
+    - depth: 2
+      target_node: Clique_0
+      activation: 1
+      confidence: 1
+      source_node: Clique_2
+    - depth: 2
+      target_node: Clique_0
+      activation: 1
+      confidence: 1
+      source_node: Clique_3
+    - depth: 2
+      target_node: Clique_1
+      activation: 0.179
+      confidence: 0.179
+      source_node: Clique_2
+    - depth: 2
+      target_node: Clique_1
+      activation: 0.193
+      confidence: 0.193
+      source_node: Clique_3
+    - depth: 2
+      target_node: Clique_2
+      activation: 0.179
+      confidence: 0.179
+      source_node: Clique_1
+    - depth: 2
+      target_node: Clique_2
+      activation: 0.193
+      confidence: 0.193
+      source_node: Clique_3
+    - depth: 2
+      target_node: Clique_3
+      activation: 0.179
+      confidence: 0.179
+      source_node: Clique_1
+    - depth: 2
+      target_node: Clique_3
+      activation: 0.193
+      confidence: 0.193
+      source_node: Clique_2
+  metrics:
+    total_activations: 3
+    cache_hits: 0
+    cache_misses: 0
+    average_latency_ns: 0
+    latency_budget_violations: 0
+    cycles_detected: 4
+    parallel_efficiency: 0
+    pool_available: 10000
+    pool_in_flight: 0
+    pool_high_water_mark: 10000

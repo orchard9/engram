@@ -102,7 +102,7 @@ One critical architectural decision is choosing **Server-Sent Events (SSE) over 
 
 ```javascript
 // SSE: Cognitively simple monitoring connection
-const eventSource = new EventSource('/api/v1/monitor/events?subsystem=memory&min_priority=warning');
+const eventSource = new EventSource('/api/v1/monitoring/events?subsystem=memory&min_priority=warning');
 
 eventSource.addEventListener('activation_anomaly', (event) => {
   const anomaly = JSON.parse(event.data);

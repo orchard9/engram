@@ -1,0 +1,4 @@
+# Basic configuration for lychee link checker
+timeout = 10
+retry = 2
+exclude = ["node_modules", "target"]

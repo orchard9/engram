@@ -1,0 +1,18 @@
+{
+  "chain_small": {
+    "median_ns": null,
+    "p95_ns": null
+  },
+  "scale_free_medium": {
+    "median_ns": null,
+    "p95_ns": null
+  },
+  "scale_free_large": {
+    "median_ns": null,
+    "p95_ns": null
+  },
+  "fan_effect": {
+    "median_ns": null,
+    "p95_ns": null
+  }
+}

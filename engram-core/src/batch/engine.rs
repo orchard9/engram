@@ -61,12 +61,12 @@ impl BatchEngine {
             .into_par_iter()
             .map(|op| match op {
                 BatchOperation::Store(episode) => {
-                    let activation = self.memory_store.store(episode);
+                    let store_result = self.memory_store.store(episode);
                     self.metrics
                         .total_operations
                         .fetch_add(1, Ordering::Relaxed);
                     BatchOperationResult::Store {
-                        activation,
+                        activation: store_result.activation,
                         memory_id: format!(
                             "mem_{}",
                             self.metrics.total_operations.load(Ordering::Relaxed)
@@ -74,11 +74,11 @@ impl BatchEngine {
                     }
                 }
                 BatchOperation::Recall(cue) => {
-                    let results = self.memory_store.recall(&cue);
+                    let recall_result = self.memory_store.recall(&cue);
                     self.metrics
                         .total_operations
                         .fetch_add(1, Ordering::Relaxed);
-                    BatchOperationResult::Recall(results)
+                    BatchOperationResult::Recall(recall_result.results)
                 }
                 BatchOperation::SimilaritySearch {
                     embedding,
@@ -161,7 +161,7 @@ impl BatchOperations for BatchEngine {
         // Process episodes in parallel
         let activations: Vec<Activation> = episodes
             .into_par_iter()
-            .map(|episode| self.memory_store.store(episode))
+            .map(|episode| self.memory_store.store(episode).activation)
             .collect();
 
         let successful_count = activations.iter().filter(|a| a.is_successful()).count();
@@ -200,7 +200,7 @@ impl BatchOperations for BatchEngine {
         // Process other cue types in parallel
         let other_results: Vec<_> = other_cues
             .into_par_iter()
-            .map(|cue| self.memory_store.recall(&cue))
+            .map(|cue| self.memory_store.recall(&cue).results)
             .collect();
 
         results.extend(other_results);

@@ -16,7 +16,7 @@ use engram_core::activation::{
 fn storage_aware_activation_conversion() {
     let mut record = ActivationRecord::new("node-1".to_string(), 0.1);
     record.set_storage_tier(StorageTier::Warm);
-    record.visits.fetch_add(3, Ordering::Relaxed);
+    record.visits_atomic().fetch_add(3, Ordering::Relaxed);
     assert!(!record.accumulate_activation(0.03));
     assert!(record.accumulate_activation(0.07));
 

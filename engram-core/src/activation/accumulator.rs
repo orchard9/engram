@@ -3,7 +3,9 @@
 //! High-performance activation accumulation using SIMD vector operations
 //! from Task 001, with support for batch processing and cache optimization.
 
-use crate::activation::{ActivationRecord, NodeId, storage_aware::StorageTier};
+use crate::activation::{
+    ActivationRecord, NodeId, memory_pool::ActivationRecordPool, storage_aware::StorageTier,
+};
 use crate::compute::cosine_similarity_batch_768;
 use dashmap::DashMap;
 use std::convert::TryFrom;
@@ -13,6 +15,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// SIMD-optimized activation accumulator
 pub struct SimdActivationAccumulator {
     activation_records: Arc<DashMap<NodeId, Arc<ActivationRecord>>>,
+    activation_pool: Arc<ActivationRecordPool>,
     batch_size: usize,
     operations_count: AtomicU64,
 }
@@ -21,8 +24,10 @@ impl SimdActivationAccumulator {
     /// Create new SIMD activation accumulator
     #[must_use]
     pub fn new(batch_size: usize) -> Self {
+        let initial_pool = batch_size.saturating_mul(4).max(32);
         Self {
             activation_records: Arc::new(DashMap::new()),
+            activation_pool: Arc::new(ActivationRecordPool::new(initial_pool)),
             batch_size,
             operations_count: AtomicU64::new(0),
         }
@@ -30,14 +35,11 @@ impl SimdActivationAccumulator {
 
     /// Accumulate single activation value
     pub fn accumulate_single(&self, node_id: &NodeId, contribution: f32) -> bool {
+        let pool = self.activation_pool.clone();
         let record = self
             .activation_records
             .entry(node_id.clone())
-            .or_insert_with(|| {
-                let mut base = ActivationRecord::new(node_id.clone(), 0.1);
-                base.set_storage_tier(StorageTier::Hot);
-                Arc::new(base)
-            })
+            .or_insert_with(|| pool.acquire_with_defaults(node_id.clone(), Some(StorageTier::Hot)))
             .clone();
 
         self.operations_count.fetch_add(1, Ordering::Relaxed);
@@ -57,6 +59,7 @@ impl SimdActivationAccumulator {
         let mut updated_count = 0;
 
         // Process in SIMD-friendly chunks
+        let pool = self.activation_pool.clone();
         for chunk in activations.chunks(self.batch_size) {
             let mut node_refs = Vec::new();
 
@@ -65,9 +68,7 @@ impl SimdActivationAccumulator {
                     .activation_records
                     .entry(node_id.clone())
                     .or_insert_with(|| {
-                        let mut base = ActivationRecord::new(node_id.clone(), 0.1);
-                        base.set_storage_tier(StorageTier::Hot);
-                        Arc::new(base)
+                        pool.acquire_with_defaults(node_id.clone(), Some(StorageTier::Hot))
                     })
                     .clone();
 
@@ -179,11 +180,14 @@ impl SimdActivationAccumulator {
     pub fn update_from_vectors(&self, updates: &[(NodeId, [f32; 768])]) -> usize {
         let mut updated_count = 0;
 
+        let pool = self.activation_pool.clone();
         for (node_id, vector) in updates {
             let record = self
                 .activation_records
                 .entry(node_id.clone())
-                .or_insert_with(|| Arc::new(ActivationRecord::new(node_id.clone(), 0.1)))
+                .or_insert_with(|| {
+                    pool.acquire_with_defaults(node_id.clone(), Some(StorageTier::Hot))
+                })
                 .clone();
 
             // Extract primary activation from first component
@@ -207,9 +211,23 @@ impl SimdActivationAccumulator {
             .collect()
     }
 
+    fn release_all_records(&self) {
+        let pool = self.activation_pool.clone();
+        let keys: Vec<NodeId> = self
+            .activation_records
+            .iter()
+            .map(|entry| entry.key().clone())
+            .collect();
+        for key in keys {
+            if let Some((_, record)) = self.activation_records.remove(&key) {
+                pool.release(record);
+            }
+        }
+    }
+
     /// Clear all activations
     pub fn clear(&self) {
-        self.activation_records.clear();
+        self.release_all_records();
         self.operations_count.store(0, Ordering::Relaxed);
     }
 
@@ -340,6 +358,12 @@ impl BiologicalAccumulator {
             .is_some_and(|r| Self::current_time_nanos() < *r);
 
         (activation, fatigue, in_refractory)
+    }
+}
+
+impl Drop for SimdActivationAccumulator {
+    fn drop(&mut self) {
+        self.release_all_records();
     }
 }
 

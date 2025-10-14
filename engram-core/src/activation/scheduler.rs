@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use crossbeam_queue::SegQueue;
@@ -103,8 +103,10 @@ impl TierAwareSpreadingScheduler {
 
     /// Clear queued state and restart timing budgets.
     pub fn reset(&self, config: &ParallelSpreadingConfig) {
-        for queue in &self.queues {
+        for (index, queue) in self.queues.iter().enumerate() {
             queue.reset();
+            queue.update_timeout(config.tier_timeouts[index]);
+            queue.update_max_in_flight(config.max_concurrent_per_tier);
         }
         self.bypass_cold.store(false, Ordering::Relaxed);
 
@@ -249,8 +251,8 @@ struct TierQueue {
     tasks: SegQueue<ScheduledTask>,
     queued: AtomicUsize,
     in_flight: AtomicUsize,
-    max_in_flight: usize,
-    timeout: Duration,
+    max_in_flight: AtomicUsize,
+    timeout_ns: AtomicU64,
     deadline_missed: AtomicBool,
     /// When true, tasks are sorted by (depth, target_node, contribution) for deterministic execution
     deterministic: bool,
@@ -258,8 +260,16 @@ struct TierQueue {
     deterministic_buffer: Mutex<Vec<ScheduledTask>>,
 }
 
+fn duration_to_nanos(duration: Duration) -> u64 {
+    duration.as_nanos().min(u128::from(u64::MAX)) as u64
+}
+
+const fn nanos_to_duration(nanos: u64) -> Duration {
+    Duration::from_nanos(nanos)
+}
+
 impl TierQueue {
-    const fn new(
+    fn new(
         tier: StorageTier,
         timeout: Duration,
         max_in_flight: usize,
@@ -270,12 +280,25 @@ impl TierQueue {
             tasks: SegQueue::new(),
             queued: AtomicUsize::new(0),
             in_flight: AtomicUsize::new(0),
-            max_in_flight,
-            timeout,
+            max_in_flight: AtomicUsize::new(max_in_flight),
+            timeout_ns: AtomicU64::new(duration_to_nanos(timeout)),
             deadline_missed: AtomicBool::new(false),
             deterministic,
             deterministic_buffer: Mutex::new(Vec::new()),
         }
+    }
+
+    fn update_timeout(&self, timeout: Duration) {
+        self.timeout_ns
+            .store(duration_to_nanos(timeout), Ordering::Relaxed);
+    }
+
+    fn timeout(&self) -> Duration {
+        nanos_to_duration(self.timeout_ns.load(Ordering::Relaxed))
+    }
+
+    fn update_max_in_flight(&self, max_in_flight: usize) {
+        self.max_in_flight.store(max_in_flight, Ordering::Relaxed);
     }
 
     fn push(&self, task: ScheduledTask) {
@@ -289,7 +312,8 @@ impl TierQueue {
             return None;
         }
 
-        if self.in_flight.load(Ordering::Relaxed) >= self.max_in_flight {
+        let max_in_flight = self.max_in_flight.load(Ordering::Relaxed);
+        if self.in_flight.load(Ordering::Relaxed) >= max_in_flight {
             return None;
         }
 
@@ -303,7 +327,7 @@ impl TierQueue {
             self.queued.fetch_sub(1, Ordering::Relaxed);
 
             let waited = now.saturating_duration_since(task.enqueued_at);
-            if waited > self.timeout {
+            if waited > self.timeout() {
                 self.mark_deadline_miss();
                 continue;
             }
@@ -357,7 +381,7 @@ impl TierQueue {
         // Pop from sorted buffer
         while let Some(task) = buffer.pop() {
             let waited = now.saturating_duration_since(task.enqueued_at);
-            if waited > self.timeout {
+            if waited > self.timeout() {
                 self.mark_deadline_miss();
                 continue;
             }

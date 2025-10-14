@@ -6,9 +6,12 @@
   "scripts": {
     "dev": "vitepress dev",
     "build": "vitepress build",
-    "preview": "vitepress preview"
+    "preview": "vitepress preview",
+    "lint": "markdownlint '**/*.md' --ignore 'node_modules'"
   },
   "devDependencies": {
+    "markdownlint": "^0.33.0",
+    "markdownlint-cli": "^0.41.0",
     "vitepress": "^1.0.0"
   }
 }

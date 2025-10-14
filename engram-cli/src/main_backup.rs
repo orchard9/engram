@@ -10,7 +10,7 @@ use engram_cli::{
     find_available_port,
     grpc::MemoryService,
 };
-use engram_core::{MemoryNode, graph::MemoryGraph};
+use engram_core::{metrics, MemoryNode, graph::MemoryGraph};
 use engram_storage::{StorageTier, hot::HotStorage};
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::{Deserialize, Serialize};
@@ -843,6 +843,8 @@ async fn start_server(
     pb.set_position(5);
     pb.set_message("🔌 Starting gRPC service...");
 
+    let metrics = metrics::init();
+
     // Find available gRPC port
     let actual_grpc_port = find_available_port(grpc_port)
         .await
@@ -856,7 +858,7 @@ async fn start_server(
     }
 
     // Start gRPC service in background
-    let grpc_service = MemoryService::new(graph.clone());
+    let grpc_service = MemoryService::new(graph.clone(), Arc::clone(&metrics));
     tokio::spawn(async move {
         if let Err(e) = grpc_service.serve(actual_grpc_port).await {
             error!("gRPC service error: {}", e);
@@ -875,7 +877,8 @@ async fn start_server(
     let _health_system = get_health_system();
 
     // Create API state for memory operations
-    let api_state = ApiState::new(graph.clone());
+    let auto_tuner = SpreadingAutoTuner::new(0.10, 16);
+    let api_state = ApiState::new(graph.clone(), metrics, auto_tuner);
 
     // Create CORS layer for browser access
     let cors = CorsLayer::new()

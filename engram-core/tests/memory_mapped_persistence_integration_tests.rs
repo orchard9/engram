@@ -60,11 +60,11 @@ async fn test_basic_persistence_integration() {
     let episode1 = create_test_episode("test1", "first test memory");
     let episode2 = create_test_episode("test2", "second test memory");
 
-    let activation1 = store.store(episode1);
-    let activation2 = store.store(episode2);
+    let store_result1 = store.store(episode1);
+    let store_result2 = store.store(episode2);
 
-    assert!(activation1.is_successful());
-    assert!(activation2.is_successful());
+    assert!(store_result1.activation.is_successful());
+    assert!(store_result2.activation.is_successful());
 
     // Verify they can be recalled
     let cue = Cue::semantic(
@@ -72,7 +72,7 @@ async fn test_basic_persistence_integration() {
         "test memory".to_string(),
         Confidence::MEDIUM,
     );
-    let results = store.recall(&cue);
+    let results = store.recall(&cue).results;
 
     assert_eq!(results.len(), 2);
     assert!(results.iter().any(|(ep, _)| ep.id == "test1"));
@@ -105,18 +105,18 @@ async fn test_tier_migration() {
     for i in 0..15 {
         let episode = create_test_episode(&format!("mem_{i}"), &format!("memory content {i}"));
 
-        let activation = store.store(episode);
+        let store_result = store.store(episode);
         if i < 15 {
             // Early stores should succeed with larger capacity
             assert!(
-                activation.value() > 0.3,
+                store_result.activation.value() > 0.3,
                 "Activation {} too low for episode {}",
-                activation.value(),
+                store_result.activation.value(),
                 i
             );
         } else {
             // Later stores might be degraded due to capacity pressure
-            assert!(activation.value() > 0.0);
+            assert!(store_result.activation.value() > 0.0);
         }
     }
 
@@ -182,7 +182,7 @@ async fn test_crash_consistency() {
             "crash test".to_string(),
             Confidence::LOW,
         );
-        let results = store.recall(&cue);
+        let results = store.recall(&cue).results;
         assert!(
             results.len() >= 5,
             "Expected recalled memories after recovery"
@@ -222,12 +222,12 @@ async fn test_cognitive_workload_pattern() {
                 &format!("{topic} content item {i}"),
             );
 
-            let activation = store.store(episode);
-            assert!(activation.is_successful());
+            let store_result = store.store(episode);
+            assert!(store_result.activation.is_successful());
 
             // Activation should be positive (no longer expecting >0.8 due to unique embeddings)
             // With unique embeddings, pressure builds and activations may be lower
-            let activation_value = activation.value();
+            let activation_value = store_result.activation.value();
             assert!(
                 activation_value > 0.0,
                 "Activation for {topic}_{i} was {activation_value}"
@@ -245,7 +245,7 @@ async fn test_cognitive_workload_pattern() {
             format!("{topic} content"),
             Confidence::MEDIUM,
         );
-        let results = store.recall(&cue);
+        let results = store.recall(&cue).results;
 
         // Should find memories related to this topic
         assert!(!results.is_empty());
@@ -348,9 +348,9 @@ async fn test_graceful_degradation_under_errors() {
     let mut degraded_count = 0;
     for i in 0..10 {
         let episode = create_test_episode(&format!("pressure_test_{i}"), "pressure test");
-        let activation = store.store(episode);
+        let store_result = store.store(episode);
 
-        if activation.is_degraded() {
+        if store_result.activation.is_degraded() {
             degraded_count += 1;
         }
     }
@@ -365,7 +365,7 @@ async fn test_graceful_degradation_under_errors() {
         "pressure test".to_string(),
         Confidence::LOW,
     );
-    let results = store.recall(&cue);
+    let results = store.recall(&cue).results;
 
     // Should still be able to recall some memories
     assert!(!results.is_empty());
@@ -437,8 +437,8 @@ async fn test_concurrent_access_patterns() {
                     &format!("concurrent data from task {task_id}"),
                 );
 
-                let activation = store_guard.store(episode);
-                assert!(activation.value() > 0.0);
+                let store_result = store_guard.store(episode);
+                assert!(store_result.activation.value() > 0.0);
 
                 // Concurrent recalls
                 let cue = Cue::semantic(
@@ -477,7 +477,7 @@ async fn test_concurrent_access_patterns() {
         Confidence::LOW,
     );
     let results = store_guard.recall(&cue);
-    let recall_count = results.len();
+    let recall_count = results.results.len();
     println!("Final recall found {recall_count} memories");
 
     drop(store_guard);

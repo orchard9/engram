@@ -3,12 +3,13 @@
 //! This module defines the interface for GPU-accelerated activation spreading,
 //! allowing CUDA kernels to be integrated without refactoring the spreading engine.
 
-use super::{ActivationResult, simd_optimization::SimdActivationMapper};
+use super::{ActivationResult, SpreadingMetrics, simd_optimization::SimdActivationMapper};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Instant;
+use tracing::warn;
 
 /// GPU device capabilities for acceleration planning
 #[derive(Debug, Clone)]
@@ -169,6 +170,7 @@ impl Future for GpuLaunchFuture {
     }
 }
 
+#[doc = include_str!("doc/gpu_interface.md")]
 /// Interface for GPU-accelerated spreading operations
 ///
 /// This trait defines the contract for GPU backends (CUDA, HIP, etc.)
@@ -310,6 +312,8 @@ pub struct AdaptiveSpreadingEngine {
     config: AdaptiveConfig,
     /// Cached GPU availability status
     gpu_available_cached: Option<bool>,
+    /// Optional spreading metrics for telemetry
+    metrics: Option<Arc<SpreadingMetrics>>,
 }
 
 /// Configuration for adaptive GPU/CPU dispatch
@@ -336,12 +340,14 @@ impl AdaptiveSpreadingEngine {
     pub fn new(
         gpu_interface: Option<Arc<dyn GPUSpreadingInterface>>,
         config: AdaptiveConfig,
+        metrics: Option<Arc<SpreadingMetrics>>,
     ) -> Self {
         Self {
             gpu_interface,
             cpu_fallback: CpuFallback::new(),
             config,
             gpu_available_cached: None,
+            metrics,
         }
     }
 
@@ -375,7 +381,27 @@ impl AdaptiveSpreadingEngine {
         if self.should_use_gpu(batch.size()) {
             // Use GPU acceleration
             if let Some(ref gpu) = self.gpu_interface {
-                return gpu.launch(batch).await;
+                if let Some(ref metrics) = self.metrics {
+                    metrics.record_gpu_launch();
+                }
+                match gpu.launch(batch).await {
+                    Ok(result) => return Ok(result),
+                    Err(error) => {
+                        if let Some(ref metrics) = self.metrics {
+                            metrics.record_gpu_fallback();
+                        }
+                        warn!(
+                            target = "engram::activation::gpu",
+                            ?error,
+                            "GPU launch failed, falling back to CPU"
+                        );
+                        return Ok(CpuFallback::process_batch(batch));
+                    }
+                }
+            }
+
+            if let Some(ref metrics) = self.metrics {
+                metrics.record_gpu_fallback();
             }
         }
 
@@ -472,7 +498,7 @@ mod tests {
             gpu_threshold: 100,
             enable_gpu: false,
         };
-        let mut engine = AdaptiveSpreadingEngine::new(None, config);
+        let mut engine = AdaptiveSpreadingEngine::new(None, config, None);
 
         // Should always use CPU when GPU disabled
         assert!(!engine.should_use_gpu(200));
@@ -486,7 +512,7 @@ mod tests {
             gpu_threshold: 50,
             enable_gpu: true,
         };
-        let mut engine = AdaptiveSpreadingEngine::new(Some(mock_gpu), config);
+        let mut engine = AdaptiveSpreadingEngine::new(Some(mock_gpu), config, None);
 
         // Below threshold - use CPU
         assert!(!engine.should_use_gpu(30));
@@ -515,7 +541,7 @@ mod tests {
             gpu_threshold: 1,
             enable_gpu: true,
         };
-        let mut engine = AdaptiveSpreadingEngine::new(Some(mock_gpu), config);
+        let mut engine = AdaptiveSpreadingEngine::new(Some(mock_gpu), config, None);
 
         let source = [1.0; 768];
         let mut batch = GPUActivationBatch::new(&source);

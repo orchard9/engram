@@ -1,0 +1,98 @@
+groups:
+  - name: engram_spreading_recording
+    rules:
+      - record: spreading:latency_p95_hot:seconds
+        expr: histogram_quantile(0.95, sum(rate(engram_spreading_latency_hot_seconds_bucket[5m])) by (le))
+      - record: spreading:latency_p95_warm:seconds
+        expr: histogram_quantile(0.95, sum(rate(engram_spreading_latency_warm_seconds_bucket[5m])) by (le))
+      - record: spreading:latency_p95_cold:seconds
+        expr: histogram_quantile(0.95, sum(rate(engram_spreading_latency_cold_seconds_bucket[5m])) by (le))
+      - record: spreading:failure_rate:ratio
+        expr: |
+          increase(engram_spreading_failures_total[5m])
+          /
+          clamp_min(increase(engram_spreading_activations_total[5m]), 1)
+      - record: spreading:fallback_rate:ratio
+        expr: |
+          increase(engram_spreading_fallback_total[5m])
+          /
+          clamp_min(increase(engram_spreading_activations_total[5m]), 1)
+
+  - name: engram_spreading_alerts
+    rules:
+      - alert: SpreadingHotLatencySLOBreach
+        expr: spreading:latency_p95_hot:seconds > 0.0002
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Hot tier latency p95 above 200µs"
+          description: |
+            p95 latency for the hot tier is {{ $value | humanizeDuration }} and exceeded the
+            200µs objective for at least 10 minutes.
+
+      - alert: SpreadingWarmLatencySLOBreach
+        expr: spreading:latency_p95_warm:seconds > 0.002
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Warm tier latency p95 above 2ms"
+          description: |
+            p95 latency for the warm tier is {{ $value | humanizeDuration }} and exceeded the
+            2ms objective for at least 10 minutes.
+
+      - alert: SpreadingColdLatencySLOBreach
+        expr: spreading:latency_p95_cold:seconds > 0.02
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Cold tier latency p95 above 20ms"
+          description: |
+            p95 latency for the cold tier is {{ $value | humanizeDuration }} and exceeded the
+            20ms objective for at least 15 minutes.
+
+      - alert: SpreadingBreakerOpen
+        expr: max(engram_spreading_breaker_state) > 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Spreading circuit breaker opened"
+          description: |
+            The spreading circuit breaker transitioned out of the closed state. Investigate
+            upstream latency and failure rate before re-enabling spreading activation.
+
+      - alert: SpreadingFailureRateHigh
+        expr: spreading:failure_rate:ratio > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Spreading failure rate exceeds 5%"
+          description: |
+            More than 5% of spreading requests failed within the last window. Inspect
+            activation logs and latency budget violations for root cause.
+
+      - alert: SpreadingLatencyBudgetRegress
+        expr: increase(engram_spreading_latency_budget_violations_total[10m]) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Latency budget violations observed"
+          description: |
+            New latency budget violations were recorded. Check scheduler settings and
+            review auto-tune audit log for recent changes.
+
+      - alert: SpreadingFallbackSpike
+        expr: spreading:fallback_rate:ratio > 0.10
+        for: 10m
+        labels:
+          severity: info
+        annotations:
+          summary: "Fallbacks exceeded 10% of recalls"
+          description: |
+            Fallbacks to similarity exceed 10% of total spread attempts. Validate that the
+            breaker is healthy and GPU fallbacks are within expectations.

@@ -1,0 +1,818 @@
+{
+  "export": {
+    "dropped": 0,
+    "exported": 40,
+    "queue_depth": 0
+  },
+  "snapshot": {
+    "five_minutes": {
+      "activation_pool_available_records": {
+        "count": 2,
+        "max": 12.0,
+        "mean": 12.0,
+        "min": 12.0,
+        "p50": 12.0,
+        "p90": 12.0,
+        "p99": 12.0,
+        "sum": 24.0
+      },
+      "activation_pool_high_water_mark": {
+        "count": 2,
+        "max": 32.0,
+        "mean": 32.0,
+        "min": 32.0,
+        "p50": 32.0,
+        "p90": 32.0,
+        "p99": 32.0,
+        "sum": 64.0
+      },
+      "activation_pool_hit_rate": {
+        "count": 2,
+        "max": 0.75,
+        "mean": 0.75,
+        "min": 0.75,
+        "p50": 0.75,
+        "p90": 0.75,
+        "p99": 0.75,
+        "sum": 1.5
+      },
+      "activation_pool_in_flight_records": {
+        "count": 2,
+        "max": 4.0,
+        "mean": 4.0,
+        "min": 4.0,
+        "p50": 4.0,
+        "p90": 4.0,
+        "p99": 4.0,
+        "sum": 8.0
+      },
+      "activation_pool_miss_count": {
+        "count": 2,
+        "max": 12.0,
+        "mean": 12.0,
+        "min": 12.0,
+        "p50": 12.0,
+        "p90": 12.0,
+        "p99": 12.0,
+        "sum": 24.0
+      },
+      "activation_pool_release_failures": {
+        "count": 2,
+        "max": 1.0,
+        "mean": 1.0,
+        "min": 1.0,
+        "p50": 1.0,
+        "p90": 1.0,
+        "p99": 1.0,
+        "sum": 2.0
+      },
+      "activation_pool_total_created": {
+        "count": 2,
+        "max": 48.0,
+        "mean": 48.0,
+        "min": 48.0,
+        "p50": 48.0,
+        "p90": 48.0,
+        "p99": 48.0,
+        "sum": 96.0
+      },
+      "activation_pool_total_reused": {
+        "count": 2,
+        "max": 36.0,
+        "mean": 36.0,
+        "min": 36.0,
+        "p50": 36.0,
+        "p90": 36.0,
+        "p99": 36.0,
+        "sum": 72.0
+      },
+      "activation_pool_utilization": {
+        "count": 2,
+        "max": 0.5,
+        "mean": 0.5,
+        "min": 0.5,
+        "p50": 0.5,
+        "p90": 0.5,
+        "p99": 0.5,
+        "sum": 1.0
+      },
+      "adaptive_batch_cold_confidence": {
+        "count": 2,
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "p50": 0.0,
+        "p90": 0.0,
+        "p99": 0.0,
+        "sum": 0.0
+      },
+      "adaptive_batch_cold_size": {
+        "count": 2,
+        "max": 32.0,
+        "mean": 32.0,
+        "min": 32.0,
+        "p50": 32.0,
+        "p90": 32.0,
+        "p99": 32.0,
+        "sum": 64.0
+      },
+      "adaptive_batch_hot_confidence": {
+        "count": 2,
+        "max": 0.18126922845840454,
+        "mean": 0.18126922845840454,
+        "min": 0.18126922845840454,
+        "p50": 0.18126922845840454,
+        "p90": 0.18126922845840454,
+        "p99": 0.18126922845840454,
+        "sum": 0.3625384569168091
+      },
+      "adaptive_batch_hot_size": {
+        "count": 2,
+        "max": 83.0,
+        "mean": 83.0,
+        "min": 83.0,
+        "p50": 83.0,
+        "p90": 83.0,
+        "p99": 83.0,
+        "sum": 166.0
+      },
+      "adaptive_batch_latency_ewma_ns": {
+        "count": 2,
+        "max": 1500000.0,
+        "mean": 1500000.0,
+        "min": 1500000.0,
+        "p50": 1500000.0,
+        "p90": 1500000.0,
+        "p99": 1500000.0,
+        "sum": 3000000.0
+      },
+      "adaptive_batch_updates_total": {
+        "count": 2,
+        "max": 1.0,
+        "mean": 1.0,
+        "min": 1.0,
+        "p50": 1.0,
+        "p90": 1.0,
+        "p99": 1.0,
+        "sum": 2.0
+      },
+      "adaptive_batch_warm_confidence": {
+        "count": 2,
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "p50": 0.0,
+        "p90": 0.0,
+        "p99": 0.0,
+        "sum": 0.0
+      },
+      "adaptive_batch_warm_size": {
+        "count": 2,
+        "max": 72.0,
+        "mean": 72.0,
+        "min": 72.0,
+        "p50": 72.0,
+        "p90": 72.0,
+        "p99": 72.0,
+        "sum": 144.0
+      },
+      "adaptive_fallback_activations_total": {
+        "count": 2,
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "p50": 0.0,
+        "p90": 0.0,
+        "p99": 0.0,
+        "sum": 0.0
+      },
+      "adaptive_guardrail_hits_total": {
+        "count": 2,
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "p50": 0.0,
+        "p90": 0.0,
+        "p99": 0.0,
+        "sum": 0.0
+      },
+      "adaptive_topology_changes_total": {
+        "count": 2,
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "p50": 0.0,
+        "p90": 0.0,
+        "p99": 0.0,
+        "sum": 0.0
+      }
+    },
+    "one_minute": {
+      "activation_pool_available_records": {
+        "count": 2,
+        "max": 12.0,
+        "mean": 12.0,
+        "min": 12.0,
+        "p50": 12.0,
+        "p90": 12.0,
+        "p99": 12.0,
+        "sum": 24.0
+      },
+      "activation_pool_high_water_mark": {
+        "count": 2,
+        "max": 32.0,
+        "mean": 32.0,
+        "min": 32.0,
+        "p50": 32.0,
+        "p90": 32.0,
+        "p99": 32.0,
+        "sum": 64.0
+      },
+      "activation_pool_hit_rate": {
+        "count": 2,
+        "max": 0.75,
+        "mean": 0.75,
+        "min": 0.75,
+        "p50": 0.75,
+        "p90": 0.75,
+        "p99": 0.75,
+        "sum": 1.5
+      },
+      "activation_pool_in_flight_records": {
+        "count": 2,
+        "max": 4.0,
+        "mean": 4.0,
+        "min": 4.0,
+        "p50": 4.0,
+        "p90": 4.0,
+        "p99": 4.0,
+        "sum": 8.0
+      },
+      "activation_pool_miss_count": {
+        "count": 2,
+        "max": 12.0,
+        "mean": 12.0,
+        "min": 12.0,
+        "p50": 12.0,
+        "p90": 12.0,
+        "p99": 12.0,
+        "sum": 24.0
+      },
+      "activation_pool_release_failures": {
+        "count": 2,
+        "max": 1.0,
+        "mean": 1.0,
+        "min": 1.0,
+        "p50": 1.0,
+        "p90": 1.0,
+        "p99": 1.0,
+        "sum": 2.0
+      },
+      "activation_pool_total_created": {
+        "count": 2,
+        "max": 48.0,
+        "mean": 48.0,
+        "min": 48.0,
+        "p50": 48.0,
+        "p90": 48.0,
+        "p99": 48.0,
+        "sum": 96.0
+      },
+      "activation_pool_total_reused": {
+        "count": 2,
+        "max": 36.0,
+        "mean": 36.0,
+        "min": 36.0,
+        "p50": 36.0,
+        "p90": 36.0,
+        "p99": 36.0,
+        "sum": 72.0
+      },
+      "activation_pool_utilization": {
+        "count": 2,
+        "max": 0.5,
+        "mean": 0.5,
+        "min": 0.5,
+        "p50": 0.5,
+        "p90": 0.5,
+        "p99": 0.5,
+        "sum": 1.0
+      },
+      "adaptive_batch_cold_confidence": {
+        "count": 2,
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "p50": 0.0,
+        "p90": 0.0,
+        "p99": 0.0,
+        "sum": 0.0
+      },
+      "adaptive_batch_cold_size": {
+        "count": 2,
+        "max": 32.0,
+        "mean": 32.0,
+        "min": 32.0,
+        "p50": 32.0,
+        "p90": 32.0,
+        "p99": 32.0,
+        "sum": 64.0
+      },
+      "adaptive_batch_hot_confidence": {
+        "count": 2,
+        "max": 0.18126922845840454,
+        "mean": 0.18126922845840454,
+        "min": 0.18126922845840454,
+        "p50": 0.18126922845840454,
+        "p90": 0.18126922845840454,
+        "p99": 0.18126922845840454,
+        "sum": 0.3625384569168091
+      },
+      "adaptive_batch_hot_size": {
+        "count": 2,
+        "max": 83.0,
+        "mean": 83.0,
+        "min": 83.0,
+        "p50": 83.0,
+        "p90": 83.0,
+        "p99": 83.0,
+        "sum": 166.0
+      },
+      "adaptive_batch_latency_ewma_ns": {
+        "count": 2,
+        "max": 1500000.0,
+        "mean": 1500000.0,
+        "min": 1500000.0,
+        "p50": 1500000.0,
+        "p90": 1500000.0,
+        "p99": 1500000.0,
+        "sum": 3000000.0
+      },
+      "adaptive_batch_updates_total": {
+        "count": 2,
+        "max": 1.0,
+        "mean": 1.0,
+        "min": 1.0,
+        "p50": 1.0,
+        "p90": 1.0,
+        "p99": 1.0,
+        "sum": 2.0
+      },
+      "adaptive_batch_warm_confidence": {
+        "count": 2,
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "p50": 0.0,
+        "p90": 0.0,
+        "p99": 0.0,
+        "sum": 0.0
+      },
+      "adaptive_batch_warm_size": {
+        "count": 2,
+        "max": 72.0,
+        "mean": 72.0,
+        "min": 72.0,
+        "p50": 72.0,
+        "p90": 72.0,
+        "p99": 72.0,
+        "sum": 144.0
+      },
+      "adaptive_fallback_activations_total": {
+        "count": 2,
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "p50": 0.0,
+        "p90": 0.0,
+        "p99": 0.0,
+        "sum": 0.0
+      },
+      "adaptive_guardrail_hits_total": {
+        "count": 2,
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "p50": 0.0,
+        "p90": 0.0,
+        "p99": 0.0,
+        "sum": 0.0
+      },
+      "adaptive_topology_changes_total": {
+        "count": 2,
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "p50": 0.0,
+        "p90": 0.0,
+        "p99": 0.0,
+        "sum": 0.0
+      }
+    },
+    "one_second": {
+      "activation_pool_available_records": {
+        "count": 2,
+        "max": 12.0,
+        "mean": 12.0,
+        "min": 12.0,
+        "p50": 12.0,
+        "p90": 12.0,
+        "p99": 12.0,
+        "sum": 24.0
+      },
+      "activation_pool_high_water_mark": {
+        "count": 2,
+        "max": 32.0,
+        "mean": 32.0,
+        "min": 32.0,
+        "p50": 32.0,
+        "p90": 32.0,
+        "p99": 32.0,
+        "sum": 64.0
+      },
+      "activation_pool_hit_rate": {
+        "count": 2,
+        "max": 0.75,
+        "mean": 0.75,
+        "min": 0.75,
+        "p50": 0.75,
+        "p90": 0.75,
+        "p99": 0.75,
+        "sum": 1.5
+      },
+      "activation_pool_in_flight_records": {
+        "count": 2,
+        "max": 4.0,
+        "mean": 4.0,
+        "min": 4.0,
+        "p50": 4.0,
+        "p90": 4.0,
+        "p99": 4.0,
+        "sum": 8.0
+      },
+      "activation_pool_miss_count": {
+        "count": 2,
+        "max": 12.0,
+        "mean": 12.0,
+        "min": 12.0,
+        "p50": 12.0,
+        "p90": 12.0,
+        "p99": 12.0,
+        "sum": 24.0
+      },
+      "activation_pool_release_failures": {
+        "count": 2,
+        "max": 1.0,
+        "mean": 1.0,
+        "min": 1.0,
+        "p50": 1.0,
+        "p90": 1.0,
+        "p99": 1.0,
+        "sum": 2.0
+      },
+      "activation_pool_total_created": {
+        "count": 2,
+        "max": 48.0,
+        "mean": 48.0,
+        "min": 48.0,
+        "p50": 48.0,
+        "p90": 48.0,
+        "p99": 48.0,
+        "sum": 96.0
+      },
+      "activation_pool_total_reused": {
+        "count": 2,
+        "max": 36.0,
+        "mean": 36.0,
+        "min": 36.0,
+        "p50": 36.0,
+        "p90": 36.0,
+        "p99": 36.0,
+        "sum": 72.0
+      },
+      "activation_pool_utilization": {
+        "count": 2,
+        "max": 0.5,
+        "mean": 0.5,
+        "min": 0.5,
+        "p50": 0.5,
+        "p90": 0.5,
+        "p99": 0.5,
+        "sum": 1.0
+      },
+      "adaptive_batch_cold_confidence": {
+        "count": 2,
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "p50": 0.0,
+        "p90": 0.0,
+        "p99": 0.0,
+        "sum": 0.0
+      },
+      "adaptive_batch_cold_size": {
+        "count": 2,
+        "max": 32.0,
+        "mean": 32.0,
+        "min": 32.0,
+        "p50": 32.0,
+        "p90": 32.0,
+        "p99": 32.0,
+        "sum": 64.0
+      },
+      "adaptive_batch_hot_confidence": {
+        "count": 2,
+        "max": 0.18126922845840454,
+        "mean": 0.18126922845840454,
+        "min": 0.18126922845840454,
+        "p50": 0.18126922845840454,
+        "p90": 0.18126922845840454,
+        "p99": 0.18126922845840454,
+        "sum": 0.3625384569168091
+      },
+      "adaptive_batch_hot_size": {
+        "count": 2,
+        "max": 83.0,
+        "mean": 83.0,
+        "min": 83.0,
+        "p50": 83.0,
+        "p90": 83.0,
+        "p99": 83.0,
+        "sum": 166.0
+      },
+      "adaptive_batch_latency_ewma_ns": {
+        "count": 2,
+        "max": 1500000.0,
+        "mean": 1500000.0,
+        "min": 1500000.0,
+        "p50": 1500000.0,
+        "p90": 1500000.0,
+        "p99": 1500000.0,
+        "sum": 3000000.0
+      },
+      "adaptive_batch_updates_total": {
+        "count": 2,
+        "max": 1.0,
+        "mean": 1.0,
+        "min": 1.0,
+        "p50": 1.0,
+        "p90": 1.0,
+        "p99": 1.0,
+        "sum": 2.0
+      },
+      "adaptive_batch_warm_confidence": {
+        "count": 2,
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "p50": 0.0,
+        "p90": 0.0,
+        "p99": 0.0,
+        "sum": 0.0
+      },
+      "adaptive_batch_warm_size": {
+        "count": 2,
+        "max": 72.0,
+        "mean": 72.0,
+        "min": 72.0,
+        "p50": 72.0,
+        "p90": 72.0,
+        "p99": 72.0,
+        "sum": 144.0
+      },
+      "adaptive_fallback_activations_total": {
+        "count": 2,
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "p50": 0.0,
+        "p90": 0.0,
+        "p99": 0.0,
+        "sum": 0.0
+      },
+      "adaptive_guardrail_hits_total": {
+        "count": 2,
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "p50": 0.0,
+        "p90": 0.0,
+        "p99": 0.0,
+        "sum": 0.0
+      },
+      "adaptive_topology_changes_total": {
+        "count": 2,
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "p50": 0.0,
+        "p90": 0.0,
+        "p99": 0.0,
+        "sum": 0.0
+      }
+    },
+    "schema_version": "1.0.0",
+    "ten_seconds": {
+      "activation_pool_available_records": {
+        "count": 2,
+        "max": 12.0,
+        "mean": 12.0,
+        "min": 12.0,
+        "p50": 12.0,
+        "p90": 12.0,
+        "p99": 12.0,
+        "sum": 24.0
+      },
+      "activation_pool_high_water_mark": {
+        "count": 2,
+        "max": 32.0,
+        "mean": 32.0,
+        "min": 32.0,
+        "p50": 32.0,
+        "p90": 32.0,
+        "p99": 32.0,
+        "sum": 64.0
+      },
+      "activation_pool_hit_rate": {
+        "count": 2,
+        "max": 0.75,
+        "mean": 0.75,
+        "min": 0.75,
+        "p50": 0.75,
+        "p90": 0.75,
+        "p99": 0.75,
+        "sum": 1.5
+      },
+      "activation_pool_in_flight_records": {
+        "count": 2,
+        "max": 4.0,
+        "mean": 4.0,
+        "min": 4.0,
+        "p50": 4.0,
+        "p90": 4.0,
+        "p99": 4.0,
+        "sum": 8.0
+      },
+      "activation_pool_miss_count": {
+        "count": 2,
+        "max": 12.0,
+        "mean": 12.0,
+        "min": 12.0,
+        "p50": 12.0,
+        "p90": 12.0,
+        "p99": 12.0,
+        "sum": 24.0
+      },
+      "activation_pool_release_failures": {
+        "count": 2,
+        "max": 1.0,
+        "mean": 1.0,
+        "min": 1.0,
+        "p50": 1.0,
+        "p90": 1.0,
+        "p99": 1.0,
+        "sum": 2.0
+      },
+      "activation_pool_total_created": {
+        "count": 2,
+        "max": 48.0,
+        "mean": 48.0,
+        "min": 48.0,
+        "p50": 48.0,
+        "p90": 48.0,
+        "p99": 48.0,
+        "sum": 96.0
+      },
+      "activation_pool_total_reused": {
+        "count": 2,
+        "max": 36.0,
+        "mean": 36.0,
+        "min": 36.0,
+        "p50": 36.0,
+        "p90": 36.0,
+        "p99": 36.0,
+        "sum": 72.0
+      },
+      "activation_pool_utilization": {
+        "count": 2,
+        "max": 0.5,
+        "mean": 0.5,
+        "min": 0.5,
+        "p50": 0.5,
+        "p90": 0.5,
+        "p99": 0.5,
+        "sum": 1.0
+      },
+      "adaptive_batch_cold_confidence": {
+        "count": 2,
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "p50": 0.0,
+        "p90": 0.0,
+        "p99": 0.0,
+        "sum": 0.0
+      },
+      "adaptive_batch_cold_size": {
+        "count": 2,
+        "max": 32.0,
+        "mean": 32.0,
+        "min": 32.0,
+        "p50": 32.0,
+        "p90": 32.0,
+        "p99": 32.0,
+        "sum": 64.0
+      },
+      "adaptive_batch_hot_confidence": {
+        "count": 2,
+        "max": 0.18126922845840454,
+        "mean": 0.18126922845840454,
+        "min": 0.18126922845840454,
+        "p50": 0.18126922845840454,
+        "p90": 0.18126922845840454,
+        "p99": 0.18126922845840454,
+        "sum": 0.3625384569168091
+      },
+      "adaptive_batch_hot_size": {
+        "count": 2,
+        "max": 83.0,
+        "mean": 83.0,
+        "min": 83.0,
+        "p50": 83.0,
+        "p90": 83.0,
+        "p99": 83.0,
+        "sum": 166.0
+      },
+      "adaptive_batch_latency_ewma_ns": {
+        "count": 2,
+        "max": 1500000.0,
+        "mean": 1500000.0,
+        "min": 1500000.0,
+        "p50": 1500000.0,
+        "p90": 1500000.0,
+        "p99": 1500000.0,
+        "sum": 3000000.0
+      },
+      "adaptive_batch_updates_total": {
+        "count": 2,
+        "max": 1.0,
+        "mean": 1.0,
+        "min": 1.0,
+        "p50": 1.0,
+        "p90": 1.0,
+        "p99": 1.0,
+        "sum": 2.0
+      },
+      "adaptive_batch_warm_confidence": {
+        "count": 2,
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "p50": 0.0,
+        "p90": 0.0,
+        "p99": 0.0,
+        "sum": 0.0
+      },
+      "adaptive_batch_warm_size": {
+        "count": 2,
+        "max": 72.0,
+        "mean": 72.0,
+        "min": 72.0,
+        "p50": 72.0,
+        "p90": 72.0,
+        "p99": 72.0,
+        "sum": 144.0
+      },
+      "adaptive_fallback_activations_total": {
+        "count": 2,
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "p50": 0.0,
+        "p90": 0.0,
+        "p99": 0.0,
+        "sum": 0.0
+      },
+      "adaptive_guardrail_hits_total": {
+        "count": 2,
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "p50": 0.0,
+        "p90": 0.0,
+        "p99": 0.0,
+        "sum": 0.0
+      },
+      "adaptive_topology_changes_total": {
+        "count": 2,
+        "max": 0.0,
+        "mean": 0.0,
+        "min": 0.0,
+        "p50": 0.0,
+        "p90": 0.0,
+        "p99": 0.0,
+        "sum": 0.0
+      }
+    }
+  }
+}

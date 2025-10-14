@@ -17,13 +17,16 @@ use axum::{
     response::Response,
 };
 use engram_cli::api::{ApiState, create_api_routes};
+use engram_core::activation::SpreadingAutoTuner;
 use std::sync::Arc;
 use tower::ServiceExt;
 
 /// Create test router for monitoring tests
 fn create_test_router() -> Router {
     let store = Arc::new(engram_core::MemoryStore::new(100));
-    let api_state = ApiState::new(store);
+    let metrics = engram_core::metrics::init();
+    let auto_tuner = SpreadingAutoTuner::new(0.10, 16);
+    let api_state = ApiState::new(store, metrics, auto_tuner);
 
     create_api_routes().with_state(api_state)
 }

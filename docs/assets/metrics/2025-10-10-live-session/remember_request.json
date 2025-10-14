@@ -1,0 +1,10 @@
+{
+  "id": "metrics_live_capture_memory",
+  "content": "Live capture memory payload for metrics validation",
+  "confidence": 0.85,
+  "confidence_reasoning": "Generated during observability capture",
+  "tags": ["metrics", "live"],
+  "memory_type": "semantic",
+  "auto_link": true,
+  "link_threshold": 0.6
+}

@@ -1,5 +1,6 @@
 //! ANN validation benchmarks comparing Engram to FAISS.
 
+#![cfg(feature = "ann_benchmarks")]
 #![allow(missing_docs)]
 
 mod support;

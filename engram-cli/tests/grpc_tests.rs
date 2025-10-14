@@ -14,7 +14,8 @@ use tonic::Request;
 /// Start a test gRPC server and return the port
 async fn start_test_grpc_server() -> u16 {
     let store = Arc::new(engram_core::MemoryStore::new(100));
-    let service = MemoryService::new(store);
+    let metrics = engram_core::metrics::init();
+    let service = MemoryService::new(store, metrics);
 
     // Find an available port
     let port = portpicker::pick_unused_port().expect("No available ports");
@@ -183,6 +184,7 @@ async fn test_grpc_introspect() {
     assert!(res.health.as_ref().unwrap().healthy);
     assert!(res.statistics.is_some());
     assert!(!res.active_processes.is_empty());
+    assert!(!res.metrics_snapshot_json.is_empty());
 }
 
 #[tokio::test]

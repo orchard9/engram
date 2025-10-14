@@ -31,11 +31,7 @@ use std::sync::{Arc, Mutex};
 #[cfg(feature = "multilingual_embeddings")]
 use ndarray::{Array2, ArrayView2};
 #[cfg(feature = "multilingual_embeddings")]
-use ort::{
-    session::builder::GraphOptimizationLevel,
-    session::Session,
-    value::Value,
-};
+use ort::{session::Session, session::builder::GraphOptimizationLevel, value::Value};
 
 /// Multilingual sentence encoder using ONNX Runtime for inference.
 ///
@@ -149,7 +145,11 @@ impl MultilingualEncoder {
     ///
     /// Returns error if tokenization or inference fails.
     #[cfg(feature = "multilingual_embeddings")]
-    fn encode_internal(&self, text: &str, _language: Option<&str>) -> Result<Vec<f32>, EmbeddingError> {
+    fn encode_internal(
+        &self,
+        text: &str,
+        _language: Option<&str>,
+    ) -> Result<Vec<f32>, EmbeddingError> {
         // Tokenize input
         let tokenization = self.tokenizer.tokenize(text)?;
 
@@ -166,19 +166,29 @@ impl MultilingualEncoder {
             (1, tokenization.token_ids.len()),
             tokenization.token_ids.iter().map(|&id| id as i64).collect(),
         )
-        .map_err(|e| EmbeddingError::EncodingFailed(format!("failed to create input tensor: {}", e)))?;
+        .map_err(|e| {
+            EmbeddingError::EncodingFailed(format!("failed to create input tensor: {}", e))
+        })?;
 
         let attention_mask = Array2::from_shape_vec(
             (1, tokenization.attention_mask.len()),
-            tokenization.attention_mask.iter().map(|&m| m as i64).collect(),
+            tokenization
+                .attention_mask
+                .iter()
+                .map(|&m| m as i64)
+                .collect(),
         )
-        .map_err(|e| EmbeddingError::EncodingFailed(format!("failed to create mask tensor: {}", e)))?;
+        .map_err(|e| {
+            EmbeddingError::EncodingFailed(format!("failed to create mask tensor: {}", e))
+        })?;
 
         // Run inference - ort requires owned arrays
-        let input_ids_value = Value::from_array(input_ids)
-            .map_err(|e| EmbeddingError::EncodingFailed(format!("failed to create input tensor: {}", e)))?;
-        let attention_mask_value = Value::from_array(attention_mask)
-            .map_err(|e| EmbeddingError::EncodingFailed(format!("failed to create mask tensor: {}", e)))?;
+        let input_ids_value = Value::from_array(input_ids).map_err(|e| {
+            EmbeddingError::EncodingFailed(format!("failed to create input tensor: {}", e))
+        })?;
+        let attention_mask_value = Value::from_array(attention_mask).map_err(|e| {
+            EmbeddingError::EncodingFailed(format!("failed to create mask tensor: {}", e))
+        })?;
 
         // Lock session for inference
         let mut session = self.session.lock().map_err(|e| {
@@ -193,9 +203,9 @@ impl MultilingualEncoder {
             .map_err(|e| EmbeddingError::EncodingFailed(format!("ONNX inference failed: {}", e)))?;
 
         // Extract last hidden state (batch_size, sequence_length, hidden_size)
-        let (shape, data) = outputs[0]
-            .try_extract_tensor::<f32>()
-            .map_err(|e| EmbeddingError::EncodingFailed(format!("failed to extract output tensor: {}", e)))?;
+        let (shape, data) = outputs[0].try_extract_tensor::<f32>().map_err(|e| {
+            EmbeddingError::EncodingFailed(format!("failed to extract output tensor: {}", e))
+        })?;
 
         // Get dimensions (cast from i64 to usize)
         let shape_dims = shape.as_ref();
@@ -203,15 +213,22 @@ impl MultilingualEncoder {
         let hidden_size = shape_dims[2] as usize;
 
         // Convert to ndarray for mean pooling
-        let hidden_states = ArrayView2::from_shape((seq_len, hidden_size), data)
-            .map_err(|e| EmbeddingError::EncodingFailed(format!("failed to reshape output: {}", e)))?;
+        let hidden_states = ArrayView2::from_shape((seq_len, hidden_size), data).map_err(|e| {
+            EmbeddingError::EncodingFailed(format!("failed to reshape output: {}", e))
+        })?;
 
         // Recreate attention mask as Array2 for pooling
         let attention_mask_array = Array2::from_shape_vec(
             (1, tokenization.attention_mask.len()),
-            tokenization.attention_mask.iter().map(|&m| m as i64).collect(),
+            tokenization
+                .attention_mask
+                .iter()
+                .map(|&m| m as i64)
+                .collect(),
         )
-        .map_err(|e| EmbeddingError::EncodingFailed(format!("failed to create mask array: {}", e)))?;
+        .map_err(|e| {
+            EmbeddingError::EncodingFailed(format!("failed to create mask array: {}", e))
+        })?;
 
         // Apply mean pooling
         let embedding = Self::mean_pool(&hidden_states, &attention_mask_array);
@@ -273,7 +290,8 @@ impl EmbeddingProvider for MultilingualEncoder {
         #[cfg(feature = "multilingual_embeddings")]
         {
             let vector = self.encode_internal(text, language)?;
-            let provenance = EmbeddingProvenance::new(self.model_version.clone(), language.map(String::from));
+            let provenance =
+                EmbeddingProvenance::new(self.model_version.clone(), language.map(String::from));
             Ok(EmbeddingWithProvenance::new(vector, provenance))
         }
 
@@ -340,7 +358,11 @@ mod tests {
         use ndarray::array;
 
         // Create simple embeddings: 3 tokens, 4 dimensions
-        let embeddings = array![[1.0, 2.0, 3.0, 4.0], [5.0, 6.0, 7.0, 8.0], [9.0, 10.0, 11.0, 12.0]];
+        let embeddings = array![
+            [1.0, 2.0, 3.0, 4.0],
+            [5.0, 6.0, 7.0, 8.0],
+            [9.0, 10.0, 11.0, 12.0]
+        ];
 
         // Attention mask: attend to first 2 tokens, ignore last
         let mask = array![[1, 1, 0]];

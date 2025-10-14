@@ -10,6 +10,9 @@ use axum::{
 };
 use chrono::Utc;
 use engram_cli::api::{ApiState, create_api_routes};
+use engram_core::activation::SpreadingAutoTuner;
+use engram_core::activation::{ActivationRecordPoolStats, SpreadingMetrics};
+use engram_core::metrics;
 use serde_json::{Value, json};
 use std::sync::Arc;
 use tower::ServiceExt; // for `oneshot`
@@ -17,9 +20,17 @@ use tower::ServiceExt; // for `oneshot`
 /// Create test router with API routes
 fn create_test_router() -> Router {
     let store = Arc::new(engram_core::MemoryStore::new(100));
-    let api_state = ApiState::new(store);
+    let metrics = engram_core::metrics::init();
+    let auto_tuner = SpreadingAutoTuner::new(0.10, 16);
+    let api_state = ApiState::new(store, metrics, auto_tuner);
 
     create_api_routes().with_state(api_state)
+}
+
+fn drain_streaming_queue() {
+    let registry = metrics::init();
+    registry.streaming_aggregator().set_export_enabled(true);
+    let _ = registry.streaming_snapshot();
 }
 
 /// Helper to make HTTP requests
@@ -88,6 +99,83 @@ async fn test_remember_memory_success() {
 
     // Check auto-linking was applied
     assert!(response["auto_links"].is_array());
+}
+
+#[tokio::test]
+async fn test_metrics_endpoint_snapshot() {
+    let app = create_test_router();
+
+    let (status, response) = make_request(&app, Method::GET, "/metrics", None).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(response.get("snapshot").is_some());
+    assert!(
+        response
+            .get("snapshot")
+            .and_then(|value| value.get("one_second"))
+            .is_some()
+    );
+    assert!(response.get("export").is_some());
+}
+
+#[tokio::test]
+async fn test_metrics_endpoint_matches_streaming_snapshot_after_reset() {
+    drain_streaming_queue();
+
+    let app = create_test_router();
+
+    let metrics = metrics::init();
+    let spreading_metrics = SpreadingMetrics::default();
+    let pool_stats = ActivationRecordPoolStats {
+        available: 4,
+        in_flight: 2,
+        high_water_mark: 8,
+        total_created: 16,
+        total_reused: 12,
+        misses: 3,
+        hit_rate: 0.8,
+        utilization: 0.25,
+        release_failures: 1,
+    };
+
+    spreading_metrics.record_pool_snapshot(&pool_stats);
+    let _ = metrics.streaming_snapshot();
+
+    spreading_metrics.reset();
+
+    let (status, response) = make_request(&app, Method::GET, "/metrics", None).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let http_snapshot = response
+        .get("snapshot")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    let expected_snapshot =
+        serde_json::to_value(metrics.streaming_snapshot()).expect("serialize core snapshot");
+
+    let windows = ["one_second", "ten_seconds", "one_minute", "five_minutes"];
+    for window in windows {
+        let http_window = http_snapshot
+            .get(window)
+            .and_then(|value| value.as_object())
+            .unwrap_or_else(|| panic!("window {window} missing in HTTP snapshot"));
+        let expected_window = expected_snapshot
+            .get(window)
+            .and_then(|value| value.as_object())
+            .unwrap_or_else(|| panic!("window {window} missing in core snapshot"));
+
+        for (key, expected_value) in expected_window {
+            if key.starts_with("activation_pool_") {
+                let http_value = http_window
+                    .get(key)
+                    .unwrap_or_else(|| panic!("metric {key} missing in HTTP snapshot"));
+                assert_eq!(
+                    http_value, expected_value,
+                    "HTTP {window}.{key} should match core snapshot"
+                );
+            }
+        }
+    }
 }
 
 #[tokio::test]
@@ -311,6 +399,31 @@ async fn test_recognize_pattern_success() {
 }
 
 #[tokio::test]
+async fn test_spreading_health_endpoint() {
+    let app = create_test_router();
+    let (status, payload) = make_request(&app, Method::GET, "/health/spreading", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(payload.get("status").is_some());
+}
+
+#[tokio::test]
+async fn test_system_health_endpoint() {
+    let app = create_test_router();
+    let (status, payload) = make_request(&app, Method::GET, "/api/v1/system/health", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(payload.get("checks").is_some());
+}
+
+#[tokio::test]
+async fn test_spreading_config_endpoint() {
+    let app = create_test_router();
+    let (status, payload) =
+        make_request(&app, Method::GET, "/api/v1/system/spreading/config", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(payload.get("audit_log").is_some());
+}
+
+#[tokio::test]
 async fn test_recognize_pattern_validation() {
     let app = create_test_router();
 
@@ -343,10 +456,10 @@ async fn test_system_health() {
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(response["status"].as_str().unwrap(), "healthy");
-    assert!(response["memory_system"]["total_memories"].is_number());
-    assert!(response["memory_system"]["consolidation_active"].is_boolean());
-    assert!(response["cognitive_load"].is_object());
-    assert!(response["system_message"].is_string());
+    assert!(response["timestamp"].is_string());
+    assert!(response["memory"].is_object());
+    assert!(response["memory"]["total_memories"].is_number());
+    assert!(response["checks"].is_array());
 }
 
 #[tokio::test]

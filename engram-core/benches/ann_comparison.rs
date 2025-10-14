@@ -1,5 +1,6 @@
 //! ANN comparison benchmarks for Engram vs FAISS.
 
+#![cfg(feature = "ann_benchmarks")]
 #![allow(missing_docs)]
 
 mod support;

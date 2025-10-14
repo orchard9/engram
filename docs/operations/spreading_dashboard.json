@@ -1,0 +1,184 @@
+{
+  "title": "Spreading Activation Operations",
+  "uid": "spreading-ops",
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "30s",
+  "tags": ["engram", "spreading"],
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Hot Tier Latency (p50/p95/p99)",
+      "gridPos": {"x": 0, "y": 0, "w": 8, "h": 8},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.50, sum(rate(engram_spreading_latency_hot_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum(rate(engram_spreading_latency_hot_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p95"
+        },
+        {
+          "refId": "C",
+          "expr": "histogram_quantile(0.99, sum(rate(engram_spreading_latency_hot_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p99"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Warm Tier Latency (p50/p95/p99)",
+      "gridPos": {"x": 8, "y": 0, "w": 8, "h": 8},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.50, sum(rate(engram_spreading_latency_warm_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum(rate(engram_spreading_latency_warm_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p95"
+        },
+        {
+          "refId": "C",
+          "expr": "histogram_quantile(0.99, sum(rate(engram_spreading_latency_warm_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p99"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Cold Tier Latency (p50/p95/p99)",
+      "gridPos": {"x": 16, "y": 0, "w": 8, "h": 8},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.50, sum(rate(engram_spreading_latency_cold_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum(rate(engram_spreading_latency_cold_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p95"
+        },
+        {
+          "refId": "C",
+          "expr": "histogram_quantile(0.99, sum(rate(engram_spreading_latency_cold_seconds_bucket[5m])) by (le))",
+          "legendFormat": "p99"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Circuit Breaker State",
+      "gridPos": {"x": 0, "y": 8, "w": 6, "h": 6},
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": ""},
+        "orientation": "horizontal"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(engram_spreading_breaker_state)",
+          "legendFormat": "state"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Breaker Transitions",
+      "gridPos": {"x": 6, "y": 8, "w": 6, "h": 6},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "increase(engram_spreading_breaker_transitions_total[5m])",
+          "legendFormat": "transitions /5m"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Fallback Rate (5m)",
+      "gridPos": {"x": 12, "y": 8, "w": 6, "h": 6},
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": ""}
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "increase(engram_spreading_fallback_total[5m])",
+          "legendFormat": "fallbacks"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "Pool Utilisation",
+      "gridPos": {"x": 18, "y": 8, "w": 6, "h": 6},
+      "options": {
+        "reduceOptions": {"calcs": ["lastNotNull"], "fields": ""},
+        "orientation": "horizontal"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(engram_spreading_pool_utilization)",
+          "legendFormat": "utilisation"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Auto-tune Activity",
+      "gridPos": {"x": 0, "y": 14, "w": 12, "h": 6},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "increase(engram_spreading_autotune_changes_total[1h])",
+          "legendFormat": "changes /h"
+        },
+        {
+          "refId": "B",
+          "expr": "max(engram_spreading_autotune_last_improvement)",
+          "legendFormat": "last improvement"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Activation Volume",
+      "gridPos": {"x": 12, "y": 14, "w": 12, "h": 6},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(engram_spreading_activations_total)",
+          "legendFormat": "activations"
+        },
+        {
+          "refId": "B",
+          "expr": "increase(engram_spreading_latency_budget_violations_total[5m])",
+          "legendFormat": "budget violations /5m"
+        },
+        {
+          "refId": "C",
+          "expr": "increase(engram_spreading_failures_total[5m])",
+          "legendFormat": "failures /5m"
+        }
+      ]
+    }
+  ]
+}

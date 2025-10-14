@@ -318,6 +318,7 @@ message IntrospectResponse {
   HealthStatus health = 2;
   MemoryStatistics statistics = 3;
   repeated string active_processes = 4;
+  string metrics_snapshot_json = 5;
 }
 
 message HealthStatus {

@@ -67,7 +67,7 @@ fn test_full_memory_lifecycle() {
         .max_results(2)
         .build();
 
-    let results = store.recall(&cue);
+    let results = store.recall(&cue).results;
 
     // Verify results
     assert!(!results.is_empty(), "Should have recall results");
@@ -136,7 +136,7 @@ fn test_activation_spreading() {
         .max_results(5)
         .build();
 
-    let results = store.recall(&cue);
+    let results = store.recall(&cue).results;
     assert!(
         !results.is_empty(),
         "expected recall results when querying inserted embeddings"
@@ -299,7 +299,7 @@ fn test_batch_operations() {
         .max_results(5)
         .build();
 
-    let recall_results = store.recall(&cue);
+    let recall_results = store.recall(&cue).results;
     assert!(!recall_results.is_empty(), "Should recall stored memories");
 }
 

@@ -18,12 +18,13 @@ use utoipa::{
 use utoipa_swagger_ui::{self, Config, Url};
 
 use crate::api::{
-    ActivationMonitoringQuery, AutoLink, CausalityMonitoringQuery, ConfidenceInfo, MemoryResult,
-    MonitoringQuery, QueryAnalysis, RecallMetadata, RecallQuery, RecallResponse, RecallResults,
-    RecognizeRequest, RecognizeResponse, RememberEpisodeRequest, RememberMemoryRequest,
-    RememberResponse, SimilarPattern, StreamActivityQuery, StreamConsolidationQuery,
-    StreamMemoryQuery,
+    ActivationMonitoringQuery, AutoLink, AutoTuneResponse, CausalityMonitoringQuery,
+    ConfidenceInfo, MemoryResult, MonitoringQuery, QueryAnalysis, RecallMetadata, RecallQuery,
+    RecallResponse, RecallResults, RecognizeRequest, RecognizeResponse, RememberEpisodeRequest,
+    RememberMemoryRequest, RememberResponse, SimilarPattern, StreamActivityQuery,
+    StreamConsolidationQuery, StreamMemoryQuery,
 };
+use engram_core::activation::AutoTuneAuditEntry;
 
 /// Main `OpenAPI` specification with cognitive-friendly organization
 #[derive(OpenApi)]
@@ -85,8 +86,11 @@ Headers:
         crate::api::recognize_pattern,
         crate::api::remember_episode,
         crate::api::replay_episodes,
+        crate::api::spreading_health,
+        crate::api::spreading_config,
         crate::api::system_health,
         crate::api::system_introspect,
+        crate::api::metrics_snapshot,
         crate::api::stream_activities,
         crate::api::stream_memories,
         crate::api::stream_consolidation,
@@ -117,7 +121,11 @@ Headers:
             ActivationMonitoringQuery,
             CausalityMonitoringQuery,
             ErrorResponse,
+            AutoTuneAuditEntry,
+            AutoTuneResponse,
+            HealthCheckSummary,
             HealthResponse,
+            MemorySummary,
             IntrospectionResponse,
         )
     ),
@@ -192,57 +200,71 @@ pub struct DocumentationLinks {
 /// Health check response
 #[derive(ToSchema, serde::Serialize)]
 pub struct HealthResponse {
-    /// System status
+    /// Overall status
     #[schema(example = "healthy")]
     pub status: String,
 
-    /// Memory system details
-    pub memory_system: MemorySystemHealth,
+    /// Timestamp of the report
+    #[schema(example = "2025-03-14T12:34:56Z")]
+    pub timestamp: String,
 
-    /// Cognitive load metrics
-    pub cognitive_load: CognitiveLoad,
+    /// Memory summary information
+    pub memory: MemorySummary,
 
-    /// Human-readable status message
-    #[schema(
-        example = "Memory system operational with 1523 stored memories. All cognitive processes functioning normally."
-    )]
-    pub system_message: String,
+    /// Individual probe results
+    pub checks: Vec<HealthCheckSummary>,
 }
 
-/// Memory system health details
+/// Memory usage summary
 #[derive(ToSchema, serde::Serialize)]
-pub struct MemorySystemHealth {
-    /// Total number of memories
+pub struct MemorySummary {
+    /// Total number of memories stored
     #[schema(example = 1523)]
     pub total_memories: usize,
-
-    /// Whether consolidation is active
-    #[schema(example = true)]
-    pub consolidation_active: bool,
-
-    /// Spreading activation status
-    #[schema(example = "normal")]
-    pub spreading_activation: String,
-
-    /// Pattern completion availability
-    #[schema(example = "available")]
-    pub pattern_completion: String,
 }
 
-/// Cognitive load metrics
+/// Individual probe result
 #[derive(ToSchema, serde::Serialize)]
-pub struct CognitiveLoad {
-    /// Current load level
-    #[schema(example = "low")]
-    pub current: String,
+pub struct HealthCheckSummary {
+    /// Probe name
+    #[schema(example = "spreading")]
+    pub name: String,
 
-    /// Remaining capacity percentage
-    #[schema(example = "85%")]
-    pub capacity_remaining: String,
+    /// Probe category
+    #[schema(example = "custom")]
+    pub r#type: String,
 
-    /// Consolidation queue size
+    /// Current status
+    #[schema(example = "healthy")]
+    pub status: String,
+
+    /// Diagnostic message
+    #[schema(example = "Spreading probe healthy: mass 0.42, latency 12ms")]
+    pub message: String,
+
+    /// Probe latency in seconds
+    #[schema(example = 0.012)]
+    pub latency_seconds: f64,
+
+    /// Consecutive failure count
     #[schema(example = 0)]
-    pub consolidation_queue: usize,
+    pub consecutive_failures: u32,
+
+    /// Consecutive success count
+    #[schema(example = 5)]
+    pub consecutive_successes: u32,
+
+    /// Seconds since the last success observation
+    #[schema(example = 4.2)]
+    pub last_success_seconds_ago: f64,
+
+    /// Seconds since the last failure observation (if any)
+    #[schema(example = 120.0, nullable = true)]
+    pub last_failure_seconds_ago: Option<f64>,
+
+    /// Seconds since the probe last executed (if available)
+    #[schema(example = 4.2, nullable = true)]
+    pub last_run_seconds_ago: Option<f64>,
 }
 
 /// System introspection response

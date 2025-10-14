@@ -1,0 +1,36 @@
+{
+  "meta": {
+    "description": "Deterministic trace sample for tutorial",
+    "deterministic": true,
+    "seed": 42,
+    "config": {
+      "max_depth": 3,
+      "threshold": 0.1,
+      "deterministic": true,
+      "trace_activation_flow": true
+    }
+  },
+  "trace": [
+    {
+      "depth": 0,
+      "source": null,
+      "target": "doctor",
+      "activation": 1.0,
+      "confidence": 0.92
+    },
+    {
+      "depth": 1,
+      "source": "doctor",
+      "target": "nurse",
+      "activation": 0.64,
+      "confidence": 0.88
+    },
+    {
+      "depth": 1,
+      "source": "doctor",
+      "target": "cardiology",
+      "activation": 0.41,
+      "confidence": 0.74
+    }
+  ]
+}

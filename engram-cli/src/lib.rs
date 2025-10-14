@@ -6,6 +6,8 @@
 pub mod api;
 pub mod benchmark_simple;
 pub mod cli;
+#[allow(missing_docs)]
+pub mod config;
 pub mod docs;
 pub mod grpc;
 pub mod openapi;

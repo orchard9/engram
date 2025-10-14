@@ -4,7 +4,9 @@
 //! allowing activation to flow through the hierarchical navigable small world
 //! graph based on vector similarity.
 
-use super::{ActivationRecord, NodeId, storage_aware::StorageTier};
+use super::{
+    ActivationRecord, NodeId, memory_pool::ActivationRecordPool, storage_aware::StorageTier,
+};
 use crate::Confidence;
 use crate::index::{HnswGraph, SearchResult};
 use dashmap::DashMap;
@@ -15,11 +17,14 @@ pub struct HnswActivationEngine {
     /// Reference to the HNSW index
     hnsw_graph: Arc<HnswGraph>,
     /// Activation records for nodes
-    activations: Arc<DashMap<NodeId, ActivationRecord>>,
+    activations: Arc<DashMap<NodeId, Arc<ActivationRecord>>>,
+    /// Shared activation record pool for recycling records
+    activation_pool: Arc<ActivationRecordPool>,
     /// Spreading parameters
     config: SpreadingConfig,
 }
 
+#[doc = include_str!("doc/hnsw_spreading_config.md")]
 /// Configuration for HNSW-based activation spreading
 #[derive(Debug, Clone)]
 pub struct SpreadingConfig {
@@ -50,9 +55,11 @@ impl Default for SpreadingConfig {
 impl HnswActivationEngine {
     /// Create a new HNSW activation engine
     pub fn new(hnsw_graph: Arc<HnswGraph>, config: SpreadingConfig) -> Self {
+        let pool_initial = config.max_hops.saturating_mul(32).max(64);
         Self {
             hnsw_graph,
             activations: Arc::new(DashMap::new()),
+            activation_pool: Arc::new(ActivationRecordPool::new(pool_initial)),
             config,
         }
     }
@@ -67,14 +74,15 @@ impl HnswActivationEngine {
         let mut results = Vec::new();
         let mut visited = dashmap::DashSet::new();
 
-        // Initialize source activation
-        let mut base_record = ActivationRecord::new(source_id.clone(), 0.1);
-        base_record.set_storage_tier(StorageTier::Hot);
-        self.activations.insert(source_id.clone(), base_record);
+        self.reset();
 
-        if let Some(record) = self.activations.get(source_id) {
-            record.accumulate_activation(initial_activation);
-        }
+        // Initialize source activation through the shared pool
+        let record = self
+            .activation_pool
+            .acquire_with_defaults(source_id.clone(), Some(StorageTier::Hot));
+        record.accumulate_activation(initial_activation);
+        self.activations
+            .insert(source_id.clone(), Arc::clone(&record));
 
         // Spread through HNSW neighbors
         self.spread_recursive(source_id, initial_activation, 0, &mut visited, &mut results);
@@ -116,14 +124,12 @@ impl HnswActivationEngine {
 
             // Update neighbor activation
             let tier = StorageTier::from_depth(depth as u16 + 1);
+            let pool = Arc::clone(&self.activation_pool);
             let record = self
                 .activations
                 .entry(neighbor_id.clone())
-                .or_insert_with(|| {
-                    let mut base = ActivationRecord::new(neighbor_id.clone(), 0.1);
-                    base.set_storage_tier(tier);
-                    base
-                });
+                .or_insert_with(|| pool.acquire_with_defaults(neighbor_id.clone(), Some(tier)))
+                .clone();
 
             if record.accumulate_activation(propagated) {
                 results.push((neighbor_id.clone(), propagated));
@@ -160,10 +166,16 @@ impl HnswActivationEngine {
             let activation = result.confidence.raw();
 
             // Create or update activation record
-            self.activations
+            let pool = Arc::clone(&self.activation_pool);
+            let record = self
+                .activations
                 .entry(result.memory_id.clone())
-                .or_insert_with(|| ActivationRecord::new(result.memory_id.clone(), 0.1))
-                .accumulate_activation(activation);
+                .or_insert_with(|| {
+                    pool.acquire_with_defaults(result.memory_id.clone(), Some(StorageTier::Hot))
+                })
+                .clone();
+
+            record.accumulate_activation(activation);
 
             activated.push((result.memory_id, activation));
         }
@@ -201,8 +213,16 @@ impl HnswActivationEngine {
 
     /// Reset all activations
     pub fn reset(&self) {
-        for entry in self.activations.iter() {
-            entry.value().reset();
+        let keys: Vec<NodeId> = self
+            .activations
+            .iter()
+            .map(|entry| entry.key().clone())
+            .collect();
+
+        for key in keys {
+            if let Some((_, record)) = self.activations.remove(&key) {
+                self.activation_pool.release(record);
+            }
         }
     }
 

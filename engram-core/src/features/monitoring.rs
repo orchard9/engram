@@ -1,16 +1,13 @@
 //! Monitoring provider abstraction for metrics and telemetry
 //!
 //! This module provides a trait-based abstraction over monitoring backends,
-//! allowing graceful fallback from Prometheus to no-op monitoring.
+//! allowing graceful fallback from Engram's internal streaming pipeline to no-op monitoring.
 
 use super::FeatureProvider;
 use std::any::Any;
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
-
-#[cfg(feature = "monitoring")]
-use crate::metrics::cognitive::{CalibrationCorrection, CognitiveMetric};
 
 /// Errors that can occur during monitoring operations
 #[derive(Debug, Error)]
@@ -34,24 +31,24 @@ pub type MonitoringResult<T> = Result<T, MonitoringError>;
 /// Trait for monitoring operations
 pub trait Monitoring: Send + Sync {
     /// Record a counter metric
-    fn record_counter(&self, name: &str, value: u64, labels: &[(String, String)]);
+    fn record_counter(&self, name: &'static str, value: u64, labels: &[(String, String)]);
 
     /// Record a gauge metric
-    fn record_gauge(&self, name: &str, value: f64, labels: &[(String, String)]);
+    fn record_gauge(&self, name: &'static str, value: f64, labels: &[(String, String)]);
 
     /// Record a histogram metric
-    fn record_histogram(&self, name: &str, value: f64, labels: &[(String, String)]);
+    fn record_histogram(&self, name: &'static str, value: f64, labels: &[(String, String)]);
 
     /// Start a timer for measuring duration
     #[must_use]
-    fn start_timer(&self, name: &str) -> Box<dyn Timer>;
+    fn start_timer(&self, name: &'static str) -> Box<dyn Timer>;
 
     /// Get current metric value
     ///
     /// # Errors
     /// Returns [`MonitoringError::MetricNotFound`] when the requested metric is unknown or
     /// [`MonitoringError::OperationFailed`] when the backend cannot fulfill the query.
-    fn get_metric(&self, name: &str) -> MonitoringResult<MetricValue>;
+    fn get_metric(&self, name: &'static str) -> MonitoringResult<MetricValue>;
 }
 
 /// Timer for measuring durations
@@ -85,11 +82,11 @@ pub trait MonitoringProvider: FeatureProvider {
 /// Configuration for monitoring operations
 #[derive(Debug, Clone)]
 pub struct MonitoringConfig {
-    /// Prometheus endpoint
+    /// Destination identifier for streaming metrics (e.g., log target).
     pub endpoint: String,
     /// Metric prefix
     pub prefix: String,
-    /// Collection interval
+    /// Suggested collection interval for aggregators
     pub interval: Duration,
     /// Enable detailed metrics
     pub detailed: bool,
@@ -98,7 +95,7 @@ pub struct MonitoringConfig {
 impl Default for MonitoringConfig {
     fn default() -> Self {
         Self {
-            endpoint: "0.0.0.0:9090".to_string(),
+            endpoint: "logs://tracing".to_string(),
             prefix: "engram".to_string(),
             interval: Duration::from_secs(60),
             detailed: false,
@@ -106,15 +103,15 @@ impl Default for MonitoringConfig {
     }
 }
 
-/// Prometheus monitoring provider (only available when feature is enabled)
+/// Streaming/log monitoring provider (available when monitoring feature is enabled)
 #[cfg(feature = "monitoring")]
-pub struct PrometheusMonitoringProvider {
+pub struct StreamingMonitoringProvider {
     config: MonitoringConfig,
 }
 
 #[cfg(feature = "monitoring")]
-impl PrometheusMonitoringProvider {
-    /// Create a provider with the default Prometheus configuration.
+impl StreamingMonitoringProvider {
+    /// Create a provider with the default streaming configuration.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -130,14 +127,14 @@ impl PrometheusMonitoringProvider {
 }
 
 #[cfg(feature = "monitoring")]
-impl Default for PrometheusMonitoringProvider {
+impl Default for StreamingMonitoringProvider {
     fn default() -> Self {
         Self::new()
     }
 }
 
 #[cfg(feature = "monitoring")]
-impl FeatureProvider for PrometheusMonitoringProvider {
+impl FeatureProvider for StreamingMonitoringProvider {
     fn is_enabled(&self) -> bool {
         true
     }
@@ -147,7 +144,7 @@ impl FeatureProvider for PrometheusMonitoringProvider {
     }
 
     fn description(&self) -> &'static str {
-        "Prometheus-based monitoring and metrics collection"
+        "Internal streaming metrics and structured logs"
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -156,9 +153,9 @@ impl FeatureProvider for PrometheusMonitoringProvider {
 }
 
 #[cfg(feature = "monitoring")]
-impl MonitoringProvider for PrometheusMonitoringProvider {
+impl MonitoringProvider for StreamingMonitoringProvider {
     fn create_monitoring(&self) -> Box<dyn Monitoring> {
-        Box::new(PrometheusMonitoringImpl::new(self.config.clone()))
+        Box::new(StreamingMonitoringImpl::new(self.config.clone()))
     }
 
     fn get_config(&self) -> MonitoringConfig {
@@ -166,100 +163,97 @@ impl MonitoringProvider for PrometheusMonitoringProvider {
     }
 }
 
-/// Actual Prometheus implementation
+/// Internal monitoring implementation backed by the MetricsRegistry streaming pipeline.
 #[cfg(feature = "monitoring")]
-struct PrometheusMonitoringImpl {
+struct StreamingMonitoringImpl {
     config: MonitoringConfig,
     metrics: Arc<crate::metrics::MetricsRegistry>,
 }
 
 #[cfg(feature = "monitoring")]
-impl PrometheusMonitoringImpl {
+impl StreamingMonitoringImpl {
     fn new(config: MonitoringConfig) -> Self {
         use crate::metrics::MetricsRegistry;
 
-        tracing::debug!(endpoint = %config.endpoint, "initialising Prometheus monitoring");
+        tracing::debug!(target = "engram::monitoring", destination = %config.endpoint, "initialising streaming metrics");
 
         let metrics = Arc::new(MetricsRegistry::new());
 
         Self { config, metrics }
     }
 
-    fn should_record_metric(&self, name: &str) -> bool {
-        self.config.detailed || !name.starts_with("detailed")
+    fn maybe_log_snapshot(&self, label: &str) {
+        if self.config.detailed {
+            self.metrics.log_streaming_snapshot(label);
+        }
     }
 }
 
 #[cfg(feature = "monitoring")]
-impl Monitoring for PrometheusMonitoringImpl {
-    fn record_counter(&self, name: &str, value: u64, _labels: &[(String, String)]) {
-        if !self.should_record_metric(name) {
-            return;
-        }
-        // Map to MetricsRegistry counter
-        // Note: MetricsRegistry uses static str, so we can't directly use dynamic names
-        // This is a limitation we'll need to address in future refactoring
-        self.metrics.increment_counter("custom_counter", value);
+impl Monitoring for StreamingMonitoringImpl {
+    fn record_counter(&self, name: &'static str, value: u64, _labels: &[(String, String)]) {
+        self.metrics.increment_counter(name, value);
+        self.maybe_log_snapshot(name);
     }
 
-    fn record_gauge(&self, name: &str, _value: f64, _labels: &[(String, String)]) {
-        if !self.should_record_metric(name) {
-            return;
-        }
-        // MetricsRegistry doesn't have direct gauge support, use cognitive metrics
-        let metric = CognitiveMetric::ConfidenceCalibration {
-            correction_type: CalibrationCorrection::BaseRate,
-        };
-        self.metrics.record_cognitive(&metric);
+    fn record_gauge(&self, name: &'static str, value: f64, _labels: &[(String, String)]) {
+        self.metrics.record_gauge(name, value);
+        self.maybe_log_snapshot(name);
     }
 
-    fn record_histogram(&self, name: &str, value: f64, _labels: &[(String, String)]) {
-        if !self.should_record_metric(name) {
-            return;
-        }
-        let normalised = value / self.config.interval.as_secs_f64().max(1.0);
-        self.metrics
-            .observe_histogram("custom_histogram", normalised);
+    fn record_histogram(&self, name: &'static str, value: f64, _labels: &[(String, String)]) {
+        self.metrics.observe_histogram(name, value);
+        self.maybe_log_snapshot(name);
     }
 
-    fn start_timer(&self, name: &str) -> Box<dyn Timer> {
-        Box::new(PrometheusTimer {
+    fn start_timer(&self, name: &'static str) -> Box<dyn Timer> {
+        Box::new(StreamingTimer {
             start: std::time::Instant::now(),
-            name: format!("{}.{name}", self.config.prefix),
-            metrics: self.metrics.clone(),
+            metric_name: name,
+            metrics: Arc::clone(&self.metrics),
             detailed: self.config.detailed,
         })
     }
 
-    fn get_metric(&self, _name: &str) -> MonitoringResult<MetricValue> {
-        // MetricsRegistry doesn't expose query methods yet
-        if self.config.detailed {
-            Ok(MetricValue::Gauge(self.config.interval.as_secs_f64()))
-        } else {
-            Ok(MetricValue::Counter(0))
+    fn get_metric(&self, name: &'static str) -> MonitoringResult<MetricValue> {
+        if let Some(gauge) = self.metrics.gauge_value(name) {
+            return Ok(MetricValue::Gauge(gauge));
         }
+
+        let counter = self.metrics.counter_value(name);
+        if counter > 0 {
+            return Ok(MetricValue::Counter(counter));
+        }
+
+        let quantiles = self.metrics.histogram_quantiles(name, &[0.5, 0.9, 0.99]);
+        if quantiles
+            .iter()
+            .any(|value| value.is_finite() && *value > 0.0)
+        {
+            return Ok(MetricValue::Histogram(quantiles));
+        }
+
+        Err(MonitoringError::MetricNotFound(name.to_string()))
     }
 }
 
 #[cfg(feature = "monitoring")]
-struct PrometheusTimer {
+struct StreamingTimer {
     start: std::time::Instant,
-    name: String,
+    metric_name: &'static str,
     metrics: Arc<crate::metrics::MetricsRegistry>,
     detailed: bool,
 }
 
 #[cfg(feature = "monitoring")]
-impl Timer for PrometheusTimer {
+impl Timer for StreamingTimer {
     fn stop(self: Box<Self>) {
         let duration = self.start.elapsed();
-        let metric_key = if self.detailed {
-            "timer_detailed"
-        } else {
-            "timer"
-        };
-        tracing::debug!(timer = %self.name, elapsed = duration.as_secs_f64(), "recorded Prometheus timer");
         self.metrics
-            .observe_histogram(metric_key, duration.as_secs_f64());
+            .observe_histogram(self.metric_name, duration.as_secs_f64());
+
+        if self.detailed {
+            self.metrics.log_streaming_snapshot(self.metric_name);
+        }
     }
 }

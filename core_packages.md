@@ -101,7 +101,7 @@ Observability and profiling.
 
 ### Exports
 - Metric types: `ActivationHistogram`, `DecayProfile`
-- Prometheus exporters
+- Streaming metrics exporters (JSON/log based)
 
 ## engram-bench
 Cognitive-realistic benchmarking suite.

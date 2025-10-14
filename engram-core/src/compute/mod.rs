@@ -60,7 +60,7 @@ pub trait VectorOps: Send + Sync {
     fn weighted_average_768(&self, vectors: &[&[f32; 768]], weights: &[f32]) -> [f32; 768];
 
     /// Fused multiply-add for columnar operations
-    /// Computes: accumulator[i] += column[i] * scalar
+    /// Computes: `accumulator[i] += column[i] * scalar`
     fn fma_accumulate(&self, column: &[f32], scalar: f32, accumulator: &mut [f32]) {
         // Default scalar implementation
         for i in 0..column.len().min(accumulator.len()) {

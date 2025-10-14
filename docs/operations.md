@@ -49,7 +49,7 @@ To force terminate (only if graceful stop fails): `engram stop --pid-file <pid_p
 
 ## 6. Monitoring & Alerting
 - Use `scripts/check_engram_health.sh` to poll `/api/v1/system/health`.
-- Integrate metrics by pointing Prometheus at the metrics endpoint if `monitoring` feature is enabled.
+- Consume metrics via the internal streaming endpoint or structured logs when the `monitoring` feature is enabled.
 - Establish alerts for:
   - Health status != `healthy` for >1m.
   - WAL lag > 1s.

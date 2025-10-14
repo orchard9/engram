@@ -23,8 +23,11 @@ fn wal_recovery_round_trip() {
             .confidence(Confidence::HIGH)
             .build();
 
-        let activation = store.store(episode);
-        assert!(activation.is_successful(), "expected successful store");
+        let store_result = store.store(episode);
+        assert!(
+            store_result.activation.is_successful(),
+            "expected successful store"
+        );
         store.shutdown().expect("shutdown persistence");
     }
 

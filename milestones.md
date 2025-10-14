@@ -34,6 +34,14 @@
 
 **Validation**: Visualize activation spread on test graphs, verify follows neuroscience activation patterns. Benchmark must show linear scaling with CPU cores up to 32 cores.
 
+### Milestone 3.6: Multilingual Semantic Recall
+
+**Objective**: Deliver language-aware semantic recall that defaults to vector search with multilingual embeddings, expands lexical cues (synonyms, abbreviations, idioms), and interprets figurative language (metaphor/simile analogies) without sacrificing determinism or latency.
+
+**Critical**: Every stored memory must carry a high-quality embedding with tracked provenance. Query expansion must respect confidence budgets and audit trails. Figurative-language interpretation must degrade gracefully—never hallucinate unsupported mappings—and expose explainability metadata for operators.
+
+**Validation**: Cross-lingual MTEB (or equivalent) benchmark ≥0.80 nDCG@10 across English/Spanish/Mandarin test sets; synonym/abbreviation suite demonstrating ≥95% recall parity with literal queries; human-evaluated metaphor/simile set with ≥80% acceptable interpretations; regression tests proving lexical fallback still matches prior behavior when embeddings unavailable.
+
 ### Milestone 4: Temporal Dynamics
 
 **Objective**: Create automatic decay functions applying to all episodes based on `last_access` patterns. Implement forgetting curves matching psychological research (Ebbinghaus, spaced repetition).

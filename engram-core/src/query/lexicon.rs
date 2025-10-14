@@ -113,7 +113,10 @@ impl SynonymLexicon {
     /// * `term` - The original term
     /// * `synonyms` - List of (synonym, confidence) pairs
     pub fn add_synonyms(&mut self, term: String, synonyms: Vec<(String, f32)>) {
-        self.synonyms.entry(term).or_insert_with(Vec::new).extend(synonyms);
+        self.synonyms
+            .entry(term)
+            .or_insert_with(Vec::new)
+            .extend(synonyms);
     }
 
     /// Create a lexicon with default English synonyms for testing.
@@ -205,7 +208,7 @@ pub struct AbbreviationLexicon {
     name: String,
 
     /// Domain/language for context-specific expansions
-    #[allow(dead_code)]  // Will be used in future for context-aware disambiguation
+    #[allow(dead_code)] // Will be used in future for context-aware disambiguation
     domain: Option<String>,
 }
 
@@ -374,7 +377,11 @@ impl Lexicon for CompositeLexicon {
             .collect();
 
         // Sort by confidence descending
-        deduplicated.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
+        deduplicated.sort_by(|a, b| {
+            b.confidence
+                .partial_cmp(&a.confidence)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         deduplicated
     }
@@ -385,7 +392,9 @@ impl Lexicon for CompositeLexicon {
 
     fn supports_language(&self, language: &str) -> bool {
         // Composite supports language if any underlying lexicon supports it
-        self.lexicons.iter().any(|lex| lex.supports_language(language))
+        self.lexicons
+            .iter()
+            .any(|lex| lex.supports_language(language))
     }
 }
 
@@ -463,10 +472,8 @@ mod tests {
         let synonym_lex = Arc::new(SynonymLexicon::with_test_data()) as Arc<dyn Lexicon>;
         let abbrev_lex = Arc::new(AbbreviationLexicon::with_test_data()) as Arc<dyn Lexicon>;
 
-        let composite = CompositeLexicon::new(
-            "test-composite".to_string(),
-            vec![synonym_lex, abbrev_lex],
-        );
+        let composite =
+            CompositeLexicon::new("test-composite".to_string(), vec![synonym_lex, abbrev_lex]);
 
         // Should find synonyms for "car"
         let car_variants = composite.lookup("car", Some("en"));

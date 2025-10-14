@@ -20,8 +20,8 @@ fn test_hnsw_index_creation() {
         .confidence(Confidence::HIGH)
         .build();
 
-    let activation = store.store(episode);
-    assert!(activation.is_successful());
+    let store_result = store.store(episode);
+    assert!(store_result.activation.is_successful());
 }
 
 #[test]
@@ -123,7 +123,7 @@ fn test_hnsw_similarity_search() {
 
     let cue = Cue::embedding("test".to_string(), query, Confidence::LOW);
 
-    let results = store.recall(&cue);
+    let results = store.recall(&cue).results;
 
     // Should find at least one similar memory
     assert!(!results.is_empty());
@@ -160,7 +160,7 @@ fn test_hnsw_confidence_filtering() {
     // Search with high confidence threshold
     let cue = Cue::embedding("test".to_string(), [0.5f32; 768], Confidence::exact(0.7));
 
-    let results = store.recall(&cue);
+    let results = store.recall(&cue).results;
 
     // Should only return high-confidence memories
     for (_, confidence) in &results {
@@ -200,7 +200,7 @@ fn test_hnsw_concurrent_operations() {
                         let cue =
                             Cue::embedding("test".to_string(), [0.5f32; 768], Confidence::LOW);
 
-                        let _results = store.recall(&cue);
+                        let _results = store.recall(&cue).results;
                     }
                 }
             })
@@ -231,11 +231,11 @@ fn test_hnsw_memory_pressure_adaptation() {
             .confidence(Confidence::MEDIUM)
             .build();
 
-        let activation = store.store(episode);
+        let store_result = store.store(episode);
 
         // Later stores should show degraded activation due to pressure
         if i > 80 {
-            assert!(activation.is_degraded());
+            assert!(store_result.activation.is_degraded());
         }
     }
 
@@ -244,7 +244,7 @@ fn test_hnsw_memory_pressure_adaptation() {
     // Search under pressure should still work
     let cue = Cue::embedding("test".to_string(), [0.5f32; 768], Confidence::LOW);
 
-    let results = store.recall(&cue);
+    let results = store.recall(&cue).results;
     assert!(!results.is_empty());
 }
 
@@ -296,8 +296,8 @@ fn test_hnsw_vs_linear_recall_quality() {
         .build();
 
     // Get results from both
-    let hnsw_results = hnsw_store.recall(&cue);
-    let linear_results = linear_store.recall(&cue);
+    let hnsw_results = hnsw_store.recall(&cue).results;
+    let linear_results = linear_store.recall(&cue).results;
 
     // HNSW should return similar quality results
     assert!(!hnsw_results.is_empty());
@@ -398,7 +398,7 @@ fn test_hnsw_spreading_activation() {
     // Search should activate neighbors through spreading
     let cue = Cue::embedding("test".to_string(), base_embedding, Confidence::LOW);
 
-    let results = store.recall(&cue);
+    let results = store.recall(&cue).results;
 
     // Should find at least the central memory
     assert!(!results.is_empty());

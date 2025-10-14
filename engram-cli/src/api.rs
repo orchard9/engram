@@ -25,7 +25,13 @@ use crate::grpc::MemoryService;
 use crate::openapi::create_swagger_ui;
 use engram_core::{
     Confidence as CoreConfidence, Cue as CoreCue, Episode, MemoryStore,
-    memory::EpisodeBuilder as CoreEpisodeBuilder, metrics::MetricsRegistry, store::MemoryEvent,
+    activation::{AutoTuneAuditEntry, RecallMode, SpreadingAutoTuner},
+    memory::EpisodeBuilder as CoreEpisodeBuilder,
+    metrics::{
+        MetricsRegistry,
+        health::{HealthCheck, HealthCheckType, HealthStatus},
+    },
+    store::MemoryEvent,
 };
 
 /// Shared application state
@@ -37,16 +43,30 @@ pub struct ApiState {
     pub memory_service: Arc<MemoryService>,
     /// Global metrics registry for streaming/log export
     pub metrics: Arc<MetricsRegistry>,
+    /// Auto-tuning audit log
+    pub auto_tuner: Arc<SpreadingAutoTuner>,
+}
+
+/// Auto-tuning response payload used by the REST API and OpenAPI schema.
+#[derive(serde::Serialize, ToSchema)]
+pub struct AutoTuneResponse {
+    /// Audit log of auto-tuner configuration changes
+    pub audit_log: Vec<AutoTuneAuditEntry>,
 }
 
 impl ApiState {
     /// Create new API state with memory store
-    pub fn new(store: Arc<MemoryStore>, metrics: Arc<MetricsRegistry>) -> Self {
+    pub fn new(
+        store: Arc<MemoryStore>,
+        metrics: Arc<MetricsRegistry>,
+        auto_tuner: Arc<SpreadingAutoTuner>,
+    ) -> Self {
         let memory_service = Arc::new(MemoryService::new(Arc::clone(&store), Arc::clone(&metrics)));
         Self {
             store,
             memory_service,
             metrics,
+            auto_tuner,
         }
     }
 }
@@ -66,6 +86,51 @@ fn embedding_to_array(embedding: &[f32]) -> Result<[f32; 768], ApiError> {
     let mut array = [0.0f32; 768];
     array.copy_from_slice(embedding);
     Ok(array)
+}
+
+fn parse_recall_mode(value: &str) -> Result<RecallMode, ApiError> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "similarity" => Ok(RecallMode::Similarity),
+        "spreading" => Ok(RecallMode::Spreading),
+        "hybrid" => Ok(RecallMode::Hybrid),
+        other => Err(ApiError::InvalidInput(format!(
+            "Unsupported recall mode '{other}'. Use one of: similarity, spreading, hybrid."
+        ))),
+    }
+}
+
+const fn format_health_status(status: HealthStatus) -> &'static str {
+    match status {
+        HealthStatus::Healthy => "healthy",
+        HealthStatus::Degraded => "degraded",
+        HealthStatus::Unhealthy => "unhealthy",
+    }
+}
+
+const fn health_check_type_str(check_type: HealthCheckType) -> &'static str {
+    match check_type {
+        HealthCheckType::Memory => "memory",
+        HealthCheckType::Latency => "latency",
+        HealthCheckType::ErrorRate => "error_rate",
+        HealthCheckType::Connectivity => "connectivity",
+        HealthCheckType::Cognitive => "cognitive",
+        HealthCheckType::Custom(name) => name,
+    }
+}
+
+fn health_check_to_json(check: &HealthCheck) -> serde_json::Value {
+    json!({
+        "name": check.name,
+        "type": health_check_type_str(check.check_type),
+        "status": format_health_status(check.status),
+        "message": check.message,
+        "latency_seconds": check.latency.as_secs_f64(),
+        "consecutive_failures": check.consecutive_failures,
+        "consecutive_successes": check.consecutive_successes,
+        "last_success_seconds_ago": check.last_success.elapsed().as_secs_f64(),
+        "last_failure_seconds_ago": check.last_failure.map(|instant| instant.elapsed().as_secs_f64()),
+        "last_run_seconds_ago": check.last_run.map(|instant| instant.elapsed().as_secs_f64()),
+    })
 }
 
 // ================================================================================================
@@ -147,6 +212,8 @@ pub struct RecallQuery {
     pub to_time: Option<DateTime<Utc>>,
     /// Location context filter
     pub location: Option<String>,
+    /// Recall mode to apply (similarity, spreading, hybrid)
+    pub mode: Option<String>,
 }
 
 /// Query parameters for streaming activities
@@ -726,8 +793,38 @@ pub async fn recall_memories(
         ));
     };
 
-    // Perform actual recall using MemoryStore
-    let recall_result = state.store.recall(&cue);
+    // Determine recall mode override if provided
+    let requested_mode = if let Some(mode_str) = &params.mode {
+        let parsed = parse_recall_mode(mode_str)?;
+
+        #[cfg(not(feature = "hnsw_index"))]
+        if matches!(parsed, RecallMode::Spreading | RecallMode::Hybrid) {
+            return Err(ApiError::InvalidInput(
+                "Spreading recall requires the CLI to be built with the 'hnsw_index' feature. Rebuild with `--features hnsw_index` or omit the mode parameter."
+                    .to_string(),
+            ));
+        }
+
+        #[cfg(feature = "hnsw_index")]
+        if matches!(parsed, RecallMode::Spreading | RecallMode::Hybrid)
+            && state.store.spreading_engine().is_none()
+        {
+            return Err(ApiError::InvalidInput(
+                "Spreading recall requires the `spreading_api_beta` flag. Enable it with `engram config set feature_flags.spreading_api_beta true` and restart the server.".to_string(),
+            ));
+        }
+
+        Some(parsed)
+    } else {
+        None
+    };
+
+    // Perform actual recall using MemoryStore and capture the effective mode
+    let (recall_result, effective_mode) = if let Some(mode) = requested_mode {
+        (state.store.recall_with_mode(&cue, mode), mode)
+    } else {
+        (state.store.recall(&cue), state.store.recall_mode())
+    };
 
     // Check if streaming failed
     if !recall_result.streaming_delivered {
@@ -796,19 +893,71 @@ pub async fn recall_memories(
         recall_confidence: ConfidenceInfo {
             value: 0.8,
             category: "High".to_string(),
-            reasoning: "Strong query understanding with multiple retrieval pathways".to_string(),
+            reasoning: match effective_mode {
+                RecallMode::Similarity => {
+                    "Similarity recall emphasised lexical and embedding cues".to_string()
+                }
+                RecallMode::Spreading => {
+                    "Spreading activation traversed associative edges to surface candidates"
+                        .to_string()
+                }
+                RecallMode::Hybrid => {
+                    "Hybrid recall blended similarity scoring with spreading activation".to_string()
+                }
+            },
         },
-        query_analysis: QueryAnalysis {
-            understood_intent: params
-                .query
-                .clone()
-                .unwrap_or_else(|| "Embedding-based search".to_string()),
-            search_strategy: "Spreading activation with similarity threshold".to_string(),
-            cognitive_load: "Medium".to_string(),
-            suggestions: vec![
-                "Try adding specific tags to narrow results".to_string(),
-                "Consider temporal constraints for episode searches".to_string(),
-            ],
+        query_analysis: {
+            let understood_intent = if let Some(query) = &params.query {
+                query.clone()
+            } else if params.embedding.is_some() {
+                "Embedding-based recall request".to_string()
+            } else {
+                "Recall request without textual cue".to_string()
+            };
+
+            let search_strategy = match (effective_mode, params.embedding.is_some()) {
+                (RecallMode::Similarity, true) => {
+                    "Vector similarity with contextual dilation".to_string()
+                }
+                (RecallMode::Similarity, false) => {
+                    "Similarity-first recall using lexical cues".to_string()
+                }
+                (RecallMode::Spreading, _) => {
+                    "Spreading activation across cognitive graph".to_string()
+                }
+                (RecallMode::Hybrid, _) => {
+                    "Hybrid recall blending similarity and spreading".to_string()
+                }
+            };
+
+            let cognitive_load = if params.max_results.unwrap_or(10) > 20 {
+                "Medium".to_string()
+            } else {
+                "Low".to_string()
+            };
+
+            let mut suggestions = Vec::new();
+            if !params.trace_activation.unwrap_or(false)
+                && matches!(effective_mode, RecallMode::Spreading | RecallMode::Hybrid)
+            {
+                suggestions
+                    .push("Set trace_activation=true to inspect activation flow".to_string());
+            }
+            if params.max_results.unwrap_or(10) < 10 {
+                suggestions
+                    .push("Increase max_results to surface broader associations".to_string());
+            }
+            if suggestions.is_empty() {
+                suggestions
+                    .push("Apply tag filters to focus on specific episodic clusters".to_string());
+            }
+
+            QueryAnalysis {
+                understood_intent,
+                search_strategy,
+                cognitive_load,
+                suggestions,
+            }
         },
         metadata: if params.include_metadata.unwrap_or(false) {
             Some(RecallMetadata {
@@ -1072,21 +1221,58 @@ pub async fn delete_memory_by_id(
     tag = "system",
     responses(
         (status = 200, description = "Simple health status", body = serde_json::Value),
+        (status = 503, description = "Service degraded or unavailable", body = serde_json::Value),
         (status = 500, description = "Health check failed", body = ErrorResponse)
     )
 )]
 /// # Errors
 ///
 /// Returns `ApiError` if health check fails
-pub async fn simple_health() -> Result<impl IntoResponse, ApiError> {
-    let health_data = json!({
-        "status": "healthy",
+pub async fn simple_health(State(state): State<ApiState>) -> Result<impl IntoResponse, ApiError> {
+    let status = state.metrics.health_status();
+    let payload = json!({
+        "status": format_health_status(status),
         "service": "engram",
         "version": env!("CARGO_PKG_VERSION"),
         "timestamp": Utc::now().to_rfc3339()
     });
 
-    Ok(Json(health_data))
+    let status_code = match status {
+        HealthStatus::Healthy | HealthStatus::Degraded => StatusCode::OK,
+        HealthStatus::Unhealthy => StatusCode::SERVICE_UNAVAILABLE,
+    };
+
+    Ok((status_code, Json(payload)))
+}
+
+/// GET /health/spreading - Spreading-specific readiness probe
+#[utoipa::path(
+    get,
+    path = "/health/spreading",
+    tag = "system",
+    responses(
+        (status = 200, description = "Spreading probe status", body = serde_json::Value),
+        (status = 503, description = "Spreading probe unhealthy", body = serde_json::Value),
+        (status = 404, description = "Spreading probe unavailable", body = serde_json::Value)
+    )
+)]
+pub async fn spreading_health(
+    State(state): State<ApiState>,
+) -> Result<impl IntoResponse, ApiError> {
+    let registry = state.metrics.health_registry();
+    if let Some(check) = registry.check_named("spreading") {
+        let status_code = match check.status {
+            HealthStatus::Healthy | HealthStatus::Degraded => StatusCode::OK,
+            HealthStatus::Unhealthy => StatusCode::SERVICE_UNAVAILABLE,
+        };
+        Ok((status_code, Json(health_check_to_json(&check))))
+    } else {
+        let payload = json!({
+            "status": "unknown",
+            "message": "Spreading probe not registered",
+        });
+        Ok((StatusCode::NOT_FOUND, Json(payload)))
+    }
 }
 
 /// GET /api/v1/system/health - Comprehensive system health
@@ -1103,28 +1289,44 @@ pub async fn simple_health() -> Result<impl IntoResponse, ApiError> {
 ///
 /// Returns `ApiError` if system health check fails
 pub async fn system_health(State(state): State<ApiState>) -> Result<impl IntoResponse, ApiError> {
+    let registry = state.metrics.health_registry();
+    let overall_status = registry.check_all();
+    let report = registry.health_report();
     let memory_count = state.store.count();
 
-    let health_data = json!({
-        "status": "healthy",
-        "memory_system": {
+    let checks: Vec<_> = report.checks.iter().map(health_check_to_json).collect();
+
+    let payload = json!({
+        "status": format_health_status(report.status),
+        "timestamp": Utc::now().to_rfc3339(),
+        "memory": {
             "total_memories": memory_count,
-            "consolidation_active": true,
-            "spreading_activation": "normal",
-            "pattern_completion": "available"
         },
-        "cognitive_load": {
-            "current": "low",
-            "capacity_remaining": "85%",
-            "consolidation_queue": 0
-        },
-        "system_message": format!(
-            "Memory system operational with {} stored memories. All cognitive processes functioning normally.",
-            memory_count
-        )
+        "checks": checks,
     });
 
-    Ok(Json(health_data))
+    let status_code = match overall_status {
+        HealthStatus::Healthy | HealthStatus::Degraded => StatusCode::OK,
+        HealthStatus::Unhealthy => StatusCode::SERVICE_UNAVAILABLE,
+    };
+
+    Ok((status_code, Json(payload)))
+}
+
+/// GET /api/v1/system/spreading/config - Auto-tuning history
+#[utoipa::path(
+    get,
+    path = "/api/v1/system/spreading/config",
+    tag = "system",
+    responses(
+        (status = 200, description = "Auto-tuning audit log", body = AutoTuneResponse)
+    )
+)]
+pub async fn spreading_config(
+    State(state): State<ApiState>,
+) -> Result<impl IntoResponse, ApiError> {
+    let audit_log = state.auto_tuner.history();
+    Ok(Json(AutoTuneResponse { audit_log }))
 }
 
 /// GET /api/v1/system/introspect - System introspection
@@ -1795,7 +1997,7 @@ fn create_consolidation_stream(
 /// Monitor real-time events with hierarchical debugging support
 #[utoipa::path(
     get,
-    path = "/api/v1/monitor/events",
+    path = "/api/v1/monitoring/events",
     tag = "monitoring",
     params(MonitoringQuery),
     responses(
@@ -1852,7 +2054,7 @@ pub async fn monitor_events(
 /// Monitor real-time activation levels with spreading traces
 #[utoipa::path(
     get,
-    path = "/api/v1/monitor/activations",
+    path = "/api/v1/monitoring/activations",
     tag = "monitoring",
     params(ActivationMonitoringQuery),
     responses(
@@ -1887,7 +2089,7 @@ pub async fn monitor_activations(
 /// Monitor causality chains for debugging distributed memory operations
 #[utoipa::path(
     get,
-    path = "/api/v1/monitor/causality",
+    path = "/api/v1/monitoring/causality",
     tag = "monitoring",
     params(CausalityMonitoringQuery),
     responses(
@@ -2183,6 +2385,7 @@ pub fn create_api_routes() -> Router<ApiState> {
     Router::new()
         // Simple health endpoint for status checks
         .route("/health", get(simple_health))
+        .route("/health/spreading", get(spreading_health))
         // Memory operations with cognitive-friendly paths
         .route("/api/v1/memories/remember", post(remember_memory))
         .route("/api/v1/memories/recall", get(recall_memories))
@@ -2197,6 +2400,7 @@ pub fn create_api_routes() -> Router<ApiState> {
         .route("/api/v1/memories/search", get(search_memories_rest))
         // System health and introspection
         .route("/api/v1/system/health", get(system_health))
+        .route("/api/v1/system/spreading/config", get(spreading_config))
         .route("/api/v1/system/introspect", get(system_introspect))
         .route("/metrics", get(metrics_snapshot))
         // Episode-specific operations
@@ -2207,6 +2411,10 @@ pub fn create_api_routes() -> Router<ApiState> {
         .route("/api/v1/stream/memories", get(stream_memories))
         .route("/api/v1/stream/consolidation", get(stream_consolidation))
         // Real-time monitoring (specialized for debugging)
+        .route("/api/v1/monitoring/events", get(monitor_events))
+        .route("/api/v1/monitoring/activations", get(monitor_activations))
+        .route("/api/v1/monitoring/causality", get(monitor_causality))
+        // Backwards compatibility for pre-013 clients
         .route("/api/v1/monitor/events", get(monitor_events))
         .route("/api/v1/monitor/activations", get(monitor_activations))
         .route("/api/v1/monitor/causality", get(monitor_causality))

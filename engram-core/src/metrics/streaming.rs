@@ -3,7 +3,8 @@
 use crossbeam_queue::ArrayQueue;
 use crossbeam_utils::CachePadded;
 use parking_lot::RwLock;
-use std::collections::VecDeque;
+use serde::Serialize;
+use std::collections::{BTreeMap, VecDeque};
 use std::convert::TryFrom;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -67,12 +68,12 @@ impl StreamingAggregator {
             }
         }
 
+        let mut windows = self.windows.write();
         if updates.is_empty() {
-            return AggregatedMetrics::empty();
+            return windows.compute_aggregates();
         }
 
         // Aggregate updates
-        let mut windows = self.windows.write();
         for update in &updates {
             windows.add_update(update);
             self.exported_count.fetch_add(1, Ordering::Relaxed);
@@ -137,6 +138,9 @@ pub enum MetricUpdate {
     },
 }
 
+/// Aggregated statistics keyed by metric name for a single window.
+pub type WindowSnapshot = BTreeMap<&'static str, MetricAggregate>;
+
 /// Time-based aggregation windows
 struct AggregationWindows {
     /// 1-second window for real-time monitoring
@@ -153,7 +157,7 @@ struct AggregationWindows {
 }
 
 impl AggregationWindows {
-    fn new() -> Self {
+    const fn new() -> Self {
         Self {
             one_second: TimeWindow::new(Duration::from_secs(1)),
             ten_seconds: TimeWindow::new(Duration::from_secs(10)),
@@ -178,10 +182,12 @@ impl AggregationWindows {
         self.five_minutes.clean_expired(now);
 
         AggregatedMetrics {
+            schema_version: Some(AggregatedMetrics::SCHEMA_VERSION.to_string()),
             one_second: self.one_second.aggregate(),
             ten_seconds: self.ten_seconds.aggregate(),
             one_minute: self.one_minute.aggregate(),
             five_minutes: self.five_minutes.aggregate(),
+            spreading: None,
         }
     }
 }
@@ -189,16 +195,14 @@ impl AggregationWindows {
 /// Time window for aggregation
 struct TimeWindow {
     duration: Duration,
-    data: VecDeque<(Instant, f64)>,
-    counter_sums: dashmap::DashMap<&'static str, u64>,
+    series: BTreeMap<&'static str, VecDeque<(Instant, f64)>>,
 }
 
 impl TimeWindow {
-    fn new(duration: Duration) -> Self {
+    const fn new(duration: Duration) -> Self {
         Self {
             duration,
-            data: VecDeque::with_capacity(1024),
-            counter_sums: dashmap::DashMap::new(),
+            series: BTreeMap::new(),
         }
     }
 
@@ -208,67 +212,93 @@ impl TimeWindow {
                 name,
                 value,
                 timestamp,
-            } => {
-                *self.counter_sums.entry(name).or_insert(0) += value;
-                let value_f64 = u64_to_f64(*value);
-                self.data.push_back((*timestamp, value_f64));
-            }
+            } => self.push_sample(name, *timestamp, u64_to_f64(*value)),
             MetricUpdate::Gauge {
-                name: _,
+                name,
                 value,
                 timestamp,
             }
             | MetricUpdate::Histogram {
-                name: _,
+                name,
                 value,
                 timestamp,
             }
             | MetricUpdate::Summary {
-                name: _,
+                name,
                 value,
                 timestamp,
-            } => {
-                self.data.push_back((*timestamp, *value));
-            }
+            } => self.push_sample(name, *timestamp, *value),
         }
+    }
+
+    fn push_sample(&mut self, name: &'static str, timestamp: Instant, value: f64) {
+        let samples = self
+            .series
+            .entry(name)
+            .or_insert_with(|| VecDeque::with_capacity(128));
+        samples.push_back((timestamp, value));
     }
 
     fn clean_expired(&mut self, now: Instant) {
         let Some(cutoff) = now.checked_sub(self.duration) else {
             return;
         };
-        while let Some((timestamp, _)) = self.data.front() {
-            if *timestamp < cutoff {
-                self.data.pop_front();
-            } else {
-                break;
+
+        let mut empty_keys = Vec::new();
+        for (name, samples) in &mut self.series {
+            while let Some((timestamp, _)) = samples.front() {
+                if *timestamp < cutoff {
+                    samples.pop_front();
+                } else {
+                    break;
+                }
             }
+
+            if samples.is_empty() {
+                empty_keys.push(*name);
+            }
+        }
+
+        for name in empty_keys {
+            self.series.remove(&name);
         }
     }
 
-    fn aggregate(&self) -> WindowAggregate {
-        if self.data.is_empty() {
-            return WindowAggregate::empty();
+    fn aggregate(&self) -> WindowSnapshot {
+        let mut aggregates: WindowSnapshot = BTreeMap::new();
+
+        for (name, samples) in &self.series {
+            if samples.is_empty() {
+                continue;
+            }
+
+            let values: Vec<f64> = samples.iter().map(|(_, v)| *v).collect();
+            let mut sorted = values.clone();
+            sorted.sort_by(f64::total_cmp);
+
+            let count = values.len();
+            let sum: f64 = values.iter().copied().sum();
+            let mean = if count == 0 {
+                0.0
+            } else {
+                sum / usize_to_f64(count)
+            };
+
+            let aggregate = MetricAggregate {
+                count,
+                sum,
+                mean,
+                min: sorted.first().copied().unwrap_or(0.0),
+                max: sorted.last().copied().unwrap_or(0.0),
+                p50: percentile(&sorted, 0.5),
+                p90: percentile(&sorted, 0.9),
+                p99: percentile(&sorted, 0.99),
+            };
+
+            aggregates.insert(*name, aggregate);
         }
 
-        let values: Vec<f64> = self.data.iter().map(|(_, v)| *v).collect();
-        let mut sorted = values.clone();
-        sorted.sort_by(f64::total_cmp);
-
-        let count = values.len();
-        let sum: f64 = values.iter().sum();
-        let mean = sum / usize_to_f64(count);
-
-        WindowAggregate {
-            count,
-            sum,
-            mean,
-            min: sorted.first().copied().unwrap_or(0.0),
-            max: sorted.last().copied().unwrap_or(0.0),
-            p50: percentile(&sorted, 0.5),
-            p90: percentile(&sorted, 0.9),
-            p99: percentile(&sorted, 0.99),
-        }
+        aggregates
     }
 }
 
@@ -287,9 +317,9 @@ fn percentile(sorted: &[f64], p: f64) -> f64 {
     sorted[index]
 }
 
-/// Aggregated metrics for a time window
-#[derive(Debug, Clone)]
-pub struct WindowAggregate {
+/// Per-metric aggregated statistics within a single window.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct MetricAggregate {
     /// Number of samples included in this window.
     pub count: usize,
     /// Sum of all sample values to assist with rate calculations.
@@ -308,43 +338,94 @@ pub struct WindowAggregate {
     pub p99: f64,
 }
 
-impl WindowAggregate {
-    const fn empty() -> Self {
-        Self {
-            count: 0,
-            sum: 0.0,
-            mean: 0.0,
-            min: 0.0,
-            max: 0.0,
-            p50: 0.0,
-            p90: 0.0,
-            p99: 0.0,
-        }
-    }
-}
-
 /// Aggregated metrics across all windows
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct AggregatedMetrics {
+    /// Schema version for backward compatibility tracking (semver format).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schema_version: Option<String>,
     /// 1-second rolling aggregate for real-time monitoring.
-    pub one_second: WindowAggregate,
+    pub one_second: WindowSnapshot,
     /// 10-second aggregate for short trend analysis.
-    pub ten_seconds: WindowAggregate,
+    pub ten_seconds: WindowSnapshot,
     /// 1-minute aggregate for medium-term trend detection.
-    pub one_minute: WindowAggregate,
+    pub one_minute: WindowSnapshot,
     /// 5-minute aggregate for stability assessment.
-    pub five_minutes: WindowAggregate,
+    pub five_minutes: WindowSnapshot,
+    /// Derived spreading summary constructed by higher-level metrics consumers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub spreading: Option<SpreadingSummary>,
 }
 
 impl AggregatedMetrics {
-    const fn empty() -> Self {
+    /// Current schema version for metrics export format (follows semver).
+    /// Update this when making backward-incompatible changes to the structure.
+    pub const SCHEMA_VERSION: &'static str = "1.1.0";
+
+    /// Create an empty metrics aggregate with schema version.
+    #[must_use]
+    pub fn empty_with_version() -> Self {
         Self {
-            one_second: WindowAggregate::empty(),
-            ten_seconds: WindowAggregate::empty(),
-            one_minute: WindowAggregate::empty(),
-            five_minutes: WindowAggregate::empty(),
+            schema_version: Some(Self::SCHEMA_VERSION.to_string()),
+            one_second: BTreeMap::new(),
+            ten_seconds: BTreeMap::new(),
+            one_minute: BTreeMap::new(),
+            five_minutes: BTreeMap::new(),
+            spreading: None,
         }
     }
+}
+
+/// Latency summary derived for a storage tier.
+#[derive(Debug, Clone, Serialize, Default, PartialEq)]
+pub struct TierLatencySummary {
+    /// Number of samples contributing to the summary.
+    pub samples: usize,
+    /// Mean latency in seconds.
+    pub mean_seconds: f64,
+    /// 50th percentile latency (seconds).
+    pub p50_seconds: f64,
+    /// 95th percentile latency (seconds).
+    pub p95_seconds: f64,
+    /// 99th percentile latency (seconds).
+    pub p99_seconds: f64,
+}
+
+/// High-level spreading telemetry exposed alongside window snapshots.
+#[derive(Debug, Clone, Serialize, Default, PartialEq)]
+pub struct SpreadingSummary {
+    /// Latency summaries keyed by tier label.
+    pub per_tier: BTreeMap<String, TierLatencySummary>,
+    /// Total recalls routed through spreading (gauge snapshot).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub activations_total: Option<u64>,
+    /// Total latency budget violations observed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latency_budget_violations_total: Option<u64>,
+    /// Total fallback count recorded.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fallback_total: Option<u64>,
+    /// Total spreading failures observed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure_total: Option<u64>,
+    /// Current breaker state (0=Closed,1=HalfOpen,2=Open).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub breaker_state: Option<u64>,
+    /// Total breaker transitions recorded.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub breaker_transitions_total: Option<u64>,
+    /// Total GPU launch attempts recorded.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gpu_launch_total: Option<u64>,
+    /// Total GPU fallbacks recorded.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gpu_fallback_total: Option<u64>,
+    /// Current activation pool utilisation (0.0 – 1.0).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pool_utilization: Option<f64>,
+    /// Current activation pool hit rate (0.0 – 1.0).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pool_hit_rate: Option<f64>,
 }
 
 fn round_f64_to_usize(value: f64, max: usize) -> usize {
@@ -392,7 +473,7 @@ fn u64_to_f64(value: u64) -> f64 {
 }
 
 /// Export statistics
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ExportStats {
     /// Total updates successfully exported since startup.
     pub exported: u64,
@@ -409,6 +490,7 @@ impl Default for StreamingAggregator {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
 
@@ -442,7 +524,23 @@ mod tests {
 
         // Process updates
         let metrics = aggregator.process_updates();
-        assert!(metrics.one_second.count > 0);
+        let counter = metrics
+            .one_second
+            .get("test_counter")
+            .cloned()
+            .expect("counter aggregate present");
+        assert!(counter.count > 0);
+
+        let histogram = metrics
+            .one_second
+            .get("test_histogram")
+            .cloned()
+            .expect("histogram aggregate present");
+        assert!(histogram.max > 0.0);
+
+        // Calling without new updates should retain prior aggregates.
+        let cached = aggregator.process_updates();
+        assert_eq!(cached.one_second, metrics.one_second);
 
         // Check stats
         let stats = aggregator.export_stats();
@@ -465,9 +563,17 @@ mod tests {
         }
 
         let aggregate = window.aggregate();
-        assert_eq!(aggregate.count, 10);
-        assert_close(aggregate.min, 0.0);
-        assert_close(aggregate.max, 9.0);
-        assert_close(aggregate.mean, 4.5);
+        let metrics = aggregate
+            .get("test")
+            .cloned()
+            .expect("aggregate for 'test'");
+        assert_eq!(metrics.count, 10);
+        assert_close(metrics.min, 0.0);
+        assert_close(metrics.max, 9.0);
+        assert_close(metrics.mean, 4.5);
+
+        // After the window expires all samples should be removed.
+        window.clean_expired(now + Duration::from_secs(2));
+        assert!(window.aggregate().is_empty());
     }
 }

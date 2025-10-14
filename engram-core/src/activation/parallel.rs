@@ -5,26 +5,83 @@
 
 use crate::activation::{
     ActivationError, ActivationGraphExt, ActivationRecord, ActivationResult, ActivationTask,
-    MemoryGraph, NodeId, ParallelSpreadingConfig, SpreadingMetrics, SpreadingResults,
-    TierAwareSpreadingScheduler, TierSummary, TraceEntry, WeightedEdge,
+    CacheOptimizedNode, MemoryGraph, NodeId, ParallelSpreadingConfig, SpreadingMetrics,
+    SpreadingResults, TierAwareSpreadingScheduler, TierSummary, TraceEntry, WeightedEdge,
     cycle_detector::CycleDetector,
     gpu_interface::{AdaptiveConfig, AdaptiveSpreadingEngine},
     latency_budget::LatencyBudgetManager,
-    memory_pool::ActivationMemoryPool,
+    memory_pool::ActivationRecordPool,
     storage_aware::StorageTier,
 };
 use dashmap::DashMap;
+use dashmap::mapref::entry::Entry;
+#[cfg(loom)]
+use loom::sync::atomic::{AtomicBool, Ordering};
+#[cfg(loom)]
+use loom::sync::{Arc, Mutex};
+use parking_lot::{RwLock, RwLockReadGuard};
 use std::cell::Cell;
 use std::collections::HashMap;
+#[cfg(not(loom))]
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(not(loom))]
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 use tracing::warn;
 
+const DEFAULT_DECAY_RATE: f32 = 0.1;
+
+const CACHE_LINE_BYTES: usize = 64;
+
+#[inline]
+fn compute_prefetch_lookahead(config: &ParallelSpreadingConfig) -> usize {
+    let distance = config.prefetch_distance;
+    if distance == 0 {
+        0
+    } else {
+        (distance / CACHE_LINE_BYTES).max(1)
+    }
+}
+
+#[inline]
+#[allow(clippy::missing_const_for_fn)]
+fn prefetch_cache_line(node: &CacheOptimizedNode) {
+    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    unsafe {
+        #[cfg(target_arch = "x86")]
+        use core::arch::x86::_mm_prefetch;
+        #[cfg(target_arch = "x86_64")]
+        use core::arch::x86_64::_mm_prefetch;
+        const _MM_HINT_T0: i32 = 3;
+        _mm_prefetch(node as *const CacheOptimizedNode as *const i8, _MM_HINT_T0);
+    }
+    #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+    {
+        let _ = node;
+    }
+}
+
+#[inline]
+fn prefetch_neighbor_handles(neighbors: &[WeightedEdge], index: usize, lookahead: usize) {
+    if lookahead == 0 {
+        return;
+    }
+
+    for offset in 1..=lookahead {
+        if let Some(edge) = neighbors.get(index + offset) {
+            if let Some(handle) = edge.hot_handle.as_ref() {
+                prefetch_cache_line(handle);
+            }
+        } else {
+            break;
+        }
+    }
+}
+
 /// Work-stealing thread pool for parallel activation spreading
 pub struct ParallelSpreadingEngine {
-    config: ParallelSpreadingConfig,
+    config: Arc<RwLock<ParallelSpreadingConfig>>,
     activation_records: Arc<DashMap<NodeId, Arc<ActivationRecord>>>,
     memory_graph: Arc<MemoryGraph>,
     scheduler: Arc<TierAwareSpreadingScheduler>,
@@ -32,22 +89,33 @@ pub struct ParallelSpreadingEngine {
     metrics: Arc<SpreadingMetrics>,
     shutdown_signal: Arc<AtomicBool>,
     phase_barrier: Arc<PhaseBarrier>,
-    latency_budget: LatencyBudgetManager,
+    latency_budget: Arc<RwLock<LatencyBudgetManager>>,
     cycle_detector: Arc<CycleDetector>,
     deterministic_trace: Arc<Mutex<Vec<TraceEntry>>>,
     adaptive_engine: Arc<Mutex<AdaptiveSpreadingEngine>>,
-    /// Memory pool reserved for future activation spreading optimization
+    /// Activation record pool shared across workers for low-allocation spreading
     #[allow(dead_code)]
-    memory_pool: Option<Arc<ActivationMemoryPool>>,
+    activation_pool: Option<Arc<ActivationRecordPool>>,
+    /// Adaptive batch sizing controller for dynamic performance optimization
+    adaptive_batcher: Option<Arc<crate::activation::AdaptiveBatcher>>,
 }
+
+#[cfg(loom)]
+type BarrierMutex<T> = loom::sync::Mutex<T>;
+#[cfg(loom)]
+type BarrierCondvar = loom::sync::Condvar;
+#[cfg(not(loom))]
+type BarrierMutex<T> = parking_lot::Mutex<T>;
+#[cfg(not(loom))]
+type BarrierCondvar = parking_lot::Condvar;
 
 /// Synchronization barrier for deterministic parallel execution
 ///
 /// Uses parking_lot's Condvar for efficient OS-level blocking instead of spin-waiting.
 /// This eliminates CPU burn during synchronization and improves behavior under contention.
 pub struct PhaseBarrier {
-    state: parking_lot::Mutex<BarrierState>,
-    condvar: parking_lot::Condvar,
+    state: BarrierMutex<BarrierState>,
+    condvar: BarrierCondvar,
 }
 
 struct BarrierState {
@@ -58,22 +126,25 @@ struct BarrierState {
 }
 
 impl PhaseBarrier {
+    #[allow(clippy::missing_const_for_fn)]
     fn new(worker_count: usize) -> Self {
         Self {
-            state: parking_lot::Mutex::new(BarrierState {
+            state: BarrierMutex::new(BarrierState {
                 worker_count,
                 waiting: 0,
                 phase_counter: 0,
                 enabled: true,
             }),
-            condvar: parking_lot::Condvar::new(),
+            condvar: BarrierCondvar::new(),
         }
     }
 
     /// Disable the barrier, allowing workers to pass through without waiting
     fn disable(&self) {
-        let mut state = self.state.lock();
-        state.enabled = false;
+        {
+            let mut state = self.state.lock();
+            state.enabled = false;
+        }
         // Wake all waiting threads
         self.condvar.notify_all();
     }
@@ -91,10 +162,24 @@ impl PhaseBarrier {
     }
 
     /// Wait for all workers to reach this barrier point
+    #[allow(clippy::significant_drop_tightening)]
     fn wait(&self) {
+        #[cfg(loom)]
+        {
+            self.wait_loom();
+            return;
+        }
+
+        #[cfg(not(loom))]
+        {
+            self.wait_parking_lot();
+        }
+    }
+
+    #[cfg(not(loom))]
+    fn wait_parking_lot(&self) {
         let mut state = self.state.lock();
 
-        // If barrier is disabled, return immediately
         if !state.enabled {
             return;
         }
@@ -103,28 +188,73 @@ impl PhaseBarrier {
         let current_phase = state.phase_counter;
 
         if state.waiting == state.worker_count {
-            // Last worker to arrive - advance phase and wake everyone
             state.waiting = 0;
             state.phase_counter += 1;
-            drop(state); // Release lock before notifying
+            drop(state);
             self.condvar.notify_all();
         } else {
-            // Wait for phase to advance or barrier to be disabled
-            // Adaptive timeout: 2s per worker to accommodate larger thread pools
             let timeout_secs = (state.worker_count as u64 * 2).max(5);
             let timeout = Duration::from_secs(timeout_secs);
-            let start = std::time::Instant::now();
+            let start = Instant::now();
 
             while state.phase_counter == current_phase && state.enabled {
                 let elapsed = start.elapsed();
                 if elapsed >= timeout {
-                    // Timeout - release this worker to prevent deadlock
                     state.waiting = state.waiting.saturating_sub(1);
                     return;
                 }
 
                 let remaining = timeout - elapsed;
-                let _result = self.condvar.wait_for(&mut state, remaining);
+                let wait_result = self.condvar.wait_for(&mut state, remaining);
+                if wait_result.timed_out() {
+                    state.waiting = state.waiting.saturating_sub(1);
+                    drop(state);
+                    return;
+                }
+            }
+        }
+    }
+
+    #[cfg(loom)]
+    fn wait_loom(&self) {
+        let mut state = self.state.lock();
+
+        if !state.enabled {
+            return;
+        }
+
+        state.waiting += 1;
+        let current_phase = state.phase_counter;
+
+        if state.waiting == state.worker_count {
+            state.waiting = 0;
+            state.phase_counter += 1;
+            drop(state);
+            self.condvar.notify_all();
+        } else {
+            let timeout_secs = (state.worker_count as u64 * 2).max(5);
+            let timeout = Duration::from_secs(timeout_secs);
+            let start = Instant::now();
+            let mut guard = state;
+
+            loop {
+                if guard.phase_counter != current_phase || !guard.enabled {
+                    break;
+                }
+
+                let elapsed = start.elapsed();
+                if elapsed >= timeout {
+                    guard.waiting = guard.waiting.saturating_sub(1);
+                    return;
+                }
+
+                let remaining = timeout - elapsed;
+                let (next_guard, wait_result) = self.condvar.wait_timeout(guard, remaining);
+                guard = next_guard;
+                if wait_result.timed_out() {
+                    guard.waiting = guard.waiting.saturating_sub(1);
+                    return;
+                }
             }
         }
     }
@@ -148,17 +278,20 @@ struct WorkerContext {
     worker_id: usize,
     activation_records: Arc<DashMap<NodeId, Arc<ActivationRecord>>>,
     memory_graph: Arc<MemoryGraph>,
-    config: ParallelSpreadingConfig,
+    config: Arc<RwLock<ParallelSpreadingConfig>>,
     metrics: Arc<SpreadingMetrics>,
     shutdown_signal: Arc<AtomicBool>,
     phase_barrier: Arc<PhaseBarrier>,
-    latency_budget: LatencyBudgetManager,
+    latency_budget: Arc<RwLock<LatencyBudgetManager>>,
     scheduler: Arc<TierAwareSpreadingScheduler>,
     cycle_detector: Arc<CycleDetector>,
     deterministic_trace: Arc<Mutex<Vec<TraceEntry>>>,
+    activation_pool: Option<Arc<ActivationRecordPool>>,
     /// Adaptive engine reserved for future GPU-accelerated spreading
     #[allow(dead_code)]
     adaptive_engine: Arc<Mutex<AdaptiveSpreadingEngine>>,
+    /// Adaptive batch sizing controller shared across workers
+    adaptive_batcher: Option<Arc<crate::activation::AdaptiveBatcher>>,
 }
 
 struct TierTaskGuard<'a> {
@@ -191,6 +324,16 @@ impl Drop for TierTaskGuard<'_> {
     }
 }
 
+impl WorkerContext {
+    fn config(&self) -> RwLockReadGuard<'_, ParallelSpreadingConfig> {
+        self.config.read()
+    }
+
+    fn latency_budget(&self) -> RwLockReadGuard<'_, LatencyBudgetManager> {
+        self.latency_budget.read()
+    }
+}
+
 impl ParallelSpreadingEngine {
     /// Create new parallel spreading engine
     pub fn new(
@@ -202,36 +345,100 @@ impl ParallelSpreadingEngine {
                 "Number of threads must be > 0".to_string(),
             ));
         }
+        let config_handle = Arc::new(RwLock::new(config));
         let activation_records = Arc::new(DashMap::new());
         let metrics = Arc::new(SpreadingMetrics::default());
         let shutdown_signal = Arc::new(AtomicBool::new(false));
-        let phase_barrier = Arc::new(PhaseBarrier::new(config.num_threads));
-        let scheduler = Arc::new(TierAwareSpreadingScheduler::from_config(&config));
-        let cycle_detector = Arc::new(CycleDetector::new(config.tier_cycle_budgets.clone()));
         let deterministic_trace = Arc::new(Mutex::new(Vec::new()));
 
-        // Initialize adaptive GPU/CPU engine
-        let adaptive_config = AdaptiveConfig {
-            gpu_threshold: config.gpu_threshold,
-            enable_gpu: config.enable_gpu,
-        };
-        let adaptive_engine = Arc::new(Mutex::new(AdaptiveSpreadingEngine::new(
-            None, // GPU interface will be injected in Milestone 11
-            adaptive_config,
-        )));
+        let (
+            phase_barrier,
+            scheduler,
+            cycle_detector,
+            adaptive_engine,
+            activation_pool,
+            adaptive_batcher,
+            latency_budget,
+        ) = {
+            let config_guard = config_handle.read();
 
-        // Initialize memory pool if configured
-        let memory_pool = if config.enable_memory_pool {
-            Some(Arc::new(ActivationMemoryPool::new(
-                config.pool_chunk_size,
-                config.pool_max_chunks,
-            )))
-        } else {
-            None
+            let phase_barrier = Arc::new(PhaseBarrier::new(config_guard.num_threads));
+            let scheduler = Arc::new(TierAwareSpreadingScheduler::from_config(&config_guard));
+            let cycle_detector =
+                Arc::new(CycleDetector::new(config_guard.tier_cycle_budgets.clone()));
+
+            let adaptive_config = AdaptiveConfig {
+                gpu_threshold: config_guard.gpu_threshold,
+                enable_gpu: config_guard.enable_gpu,
+            };
+            let adaptive_engine = Arc::new(Mutex::new(AdaptiveSpreadingEngine::new(
+                None, // GPU interface will be injected in Milestone 11
+                adaptive_config,
+                Some(metrics.clone()),
+            )));
+
+            let activation_pool = if config_guard.enable_memory_pool {
+                let record_size = std::mem::size_of::<ActivationRecord>().max(1);
+                let max_bytes = config_guard
+                    .pool_chunk_size
+                    .saturating_mul(config_guard.pool_max_chunks.max(1));
+                let computed_max = if max_bytes > 0 {
+                    (max_bytes / record_size).max(config_guard.pool_initial_size)
+                } else {
+                    config_guard.pool_initial_size
+                };
+                let max_records = computed_max.max(64);
+                let cache_capacity =
+                    (config_guard.pool_chunk_size / record_size).clamp(8, max_records.max(8));
+                Some(Arc::new(ActivationRecordPool::with_config(
+                    config_guard.pool_initial_size,
+                    max_records,
+                    cache_capacity,
+                    DEFAULT_DECAY_RATE,
+                )))
+            } else {
+                None
+            };
+
+            let adaptive_batcher =
+                config_guard
+                    .adaptive_batcher_config
+                    .as_ref()
+                    .map(|batcher_config| {
+                        use crate::activation::{AdaptiveBatcher, AdaptiveMode};
+                        let mode = AdaptiveMode::default();
+                        Arc::new(AdaptiveBatcher::new(batcher_config.clone(), mode))
+                    });
+
+            let mut budget = LatencyBudgetManager::new();
+            budget.set_budget(
+                StorageTier::Hot,
+                config_guard.tier_timeouts[StorageTier::Hot as usize],
+            );
+            budget.set_budget(
+                StorageTier::Warm,
+                config_guard.tier_timeouts[StorageTier::Warm as usize],
+            );
+            budget.set_budget(
+                StorageTier::Cold,
+                config_guard.tier_timeouts[StorageTier::Cold as usize],
+            );
+            let latency_budget = Arc::new(RwLock::new(budget));
+            drop(config_guard);
+
+            (
+                phase_barrier,
+                scheduler,
+                cycle_detector,
+                adaptive_engine,
+                activation_pool,
+                adaptive_batcher,
+                latency_budget,
+            )
         };
 
         let mut engine = Self {
-            config,
+            config: config_handle,
             activation_records,
             memory_graph,
             scheduler,
@@ -239,11 +446,12 @@ impl ParallelSpreadingEngine {
             metrics,
             shutdown_signal,
             phase_barrier,
-            latency_budget: LatencyBudgetManager::new(),
+            latency_budget,
             cycle_detector,
             deterministic_trace,
             adaptive_engine,
-            memory_pool,
+            activation_pool,
+            adaptive_batcher,
         };
 
         engine.spawn_workers()?;
@@ -253,7 +461,8 @@ impl ParallelSpreadingEngine {
 
     /// Spawn worker threads for parallel processing
     fn spawn_workers(&mut self) -> ActivationResult<()> {
-        for worker_id in 0..self.config.num_threads {
+        let worker_count = self.config.read().num_threads;
+        for worker_id in 0..worker_count {
             let context = WorkerContext {
                 worker_id,
                 activation_records: self.activation_records.clone(),
@@ -266,7 +475,9 @@ impl ParallelSpreadingEngine {
                 scheduler: self.scheduler.clone(),
                 cycle_detector: self.cycle_detector.clone(),
                 deterministic_trace: self.deterministic_trace.clone(),
+                activation_pool: self.activation_pool.clone(),
                 adaptive_engine: self.adaptive_engine.clone(),
+                adaptive_batcher: self.adaptive_batcher.clone(),
             };
 
             let handle = thread::Builder::new()
@@ -282,8 +493,42 @@ impl ParallelSpreadingEngine {
         Ok(())
     }
 
+    /// Capture a snapshot of the current spreading configuration.
+    #[must_use]
+    pub fn config_snapshot(&self) -> ParallelSpreadingConfig {
+        self.config.read().clone()
+    }
+
+    /// Apply an updated spreading configuration to the live engine.
+    pub fn update_config(&self, updated: &ParallelSpreadingConfig) {
+        {
+            let mut guard = self.config.write();
+            *guard = updated.clone();
+        }
+
+        self.scheduler.reset(updated);
+
+        {
+            let mut budget_guard = self.latency_budget.write();
+            budget_guard.set_budget(
+                StorageTier::Hot,
+                updated.tier_timeouts[StorageTier::Hot as usize],
+            );
+            budget_guard.set_budget(
+                StorageTier::Warm,
+                updated.tier_timeouts[StorageTier::Warm as usize],
+            );
+            budget_guard.set_budget(
+                StorageTier::Cold,
+                updated.tier_timeouts[StorageTier::Cold as usize],
+            );
+        }
+
+        self.phase_barrier.enable();
+    }
+
     /// Determine if batch spreading should be used for this set of neighbors
-    const fn should_use_batch_spreading(
+    fn should_use_batch_spreading(
         context: &WorkerContext,
         neighbors: &[WeightedEdge],
         tier: StorageTier,
@@ -291,7 +536,11 @@ impl ParallelSpreadingEngine {
         use crate::activation::simd_optimization::should_use_simd_for_tier;
 
         let neighbor_count = neighbors.len();
-        should_use_simd_for_tier(tier, neighbor_count, context.config.simd_batch_size)
+        let simd_batch_size = {
+            let config = context.config();
+            config.simd_batch_size
+        };
+        should_use_simd_for_tier(tier, neighbor_count, simd_batch_size)
     }
 
     /// Process neighbors using SIMD batch operations
@@ -302,6 +551,7 @@ impl ParallelSpreadingEngine {
         neighbors: &[WeightedEdge],
         next_tier: StorageTier,
         decay_factor: f32,
+        prefetch_lookahead: usize,
     ) {
         use crate::activation::ActivationGraphExt;
         use crate::activation::simd_optimization::SimdActivationMapper;
@@ -317,6 +567,7 @@ impl ParallelSpreadingEngine {
                 neighbors,
                 next_tier,
                 decay_factor,
+                prefetch_lookahead,
             );
             return;
         };
@@ -336,6 +587,7 @@ impl ParallelSpreadingEngine {
                 neighbors,
                 next_tier,
                 decay_factor,
+                prefetch_lookahead,
             );
             return;
         }
@@ -345,12 +597,20 @@ impl ParallelSpreadingEngine {
 
         // Convert similarities to activations using SIMD
         let temperature = 0.5; // From config
-        let threshold = context.config.threshold;
+        let threshold = {
+            let config = context.config();
+            config.threshold
+        };
         let activations =
             SimdActivationMapper::batch_sigmoid_activation(&similarities, temperature, threshold);
 
         // Create tasks with computed activations
         for (idx, edge) in neighbors.iter().enumerate() {
+            if let Some(handle) = edge.hot_handle.as_ref() {
+                prefetch_cache_line(handle);
+            }
+            prefetch_neighbor_handles(neighbors, idx, prefetch_lookahead);
+
             let activation_weight = activations.get(idx).copied().unwrap_or(edge.weight);
 
             let mut next_path = task.path.clone();
@@ -378,8 +638,14 @@ impl ParallelSpreadingEngine {
         neighbors: &[WeightedEdge],
         next_tier: StorageTier,
         decay_factor: f32,
+        prefetch_lookahead: usize,
     ) {
-        for edge in neighbors {
+        for (idx, edge) in neighbors.iter().enumerate() {
+            if let Some(handle) = edge.hot_handle.as_ref() {
+                prefetch_cache_line(handle);
+            }
+            prefetch_neighbor_handles(neighbors, idx, prefetch_lookahead);
+
             let mut next_path = task.path.clone();
             next_path.push(edge.target.clone());
             let new_task = ActivationTask::new(
@@ -404,7 +670,7 @@ impl ParallelSpreadingEngine {
             if let Some(task) = context.scheduler.next_task() {
                 Self::process_task(&context, task);
 
-                if context.config.deterministic {
+                if context.config().deterministic {
                     context.phase_barrier.wait();
                 }
 
@@ -417,7 +683,7 @@ impl ParallelSpreadingEngine {
                 thread::sleep(Duration::from_micros(100));
             } else {
                 // Scheduler has work but we didn't get a task - sync and retry
-                if context.config.deterministic {
+                if context.config().deterministic {
                     context.phase_barrier.wait();
                 }
                 thread::yield_now();
@@ -433,17 +699,38 @@ impl ParallelSpreadingEngine {
             .unwrap_or_else(|| StorageTier::from_depth(task.depth));
         let guard = TierTaskGuard::new(context.scheduler.as_ref(), tier);
 
+        let config_view = context.config();
+        let deterministic = config_view.deterministic;
+        let trace_activation_flow_enabled = config_view.trace_activation_flow;
+        let cycle_detection_enabled = config_view.cycle_detection;
+        let cycle_penalty_factor = config_view.cycle_penalty_factor;
+        let decay_function = config_view.decay_function.clone();
+        let batch_size_snapshot = config_view.batch_size;
+        let prefetch_lookahead_default = compute_prefetch_lookahead(&config_view);
+        drop(config_view);
+
         // Get or create activation record
         let target_clone = task.target_node.clone();
-        let record = context
-            .activation_records
-            .entry(target_clone.clone())
-            .or_insert_with(|| {
-                let mut base = ActivationRecord::new(target_clone.clone(), 0.1);
-                base.set_storage_tier(tier);
-                Arc::new(base)
-            })
-            .clone();
+        let pool = context.activation_pool.clone();
+        let record = match context.activation_records.entry(target_clone.clone()) {
+            Entry::Occupied(entry) => entry.get().clone(),
+            Entry::Vacant(slot) => {
+                let record = pool.as_ref().map_or_else(
+                    || {
+                        let mut base =
+                            ActivationRecord::new(target_clone.clone(), DEFAULT_DECAY_RATE);
+                        base.set_storage_tier(tier);
+                        Arc::new(base)
+                    },
+                    |pool| pool.acquire(target_clone.clone(), DEFAULT_DECAY_RATE, Some(tier)),
+                );
+                context
+                    .memory_graph
+                    .register_hot_handle(target_clone.clone(), record.hot_handle());
+                slot.insert(record.clone());
+                record
+            }
+        };
 
         // Accumulate activation with threshold check and capture applied delta
         let contribution = task.contribution();
@@ -455,7 +742,7 @@ impl ParallelSpreadingEngine {
         };
 
         // Capture trace entry if deterministic tracing is enabled
-        if context.config.trace_activation_flow && context.config.deterministic {
+        if trace_activation_flow_enabled && deterministic {
             let source_node = if task.path.len() > 1 {
                 task.path.get(task.path.len() - 2).cloned()
             } else {
@@ -475,10 +762,10 @@ impl ParallelSpreadingEngine {
             }
         }
 
-        let visit_count = record.visits.fetch_add(1, Ordering::Relaxed) + 1;
+        let visit_count = record.visits_atomic().fetch_add(1, Ordering::Relaxed) + 1;
         let mut should_mark_done = false;
 
-        if context.config.cycle_detection {
+        if cycle_detection_enabled {
             if task.path.is_empty() || task.path.last() != Some(&target_clone) {
                 task.path.push(target_clone.clone());
             }
@@ -487,14 +774,14 @@ impl ParallelSpreadingEngine {
                 .cycle_detector
                 .should_visit(&target_clone, visit_count, tier, &task.path)
             {
-                record.apply_cycle_penalty(context.config.cycle_penalty_factor);
+                record.apply_cycle_penalty(cycle_penalty_factor);
                 context
                     .metrics
                     .cycles_detected
                     .fetch_add(1, Ordering::Relaxed);
                 context.metrics.increment_cycle_for_tier(tier);
 
-                if context.config.trace_activation_flow {
+                if trace_activation_flow_enabled {
                     warn!(
                         target = "engram::activation::cycles",
                         node = %target_clone,
@@ -527,8 +814,9 @@ impl ParallelSpreadingEngine {
         if let Some(neighbors) =
             ActivationGraphExt::get_neighbors(&*context.memory_graph, &task.target_node)
         {
-            let decay_factor = context.config.decay_function.apply(task.depth + 1);
+            let decay_factor = decay_function.apply(task.depth + 1);
             let next_tier = StorageTier::from_depth(task.depth + 1);
+            let prefetch_lookahead = prefetch_lookahead_default;
 
             // Try SIMD batch processing if we have enough neighbors
             if Self::should_use_batch_spreading(context, &neighbors, next_tier) {
@@ -539,10 +827,16 @@ impl ParallelSpreadingEngine {
                     &neighbors,
                     next_tier,
                     decay_factor,
+                    prefetch_lookahead,
                 );
             } else {
                 // Scalar path: process neighbors individually
-                for edge in neighbors {
+                for (idx, edge) in neighbors.iter().enumerate() {
+                    if let Some(handle) = edge.hot_handle.as_ref() {
+                        prefetch_cache_line(handle);
+                    }
+                    prefetch_neighbor_handles(&neighbors, idx, prefetch_lookahead);
+
                     let mut next_path = task.path.clone();
                     next_path.push(edge.target.clone());
                     let new_task = ActivationTask::new(
@@ -562,24 +856,24 @@ impl ParallelSpreadingEngine {
         }
 
         // Update metrics
-        let duration = start_time.elapsed().as_nanos() as u64;
-        context
-            .metrics
-            .average_latency
-            .store(duration, Ordering::Relaxed);
-        context
-            .metrics
-            .total_activations
-            .fetch_add(1, Ordering::Relaxed);
+        let elapsed = start_time.elapsed();
+        let duration_ns = elapsed.as_nanos().min(u128::from(u64::MAX)) as u64;
+        context.metrics.record_activation_latency(tier, elapsed);
 
-        if !context
-            .latency_budget
-            .within_budget(tier, Duration::from_nanos(duration))
-        {
-            context
-                .metrics
-                .latency_budget_violations
-                .fetch_add(1, Ordering::Relaxed);
+        if !context.latency_budget().within_budget(tier, elapsed) {
+            context.metrics.record_latency_budget_violation();
+        }
+
+        // Record observation for adaptive batch sizing
+        if let Some(ref batcher) = context.adaptive_batcher {
+            use crate::activation::Observation;
+            let observation = Observation {
+                batch_size: batch_size_snapshot,
+                latency_ns: duration_ns,
+                hop_count: task.depth as usize,
+                tier,
+            };
+            batcher.record_observation(observation);
         }
 
         if should_mark_done {
@@ -594,10 +888,18 @@ impl ParallelSpreadingEngine {
         &self,
         seed_activations: &[(NodeId, f32)],
     ) -> ActivationResult<SpreadingResults> {
+        // Process pending observations from previous spreads
+        if let Some(ref batcher) = self.adaptive_batcher {
+            batcher.process_observations();
+            self.metrics
+                .record_adaptive_batcher_snapshot(&batcher.snapshot());
+        }
+
         // Clear previous activation state
-        self.activation_records.clear();
+        self.release_activation_records();
         self.metrics.reset();
-        self.scheduler.reset(&self.config);
+        let config_guard = self.config.read();
+        self.scheduler.reset(&config_guard);
         self.cycle_detector.reset();
         self.phase_barrier.enable();
         if let Ok(mut trace) = self.deterministic_trace.lock() {
@@ -606,15 +908,30 @@ impl ParallelSpreadingEngine {
 
         // Create initial tasks from seed nodes
         for (node_id, initial_activation) in seed_activations {
-            let mut base_record = ActivationRecord::new(node_id.clone(), 0.1);
-            base_record.set_storage_tier(StorageTier::Hot);
-            let record = Arc::new(base_record);
-            record.accumulate_activation(*initial_activation);
+            let record = self.activation_pool.as_ref().map_or_else(
+                || {
+                    let mut base_record =
+                        ActivationRecord::new(node_id.clone(), DEFAULT_DECAY_RATE);
+                    base_record.set_storage_tier(StorageTier::Hot);
+                    let record = Arc::new(base_record);
+                    record.accumulate_activation(*initial_activation);
+                    record
+                },
+                |pool| {
+                    let record =
+                        pool.acquire(node_id.clone(), DEFAULT_DECAY_RATE, Some(StorageTier::Hot));
+                    record.accumulate_activation(*initial_activation);
+                    record
+                },
+            );
+            let hot_handle = record.hot_handle();
             self.activation_records.insert(node_id.clone(), record);
+            self.memory_graph
+                .register_hot_handle(node_id.clone(), hot_handle);
 
             if let Some(neighbors) = ActivationGraphExt::get_neighbors(&*self.memory_graph, node_id)
             {
-                let decay_factor = self.config.decay_function.apply(1);
+                let decay_factor = config_guard.decay_function.apply(1);
                 let next_tier = StorageTier::from_depth(1);
 
                 for edge in neighbors {
@@ -625,7 +942,7 @@ impl ParallelSpreadingEngine {
                         edge.weight,
                         decay_factor,
                         1,
-                        self.config.max_depth,
+                        config_guard.max_depth,
                     )
                     .with_storage_tier(next_tier)
                     .with_path(task_path);
@@ -635,10 +952,15 @@ impl ParallelSpreadingEngine {
             }
         }
 
+        drop(config_guard);
+
         // Wait for processing to complete
         self.wait_for_completion()?;
 
-        Ok(self.collect_results())
+        let results = self.collect_results();
+        self.release_activation_records();
+
+        Ok(results)
     }
 
     /// Wait for all workers to complete processing
@@ -650,7 +972,6 @@ impl ParallelSpreadingEngine {
             .unwrap_or(4);
         let timeout = Duration::from_secs(30 + (available_parallelism as u64 * 10));
         let start = Instant::now();
-
         while start.elapsed() < timeout {
             if self.scheduler.is_idle() {
                 // Disable phase barrier to release any waiting workers
@@ -670,6 +991,37 @@ impl ParallelSpreadingEngine {
         }
 
         Ok(())
+    }
+
+    fn release_activation_records(&self) {
+        let keys: Vec<NodeId> = self
+            .activation_records
+            .iter()
+            .map(|entry| entry.key().clone())
+            .collect();
+
+        for key in &keys {
+            self.memory_graph.clear_hot_handle(key);
+        }
+
+        if let Some(pool) = &self.activation_pool {
+            for key in keys {
+                if let Some((_, record)) = self.activation_records.remove(&key) {
+                    pool.release(record);
+                }
+            }
+        } else {
+            self.activation_records.clear();
+        }
+
+        self.update_pool_metrics();
+    }
+
+    fn update_pool_metrics(&self) {
+        if let Some(pool) = &self.activation_pool {
+            let stats = pool.stats();
+            self.metrics.record_pool_snapshot(&stats);
+        }
     }
 
     fn collect_results(&self) -> SpreadingResults {
@@ -725,14 +1077,16 @@ impl ParallelSpreadingEngine {
             );
         }
 
-        let deterministic_trace = if self.config.trace_activation_flow && self.config.deterministic
-        {
-            self.deterministic_trace
-                .lock()
-                .map(|trace| trace.clone())
-                .unwrap_or_default()
-        } else {
-            Vec::new()
+        let deterministic_trace = {
+            let config_guard = self.config.read();
+            if config_guard.trace_activation_flow && config_guard.deterministic {
+                self.deterministic_trace
+                    .lock()
+                    .map(|trace| trace.clone())
+                    .unwrap_or_default()
+            } else {
+                Vec::new()
+            }
         };
 
         SpreadingResults {
@@ -771,7 +1125,19 @@ impl ParallelSpreadingEngine {
     /// Get performance metrics
     #[must_use]
     pub fn get_metrics(&self) -> &SpreadingMetrics {
+        self.update_pool_metrics();
+        // Update adaptive batcher metrics if available
+        if let Some(ref batcher) = self.adaptive_batcher {
+            self.metrics
+                .record_adaptive_batcher_snapshot(&batcher.snapshot());
+        }
         &self.metrics
+    }
+
+    /// Get a cloned Arc handle to the metrics structure for external monitoring
+    #[must_use]
+    pub fn metrics_handle(&self) -> Arc<SpreadingMetrics> {
+        Arc::clone(&self.metrics)
     }
 
     /// Shutdown the spreading engine
@@ -793,6 +1159,7 @@ impl ParallelSpreadingEngine {
 impl Drop for ParallelSpreadingEngine {
     fn drop(&mut self) {
         self.shutdown_signal.store(true, Ordering::SeqCst);
+        self.release_activation_records();
 
         // Join any remaining threads
         while let Some(handle) = self.thread_handles.pop() {
@@ -830,9 +1197,9 @@ mod tests {
                 .as_nanos()
         );
 
-        let node_a = format!("{}_A", prefix);
-        let node_b = format!("{}_B", prefix);
-        let node_c = format!("{}_C", prefix);
+        let node_a = format!("{prefix}_A");
+        let node_b = format!("{prefix}_B");
+        let node_c = format!("{prefix}_C");
 
         // Create a simple test graph: A -> B -> C, A -> C
         ActivationGraphExt::add_edge(
@@ -872,9 +1239,9 @@ mod tests {
             neighbors_a.is_some(),
             "Node A should have neighbors after adding edges"
         );
-        let neighbors_a_unwrapped = neighbors_a.expect("node A should have neighbors");
+        let neighbors_from_a = neighbors_a.expect("node A should have neighbors");
         assert_eq!(
-            neighbors_a_unwrapped.len(),
+            neighbors_from_a.len(),
             2,
             "Node A should have 2 outgoing edges (A->B, A->C)"
         );
@@ -884,9 +1251,9 @@ mod tests {
             neighbors_b.is_some(),
             "Node B should have neighbors after adding edges"
         );
-        let neighbors_b_unwrapped = neighbors_b.expect("node B should have neighbors");
+        let neighbors_from_b = neighbors_b.expect("node B should have neighbors");
         assert_eq!(
-            neighbors_b_unwrapped.len(),
+            neighbors_from_b.len(),
             1,
             "Node B should have 1 outgoing edge (B->C)"
         );
@@ -929,6 +1296,11 @@ mod tests {
             simd_batch_size: 4,
             prefetch_distance: 16,
             enable_memory_pool: false,
+            tier_timeouts: [
+                Duration::from_millis(50),
+                Duration::from_millis(50),
+                Duration::from_millis(100),
+            ],
             ..ParallelSpreadingConfig::deterministic(seed)
         }
     }
@@ -962,7 +1334,7 @@ mod tests {
             ParallelSpreadingEngine::new(config, graph).expect("engine creation should succeed");
 
         // Spread activation from node A
-        let seed_activations = vec![(node_a.clone(), 1.0)];
+        let seed_activations = vec![(node_a, 1.0)];
         let results = engine
             .spread_activation(&seed_activations)
             .expect("spread should succeed");
@@ -973,10 +1345,11 @@ mod tests {
             .expect("hot tier summary");
         assert!(hot_summary.node_count >= 1);
 
+        let seed_node = &seed_activations[0].0;
         let node_a_activation = results
             .activations
             .iter()
-            .find(|activation| activation.memory_id == node_a)
+            .find(|activation| activation.memory_id == *seed_node)
             .map(|activation| activation.activation_level.load(Ordering::Relaxed));
         assert!(node_a_activation.is_some());
         assert!(node_a_activation.expect("activation should exist") >= 1.0);
@@ -1014,7 +1387,7 @@ mod tests {
             .activations
             .iter()
             .map(|activation| {
-                let suffix = activation.memory_id.split('_').last().unwrap_or("");
+                let suffix = activation.memory_id.split('_').next_back().unwrap_or("");
                 (
                     suffix.to_string(),
                     activation.activation_level.load(Ordering::Relaxed),
@@ -1025,7 +1398,7 @@ mod tests {
             .activations
             .iter()
             .map(|activation| {
-                let suffix = activation.memory_id.split('_').last().unwrap_or("");
+                let suffix = activation.memory_id.split('_').next_back().unwrap_or("");
                 (
                     suffix.to_string(),
                     activation.activation_level.load(Ordering::Relaxed),
@@ -1082,7 +1455,7 @@ mod tests {
                 .activations
                 .iter()
                 .map(|a| {
-                    let suffix = a.memory_id.split('_').last().unwrap_or("");
+                    let suffix = a.memory_id.split('_').next_back().unwrap_or("");
                     (
                         suffix.to_string(),
                         a.activation_level.load(Ordering::Relaxed),
@@ -1251,8 +1624,8 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         );
-        let node_a = format!("{}_A", prefix);
-        let node_b = format!("{}_B", prefix);
+        let node_a = format!("{prefix}_A");
+        let node_b = format!("{prefix}_B");
 
         let graph = Arc::new(create_activation_graph());
         ActivationGraphExt::add_edge(
@@ -1271,7 +1644,7 @@ mod tests {
         );
 
         let engine = ParallelSpreadingEngine::new(config, graph).expect("engine should succeed");
-        let seed_activations = vec![(node_a.clone(), 1.0)];
+        let seed_activations = vec![(node_a, 1.0)];
         let results = engine
             .spread_activation(&seed_activations)
             .expect("spread should succeed");
@@ -1330,5 +1703,262 @@ mod tests {
         }
 
         assert_eq!(barrier_arc.phase_count(), 1);
+    }
+
+    #[cfg(loom)]
+    #[test]
+    fn loom_phase_barrier_resets_without_deadlock() {
+        loom::model(|| {
+            use loom::sync::Arc;
+            use loom::thread;
+
+            let barrier = Arc::new(PhaseBarrier::new(2));
+            let barrier_clone = Arc::clone(&barrier);
+
+            let handle = thread::spawn(move || {
+                barrier_clone.wait();
+                barrier_clone.wait();
+            });
+
+            barrier.wait();
+            barrier.wait();
+
+            handle.join().expect("loom phase barrier join");
+            assert!(barrier.phase_count() >= 1);
+        });
+    }
+
+    #[test]
+    #[serial(parallel_engine)]
+    fn test_adaptive_batcher_records_observations() {
+        use crate::activation::AdaptiveBatcherConfig;
+
+        // Create config with adaptive batcher enabled
+        let mut config = fast_parallel_config();
+        config.adaptive_batcher_config = Some(AdaptiveBatcherConfig::default());
+
+        let (graph, node_a, _node_b, _node_c) = create_test_graph();
+        let engine =
+            ParallelSpreadingEngine::new(config, graph).expect("engine creation should succeed");
+
+        // Verify batcher was created
+        assert!(
+            engine.adaptive_batcher.is_some(),
+            "AdaptiveBatcher should be initialized when config is provided"
+        );
+
+        let batcher = engine.adaptive_batcher.as_ref().expect("batcher exists");
+
+        // Record initial metrics state
+        let initial_update_count = batcher.metrics().update_count.load(Ordering::Relaxed);
+
+        // Spread activation which should record observations
+        let seed_activations = vec![(node_a, 1.0)];
+        let results = engine
+            .spread_activation(&seed_activations)
+            .expect("spread should succeed");
+
+        assert!(!results.activations.is_empty(), "Should have activations");
+
+        // Process observations
+        batcher.process_observations();
+
+        // Verify observations were recorded
+        let final_update_count = batcher.metrics().update_count.load(Ordering::Relaxed);
+        assert!(
+            final_update_count > initial_update_count,
+            "Observations should have been recorded and processed"
+        );
+
+        engine.shutdown().expect("shutdown should succeed");
+    }
+
+    #[test]
+    #[serial(parallel_engine)]
+    fn test_adaptive_batcher_per_tier_recommendations() {
+        use crate::activation::AdaptiveBatcherConfig;
+
+        // Create config with adaptive batcher
+        let mut config = fast_parallel_config();
+        let batcher_config = AdaptiveBatcherConfig::default();
+        config.adaptive_batcher_config = Some(batcher_config.clone());
+
+        let (graph, _node_a, _node_b, _node_c) = create_test_graph();
+        let engine =
+            ParallelSpreadingEngine::new(config, graph).expect("engine creation should succeed");
+
+        let batcher = engine.adaptive_batcher.as_ref().expect("batcher exists");
+
+        // Get initial recommendations for each tier
+        let hot_size = batcher.recommend_batch_size(StorageTier::Hot);
+        let warm_size = batcher.recommend_batch_size(StorageTier::Warm);
+        let cold_size = batcher.recommend_batch_size(StorageTier::Cold);
+
+        // Verify tier-based sizing (Hot >= Warm >= Cold)
+        assert!(
+            hot_size >= warm_size,
+            "Hot tier should have >= batch size than Warm"
+        );
+        assert!(
+            warm_size >= cold_size,
+            "Warm tier should have >= batch size than Cold"
+        );
+
+        // All should be within configured bounds
+        assert!(hot_size >= batcher_config.min_batch_size);
+        assert!(hot_size <= batcher_config.max_batch_size);
+
+        engine.shutdown().expect("shutdown should succeed");
+    }
+
+    #[test]
+    #[serial(parallel_engine)]
+    fn test_adaptive_batcher_convergence() {
+        use crate::activation::AdaptiveBatcherConfig;
+
+        // Create config with adaptive batcher
+        let mut config = fast_parallel_config();
+        config.adaptive_batcher_config = Some(AdaptiveBatcherConfig {
+            min_batch_size: 4,
+            max_batch_size: 128,
+            cooldown_interval: 1, // Very short cooldown for testing
+            oscillation_threshold: 2,
+            instability_threshold: 0.30,
+        });
+
+        let (graph, node_a, _node_b, _node_c) = create_test_graph();
+        let engine =
+            ParallelSpreadingEngine::new(config, graph).expect("engine creation should succeed");
+
+        let batcher = engine.adaptive_batcher.as_ref().expect("batcher exists");
+
+        // Run multiple spreads to allow convergence
+        // Each spread records observations, and the next spread processes them
+        let seed_activations = vec![(node_a, 1.0)];
+        for _ in 0..15 {
+            let _results = engine
+                .spread_activation(&seed_activations)
+                .expect("spread should succeed");
+        }
+
+        // Check convergence confidence
+        // Note: Hot tier (depth 0) is seed nodes and may not have observations
+        // Warm tier (depth 1) and Cold tier (depth 2) should have observations from spreading
+        let warm_confidence = batcher.convergence_confidence(StorageTier::Warm);
+        let cold_confidence = batcher.convergence_confidence(StorageTier::Cold);
+
+        // After 15 spreads (14 processing cycles), confidence should be increasing
+        // At least one tier should show convergence
+        assert!(
+            warm_confidence > 0.0 || cold_confidence > 0.0,
+            "At least one tier should have convergence confidence: Warm={warm_confidence}, Cold={cold_confidence}"
+        );
+
+        engine.shutdown().expect("shutdown should succeed");
+    }
+
+    #[test]
+    #[serial(parallel_engine)]
+    fn test_adaptive_batcher_metrics_tracking() {
+        use crate::activation::AdaptiveBatcherConfig;
+
+        // Create config with adaptive batcher
+        let mut config = fast_parallel_config();
+        config.adaptive_batcher_config = Some(AdaptiveBatcherConfig::default());
+
+        let (graph, node_a, _node_b, _node_c) = create_test_graph();
+        let engine =
+            ParallelSpreadingEngine::new(config, graph).expect("engine creation should succeed");
+
+        let batcher = engine.adaptive_batcher.as_ref().expect("batcher exists");
+
+        // Spread activation (records observations)
+        let seed_activations = vec![(node_a, 1.0)];
+        let _results = engine
+            .spread_activation(&seed_activations)
+            .expect("spread should succeed");
+
+        // Run a second spread to process observations from the first spread
+        let _results2 = engine
+            .spread_activation(&seed_activations)
+            .expect("second spread should succeed");
+
+        // Get metrics
+        let metrics = batcher.metrics();
+
+        // Verify metrics are being tracked
+        assert!(
+            metrics.update_count.load(Ordering::Relaxed) > 0,
+            "Update count should be tracked"
+        );
+
+        // All metric fields should be accessible
+        let _guardrails = metrics.guardrail_hits.load(Ordering::Relaxed);
+        let _topology = metrics.topology_changes.load(Ordering::Relaxed);
+        let _fallbacks = metrics.fallback_activations.load(Ordering::Relaxed);
+
+        engine.shutdown().expect("shutdown should succeed");
+    }
+
+    #[test]
+    #[serial(parallel_engine)]
+    fn test_adaptive_batcher_disabled_by_default() {
+        // Create config without adaptive batcher
+        let config = fast_parallel_config();
+        assert!(
+            config.adaptive_batcher_config.is_none(),
+            "Default config should not have adaptive batcher enabled"
+        );
+
+        let (graph, _node_a, _node_b, _node_c) = create_test_graph();
+        let engine =
+            ParallelSpreadingEngine::new(config, graph).expect("engine creation should succeed");
+
+        // Verify batcher was NOT created
+        assert!(
+            engine.adaptive_batcher.is_none(),
+            "AdaptiveBatcher should be None when config is not provided"
+        );
+
+        engine.shutdown().expect("shutdown should succeed");
+    }
+
+    #[test]
+    #[serial(parallel_engine)]
+    fn test_adaptive_batcher_observation_flow() {
+        use crate::activation::{AdaptiveBatcherConfig, Observation};
+
+        // Create config with adaptive batcher
+        let mut config = fast_parallel_config();
+        config.adaptive_batcher_config = Some(AdaptiveBatcherConfig::default());
+        config.max_depth = 3; // Deeper spreading for more observations
+
+        let (graph, _node_a, _node_b, _node_c) = create_test_graph();
+        let engine =
+            ParallelSpreadingEngine::new(config, graph).expect("engine creation should succeed");
+
+        let batcher = engine.adaptive_batcher.as_ref().expect("batcher exists");
+
+        // Manually record an observation
+        let test_observation = Observation {
+            batch_size: 64,
+            latency_ns: 1_000_000, // 1ms
+            hop_count: 2,
+            tier: StorageTier::Hot,
+        };
+
+        batcher.record_observation(test_observation);
+
+        // Process observations
+        batcher.process_observations();
+
+        // Verify observation was processed
+        let metrics = batcher.metrics();
+        assert!(
+            metrics.update_count.load(Ordering::Relaxed) > 0,
+            "Observation should have been processed"
+        );
+
+        engine.shutdown().expect("shutdown should succeed");
     }
 }

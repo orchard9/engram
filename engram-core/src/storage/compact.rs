@@ -24,7 +24,7 @@ impl BackgroundCompactor {
     ///
     /// # Errors
     ///
-    /// Returns [`StorageError`](super::StorageError) if compaction is already active.
+    /// Returns [`StorageError`] if compaction is already active.
     pub fn start_compaction(&self) -> StorageResult<()> {
         if self
             .is_running

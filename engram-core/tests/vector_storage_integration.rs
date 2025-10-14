@@ -647,7 +647,7 @@ impl IntegrationTestHarness {
                 .max_results(10)
                 .build();
 
-            let results = self.memory_store.recall(&cue);
+            let results = self.memory_store.recall(&cue).results;
 
             let latency = start.elapsed();
             latencies.push(latency);
@@ -739,7 +739,7 @@ impl IntegrationTestHarness {
                 .max_results(10)
                 .build();
 
-            let results = self.memory_store.recall(&cue);
+            let results = self.memory_store.recall(&cue).results;
 
             for (_, confidence) in results.iter().take(5) {
                 // Simulate relevance check (simplified)

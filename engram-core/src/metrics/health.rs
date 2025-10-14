@@ -3,13 +3,90 @@
 use crate::Confidence;
 use crossbeam_utils::CachePadded;
 use std::convert::TryFrom;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+/// Result produced by a [`HealthProbe`] execution.
+#[derive(Debug, Clone)]
+pub struct HealthCheckResult {
+    /// Overall status reported by the probe.
+    pub status: HealthStatus,
+    /// Human friendly explanation of the current status.
+    pub message: String,
+    /// How long the probe execution took.
+    pub latency: Duration,
+    /// Timestamp when the observation was captured.
+    pub observed_at: Instant,
+}
+
+impl HealthCheckResult {
+    /// Create a new health result with the provided status and message.
+    #[must_use]
+    pub fn new(status: HealthStatus, message: impl Into<String>, latency: Duration) -> Self {
+        Self {
+            status,
+            message: message.into(),
+            latency,
+            observed_at: Instant::now(),
+        }
+    }
+}
+
+/// Configuration for controlling probe hysteresis and cooldown behaviour.
+#[derive(Debug, Clone, Copy)]
+pub struct ProbeHysteresis {
+    /// Number of consecutive failures before reporting `Degraded`.
+    pub degrade_threshold: u32,
+    /// Number of consecutive failures before reporting `Unhealthy`.
+    pub unhealthy_threshold: u32,
+    /// Number of consecutive successes required for recovery back to healthy.
+    pub recovery_threshold: u32,
+    /// Optional cooldown applied after an unhealthy result to reduce probe pressure.
+    pub cooldown: Duration,
+}
+
+impl Default for ProbeHysteresis {
+    fn default() -> Self {
+        Self {
+            degrade_threshold: 1,
+            unhealthy_threshold: 3,
+            recovery_threshold: 2,
+            cooldown: Duration::from_secs(0),
+        }
+    }
+}
+
+/// Trait implemented by health probes that can be registered with [`SystemHealth`].
+pub trait HealthProbe: Send + Sync {
+    /// Machine-readable name used for registration and lookups.
+    fn name(&self) -> &'static str;
+
+    /// Logical category for this probe.
+    fn check_type(&self) -> HealthCheckType {
+        HealthCheckType::Custom(self.name())
+    }
+
+    /// Execute the probe and return a structured result.
+    fn run(&self) -> HealthCheckResult;
+
+    /// Hysteresis settings for this probe.
+    fn hysteresis(&self) -> ProbeHysteresis {
+        ProbeHysteresis::default()
+    }
+}
+
+struct RegisteredProbe {
+    probe: Arc<dyn HealthProbe>,
+    hysteresis: ProbeHysteresis,
+    state: HealthCheck,
+    cooldown_until: Option<Instant>,
+}
 
 /// System health monitor
 pub struct SystemHealth {
     /// Individual health checks
-    checks: dashmap::DashMap<&'static str, HealthCheck>,
+    probes: dashmap::DashMap<&'static str, RegisteredProbe>,
 
     /// Global health state
     is_healthy: CachePadded<AtomicBool>,
@@ -40,7 +117,7 @@ impl SystemHealth {
         error_rate_threshold: f32,
     ) -> Self {
         let health = Self {
-            checks: dashmap::DashMap::new(),
+            probes: dashmap::DashMap::new(),
             is_healthy: CachePadded::new(AtomicBool::new(true)),
             last_check: CachePadded::new(AtomicU64::new(0)),
             memory_threshold_bytes,
@@ -54,213 +131,115 @@ impl SystemHealth {
     }
 
     fn register_default_checks(&self) {
-        // Memory check
-        self.checks.insert(
-            "memory",
-            HealthCheck {
-                name: "memory",
-                check_type: HealthCheckType::Memory,
-                status: HealthStatus::Healthy,
-                last_success: Instant::now(),
-                consecutive_failures: 0,
-                message: String::from("Memory usage within limits"),
-            },
-        );
+        self.register_probe(MemoryUsageProbe::new(self.memory_threshold_bytes));
+        self.register_probe(LatencyProbe::new(self.latency_threshold_ms));
+        self.register_probe(ErrorRateProbe::new(self.error_rate_threshold));
+        self.register_probe(ConnectivityProbe);
+        self.register_probe(CognitiveProbe);
+    }
 
-        // Latency check
-        self.checks.insert(
-            "latency",
-            HealthCheck {
-                name: "latency",
-                check_type: HealthCheckType::Latency,
-                status: HealthStatus::Healthy,
-                last_success: Instant::now(),
-                consecutive_failures: 0,
-                message: String::from("Latency within acceptable range"),
-            },
-        );
+    /// Register a custom health probe using its default hysteresis configuration.
+    pub fn register_probe<P>(&self, probe: P)
+    where
+        P: HealthProbe + 'static,
+    {
+        let hysteresis = probe.hysteresis();
+        self.register_probe_with_hysteresis(probe, hysteresis);
+    }
 
-        // Error rate check
-        self.checks.insert(
-            "error_rate",
-            HealthCheck {
-                name: "error_rate",
-                check_type: HealthCheckType::ErrorRate,
-                status: HealthStatus::Healthy,
-                last_success: Instant::now(),
-                consecutive_failures: 0,
-                message: String::from("Error rate below threshold"),
-            },
-        );
+    /// Register a probe with explicit hysteresis configuration.
+    pub fn register_probe_with_hysteresis<P>(&self, probe: P, hysteresis: ProbeHysteresis)
+    where
+        P: HealthProbe + 'static,
+    {
+        let probe = Arc::new(probe);
+        let probe_dyn: Arc<dyn HealthProbe> = probe;
+        self.insert_probe(probe_dyn, hysteresis);
+    }
 
-        // Connectivity check
-        self.checks.insert(
-            "connectivity",
-            HealthCheck {
-                name: "connectivity",
-                check_type: HealthCheckType::Connectivity,
-                status: HealthStatus::Healthy,
-                last_success: Instant::now(),
-                consecutive_failures: 0,
-                message: String::from("All services reachable"),
-            },
-        );
+    fn insert_probe(&self, probe: Arc<dyn HealthProbe>, hysteresis: ProbeHysteresis) {
+        let now = Instant::now();
+        let state = HealthCheck {
+            name: probe.name(),
+            check_type: probe.check_type(),
+            status: HealthStatus::Healthy,
+            last_success: now,
+            consecutive_failures: 0,
+            consecutive_successes: 0,
+            last_failure: None,
+            latency: Duration::from_secs(0),
+            last_run: None,
+            message: String::from("Probe registered"),
+        };
 
-        // Cognitive health check
-        self.checks.insert(
-            "cognitive",
-            HealthCheck {
-                name: "cognitive",
-                check_type: HealthCheckType::Cognitive,
-                status: HealthStatus::Healthy,
-                last_success: Instant::now(),
-                consecutive_failures: 0,
-                message: String::from("Cognitive metrics within biological ranges"),
+        self.probes.insert(
+            probe.name(),
+            RegisteredProbe {
+                probe,
+                hysteresis,
+                state,
+                cooldown_until: None,
             },
         );
     }
 
-    /// Run all health checks
+    /// Fetch the latest recorded state for the named probe, if present.
+    #[must_use]
+    pub fn check_named(&self, name: &str) -> Option<HealthCheck> {
+        self.probes
+            .get(name)
+            .map(|entry| entry.value().state.clone())
+    }
+
+    /// Convenience helper that returns the current health report.
+    #[must_use]
+    pub fn latest_report(&self) -> HealthReport {
+        self.health_report()
+    }
+
+    /// Run all registered health probes and update their state.
     pub fn check_all(&self) -> HealthStatus {
-        let mut all_healthy = true;
         let now = Instant::now();
+        let mut overall = HealthStatus::Healthy;
 
-        for mut check in self.checks.iter_mut() {
-            let check_type = check.check_type;
-            let status = self.run_check(check_type);
-            check.status = status.clone();
+        for mut entry in self.probes.iter_mut() {
+            let should_run = entry.cooldown_until.is_none_or(|until| {
+                until <= now || !matches!(entry.state.status, HealthStatus::Unhealthy)
+            });
 
-            match status {
-                HealthStatus::Healthy => {
-                    check.last_success = now;
-                    check.consecutive_failures = 0;
-                    check.message = Self::get_success_message(check_type);
-                }
-                HealthStatus::Degraded => {
-                    all_healthy = false;
-                    check.consecutive_failures += 1;
-                    check.message = Self::get_degraded_message(check_type);
-                }
-                HealthStatus::Unhealthy => {
-                    all_healthy = false;
-                    check.consecutive_failures += 1;
-                    check.message = Self::get_failure_message(check_type);
+            if should_run {
+                let result = entry.probe.run();
+                let hysteresis = entry.hysteresis;
+                apply_result(&mut entry.state, &result, hysteresis);
+
+                if matches!(entry.state.status, HealthStatus::Unhealthy)
+                    && entry.hysteresis.cooldown > Duration::from_secs(0)
+                {
+                    entry.cooldown_until = Some(result.observed_at + entry.hysteresis.cooldown);
+                } else {
+                    entry.cooldown_until = None;
                 }
             }
+
+            overall = combine_status(overall, entry.state.status);
         }
 
-        self.is_healthy.store(all_healthy, Ordering::Release);
+        self.is_healthy
+            .store(matches!(overall, HealthStatus::Healthy), Ordering::Release);
         self.last_check
             .store(now.elapsed().as_secs(), Ordering::Release);
 
-        if all_healthy {
-            HealthStatus::Healthy
-        } else if self.has_critical_failure() {
-            HealthStatus::Unhealthy
-        } else {
-            HealthStatus::Degraded
-        }
+        overall
     }
 
     /// Run a specific health check
-    fn run_check(&self, check_type: HealthCheckType) -> HealthStatus {
-        match check_type {
-            HealthCheckType::Memory => self.check_memory(),
-            HealthCheckType::Latency => self.check_latency(),
-            HealthCheckType::ErrorRate => self.check_error_rate(),
-            HealthCheckType::Connectivity => Self::check_connectivity(),
-            HealthCheckType::Cognitive => Self::check_cognitive_health(),
-        }
-    }
-
-    const fn check_memory(&self) -> HealthStatus {
-        // Get current memory usage (simplified)
-        let usage = Self::estimate_memory_usage();
-
-        if usage < self.memory_threshold_bytes * 70 / 100 {
-            HealthStatus::Healthy
-        } else if usage < self.memory_threshold_bytes * 90 / 100 {
-            HealthStatus::Degraded
-        } else {
-            HealthStatus::Unhealthy
-        }
-    }
-
-    fn check_latency(&self) -> HealthStatus {
-        // Check recent p99 latency (would come from metrics)
-        let p99_latency = 30.0; // Mock value in ms (well below 50% of 100ms threshold)
-
-        if p99_latency < self.latency_threshold_ms * 0.5 {
-            HealthStatus::Healthy
-        } else if p99_latency < self.latency_threshold_ms {
-            HealthStatus::Degraded
-        } else {
-            HealthStatus::Unhealthy
-        }
-    }
-
-    fn check_error_rate(&self) -> HealthStatus {
-        // Check recent error rate (would come from metrics)
-        let error_rate = 0.002; // Mock value (0.2%, well below 50% of 1% threshold)
-
-        if error_rate < self.error_rate_threshold * 0.5 {
-            HealthStatus::Healthy
-        } else if error_rate < self.error_rate_threshold {
-            HealthStatus::Degraded
-        } else {
-            HealthStatus::Unhealthy
-        }
-    }
-
-    const fn check_connectivity() -> HealthStatus {
-        // Check if all required services are reachable
-        // This would ping databases, external services, etc.
-        HealthStatus::Healthy // Simplified
-    }
-
-    const fn check_cognitive_health() -> HealthStatus {
-        // Check if cognitive metrics are within biological ranges
-        // Would check CLS balance, consolidation rates, etc.
-        HealthStatus::Healthy // Simplified
-    }
-
     fn has_critical_failure(&self) -> bool {
-        self.checks.iter().any(|check| {
+        self.probes.iter().any(|entry| {
             matches!(
-                check.check_type,
+                entry.value().state.check_type,
                 HealthCheckType::Memory | HealthCheckType::Connectivity
-            ) && matches!(check.status, HealthStatus::Unhealthy)
+            ) && matches!(entry.value().state.status, HealthStatus::Unhealthy)
         })
-    }
-
-    fn get_success_message(check_type: HealthCheckType) -> String {
-        match check_type {
-            HealthCheckType::Memory => "Memory usage within limits".to_string(),
-            HealthCheckType::Latency => "Latency within acceptable range".to_string(),
-            HealthCheckType::ErrorRate => "Error rate below threshold".to_string(),
-            HealthCheckType::Connectivity => "All services reachable".to_string(),
-            HealthCheckType::Cognitive => "Cognitive metrics within biological ranges".to_string(),
-        }
-    }
-
-    fn get_degraded_message(check_type: HealthCheckType) -> String {
-        match check_type {
-            HealthCheckType::Memory => "Memory usage elevated but manageable".to_string(),
-            HealthCheckType::Latency => "Latency elevated but acceptable".to_string(),
-            HealthCheckType::ErrorRate => "Error rate elevated but tolerable".to_string(),
-            HealthCheckType::Connectivity => "Some services experiencing delays".to_string(),
-            HealthCheckType::Cognitive => "Cognitive metrics showing minor deviations".to_string(),
-        }
-    }
-
-    fn get_failure_message(check_type: HealthCheckType) -> String {
-        match check_type {
-            HealthCheckType::Memory => "Memory usage critical".to_string(),
-            HealthCheckType::Latency => "Latency exceeds acceptable threshold".to_string(),
-            HealthCheckType::ErrorRate => "Error rate exceeds threshold".to_string(),
-            HealthCheckType::Connectivity => "Critical services unreachable".to_string(),
-            HealthCheckType::Cognitive => "Cognitive metrics outside biological ranges".to_string(),
-        }
     }
 
     /// Get current health status without running checks
@@ -277,9 +256,9 @@ impl SystemHealth {
     /// Get detailed health report
     pub fn health_report(&self) -> HealthReport {
         let checks: Vec<HealthCheck> = self
-            .checks
+            .probes
             .iter()
-            .map(|entry| entry.value().clone())
+            .map(|entry| entry.value().state.clone())
             .collect();
 
         let overall_status = self.current_status();
@@ -294,12 +273,12 @@ impl SystemHealth {
 
     fn calculate_health_confidence(&self) -> Confidence {
         let healthy_count = self
-            .checks
+            .probes
             .iter()
-            .filter(|check| matches!(check.status, HealthStatus::Healthy))
+            .filter(|entry| matches!(entry.value().state.status, HealthStatus::Healthy))
             .count();
 
-        let total_count = self.checks.len();
+        let total_count = self.probes.len();
         if total_count == 0 {
             return Confidence::from_probability(1.0);
         }
@@ -316,13 +295,6 @@ impl SystemHealth {
 
         Confidence::from_probability(probability)
     }
-
-    /// Estimate current memory usage in bytes
-    const fn estimate_memory_usage() -> u64 {
-        // Simplified estimate - in production this would query actual system metrics
-        // Return a low value to pass health checks
-        1024 * 1024 * 100 // 100 MB estimate
-    }
 }
 
 /// Individual health check
@@ -338,6 +310,14 @@ pub struct HealthCheck {
     pub last_success: Instant,
     /// Number of consecutive failures
     pub consecutive_failures: u32,
+    /// Number of consecutive successes (used for hysteresis recovery)
+    pub consecutive_successes: u32,
+    /// Last time the check failed
+    pub last_failure: Option<Instant>,
+    /// Duration of the most recent probe execution
+    pub latency: Duration,
+    /// Timestamp of the last probe execution
+    pub last_run: Option<Instant>,
     /// Human-readable status message
     pub message: String,
 }
@@ -355,10 +335,12 @@ pub enum HealthCheckType {
     Connectivity,
     /// Cognitive system health check
     Cognitive,
+    /// Custom probe supplied by integrators
+    Custom(&'static str),
 }
 
 /// Health status levels
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum HealthStatus {
     /// Checks indicate the system is operating nominally.
     Healthy,
@@ -448,6 +430,304 @@ fn clamped_f64_to_f32(value: f64, default: f32) -> f32 {
     let exponent_field = u32::try_from(exponent_adjusted).unwrap_or(0);
     let bits32 = sign_bit | (exponent_field << 23) | mantissa32;
     f32::from_bits(bits32)
+}
+
+/// Estimate current memory usage in bytes (placeholder implementation).
+const fn estimate_memory_usage() -> u64 {
+    // Simplified estimate - in production this would query actual system metrics.
+    1024 * 1024 * 100
+}
+
+#[derive(Debug)]
+struct MemoryUsageProbe {
+    threshold_bytes: u64,
+}
+
+impl MemoryUsageProbe {
+    const fn new(threshold_bytes: u64) -> Self {
+        Self { threshold_bytes }
+    }
+}
+
+impl HealthProbe for MemoryUsageProbe {
+    fn name(&self) -> &'static str {
+        "memory"
+    }
+
+    fn check_type(&self) -> HealthCheckType {
+        HealthCheckType::Memory
+    }
+
+    fn run(&self) -> HealthCheckResult {
+        let start = Instant::now();
+        let usage = estimate_memory_usage();
+
+        let status = if usage < self.threshold_bytes * 70 / 100 {
+            HealthStatus::Healthy
+        } else if usage < self.threshold_bytes * 90 / 100 {
+            HealthStatus::Degraded
+        } else {
+            HealthStatus::Unhealthy
+        };
+
+        let usage_mb = usage / (1024 * 1024);
+        let threshold_mb = self.threshold_bytes / (1024 * 1024);
+        let message = match status {
+            HealthStatus::Healthy => {
+                format!("Memory usage {usage_mb}MB within {threshold_mb}MB budget")
+            }
+            HealthStatus::Degraded => {
+                format!("Memory usage {usage_mb}MB approaching {threshold_mb}MB threshold")
+            }
+            HealthStatus::Unhealthy => {
+                format!("Memory usage {usage_mb}MB exceeds {threshold_mb}MB threshold")
+            }
+        };
+
+        let latency = start.elapsed();
+        let observed_at = Instant::now();
+
+        HealthCheckResult {
+            status,
+            message,
+            latency,
+            observed_at,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct LatencyProbe {
+    threshold_ms: f64,
+}
+
+impl LatencyProbe {
+    const fn new(threshold_ms: f64) -> Self {
+        Self { threshold_ms }
+    }
+}
+
+impl HealthProbe for LatencyProbe {
+    fn name(&self) -> &'static str {
+        "latency"
+    }
+
+    fn check_type(&self) -> HealthCheckType {
+        HealthCheckType::Latency
+    }
+
+    fn run(&self) -> HealthCheckResult {
+        let start = Instant::now();
+        let p99_latency = 30.0; // Placeholder metric. Replace with real telemetry.
+
+        let status = if p99_latency < self.threshold_ms * 0.5 {
+            HealthStatus::Healthy
+        } else if p99_latency < self.threshold_ms {
+            HealthStatus::Degraded
+        } else {
+            HealthStatus::Unhealthy
+        };
+
+        let message = match status {
+            HealthStatus::Healthy => format!(
+                "p99 latency {:.2}ms within {:.2}ms budget",
+                p99_latency, self.threshold_ms
+            ),
+            HealthStatus::Degraded => format!(
+                "p99 latency {:.2}ms nearing {:.2}ms budget",
+                p99_latency, self.threshold_ms
+            ),
+            HealthStatus::Unhealthy => format!(
+                "p99 latency {:.2}ms exceeds {:.2}ms budget",
+                p99_latency, self.threshold_ms
+            ),
+        };
+
+        let latency = start.elapsed();
+        let observed_at = Instant::now();
+
+        HealthCheckResult {
+            status,
+            message,
+            latency,
+            observed_at,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct ErrorRateProbe {
+    threshold: f32,
+}
+
+impl ErrorRateProbe {
+    const fn new(threshold: f32) -> Self {
+        Self { threshold }
+    }
+}
+
+impl HealthProbe for ErrorRateProbe {
+    fn name(&self) -> &'static str {
+        "error_rate"
+    }
+
+    fn check_type(&self) -> HealthCheckType {
+        HealthCheckType::ErrorRate
+    }
+
+    fn run(&self) -> HealthCheckResult {
+        let start = Instant::now();
+        let error_rate = 0.002; // Placeholder error rate.
+
+        let status = if error_rate < self.threshold * 0.5 {
+            HealthStatus::Healthy
+        } else if error_rate < self.threshold {
+            HealthStatus::Degraded
+        } else {
+            HealthStatus::Unhealthy
+        };
+
+        let message = match status {
+            HealthStatus::Healthy => format!(
+                "Error rate {:.3}% within {:.3}% budget",
+                error_rate * 100.0,
+                self.threshold * 100.0
+            ),
+            HealthStatus::Degraded => format!(
+                "Error rate {:.3}% approaching {:.3}% budget",
+                error_rate * 100.0,
+                self.threshold * 100.0
+            ),
+            HealthStatus::Unhealthy => format!(
+                "Error rate {:.3}% exceeds {:.3}% budget",
+                error_rate * 100.0,
+                self.threshold * 100.0
+            ),
+        };
+
+        let latency = start.elapsed();
+        let observed_at = Instant::now();
+
+        HealthCheckResult {
+            status,
+            message,
+            latency,
+            observed_at,
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct ConnectivityProbe;
+
+impl HealthProbe for ConnectivityProbe {
+    fn name(&self) -> &'static str {
+        "connectivity"
+    }
+
+    fn check_type(&self) -> HealthCheckType {
+        HealthCheckType::Connectivity
+    }
+
+    fn run(&self) -> HealthCheckResult {
+        let start = Instant::now();
+        let latency = start.elapsed();
+        let observed_at = Instant::now();
+        HealthCheckResult {
+            status: HealthStatus::Healthy,
+            message: String::from("All services reachable"),
+            latency,
+            observed_at,
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct CognitiveProbe;
+
+impl HealthProbe for CognitiveProbe {
+    fn name(&self) -> &'static str {
+        "cognitive"
+    }
+
+    fn check_type(&self) -> HealthCheckType {
+        HealthCheckType::Cognitive
+    }
+
+    fn run(&self) -> HealthCheckResult {
+        let start = Instant::now();
+        let latency = start.elapsed();
+        let observed_at = Instant::now();
+        HealthCheckResult {
+            status: HealthStatus::Healthy,
+            message: String::from("Cognitive metrics within biological ranges"),
+            latency,
+            observed_at,
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Severity {
+    Healthy = 0,
+    Degraded = 1,
+    Unhealthy = 2,
+}
+
+const fn severity(status: HealthStatus) -> Severity {
+    match status {
+        HealthStatus::Healthy => Severity::Healthy,
+        HealthStatus::Degraded => Severity::Degraded,
+        HealthStatus::Unhealthy => Severity::Unhealthy,
+    }
+}
+
+const fn status_from_severity(severity: Severity) -> HealthStatus {
+    match severity {
+        Severity::Healthy => HealthStatus::Healthy,
+        Severity::Degraded => HealthStatus::Degraded,
+        Severity::Unhealthy => HealthStatus::Unhealthy,
+    }
+}
+
+fn combine_status(current: HealthStatus, next: HealthStatus) -> HealthStatus {
+    let severity = severity(current).max(severity(next));
+    status_from_severity(severity)
+}
+
+fn apply_result(state: &mut HealthCheck, result: &HealthCheckResult, hysteresis: ProbeHysteresis) {
+    state.last_run = Some(result.observed_at);
+    state.latency = result.latency;
+    state.message.clone_from(&result.message);
+
+    if result.status == HealthStatus::Healthy {
+        state.consecutive_successes = state.consecutive_successes.saturating_add(1);
+        state.consecutive_failures = 0;
+        state.last_success = result.observed_at;
+
+        if severity(state.status) > Severity::Healthy {
+            if state.consecutive_successes >= hysteresis.recovery_threshold {
+                state.status = HealthStatus::Healthy;
+            }
+        } else {
+            state.status = HealthStatus::Healthy;
+        }
+    } else {
+        state.consecutive_failures = state.consecutive_failures.saturating_add(1);
+        state.consecutive_successes = 0;
+        state.last_failure = Some(result.observed_at);
+
+        let mut target = severity(result.status);
+
+        if state.consecutive_failures >= hysteresis.unhealthy_threshold {
+            target = Severity::Unhealthy;
+        } else if state.consecutive_failures >= hysteresis.degrade_threshold {
+            target = target.max(Severity::Degraded);
+        }
+
+        let combined = severity(state.status).max(target);
+        state.status = status_from_severity(combined);
+    }
 }
 
 #[cfg(test)]

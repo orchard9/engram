@@ -1,5 +1,7 @@
 # Production Integration and Monitoring Research
 
+> Update (2025-10-09): Engram now emits metrics through its internal streaming/log pipeline. The Prometheus discussions below describe legacy adapters and should be treated as optional extensions layered on the streaming feed.
+
 ## Research Topics for Milestone 3 Task 012: Production Integration and Monitoring
 
 ### 1. Observability for Cognitive Systems

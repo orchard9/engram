@@ -31,7 +31,7 @@ fn test_adaptive_engine_dispatch() {
         gpu_threshold: 10,
         enable_gpu: false,
     };
-    let mut engine_cpu = AdaptiveSpreadingEngine::new(None, config_cpu);
+    let mut engine_cpu = AdaptiveSpreadingEngine::new(None, config_cpu, None);
 
     let source = [1.0; 768];
     let mut batch = GPUActivationBatch::new(&source);
@@ -54,7 +54,7 @@ fn test_adaptive_engine_with_mock_gpu() {
         gpu_threshold: 5,
         enable_gpu: true,
     };
-    let mut engine = AdaptiveSpreadingEngine::new(Some(mock_gpu), config);
+    let mut engine = AdaptiveSpreadingEngine::new(Some(mock_gpu), config, None);
 
     let source = [1.0; 768];
     let mut batch = GPUActivationBatch::new(&source);

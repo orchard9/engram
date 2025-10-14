@@ -32,7 +32,7 @@ fn bench_adaptive_engine_cpu(c: &mut Criterion) {
         gpu_threshold: 1000, // High threshold to force CPU
         enable_gpu: false,
     };
-    let mut engine = AdaptiveSpreadingEngine::new(None, config);
+    let mut engine = AdaptiveSpreadingEngine::new(None, config, None);
     let source = [1.0; 768];
     let mut batch = GPUActivationBatch::new(&source);
 

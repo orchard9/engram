@@ -1,0 +1,17 @@
+{
+  "memory_id": "metrics_live_capture_memory",
+  "storage_confidence": {
+    "value": 0.8499915,
+    "category": "High",
+    "reasoning": "Generated during observability capture"
+  },
+  "consolidation_state": "Recent",
+  "auto_links": [
+    {
+      "target_memory_id": "example_linked_memory",
+      "similarity_score": 0.70000005,
+      "link_reason": "Semantic similarity detected in content patterns"
+    }
+  ],
+  "system_message": "Memory 'metrics_live_capture_memory' successfully encoded with 0.85 activation. Automatic linking enabled - similar memories will be connected during consolidation."
+}

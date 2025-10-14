@@ -4,7 +4,7 @@
 #![allow(clippy::multiple_crate_versions)] // Dependencies control their own versions
 #![allow(clippy::too_many_lines)] // Main.rs coordinates multiple subsystems
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use clap::Parser;
 use engram_cli::{
     api::{ApiState, create_api_routes},
@@ -12,7 +12,9 @@ use engram_cli::{
     find_available_port,
     grpc::MemoryService,
 };
-use engram_core::MemoryStore;
+#[cfg(feature = "hnsw_index")]
+use engram_core::activation::{RecallConfig, RecallMode, SpreadingAutoTuner};
+use engram_core::{MemoryStore, metrics};
 use std::fs;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -25,11 +27,13 @@ use tracing_subscriber::FmtSubscriber;
 
 // Import our CLI modules
 mod cli;
+mod config;
 use cli::{
     Cli, Commands, ConfigAction, MemoryAction, create_memory, delete_memory, get_memory,
     get_server_connection, list_memories, remove_pid_file, search_memories, show_status,
     stop_server, write_pid_file,
 };
+use config::ConfigManager;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -48,8 +52,12 @@ async fn main() -> Result<()> {
 
     tracing::subscriber::set_global_default(subscriber).expect("Setting default subscriber failed");
 
+    let mut config_manager = ConfigManager::load().context("failed to load CLI configuration")?;
+
     match cli.command {
-        Commands::Start { port, grpc_port } => start_server(port, grpc_port).await,
+        Commands::Start { port, grpc_port } => {
+            start_server(port, grpc_port, config_manager.config()).await
+        }
 
         Commands::Stop { force } => {
             if force {
@@ -78,10 +86,7 @@ async fn main() -> Result<()> {
 
         Commands::Memory { action } => handle_memory_command(action).await,
 
-        Commands::Config { action } => {
-            handle_config_command(action);
-            Ok(())
-        }
+        Commands::Config { action } => handle_config_command(action, &mut config_manager),
 
         Commands::Shell => start_interactive_shell().await,
 
@@ -100,7 +105,7 @@ async fn main() -> Result<()> {
     }
 }
 
-async fn start_server(port: u16, grpc_port: u16) -> Result<()> {
+async fn start_server(port: u16, grpc_port: u16, cli_config: &config::CliConfig) -> Result<()> {
     info!(" Starting Engram server...");
 
     let actual_port = find_available_port(port).await?;
@@ -154,11 +159,118 @@ async fn start_server(port: u16, grpc_port: u16) -> Result<()> {
             .map_err(|e| anyhow::anyhow!("Failed to start persistence workers: {}", e))?;
     }
 
+    #[cfg(feature = "hnsw_index")]
+    if cli_config.feature_flags.spreading_api_beta {
+        info!(" Spreading API beta flag enabled");
+    } else {
+        warn!(" Spreading API beta flag disabled — similarity-only recall will be used by default");
+        store = store.with_recall_config(RecallConfig {
+            recall_mode: RecallMode::Similarity,
+            ..RecallConfig::default()
+        });
+    }
+
+    #[cfg(not(feature = "hnsw_index"))]
+    if cli_config.feature_flags.spreading_api_beta {
+        warn!(
+            " Spreading API beta flag ignored because the CLI was built without the 'hnsw_index' feature"
+        );
+    }
+
     // Enable event streaming for real-time observability
-    let _event_rx = store.enable_event_streaming(1000);
+    // CRITICAL: Keep the receiver alive to maintain broadcast channel subscriptions
+    // Without an active subscriber, all events are silently dropped
+    let mut event_rx = store.enable_event_streaming(1000);
     info!(" Event streaming enabled (buffer size: 1000)");
 
     let memory_store = Arc::new(store);
+
+    // Spawn keepalive subscriber task to guarantee the broadcast channel
+    // always has at least one active receiver. This prevents events from
+    // being silently dropped when no SSE clients are connected.
+    info!(" Keepalive subscriber started - maintaining event streaming invariant");
+    tokio::spawn(async move {
+        let mut lagged_count = 0u64;
+        let mut events_received = 0u64;
+        let mut last_health_log = std::time::Instant::now();
+
+        loop {
+            match event_rx.recv().await {
+                Ok(_event) => {
+                    events_received += 1;
+
+                    // Periodic health reporting (every 10 seconds)
+                    if last_health_log.elapsed() >= std::time::Duration::from_secs(10) {
+                        info!(
+                            events_received,
+                            lagged_count,
+                            "Keepalive subscriber healthy - {} events received, {} lagged",
+                            events_received,
+                            lagged_count
+                        );
+                        last_health_log = std::time::Instant::now();
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                    lagged_count += skipped;
+                    warn!(
+                        lagged_count,
+                        skipped,
+                        "Keepalive event subscriber lagging - {} events skipped (total: {}). \
+                         This indicates high event volume or slow processing.",
+                        skipped,
+                        lagged_count
+                    );
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                    error!(
+                        events_received,
+                        lagged_count,
+                        "CRITICAL: Event broadcast channel closed - keepalive subscriber exiting. \
+                         Event streaming is now BROKEN. {} events were received before shutdown.",
+                        events_received
+                    );
+                    break;
+                }
+            }
+        }
+    });
+    let metrics = metrics::init();
+
+    let auto_tuner = SpreadingAutoTuner::new(0.10, 64);
+    let tuner_metrics = Arc::clone(&metrics);
+    let tuner_auto = Arc::clone(&auto_tuner);
+    #[cfg(feature = "hnsw_index")]
+    let tuner_store = Arc::clone(&memory_store);
+    let auto_tune_handle = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
+        loop {
+            interval.tick().await;
+            let snapshot = tuner_metrics.streaming_snapshot();
+            if let Some(summary) = snapshot.spreading.clone() {
+                #[cfg(feature = "hnsw_index")]
+                if let Some(engine) = tuner_store.spreading_engine() {
+                    let _ = tuner_auto.evaluate(&summary, &engine);
+                }
+            }
+        }
+    });
+    info!(" Auto-tuner background worker started (5 minute interval)");
+
+    let health_metrics = Arc::clone(&metrics);
+    let health_handle = tokio::spawn(async move {
+        let registry = health_metrics.health_registry();
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(10));
+        loop {
+            interval.tick().await;
+            let status = registry.check_all();
+            tracing::trace!(
+                target = "engram::health",
+                ?status,
+                "health probes evaluated"
+            );
+        }
+    });
 
     // Start background tier migration task if persistence is enabled
     #[cfg(feature = "memory_mapped_persistence")]
@@ -175,10 +287,15 @@ async fn start_server(port: u16, grpc_port: u16) -> Result<()> {
     }
 
     // Create API state
-    let api_state = ApiState::new(memory_store);
+    let api_state = ApiState::new(
+        Arc::clone(&memory_store),
+        Arc::clone(&metrics),
+        Arc::clone(&auto_tuner),
+    );
 
     // Clone memory store for gRPC before moving api_state into router
     let grpc_memory_store = Arc::clone(&api_state.store);
+    let grpc_metrics = Arc::clone(&api_state.metrics);
 
     // Build HTTP API routes
     let app = create_api_routes().with_state(api_state).layer(
@@ -187,6 +304,16 @@ async fn start_server(port: u16, grpc_port: u16) -> Result<()> {
             .allow_methods(Any)
             .allow_headers(Any),
     );
+
+    // Emit periodic structured metrics logs for operators tailing logs.
+    let logging_metrics = Arc::clone(&metrics);
+    let logging_handle = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
+        loop {
+            interval.tick().await;
+            logging_metrics.log_streaming_snapshot("daemon");
+        }
+    });
 
     // Start HTTP server
     let addr = SocketAddr::from(([127, 0, 0, 1], actual_port));
@@ -202,7 +329,7 @@ async fn start_server(port: u16, grpc_port: u16) -> Result<()> {
     write_pid_file(actual_port)?;
 
     // Start gRPC server in background task
-    let grpc_service = MemoryService::new(grpc_memory_store);
+    let grpc_service = MemoryService::new(grpc_memory_store, grpc_metrics);
     let grpc_handle = tokio::spawn(async move {
         if let Err(e) = grpc_service.serve(actual_grpc_port).await {
             error!(" gRPC server error: {}", e);
@@ -226,6 +353,9 @@ async fn start_server(port: u16, grpc_port: u16) -> Result<()> {
     // gRPC server will be cancelled when the tokio runtime shuts down
     // Explicitly abort to ensure clean shutdown
     grpc_handle.abort();
+    logging_handle.abort();
+    auto_tune_handle.abort();
+    health_handle.abort();
 
     // Cleanup on exit
     remove_pid_file()?;
@@ -265,47 +395,42 @@ async fn handle_memory_command(action: MemoryAction) -> Result<()> {
     }
 }
 
-fn handle_config_command(action: ConfigAction) {
+fn handle_config_command(action: ConfigAction, manager: &mut ConfigManager) -> Result<()> {
     match action {
-        ConfigAction::Get { key } => match key.as_str() {
-            "network.port" => println!("7432"),
-            "network.grpc_port" => println!("50051"),
-            _ => {
-                println!("Unknown configuration key: {key}");
-                std::process::exit(1);
-            }
-        },
+        ConfigAction::Get { key } => manager.get(&key).map_or_else(
+            || Err(anyhow!("unknown configuration key: {key}")),
+            |value| {
+                println!("{value}");
+                Ok(())
+            },
+        ),
         ConfigAction::Set { key, value } => {
-            println!("Setting {key} = {value}");
-            println!("  Configuration setting not yet implemented");
+            manager.set(&key, &value)?;
+            manager.save()?;
+            println!("Updated {key} = {value}");
+            Ok(())
         }
-        ConfigAction::List { section } => match section.as_deref() {
-            Some("memory") => {
-                println!("memory.cache_size=100MB");
-                println!("memory.gc_threshold=0.7");
+        ConfigAction::List { section } => {
+            match section.as_deref() {
+                Some("feature_flags") => {
+                    for line in config::format_feature_flags(&manager.config().feature_flags) {
+                        println!("{line}");
+                    }
+                }
+                None => {
+                    for line in config::format_sections(manager.config()) {
+                        println!("{line}");
+                    }
+                }
+                Some(other) => {
+                    return Err(anyhow!("unknown section: {other}"));
+                }
             }
-            Some("network") => {
-                println!("network.port=7432");
-                println!("network.grpc_port=50051");
-            }
-            None => {
-                println!("[network]");
-                println!("port=7432");
-                println!("grpc_port=50051");
-                println!();
-                println!("[memory]");
-                println!("cache_size=100MB");
-                println!("gc_threshold=0.7");
-            }
-            Some(s) => {
-                println!("Unknown section: {s}");
-            }
-        },
+            Ok(())
+        }
         ConfigAction::Path => {
-            println!(
-                "{}/config.toml",
-                cli::server::pid_file_path().parent().unwrap().display()
-            );
+            println!("{}", manager.path().display());
+            Ok(())
         }
     }
 }

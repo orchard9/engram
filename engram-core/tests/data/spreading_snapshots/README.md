@@ -7,4 +7,11 @@ Each fixture captures:
 - Activation parameters (seed, decay, hop limits)
 - Ranked activation results and confidence measurements
 
-Use the helper in `tests/spreading_validation_prep.rs` to refresh snapshots.
+Use `cargo xtask update-spreading-snapshots` to regenerate these baselines after
+intentional engine changes. Review updates with `cargo insta review` before
+committing to avoid accidentally accepting regressions.
+
+## Deterministic Seeds & Cognitive Effect Sizes
+- Snapshot regenerations use `deterministic_config(4242)` with per-fixture overrides recorded in `tests/support/graph_builders.rs`.
+- Semantic priming harness (`cognitive_spreading_tests.rs`) seeds `doctor → nurse` scenarios with `deterministic_config(123)`, expecting the related term to outrank unrelated probes by at least 0.1 activation.
+- Fan-effect checks reuse `deterministic_config(456)` and fixtures weighting spokes at `1/spokes`; low-fan spokes average roughly 3× the activation observed under the high-fan topology.

@@ -5,6 +5,8 @@
 Engram's spreading engine is now powerful and fast, but production readiness depends on how well we observe and control it. Task 012 instrumented the engine with metrics, health checks, circuit breakers, and auto-tuning so operators can trust it in live environments.
 
 ## Metrics: Seeing the Right Signals
+> Update (2025-10-09): Engram now exposes metrics through its internal streaming pipeline and structured logs. References to Prometheus here describe the previous export path and should be interpreted as optional adapters built atop the streaming feed.
+
 We registered a `SpreadingMetrics` bundle with Prometheus, capturing latency histograms, throughput counters, quality gauges, and resource utilization. Key signals:
 - `engram_spreading_latency_seconds{tier="hot"}` for P95 monitoring
 - `engram_cycle_detection_rate_total` to spot pathological loops

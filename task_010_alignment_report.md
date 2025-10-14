@@ -10,6 +10,8 @@
 
 **Finding**: Task 010 specification is **mostly accurate** but needs updates to reflect current implementation state. The baseline assessment is **partially outdated**.
 
+> Update 2025-10-12: deterministic spread baseline now passes after widening tier deadlines (`ParallelSpreadingConfig::tier_timeouts` in `fast_deterministic_config`), and streaming metrics reset coverage + sample payloads (`docs/assets/metrics/`) are in place. Roadmap/docs still reference Prometheus and need refresh.
+
 **Current Baseline Reality**:
 - ✅ `ActivationMemoryPool` exists and is integrated into engine construction
 - ❌ Memory pool is **not used** in `process_task` (ActivationRecords allocated directly)
@@ -170,7 +172,7 @@ let record = context
 **Status**: ⏳ **PARTIALLY IMPLEMENTED**
 
 **Spec Requirements**:
-- Prometheus metrics:
+- Internal streaming metrics/logs:
   - `engram_spreading_latency_prediction_error`
   - `engram_spreading_cache_miss_rate`
   - `engram_spreading_pool_utilization`
@@ -179,11 +181,11 @@ let record = context
 **Current State**:
 - ✅ Basic `SpreadingMetrics` exists with counters
 - ✅ `PoolStats` struct exists in `memory_pool.rs` (lines 148-155)
-- ❌ No Prometheus integration in activation module
+- ❌ Streaming snapshots/log export not yet wired into activation module
 - ❌ No hardware metrics integration
 - ❌ New metrics not implemented
 
-**Gap**: Prometheus integration and hardware metrics missing
+**Gap**: Streaming/log export and hardware metrics wiring missing
 
 ---
 

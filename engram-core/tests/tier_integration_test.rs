@@ -51,7 +51,7 @@ async fn test_cross_tier_recall() {
         .build();
 
     // Recall should find memories across all tiers
-    let results = store.recall(&cue);
+    let results = store.recall(&cue).results;
 
     // Verify we got results
     assert!(
@@ -139,7 +139,7 @@ async fn test_semantic_cross_tier_search() {
         .max_results(10)
         .build();
 
-    let results = store.recall(&cue);
+    let results = store.recall(&cue).results;
 
     assert!(
         !results.is_empty(),
@@ -205,17 +205,17 @@ async fn test_tier_search_strategy_optimization() {
 
     // Both should return results
     assert!(
-        !high_results.is_empty(),
+        !high_results.results.is_empty(),
         "High confidence search should find results"
     );
     assert!(
-        !low_results.is_empty(),
+        !low_results.results.is_empty(),
         "Low confidence search should find results"
     );
 
     println!(
         "Tier strategy test passed: high_conf={} results, low_conf={} results",
-        high_results.len(),
-        low_results.len()
+        high_results.results.len(),
+        low_results.results.len()
     );
 }

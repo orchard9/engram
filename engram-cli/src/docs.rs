@@ -1237,9 +1237,9 @@ impl OperationalDocs {
             - `POST /api/v1/memories/recognize` - Pattern recognition
 
             ### Monitoring (SSE)
-            - `GET /api/v1/monitor/events` - Real-time event stream
-            - `GET /api/v1/monitor/activations` - Memory activation monitoring
-            - `GET /api/v1/monitor/causality` - Causality tracking
+            - `GET /api/v1/monitoring/events` - Real-time event stream
+            - `GET /api/v1/monitoring/activations` - Memory activation monitoring
+            - `GET /api/v1/monitoring/causality` - Causality tracking
 
             ## Default Configuration
 

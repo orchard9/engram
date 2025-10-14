@@ -19,7 +19,7 @@ Follow the "How to do a task" process in `CLAUDE.md` when working through roadma
 3. Plan tests up front using the Pareto principle—target the highest-impact cases first.
 4. Implement the feature until the relevant tests pass, then review your changes against the architecture.
 5. Iterate on any fixes found during review and add integration coverage as needed, again leaning on the Pareto principle.
-6. Run `watch-now --once` to ensure the runtime checks succeed.
+6. Run `make quality` to ensure fmt, clippy, docs, and lint gates stay green.
 7. Verify your implementation against the task requirements; if gaps remain, open a follow-up task in the same milestone with the original task name as a prefix.
 8. Rename the task file from `_in_progress` to `_complete` once everything aligns.
 9. Stage only the intended changes with `git status`, then commit.

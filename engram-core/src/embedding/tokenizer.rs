@@ -96,10 +96,9 @@ impl SentenceTokenizer {
             let original_length = text.chars().count();
 
             // Encode with truncation enabled
-            let encoding = self
-                .inner
-                .encode(text, true)
-                .map_err(|e| EmbeddingError::EncodingFailed(format!("tokenization failed: {}", e)))?;
+            let encoding = self.inner.encode(text, true).map_err(|e| {
+                EmbeddingError::EncodingFailed(format!("tokenization failed: {}", e))
+            })?;
 
             let token_ids = encoding.get_ids().to_vec();
             let attention_mask = encoding.get_attention_mask().to_vec();
@@ -137,7 +136,10 @@ impl SentenceTokenizer {
     /// # Errors
     ///
     /// Returns `EncodingFailed` if any tokenization fails.
-    pub fn tokenize_batch(&self, texts: &[&str]) -> Result<Vec<TokenizationResult>, EmbeddingError> {
+    pub fn tokenize_batch(
+        &self,
+        texts: &[&str],
+    ) -> Result<Vec<TokenizationResult>, EmbeddingError> {
         #[cfg(feature = "multilingual_embeddings")]
         {
             let original_lengths: Vec<usize> = texts.iter().map(|t| t.chars().count()).collect();

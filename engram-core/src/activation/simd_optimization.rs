@@ -177,7 +177,7 @@ impl SimdActivationMapper {
     }
 
     /// Fused multiply-add for confidence aggregation with SIMD acceleration.
-    /// Computes: activations[i] = activations[i] + confidence_weights[i] * path_confidence
+    /// Computes: `activations[i] = activations[i] + confidence_weights[i] * path_confidence`
     pub fn fma_confidence_aggregate(
         activations: &mut [f32],
         confidence_weights: &[f32],

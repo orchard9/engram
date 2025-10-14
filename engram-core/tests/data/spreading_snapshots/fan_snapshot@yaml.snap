@@ -1,0 +1,108 @@
+---
+source: engram-core/tests/spreading_validation.rs
+expression: "FixtureSnapshot { metadata: metadata.clone(), snapshot: normalized, }"
+---
+metadata:
+  name: fan
+  description: Fan effect graph replicating Anderson (1974)
+  seeds:
+    - - fan_center
+      - 1
+  node_count: 5
+  edge_count: 4
+  average_out_degree: 0.8
+  adjacency:
+    fan_center:
+      - target: fan_center_spoke_0
+        weight: 0.25
+        edge_type: Excitatory
+      - target: fan_center_spoke_1
+        weight: 0.25
+        edge_type: Excitatory
+      - target: fan_center_spoke_2
+        weight: 0.25
+        edge_type: Excitatory
+      - target: fan_center_spoke_3
+        weight: 0.25
+        edge_type: Excitatory
+    fan_center_spoke_0: []
+    fan_center_spoke_1: []
+    fan_center_spoke_2: []
+    fan_center_spoke_3: []
+snapshot:
+  seeds:
+    - - fan_center
+      - 1
+  activations:
+    - memory_id: fan_center
+      activation: 1
+      confidence: 1
+      hop_count: 0
+      storage_tier: Hot
+      flags: 0b00000000
+    - memory_id: fan_center_spoke_0
+      activation: 0.124
+      confidence: 0.118
+      hop_count: 1
+      storage_tier: Warm
+      flags: 0b00000000
+    - memory_id: fan_center_spoke_1
+      activation: 0.124
+      confidence: 0.118
+      hop_count: 1
+      storage_tier: Warm
+      flags: 0b00000000
+    - memory_id: fan_center_spoke_2
+      activation: 0.124
+      confidence: 0.118
+      hop_count: 1
+      storage_tier: Warm
+      flags: 0b00000000
+    - memory_id: fan_center_spoke_3
+      activation: 0.124
+      confidence: 0.118
+      hop_count: 1
+      storage_tier: Warm
+      flags: 0b00000000
+  tier_summaries:
+    - - Hot
+      - node_count: 1
+        total_activation: 1
+        average_confidence: 1
+    - - Warm
+      - node_count: 4
+        total_activation: 0.497
+        average_confidence: 0.118
+  cycle_paths: []
+  deterministic_trace:
+    - depth: 1
+      target_node: fan_center_spoke_0
+      activation: 0.124
+      confidence: 0.124
+      source_node: fan_center
+    - depth: 1
+      target_node: fan_center_spoke_1
+      activation: 0.124
+      confidence: 0.124
+      source_node: fan_center
+    - depth: 1
+      target_node: fan_center_spoke_2
+      activation: 0.124
+      confidence: 0.124
+      source_node: fan_center
+    - depth: 1
+      target_node: fan_center_spoke_3
+      activation: 0.124
+      confidence: 0.124
+      source_node: fan_center
+  metrics:
+    total_activations: 4
+    cache_hits: 0
+    cache_misses: 0
+    average_latency_ns: 0
+    latency_budget_violations: 0
+    cycles_detected: 0
+    parallel_efficiency: 0
+    pool_available: 10000
+    pool_in_flight: 0
+    pool_high_water_mark: 10000

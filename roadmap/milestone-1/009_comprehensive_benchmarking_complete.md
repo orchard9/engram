@@ -15,7 +15,7 @@
 Implement a statistically rigorous, verification-focused benchmarking framework that validates both correctness and performance across all milestone-1 features through differential testing, performance fuzzing, and formal verification techniques. Achieve >99.5% statistical confidence in detecting 5% performance regressions while maintaining comprehensive correctness validation against multiple baseline implementations.
 
 ## Post-Completion Notes
-- The framework ships as `criterion`/bench harnesses under `engram-core/benches/milestone_1`, so we still need a scheduled runner (nightly CI or `watch-now --once` hook) to surface regressions automatically.
+- The framework ships as `criterion`/bench harnesses under `engram-core/benches/milestone_1`; wire these into nightly CI or add a dedicated `make benchmark` target so regressions surface automatically.
 - Confidence calculations currently have smoke coverage only—`tests/benchmark_framework_test.rs` asserts structure, not end-to-end statistical accuracy; plan richer property tests before treating the 99.5% power guarantee as enforced (`engram-core/tests/benchmark_framework_test.rs:1`).
 - Formal verification adapters expect the SMT toolchain (`Z3`) to be installed; document this dependency for contributors so the verification gate doesn’t silently no-op on unconfigured machines (`engram-core/benches/milestone_1/formal_verification.rs`).
 

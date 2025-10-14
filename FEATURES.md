@@ -69,7 +69,7 @@ This document provides an honest assessment of feature implementation status acr
 | Feature | Status | Notes |
 |---------|--------|-------|
 | **Lock-Free Metrics** | ✅ Production | Low-overhead histogram tracking |
-| **Prometheus Export** | 🟢 Functional | Metrics exposed, needs tuning |
+| **Streaming Metrics Export** | 🟢 Functional | Structured logs + JSON snapshots; Prometheus removed |
 | **Benchmarking Framework** | 🟢 Functional | Criterion-based, works well |
 | **GPU Acceleration** | 🟡 Partial | Interface defined, CUDA implementation incomplete |
 | **FAISS/Annoy Comparison** | 🟢 Complete | Framework benchmarks Engram vs FAISS vs Annoy-style baseline |
@@ -97,6 +97,13 @@ This document provides an honest assessment of feature implementation status acr
 | `probabilistic_queries` | Confidence intervals | 🟢 Functional | Enabled |
 | `memory_mapped_persistence` | Persistent storage | 🟡 Partial | Disabled |
 | `monitoring` | Metrics collection | ✅ Production | Enabled |
+| `spreading_api_beta` | Controls availability of the spreading activation API | 🟢 Functional (beta) | Enabled |
+
+Every new feature flag must ship with:
+
+1. Default values captured in `engram-cli/config/default.toml`
+2. Documentation updates (`docs/changelog.md`, relevant Diátaxis pages)
+3. CLI support via `engram config` commands so operators can inspect and mutate flags at runtime
 
 ---
 
@@ -151,11 +158,15 @@ This document provides an honest assessment of feature implementation status acr
 ```rust
 // Old (deprecated)
 let graph = Arc::new(RwLock::new(create_concurrent_graph()));
-let state = ApiState::new(graph);
+let metrics = engram_core::metrics::init();
+let auto_tuner = SpreadingAutoTuner::new(0.10, 32);
+let state = ApiState::new(graph, metrics, auto_tuner);
 
 // New (current)
 let store = Arc::new(MemoryStore::new(100_000).with_hnsw_index());
-let state = ApiState::new(store);
+let metrics = engram_core::metrics::init();
+let auto_tuner = SpreadingAutoTuner::new(0.10, 32);
+let state = ApiState::new(store, metrics, auto_tuner);
 ```
 
 ---

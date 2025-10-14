@@ -2,7 +2,6 @@
 
 use crate::cli::server::{is_process_running, pid_file_path, read_pid_file};
 use anyhow::Result;
-use chrono::{DateTime, Utc};
 use serde_json::Value;
 use std::time::{Duration, Instant};
 
@@ -108,49 +107,37 @@ fn print_health_details(health_data: &Value) {
         println!("  Overall: {status}");
     }
 
-    if let Some(uptime) = health_data
-        .get("uptime_seconds")
-        .and_then(serde_json::Value::as_f64)
+    if let Some(memory_total) = health_data
+        .get("memory")
+        .and_then(|m| m.get("total_memories"))
+        .and_then(Value::as_u64)
     {
-        let hours = uptime / 3600.0;
-        if hours < 1.0 {
-            println!("   Uptime: {:.1} minutes", uptime / 60.0);
-        } else {
-            println!("   Uptime: {hours:.1} hours");
-        }
+        println!("  Memories: {memory_total}");
     }
 
-    if let Some(memory_usage) = health_data
-        .get("memory_usage_mb")
-        .and_then(serde_json::Value::as_f64)
-    {
-        println!("   Memory Usage: {memory_usage:.1} MB");
-    }
+    if let Some(checks) = health_data.get("checks").and_then(Value::as_array) {
+        println!("  Probes:");
+        for check in checks {
+            let name = check
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
+            let status = check
+                .get("status")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
+            let latency = check
+                .get("latency_seconds")
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0);
+            println!("    - {name}: {status} ({latency:.3}s)");
 
-    if let Some(connections) = health_data
-        .get("active_connections")
-        .and_then(serde_json::Value::as_u64)
-    {
-        println!("   Active Connections: {connections}");
-    }
-
-    if let Some(last_activity) = health_data.get("last_activity").and_then(|l| l.as_str()) {
-        if let Ok(datetime) = last_activity.parse::<DateTime<Utc>>() {
-            let now = Utc::now();
-            let elapsed = now.signed_duration_since(datetime);
-
-            if elapsed.num_seconds() < 60 {
-                println!("   Last Activity: {} seconds ago", elapsed.num_seconds());
-            } else if elapsed.num_minutes() < 60 {
-                println!("   Last Activity: {} minutes ago", elapsed.num_minutes());
-            } else {
-                println!("   Last Activity: {} hours ago", elapsed.num_hours());
+            if let Some(message) = check.get("message").and_then(Value::as_str) {
+                if !message.is_empty() {
+                    println!("        {message}");
+                }
             }
         }
-    }
-
-    if let Some(version) = health_data.get("version").and_then(|v| v.as_str()) {
-        println!("   Version: {version}");
     }
 }
 

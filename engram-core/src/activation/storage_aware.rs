@@ -202,7 +202,7 @@ impl StorageAwareActivation {
     #[must_use]
     pub fn from_activation_record(record: &ActivationRecord, tier: StorageTier) -> Self {
         let activation = Self::new(record.node_id.clone(), tier);
-        let activation_value = record.activation.load(Ordering::Relaxed);
+        let activation_value = record.activation_atomic().load(Ordering::Relaxed);
         activation
             .activation_level
             .store(activation_value, Ordering::Relaxed);
@@ -213,7 +213,7 @@ impl StorageAwareActivation {
             .confidence
             .store(adjusted_confidence, Ordering::Relaxed);
 
-        let visits = record.visits.load(Ordering::Relaxed);
+        let visits = record.visits_atomic().load(Ordering::Relaxed);
         let hop_value = u16::try_from(visits).unwrap_or(u16::MAX);
         activation.hop_count.store(hop_value, Ordering::Relaxed);
 

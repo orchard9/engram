@@ -1,5 +1,7 @@
 # Production Integration & Monitoring Twitter Content
 
+> Update (2025-10-09): Engram now streams metrics internally and logs structured snapshots; the Prometheus notes below reflect historical integrations layered atop that feed.
+
 ## Thread: Keeping Cognitive Spreading Healthy in Production
 
 **Tweet 1/9**

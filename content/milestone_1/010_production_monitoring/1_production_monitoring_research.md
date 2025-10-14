@@ -1,5 +1,7 @@
 # Production Monitoring Research for Engram
 
+> Update (2025-10-09): We now emit metrics through Engram's built-in streaming/log pipeline; Prometheus remains an optional downstream adapter for teams that need it.
+
 ## Lock-Free Data Structures for Metrics Collection
 
 ### Research Topics

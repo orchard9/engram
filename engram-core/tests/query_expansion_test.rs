@@ -8,10 +8,13 @@
 //! - Integration with semantic activation seeding
 
 use engram_core::{
-    query::expansion::{QueryExpander, VariantType},
-    query::lexicon::{SynonymLexicon, AbbreviationLexicon, CompositeLexicon, Lexicon},
-    embedding::{EmbeddingProvider, EmbeddingError, EmbeddingWithProvenance, EmbeddingProvenance, ModelVersion},
     ConfidenceBudget,
+    embedding::{
+        EmbeddingError, EmbeddingProvenance, EmbeddingProvider, EmbeddingWithProvenance,
+        ModelVersion,
+    },
+    query::expansion::{QueryExpander, VariantType},
+    query::lexicon::{AbbreviationLexicon, CompositeLexicon, Lexicon, SynonymLexicon},
 };
 use std::sync::Arc;
 
@@ -20,7 +23,11 @@ struct MockEmbeddingProvider;
 
 #[async_trait::async_trait]
 impl EmbeddingProvider for MockEmbeddingProvider {
-    async fn embed(&self, text: &str, language: Option<&str>) -> Result<EmbeddingWithProvenance, EmbeddingError> {
+    async fn embed(
+        &self,
+        text: &str,
+        language: Option<&str>,
+    ) -> Result<EmbeddingWithProvenance, EmbeddingError> {
         let value = (text.len() as f32) / 1000.0;
         let vector = vec![value; 768];
         let model = ModelVersion::new("mock-model".to_string(), "1.0.0".to_string(), 768);
@@ -28,7 +35,11 @@ impl EmbeddingProvider for MockEmbeddingProvider {
         Ok(EmbeddingWithProvenance::new(vector, provenance))
     }
 
-    async fn embed_batch(&self, texts: &[&str], language: Option<&str>) -> Result<Vec<EmbeddingWithProvenance>, EmbeddingError> {
+    async fn embed_batch(
+        &self,
+        texts: &[&str],
+        language: Option<&str>,
+    ) -> Result<Vec<EmbeddingWithProvenance>, EmbeddingError> {
         let mut results = Vec::new();
         for text in texts {
             results.push(self.embed(text, language).await?);
@@ -63,7 +74,10 @@ async fn test_query_expansion_with_synonyms() {
     let result = expanded.unwrap();
 
     // Should include original + synonyms
-    assert!(result.variants.len() >= 2, "should have at least original + synonyms");
+    assert!(
+        result.variants.len() >= 2,
+        "should have at least original + synonyms"
+    );
 
     // Original should be first (highest confidence)
     assert_eq!(result.variants[0].text, "car");
@@ -80,7 +94,11 @@ async fn test_query_expansion_with_synonyms() {
 
     // All variants should have embeddings
     for variant in &result.variants {
-        assert!(variant.has_embedding(), "variant should have embedding: {}", variant.text);
+        assert!(
+            variant.has_embedding(),
+            "variant should have embedding: {}",
+            variant.text
+        );
     }
 }
 
@@ -101,7 +119,10 @@ async fn test_query_expansion_with_abbreviations() {
     let result = expanded.unwrap();
 
     // Should include original + expansions
-    assert!(result.variants.len() >= 2, "should have at least original + expansions");
+    assert!(
+        result.variants.len() >= 2,
+        "should have at least original + expansions"
+    );
 
     // Original should be first
     assert_eq!(result.variants[0].text, "ML");
@@ -111,7 +132,10 @@ async fn test_query_expansion_with_abbreviations() {
     assert!(has_ml, "should include 'machine learning' expansion");
 
     // May include "maximum likelihood" if confidence threshold allows
-    let has_maxlik = result.variants.iter().any(|v| v.text == "maximum likelihood");
+    let has_maxlik = result
+        .variants
+        .iter()
+        .any(|v| v.text == "maximum likelihood");
     // This is optional depending on confidence threshold
     if has_maxlik {
         println!("Included 'maximum likelihood' expansion");
@@ -150,8 +174,8 @@ async fn test_query_expansion_respects_max_variants() {
 
     let expander = QueryExpander::builder(provider)
         .with_lexicon(synonym_lexicon)
-        .max_variants(2)  // Limit to 2 variants
-        .confidence_threshold(0.0)  // Include all
+        .max_variants(2) // Limit to 2 variants
+        .confidence_threshold(0.0) // Include all
         .build();
 
     let expanded = expander.expand("big", Some("en")).await;
@@ -164,7 +188,10 @@ async fn test_query_expansion_respects_max_variants() {
 
     // Should have truncation flag if more variants were generated
     if result.expansion_metadata.total_variants_generated > 2 {
-        assert!(result.expansion_metadata.truncated, "should be marked as truncated");
+        assert!(
+            result.expansion_metadata.truncated,
+            "should be marked as truncated"
+        );
     }
 }
 
@@ -176,7 +203,7 @@ async fn test_query_expansion_respects_confidence_threshold() {
     let expander = QueryExpander::builder(provider)
         .with_lexicon(synonym_lexicon)
         .max_variants(10)
-        .confidence_threshold(0.75)  // High threshold
+        .confidence_threshold(0.75) // High threshold
         .build();
 
     let expanded = expander.expand("car", Some("en")).await;
@@ -187,9 +214,12 @@ async fn test_query_expansion_respects_confidence_threshold() {
     // All variants should meet threshold (except original which is always 1.0)
     for variant in &result.variants {
         if variant.variant_type != VariantType::Original {
-            assert!(variant.confidence >= 0.75,
+            assert!(
+                variant.confidence >= 0.75,
                 "variant '{}' has confidence {} < threshold 0.75",
-                variant.text, variant.confidence);
+                variant.text,
+                variant.confidence
+            );
         }
     }
 }
@@ -213,11 +243,16 @@ async fn test_query_expansion_metadata() {
     assert!(metadata.expansion_time_us > 0, "should have expansion time");
 
     // Should list lexicons consulted
-    assert!(!metadata.lexicons_consulted.is_empty(), "should list lexicons");
+    assert!(
+        !metadata.lexicons_consulted.is_empty(),
+        "should list lexicons"
+    );
 
     // Should track total variants generated
-    assert!(metadata.total_variants_generated >= result.variants.len(),
-        "total_variants_generated should be >= final variant count");
+    assert!(
+        metadata.total_variants_generated >= result.variants.len(),
+        "total_variants_generated should be >= final variant count"
+    );
 }
 
 #[tokio::test]
@@ -246,13 +281,24 @@ async fn test_query_expansion_deduplication() {
     let result = expanded.unwrap();
 
     // Count occurrences of "example"
-    let example_count = result.variants.iter().filter(|v| v.text == "example").count();
-    assert_eq!(example_count, 1, "should deduplicate 'example' to single variant");
+    let example_count = result
+        .variants
+        .iter()
+        .filter(|v| v.text == "example")
+        .count();
+    assert_eq!(
+        example_count, 1,
+        "should deduplicate 'example' to single variant"
+    );
 
     // Should keep the higher confidence
     let example_variant = result.variants.iter().find(|v| v.text == "example");
     assert!(example_variant.is_some());
-    assert_eq!(example_variant.unwrap().confidence, 0.9, "should keep higher confidence");
+    assert_eq!(
+        example_variant.unwrap().confidence,
+        0.9,
+        "should keep higher confidence"
+    );
 }
 
 #[test]
@@ -260,13 +306,25 @@ fn test_confidence_budget_basic() {
     let budget = ConfidenceBudget::new(1.0);
 
     assert!(budget.consume(0.3), "should consume 0.3");
-    assert!((budget.remaining() - 0.7).abs() < 0.01, "remaining should be ~0.7");
+    assert!(
+        (budget.remaining() - 0.7).abs() < 0.01,
+        "remaining should be ~0.7"
+    );
 
     assert!(budget.consume(0.5), "should consume 0.5");
-    assert!((budget.remaining() - 0.2).abs() < 0.01, "remaining should be ~0.2");
+    assert!(
+        (budget.remaining() - 0.2).abs() < 0.01,
+        "remaining should be ~0.2"
+    );
 
-    assert!(!budget.consume(0.3), "should fail to consume 0.3 (would exceed)");
-    assert!((budget.remaining() - 0.2).abs() < 0.01, "remaining should still be ~0.2");
+    assert!(
+        !budget.consume(0.3),
+        "should fail to consume 0.3 (would exceed)"
+    );
+    assert!(
+        (budget.remaining() - 0.2).abs() < 0.01,
+        "remaining should still be ~0.2"
+    );
 }
 
 #[test]
@@ -275,7 +333,10 @@ fn test_confidence_budget_exhaustion() {
 
     assert!(budget.consume(1.0), "should consume full budget");
     assert!(budget.is_exhausted(), "should be exhausted");
-    assert!(!budget.consume(0.01), "should fail to consume after exhaustion");
+    assert!(
+        !budget.consume(0.01),
+        "should fail to consume after exhaustion"
+    );
 }
 
 #[test]
@@ -286,7 +347,10 @@ fn test_confidence_budget_reset() {
     assert!((budget.remaining() - 0.2).abs() < 0.01);
 
     budget.reset();
-    assert!((budget.remaining() - 1.0).abs() < 0.01, "should reset to initial");
+    assert!(
+        (budget.remaining() - 1.0).abs() < 0.01,
+        "should reset to initial"
+    );
     assert!(budget.consume(0.8), "should be able to consume after reset");
 }
 
@@ -295,5 +359,8 @@ fn test_confidence_budget_negative_consumption() {
     let budget = ConfidenceBudget::new(1.0);
 
     assert!(!budget.consume(-0.5), "should reject negative consumption");
-    assert!((budget.remaining() - 1.0).abs() < 0.01, "budget should be unchanged");
+    assert!(
+        (budget.remaining() - 1.0).abs() < 0.01,
+        "budget should be unchanged"
+    );
 }

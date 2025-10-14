@@ -84,8 +84,9 @@ cargo test --features "hnsw_index,psychological_decay"
 - **`psychological_decay`**: Biologically-inspired forgetting curves
 - **`pattern_completion`**: Neural-inspired pattern completion
 - **`probabilistic_queries`**: Confidence-based query processing
-- **`monitoring`**: Prometheus metrics and observability
+- **`monitoring`**: Built-in streaming metrics and structured observability logs
 - **`smt_verification`**: SMT-based correctness verification (requires Z3)
+- **Spreading Activation (beta)**: Enabled via the `spreading_api_beta` feature flag. Toggle with `engram config set feature_flags.spreading_api_beta <true|false>`.
 
 ## Development
 
@@ -145,6 +146,7 @@ Comprehensive test coverage includes:
 - [Milestone Planning](roadmap/)
 - [API Documentation](https://docs.rs/engram-core)
 - [Examples](examples/)
+- [Changelog](docs/changelog.md)
 
 ## Contributing
 

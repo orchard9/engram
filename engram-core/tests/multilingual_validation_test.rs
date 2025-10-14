@@ -62,9 +62,7 @@ impl EmbeddingProvider for MockEmbeddingProvider {
 
     fn model_version(&self) -> &ModelVersion {
         static MODEL: std::sync::OnceLock<ModelVersion> = std::sync::OnceLock::new();
-        MODEL.get_or_init(|| {
-            ModelVersion::new("mock-model".to_string(), "1.0.0".to_string(), 768)
-        })
+        MODEL.get_or_init(|| ModelVersion::new("mock-model".to_string(), "1.0.0".to_string(), 768))
     }
 
     fn max_sequence_length(&self) -> usize {
@@ -324,10 +322,7 @@ async fn test_query_expansion_to_figurative_interpretation_pipeline() {
     let interpreter = FigurativeInterpreter::new(idiom_lexicon, embedding_provider);
 
     // Step 1: Expand query
-    let expanded = expander
-        .expand("break the ice", Some("en"))
-        .await
-        .unwrap();
+    let expanded = expander.expand("break the ice", Some("en")).await.unwrap();
 
     // Step 2: Interpret figurative language
     let figurative_variants = interpreter
@@ -377,10 +372,7 @@ async fn test_expander_handles_unknown_language() {
         .build();
 
     // Query in language not in lexicon
-    let expanded = expander
-        .expand("car", Some("unknown-lang"))
-        .await
-        .unwrap();
+    let expanded = expander.expand("car", Some("unknown-lang")).await.unwrap();
 
     // Should still work (may use English fallback or return original)
     // At minimum should not crash
@@ -424,7 +416,10 @@ async fn test_embedding_generation_consistent() {
     assert_eq!(embedding1.vector, embedding2.vector);
 
     // Different text should produce different embeddings
-    let embedding3 = embedding_provider.embed("different text", Some("en")).await.unwrap();
+    let embedding3 = embedding_provider
+        .embed("different text", Some("en"))
+        .await
+        .unwrap();
     assert_ne!(embedding1.vector, embedding3.vector);
 }
 

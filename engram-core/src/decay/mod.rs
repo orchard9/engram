@@ -276,6 +276,29 @@ impl BiologicalDecaySystem {
                     Confidence::exact(decayed_confidence)
                 }
             }
+            DecayFunction::Hybrid {
+                short_term_tau,
+                long_term_beta,
+                transition_point,
+            } => {
+                // Hybrid model: exponential for short-term, power-law for long-term
+                let elapsed_seconds = elapsed_time.as_secs();
+
+                let retention = if elapsed_seconds < transition_point {
+                    // Short-term: exponential decay R(t) = e^(-t/τ)
+                    let tau_seconds = short_term_tau * 3600.0;
+                    let t = elapsed_seconds as f32;
+                    (-t / tau_seconds).exp()
+                } else {
+                    // Long-term: power-law decay R(t) = (1 + t)^(-β)
+                    // Use hours as time unit for long-term decay
+                    let t_hours = elapsed_seconds as f32 / 3600.0;
+                    (1.0 + t_hours).powf(-long_term_beta)
+                };
+
+                let decayed_confidence = base_confidence.raw() * retention;
+                Confidence::exact(decayed_confidence)
+            }
         };
 
         // Apply individual differences calibration and respect minimum confidence threshold
@@ -509,6 +532,24 @@ pub enum DecayFunction {
         /// Access count to switch from hippocampal to neocortical (default: 3)
         consolidation_threshold: u64,
     },
+
+    /// Hybrid decay: Exponential (short-term) → Power-law (long-term)
+    ///
+    /// Matches psychological findings that forgetting curves show exponential
+    /// decay over short intervals but transition to power-law over longer timescales.
+    /// Provides best fit to Ebbinghaus (1885) data across full time range.
+    ///
+    /// References:
+    /// - Wixted & Ebbesen (1991): Different forms across timescales
+    /// - Rubin & Wenzel (1996): Multi-process forgetting systems
+    Hybrid {
+        /// Exponential tau for short-term decay (hours, default: 0.8)
+        short_term_tau: f32,
+        /// Power-law beta for long-term decay (default: 0.25)
+        long_term_beta: f32,
+        /// Transition point in seconds (default: 24 hours = 86400)
+        transition_point: u64,
+    },
 }
 
 impl Default for DecayFunction {
@@ -541,6 +582,21 @@ impl DecayFunction {
     pub const fn two_component() -> Self {
         Self::TwoComponent {
             consolidation_threshold: 3,
+        }
+    }
+
+    /// Creates hybrid decay with default parameters
+    ///
+    /// Default values provide best fit to Ebbinghaus (1885) data:
+    /// - Short-term tau: 0.8 hours (exponential for < 24h)
+    /// - Long-term beta: 0.25 (power-law for > 24h)
+    /// - Transition: 24 hours (86400 seconds)
+    #[must_use]
+    pub const fn hybrid() -> Self {
+        Self::Hybrid {
+            short_term_tau: 0.8,
+            long_term_beta: 0.25,
+            transition_point: 86400, // 24 hours
         }
     }
 }
@@ -633,6 +689,25 @@ impl DecayConfigBuilder {
     pub const fn two_component(mut self, consolidation_threshold: u64) -> Self {
         self.config.default_function = DecayFunction::TwoComponent {
             consolidation_threshold,
+        };
+        self
+    }
+
+    /// Use hybrid exponential-to-power-law decay
+    ///
+    /// Provides best fit to Ebbinghaus (1885) forgetting curve data
+    /// by combining exponential decay for short-term with power-law for long-term.
+    #[must_use]
+    pub const fn hybrid(
+        mut self,
+        short_term_tau: f32,
+        long_term_beta: f32,
+        transition_point: u64,
+    ) -> Self {
+        self.config.default_function = DecayFunction::Hybrid {
+            short_term_tau,
+            long_term_beta,
+            transition_point,
         };
         self
     }

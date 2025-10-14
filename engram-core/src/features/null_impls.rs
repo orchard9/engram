@@ -309,7 +309,7 @@ impl FeatureProvider for NullMonitoringProvider {
     }
 
     fn description(&self) -> &'static str {
-        "No-op monitoring when Prometheus is disabled"
+        "No-op monitoring when streaming metrics are disabled"
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -331,23 +331,26 @@ impl monitoring::MonitoringProvider for NullMonitoringProvider {
 struct NullMonitoring;
 
 impl monitoring::Monitoring for NullMonitoring {
-    fn record_counter(&self, _name: &str, _value: u64, _labels: &[(String, String)]) {
+    fn record_counter(&self, _name: &'static str, _value: u64, _labels: &[(String, String)]) {
         // No-op
     }
 
-    fn record_gauge(&self, _name: &str, _value: f64, _labels: &[(String, String)]) {
+    fn record_gauge(&self, _name: &'static str, _value: f64, _labels: &[(String, String)]) {
         // No-op
     }
 
-    fn record_histogram(&self, _name: &str, _value: f64, _labels: &[(String, String)]) {
+    fn record_histogram(&self, _name: &'static str, _value: f64, _labels: &[(String, String)]) {
         // No-op
     }
 
-    fn start_timer(&self, _name: &str) -> Box<dyn monitoring::Timer> {
+    fn start_timer(&self, _name: &'static str) -> Box<dyn monitoring::Timer> {
         Box::new(NullTimer)
     }
 
-    fn get_metric(&self, _name: &str) -> monitoring::MonitoringResult<monitoring::MetricValue> {
+    fn get_metric(
+        &self,
+        _name: &'static str,
+    ) -> monitoring::MonitoringResult<monitoring::MetricValue> {
         Ok(monitoring::MetricValue::Counter(0))
     }
 }

@@ -14,7 +14,7 @@ Build Server-Sent Events (SSE) endpoint enabling real-time monitoring of activat
 - Causality tracking for activation spreading to reduce false debugging hypotheses
 
 ### Technical Requirements
-- Server-Sent Events endpoint at /api/v1/monitor/events
+- Server-Sent Events endpoint at /api/v1/monitoring/events (legacy clients can continue using `/api/v1/monitor/events`)
 - Real-time activation level updates with <100ms latency
 - Memory formation event stream
 - Consolidation progress updates

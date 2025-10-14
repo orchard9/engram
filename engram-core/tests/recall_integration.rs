@@ -547,7 +547,7 @@ mod tests {
         let cue = Cue::embedding("test_cue".to_string(), [0.4f32; 768], Confidence::HIGH);
 
         // Call MemoryStore::recall() which should dispatch to spreading activation
-        let results = store.recall(&cue);
+        let results = store.recall(&cue).results;
 
         // Verify results
         assert!(
@@ -617,7 +617,7 @@ mod tests {
         );
 
         // Call MemoryStore::recall() which should use similarity-only path
-        let _results = store.recall(&cue);
+        let _results = store.recall(&cue).results;
 
         // Should return results (using HNSW or basic similarity)
         // Test passes if no panic occurred
@@ -673,7 +673,7 @@ mod tests {
         let cue = Cue::embedding("hybrid_cue".to_string(), [0.7f32; 768], Confidence::HIGH);
 
         // Call MemoryStore::recall() which should try spreading then fallback if needed
-        let results = store.recall(&cue);
+        let results = store.recall(&cue).results;
 
         // Should return results via hybrid mode
         assert!(

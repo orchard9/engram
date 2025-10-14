@@ -1,12 +1,66 @@
-//! Memory pool for efficient allocation during activation spreading
+//! Memory pool primitives for activation spreading
 //!
-//! This module provides arena-based allocation to reduce allocation overhead
-//! during graph traversal and activation spreading operations.
+//! Provides legacy byte-oriented arenas as well as the lock-free
+//! [`ActivationRecordPool`] used by the spreading engine to recycle
+//! `ActivationRecord` instances with minimal contention.
 
+#[cfg(not(loom))]
+use crossbeam_queue::SegQueue;
+#[cfg(loom)]
+use loom::sync::Arc;
+#[cfg(loom)]
+use loom::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use parking_lot::Mutex;
 use std::cell::RefCell;
+use std::collections::HashMap;
+#[cfg(loom)]
+use std::collections::VecDeque;
 use std::mem;
+#[cfg(not(loom))]
 use std::sync::Arc;
+#[cfg(not(loom))]
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+
+use super::{ActivationRecord, NodeId, storage_aware::StorageTier};
+
+#[cfg(loom)]
+type GlobalQueue<T> = loom::sync::Mutex<VecDeque<T>>;
+#[cfg(not(loom))]
+type GlobalQueue<T> = SegQueue<T>;
+
+#[cfg(loom)]
+fn global_queue_new<T>() -> GlobalQueue<T> {
+    GlobalQueue::new(VecDeque::new())
+}
+
+#[cfg(not(loom))]
+const fn global_queue_new<T>() -> GlobalQueue<T> {
+    GlobalQueue::new()
+}
+
+#[cfg(loom)]
+fn global_queue_push<T>(queue: &GlobalQueue<T>, value: T) {
+    queue.lock().push_back(value);
+}
+
+#[cfg(not(loom))]
+fn global_queue_push<T>(queue: &GlobalQueue<T>, value: T) {
+    queue.push(value);
+}
+
+#[cfg(loom)]
+fn global_queue_pop<T>(queue: &GlobalQueue<T>) -> Option<T> {
+    queue.lock().pop_front()
+}
+
+#[cfg(not(loom))]
+fn global_queue_pop<T>(queue: &GlobalQueue<T>) -> Option<T> {
+    queue.pop()
+}
+
+// ---------------------------------------------------------------------------
+// Legacy chunk-based arena (kept for backwards compatibility)
+// ---------------------------------------------------------------------------
 
 /// Memory pool for activation records and traversal state
 pub struct ActivationMemoryPool {
@@ -34,8 +88,6 @@ impl MemoryChunk {
 
     const fn reset(&mut self) {
         self.used = 0;
-        // Optionally clear memory for security
-        // self.data.fill(0);
     }
 
     const fn has_space(&self, size: usize) -> bool {
@@ -76,7 +128,7 @@ impl ActivationMemoryPool {
                 return PooledAllocation {
                     data: memory.as_mut_ptr(),
                     size,
-                    pool: None, // Would need unsafe to store reference
+                    pool: None,
                 };
             }
         }
@@ -126,7 +178,11 @@ impl ActivationMemoryPool {
             chunk_size: self.chunk_size,
             total_capacity,
             total_used,
-            utilization: total_used as f32 / total_capacity as f32,
+            utilization: if total_capacity > 0 {
+                total_used as f32 / total_capacity as f32
+            } else {
+                0.0
+            },
         }
     }
 }
@@ -231,6 +287,338 @@ impl LocalMemoryPool {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Lock-free ActivationRecord pool used by the spreading engine
+// ---------------------------------------------------------------------------
+
+const DEFAULT_DECAY_RATE: f32 = 0.1;
+
+static NEXT_POOL_ID: AtomicUsize = AtomicUsize::new(1);
+
+thread_local! {
+    static THREAD_CACHES: RefCell<HashMap<usize, Vec<Arc<ActivationRecord>>>> =
+        RefCell::new(HashMap::new());
+}
+
+/// Lock-free pool for recycling `ActivationRecord` instances.
+#[derive(Clone)]
+pub struct ActivationRecordPool {
+    inner: Arc<ActivationRecordPoolInner>,
+}
+
+impl ActivationRecordPool {
+    /// Create a pool with a default configuration suitable for tests.
+    #[must_use]
+    pub fn new(initial_records: usize) -> Self {
+        Self::with_config(
+            initial_records,
+            initial_records.max(512),
+            64,
+            DEFAULT_DECAY_RATE,
+        )
+    }
+
+    /// Create a pool with explicit limits and decay rate.
+    #[must_use]
+    pub fn with_config(
+        initial_records: usize,
+        max_records: usize,
+        thread_cache_capacity: usize,
+        default_decay_rate: f32,
+    ) -> Self {
+        let id = NEXT_POOL_ID.fetch_add(1, Ordering::Relaxed);
+        let inner = Arc::new(ActivationRecordPoolInner::new(
+            id,
+            max_records.max(initial_records).max(1),
+            thread_cache_capacity.max(1),
+            default_decay_rate,
+        ));
+        inner.prepopulate(initial_records);
+        Self { inner }
+    }
+
+    /// Acquire an activation record, reusing a pooled instance when available.
+    #[must_use]
+    pub fn acquire(
+        &self,
+        node_id: NodeId,
+        decay_rate: f32,
+        storage_tier: Option<StorageTier>,
+    ) -> Arc<ActivationRecord> {
+        if let Some(mut record) = self.inner.checkout_from_pool() {
+            if let Some(inner) = Arc::get_mut(&mut record) {
+                inner.reinitialize(node_id, decay_rate, storage_tier);
+            }
+            record
+        } else {
+            self.inner.record_miss();
+            let mut record = ActivationRecord::new(node_id, decay_rate);
+            if let Some(tier) = storage_tier {
+                record.set_storage_tier(tier);
+            }
+            Arc::new(record)
+        }
+    }
+
+    /// Acquire a record using the pool's default decay rate.
+    #[must_use]
+    pub fn acquire_with_defaults(
+        &self,
+        node_id: NodeId,
+        storage_tier: Option<StorageTier>,
+    ) -> Arc<ActivationRecord> {
+        self.acquire(node_id, self.inner.default_decay_rate, storage_tier)
+    }
+
+    /// Return a record to the pool for reuse.
+    pub fn release(&self, mut record: Arc<ActivationRecord>) {
+        self.inner.mark_return();
+
+        if Arc::strong_count(&record) != 1 {
+            self.inner
+                .counters
+                .release_failures
+                .fetch_add(1, Ordering::Relaxed);
+            return;
+        }
+
+        if !self.inner.should_retain() {
+            // Drop record instead of returning to avoid exceeding pool bound.
+            return;
+        }
+
+        if let Some(inner) = Arc::get_mut(&mut record) {
+            inner.prepare_for_pool();
+        }
+
+        self.inner
+            .counters
+            .available
+            .fetch_add(1, Ordering::Relaxed);
+        self.inner.update_high_water();
+
+        if let Err(record) = self.inner.push_to_thread_cache(record) {
+            global_queue_push(&self.inner.global, record);
+        }
+    }
+
+    /// Snapshot statistics about the pool.
+    #[must_use]
+    pub fn stats(&self) -> ActivationRecordPoolStats {
+        let counters = &self.inner.counters;
+        let available = counters.available.load(Ordering::Relaxed);
+        let total_checked_out = counters.total_checked_out.load(Ordering::Relaxed);
+        let total_returned = counters.total_returned.load(Ordering::Relaxed);
+        let local_hits = counters.local_hits.load(Ordering::Relaxed);
+        let global_hits = counters.global_hits.load(Ordering::Relaxed);
+        let misses = counters.misses.load(Ordering::Relaxed);
+
+        let total_reused = local_hits + global_hits;
+        let in_flight = total_checked_out.saturating_sub(total_returned);
+
+        let hit_rate = if total_checked_out > 0 {
+            (total_reused as f64 / total_checked_out as f64) as f32
+        } else {
+            0.0
+        };
+
+        let utilization = {
+            let total_known = available as u64 + in_flight;
+            if total_known > 0 {
+                (in_flight as f64 / total_known as f64) as f32
+            } else {
+                0.0
+            }
+        };
+
+        ActivationRecordPoolStats {
+            available,
+            in_flight,
+            high_water_mark: counters.high_water_mark.load(Ordering::Relaxed),
+            total_created: counters.total_created.load(Ordering::Relaxed),
+            total_reused,
+            misses,
+            hit_rate,
+            utilization,
+            release_failures: counters.release_failures.load(Ordering::Relaxed),
+        }
+    }
+
+    /// Return the pool identifier (test-only).
+    #[cfg(test)]
+    #[must_use]
+    pub fn id(&self) -> usize {
+        self.inner.id
+    }
+}
+
+struct ActivationRecordPoolInner {
+    id: usize,
+    global: GlobalQueue<Arc<ActivationRecord>>,
+    counters: PoolCounters,
+    max_records: usize,
+    thread_cache_capacity: usize,
+    default_decay_rate: f32,
+}
+
+impl ActivationRecordPoolInner {
+    fn new(
+        id: usize,
+        max_records: usize,
+        thread_cache_capacity: usize,
+        default_decay_rate: f32,
+    ) -> Self {
+        Self {
+            id,
+            global: global_queue_new(),
+            counters: PoolCounters::default(),
+            max_records,
+            thread_cache_capacity,
+            default_decay_rate,
+        }
+    }
+
+    fn prepopulate(&self, count: usize) {
+        let to_create = count.min(self.max_records);
+        for _ in 0..to_create {
+            let record = Arc::new(ActivationRecord::new(
+                String::new(),
+                self.default_decay_rate,
+            ));
+            global_queue_push(&self.global, record);
+            self.counters.available.fetch_add(1, Ordering::Relaxed);
+            self.counters.total_created.fetch_add(1, Ordering::Relaxed);
+        }
+        self.update_high_water();
+    }
+
+    fn checkout_from_pool(&self) -> Option<Arc<ActivationRecord>> {
+        self.take_from_thread_cache()
+            .inspect(|_| self.after_hit(true))
+            .or_else(|| global_queue_pop(&self.global).inspect(|_| self.after_hit(false)))
+    }
+
+    fn take_from_thread_cache(&self) -> Option<Arc<ActivationRecord>> {
+        THREAD_CACHES.with(|caches| {
+            let mut caches = caches.borrow_mut();
+            caches.get_mut(&self.id).and_then(Vec::pop)
+        })
+    }
+
+    fn push_to_thread_cache(
+        &self,
+        record: Arc<ActivationRecord>,
+    ) -> Result<(), Arc<ActivationRecord>> {
+        THREAD_CACHES.with(|caches| {
+            let mut caches = caches.borrow_mut();
+            let cache = caches.entry(self.id).or_default();
+            if cache.len() < self.thread_cache_capacity {
+                cache.push(record);
+                Ok(())
+            } else {
+                Err(record)
+            }
+        })
+    }
+
+    fn after_hit(&self, local: bool) {
+        self.decrement_available();
+        if local {
+            self.counters.local_hits.fetch_add(1, Ordering::Relaxed);
+        } else {
+            self.counters.global_hits.fetch_add(1, Ordering::Relaxed);
+        }
+        self.counters
+            .total_checked_out
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn record_miss(&self) {
+        self.counters
+            .total_checked_out
+            .fetch_add(1, Ordering::Relaxed);
+        self.counters.misses.fetch_add(1, Ordering::Relaxed);
+        self.counters.total_created.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn mark_return(&self) {
+        self.counters.total_returned.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn should_retain(&self) -> bool {
+        let available = self.counters.available.load(Ordering::Relaxed);
+        available < self.max_records
+    }
+
+    fn update_high_water(&self) {
+        let mut current = self.counters.high_water_mark.load(Ordering::Relaxed);
+        loop {
+            let available = self.counters.available.load(Ordering::Relaxed);
+            if available <= current {
+                break;
+            }
+            match self.counters.high_water_mark.compare_exchange(
+                current,
+                available,
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => break,
+                Err(observed) => current = observed,
+            }
+        }
+    }
+
+    fn decrement_available(&self) {
+        let _ =
+            self.counters
+                .available
+                .fetch_update(Ordering::AcqRel, Ordering::Relaxed, |current| {
+                    if current == 0 {
+                        None
+                    } else {
+                        Some(current - 1)
+                    }
+                });
+    }
+}
+
+#[derive(Default)]
+struct PoolCounters {
+    available: AtomicUsize,
+    high_water_mark: AtomicUsize,
+    total_created: AtomicU64,
+    total_checked_out: AtomicU64,
+    total_returned: AtomicU64,
+    local_hits: AtomicU64,
+    global_hits: AtomicU64,
+    misses: AtomicU64,
+    release_failures: AtomicU64,
+}
+
+/// Snapshot of activation record pool utilisation.
+#[derive(Debug, Clone)]
+pub struct ActivationRecordPoolStats {
+    /// Records currently available for reuse (global + thread-local caches).
+    pub available: usize,
+    /// Records currently checked out by workers and not yet returned.
+    pub in_flight: u64,
+    /// Maximum number of simultaneously available records observed.
+    pub high_water_mark: usize,
+    /// Total activation records allocated since pool creation.
+    pub total_created: u64,
+    /// Number of acquisitions served from the pool rather than new allocations.
+    pub total_reused: u64,
+    /// Number of acquisitions that required allocating a fresh record.
+    pub misses: u64,
+    /// Ratio of pooled acquisitions to total acquisitions.
+    pub hit_rate: f32,
+    /// Fraction of records currently in flight relative to tracked pool size.
+    pub utilization: f32,
+    /// Count of failed release attempts (usually due to outstanding references).
+    pub release_failures: u64,
+}
+
 #[cfg(test)]
 #[allow(clippy::panic)]
 mod tests {
@@ -254,6 +642,7 @@ mod tests {
         let stats = pool.stats();
         assert_eq!(stats.num_chunks, 1);
         assert_eq!(stats.total_used, 300);
+        assert!(stats.utilization > 0.0);
     }
 
     #[test]
@@ -280,5 +669,44 @@ mod tests {
         };
         *val3 = 7;
         assert_eq!(*val3, 7);
+    }
+
+    #[test]
+    fn activation_record_pool_reuses_records() {
+        let pool = ActivationRecordPool::with_config(2, 8, 4, DEFAULT_DECAY_RATE);
+
+        let first = pool.acquire("node-a".to_string(), 0.1, Some(StorageTier::Hot));
+        assert!(first.get_activation().abs() < f32::EPSILON);
+        pool.release(first);
+
+        let stats_after_release = pool.stats();
+        assert!(stats_after_release.available >= 1);
+
+        let recycled = pool.acquire("node-b".to_string(), 0.2, Some(StorageTier::Warm));
+        assert_eq!(recycled.storage_tier(), Some(StorageTier::Warm));
+        assert!(recycled.get_activation().abs() < f32::EPSILON);
+
+        let stats = pool.stats();
+        assert!(stats.total_reused >= 1);
+        assert!(stats.hit_rate > 0.0);
+        // Ensure record returned to pool clears node id when reclaimed.
+        assert_eq!(recycled.node_id, "node-b");
+
+        pool.release(recycled);
+    }
+
+    #[test]
+    fn activation_record_pool_respects_capacity() {
+        let pool = ActivationRecordPool::with_config(0, 1, 1, DEFAULT_DECAY_RATE);
+
+        let record1 = pool.acquire("node-a".into(), 0.1, None);
+        pool.release(record1);
+
+        // Pool is at capacity, next release should drop instead of retain.
+        let record2 = pool.acquire("node-b".into(), 0.1, None);
+        pool.release(record2);
+
+        let stats = pool.stats();
+        assert!(stats.available <= 1);
     }
 }

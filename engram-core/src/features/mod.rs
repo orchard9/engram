@@ -31,7 +31,7 @@
 //! - `IndexProvider`: Vector similarity search (HNSW -> linear search)
 //! - `StorageProvider`: Persistence backends (memory-mapped -> in-memory)
 //! - `DecayProvider`: Psychological decay models (research-based -> simple exponential)
-//! - `MonitoringProvider`: Metrics collection (Prometheus -> no-op)
+//! - `MonitoringProvider`: Metrics collection (streaming/log -> no-op)
 //! - `CompletionProvider`: Pattern completion (neural -> similarity-based)
 //!
 //! ## Usage Pattern
@@ -70,7 +70,7 @@
 //! - HNSW index -> linear search: O(n) search with the same API
 //! - Memory-mapped storage -> in-memory `HashMap`: No persistence, same interface
 //! - Psychological decay -> simple exponential: Basic time-based decay
-//! - Prometheus monitoring -> no-op: All metrics calls become no-ops
+//! - Streaming metrics/logging -> no-op: All metrics calls become no-ops
 //! - Neural completion -> similarity matching: Cosine similarity fallback
 //!
 //! ## Compile-Time Optimization
@@ -200,7 +200,7 @@ impl FeatureRegistry {
         {
             providers.insert(
                 "monitoring",
-                Arc::new(monitoring::PrometheusMonitoringProvider::new())
+                Arc::new(monitoring::StreamingMonitoringProvider::new())
                     as Arc<dyn FeatureProvider>,
             );
         }

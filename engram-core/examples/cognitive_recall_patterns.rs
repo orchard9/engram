@@ -1,10 +1,27 @@
 //! Cognitive Recall Patterns Example
 //!
-//! Demonstrates the three recall modes and how to interpret recall results.
-//! This example shows the API design and expected usage patterns.
+//! Demonstrates three recall scenarios using deterministic spreading activation:
+//! semantic priming, episodic reconstruction, and confidence-guided exploration.
+//! Runs only when the `hnsw_index` feature is enabled.
 
 #[cfg(feature = "hnsw_index")]
-use engram_core::activation::{RecallConfig, RecallMetrics, RecallMode};
+use chrono::Utc;
+#[cfg(feature = "hnsw_index")]
+use engram_core::activation::{
+    ActivationGraphExt, ConfidenceAggregator, EdgeType, ParallelSpreadingConfig, RecallMode,
+    create_activation_graph,
+    cycle_detector::CycleDetector,
+    parallel::ParallelSpreadingEngine,
+    recall::{CognitiveRecall, CognitiveRecallBuilder, RecallConfig},
+    seeding::VectorActivationSeeder,
+    similarity_config::SimilarityConfig,
+};
+#[cfg(feature = "hnsw_index")]
+use engram_core::{Confidence, Cue, EpisodeBuilder, MemoryStore};
+#[cfg(feature = "hnsw_index")]
+use std::collections::HashMap;
+#[cfg(feature = "hnsw_index")]
+use std::sync::Arc;
 #[cfg(feature = "hnsw_index")]
 use std::time::Duration;
 
@@ -18,121 +35,271 @@ fn main() {
 fn main() {
     println!("=== Cognitive Recall Patterns ===\n");
 
-    // Example 1: Configuration for different recall modes
-    demonstrate_recall_modes();
+    // 1. Seed the memory store with a small clinical scenario graph.
+    let store = seed_memory_graph();
 
-    // Example 2: Metrics monitoring
-    demonstrate_metrics();
+    // 2. Build shared spreading infrastructure (deterministic for reproducibility).
+    let index = store
+        .hnsw_index()
+        .expect("HNSW index should be available when feature is enabled");
+    let graph = Arc::new(create_activation_graph());
+    wire_spreading_edges(&graph);
 
-    // Example 3: Result interpretation
-    demonstrate_results();
-}
+    let seeder = Arc::new(VectorActivationSeeder::with_default_resolver(
+        index,
+        SimilarityConfig::default(),
+    ));
 
-#[cfg(feature = "hnsw_index")]
-fn demonstrate_recall_modes() {
-    println!("1. RECALL MODES\n");
-
-    // Similarity mode: Fast, vector-based retrieval
-    let similarity_config = RecallConfig {
-        recall_mode: RecallMode::Similarity,
-        time_budget: Duration::from_millis(5),
-        min_confidence: 0.1,
-        max_results: 10,
-        enable_recency_boost: false,
-        recency_boost_factor: 1.0,
-        recency_window: Duration::from_secs(0),
+    let spreading_config = ParallelSpreadingConfig {
+        deterministic: true,
+        seed: Some(42),
+        trace_activation_flow: true,
+        max_depth: 3,
+        threshold: 0.08,
+        ..ParallelSpreadingConfig::default()
     };
-    println!("  Similarity Mode:");
-    println!("    - Uses: HNSW vector similarity only");
-    println!("    - Speed: Fastest (<5ms)");
-    println!("    - Quality: Good for known queries");
-    println!("    - Config: {:?}\n", similarity_config.recall_mode);
 
-    // Spreading mode: Context-aware traversal
-    let spreading_config = RecallConfig {
+    let spreading_engine = Arc::new(
+        ParallelSpreadingEngine::new(spreading_config, Arc::clone(&graph))
+            .expect("failed to initialise spreading engine"),
+    );
+
+    // 3. Demonstrate semantic priming (doctor → nurse).
+    println!("-- Semantic Priming (doctor → nurse) --");
+    let semantic_recall = build_recall(
+        &seeder,
+        &spreading_engine,
+        RecallMode::Spreading,
+        Duration::from_millis(12),
+    );
+    let doctor_cue = Cue::embedding(
+        "doctor_cue".to_string(),
+        uniform_embedding(0.90),
+        Confidence::from_raw(0.92),
+    );
+    let semantic_results = semantic_recall
+        .recall(&doctor_cue, &store)
+        .expect("semantic recall failed");
+    display_results("Primed results", &semantic_results);
+
+    // 4. Episodic reconstruction from partial cues.
+    println!("\n-- Episodic Reconstruction (clinic follow-up) --");
+    let episodic_recall = build_recall(
+        &seeder,
+        &spreading_engine,
+        RecallMode::Hybrid,
+        Duration::from_millis(15),
+    );
+    let clinic_cue = Cue::embedding(
+        "clinic_fragment".to_string(),
+        uniform_embedding(0.76),
+        Confidence::from_raw(0.8),
+    );
+    let episodic_results = episodic_recall
+        .recall(&clinic_cue, &store)
+        .expect("episodic recall failed");
+    display_results("Reconstructed timeline", &episodic_results);
+
+    // 5. Confidence-guided exploration at a relaxed threshold.
+    println!("\n-- Confidence-Guided Exploration --");
+    let mut exploratory_config = RecallConfig {
         recall_mode: RecallMode::Spreading,
-        time_budget: Duration::from_millis(10),
-        min_confidence: 0.2,
-        max_results: 20,
-        enable_recency_boost: true,
-        recency_boost_factor: 1.3,
-        recency_window: Duration::from_secs(3600),
+        min_confidence: 0.25,
+        max_results: 8,
+        time_budget: Duration::from_millis(18),
+        ..RecallConfig::default()
     };
-    println!("  Spreading Mode:");
-    println!("    - Uses: Graph traversal + activation spreading");
-    println!("    - Speed: Moderate (<10ms)");
-    println!("    - Quality: Best for exploratory queries");
-    println!("    - Config: {:?}\n", spreading_config.recall_mode);
+    exploratory_config.enable_recency_boost = false;
 
-    // Hybrid mode: Best of both with fallback
-    let hybrid_config = RecallConfig {
-        recall_mode: RecallMode::Hybrid,
-        time_budget: Duration::from_millis(10),
-        min_confidence: 0.15,
-        max_results: 15,
-        enable_recency_boost: true,
-        recency_boost_factor: 1.2,
-        recency_window: Duration::from_secs(1800),
-    };
-    println!("  Hybrid Mode (RECOMMENDED for production):");
-    println!("    - Uses: Spreading with similarity fallback");
-    println!("    - Speed: Adaptive (<10ms with timeout)");
-    println!("    - Quality: Balanced performance/quality");
-    println!("    - Config: {:?}\n", hybrid_config.recall_mode);
+    let exploratory_recall =
+        build_recall_with_config(&seeder, &spreading_engine, exploratory_config);
+
+    let exploration_cue = Cue::embedding(
+        "confidence_probe".to_string(),
+        uniform_embedding(0.72),
+        Confidence::from_raw(0.72),
+    );
+
+    let exploration_results = exploratory_recall
+        .recall(&exploration_cue, &store)
+        .expect("exploratory recall failed");
+
+    // Sort by confidence to emphasise ranking rationale.
+    let mut sorted = exploration_results;
+    sorted.sort_by(|a, b| b.confidence.raw().total_cmp(&a.confidence.raw()));
+    display_results("Confidence-ranked", &sorted);
+
+    println!(
+        "\nTip: enable trace_activation_flow and run \"cargo run -p engram-cli --example spreading_visualizer\" \n     to convert deterministic traces into GraphViz diagrams."
+    );
 }
 
 #[cfg(feature = "hnsw_index")]
-fn demonstrate_metrics() {
-    println!("\n2. METRICS MONITORING\n");
+fn seed_memory_graph() -> MemoryStore {
+    let store = MemoryStore::new(128).with_hnsw_index();
 
-    let metrics = RecallMetrics::new();
+    let episodes = vec![
+        (
+            "doctor_harmon",
+            "Dr. Harmon triages patient Lucy",
+            0.90,
+            0.88,
+        ),
+        (
+            "nurse_lucy",
+            "Nurse Lucy schedules the cardiology consult",
+            0.88,
+            0.86,
+        ),
+        (
+            "cardiology_consult",
+            "Cardiology reviews heart rate telemetry",
+            0.65,
+            0.74,
+        ),
+        (
+            "follow_up_call",
+            "Lucy confirms follow-up appointment over the phone",
+            0.76,
+            0.8,
+        ),
+        (
+            "night_shift",
+            "Night shift logs quiet vitals check",
+            0.55,
+            0.6,
+        ),
+    ];
 
-    println!("  Available metrics for production monitoring:");
-    println!("    - total_recalls: Total recall operations");
-    println!("    - similarity_mode_count: Similarity-only recalls");
-    println!("    - spreading_mode_count: Spreading-only recalls");
-    println!("    - hybrid_mode_count: Hybrid mode recalls");
-    println!("    - fallbacks_total: Number of fallbacks to similarity");
-    println!("    - time_budget_violations: Recalls exceeding budget");
-    println!("    - recall_activation_mass: Total activation across results");
-    println!("    - seeding_failures: Vector seeding errors");
-    println!("    - spreading_failures: Graph traversal errors\n");
+    for (id, content, magnitude, confidence) in episodes {
+        let episode = EpisodeBuilder::new()
+            .id(id.to_string())
+            .when(Utc::now())
+            .what(content.to_string())
+            .embedding(uniform_embedding(magnitude))
+            .confidence(Confidence::from_raw(confidence))
+            .build();
 
-    println!("  Example: Check fallback rate");
-    println!("    fallback_rate = fallbacks_total / total_recalls");
-    println!("    Current: {:.1}%\n", metrics.fallback_rate() * 100.0);
+        store.store(episode);
+    }
+
+    store
 }
 
 #[cfg(feature = "hnsw_index")]
-fn demonstrate_results() {
-    println!("\n3. RESULT INTERPRETATION\n");
+fn wire_spreading_edges(graph: &Arc<engram_core::activation::MemoryGraph>) {
+    let connections = vec![
+        ("doctor_harmon", "nurse_lucy", 0.92),
+        ("nurse_lucy", "follow_up_call", 0.88),
+        ("doctor_harmon", "cardiology_consult", 0.76),
+        ("cardiology_consult", "follow_up_call", 0.72),
+        ("doctor_harmon", "night_shift", 0.45),
+    ];
 
-    println!("  RankedMemory fields:");
-    println!("    - episode: The recalled memory");
-    println!("    - activation: Spreading activation level (0.0-1.0)");
-    println!("    - confidence: Aggregate confidence score");
-    println!("    - similarity: Vector similarity (if from seeding)");
-    println!("    - recency_boost: Temporal boost applied");
-    println!("    - rank_score: Final ranking score\n");
+    for (source, target, weight) in connections {
+        ActivationGraphExt::add_edge(
+            &**graph,
+            source.to_string(),
+            target.to_string(),
+            weight,
+            EdgeType::Excitatory,
+        );
+        ActivationGraphExt::add_edge(
+            &**graph,
+            target.to_string(),
+            source.to_string(),
+            weight * 0.9,
+            EdgeType::Excitatory,
+        );
+    }
 
-    println!("  Ranking formula:");
-    println!("    rank_score = (activation * 0.4) +");
-    println!("                 (confidence * 0.3) +");
-    println!("                 (similarity * 0.2) +");
-    println!("                 (recency_boost * 0.1)\n");
+    let embeddings = vec![
+        ("doctor_harmon", uniform_embedding(0.90)),
+        ("nurse_lucy", uniform_embedding(0.88)),
+        ("cardiology_consult", uniform_embedding(0.65)),
+        ("follow_up_call", uniform_embedding(0.76)),
+        ("night_shift", uniform_embedding(0.55)),
+    ];
 
-    println!("  Example interpretation:");
-    println!("    Result 1:");
-    println!("      activation: 0.85  (strong graph activation)");
-    println!("      confidence: 0.92  (high path confidence)");
-    println!("      similarity: 0.78  (good vector match)");
-    println!("      recency_boost: 0.15  (recent memory)");
-    println!("      rank_score: 0.847  → Top result\n");
+    for (node, embedding) in embeddings {
+        ActivationGraphExt::set_embedding(&**graph, &node.to_string(), &embedding);
+    }
+}
 
-    println!("    Result 2:");
-    println!("      activation: 0.45  (weak graph activation)");
-    println!("      confidence: 0.65  (medium path confidence)");
-    println!("      similarity: 0.95  (excellent vector match)");
-    println!("      recency_boost: 0.0  (old memory)");
-    println!("      rank_score: 0.585  → Lower rank despite similarity\n");
+#[cfg(feature = "hnsw_index")]
+fn build_recall(
+    seeder: &Arc<VectorActivationSeeder>,
+    engine: &Arc<ParallelSpreadingEngine>,
+    mode: RecallMode,
+    budget: Duration,
+) -> CognitiveRecall {
+    let aggregator = Arc::new(ConfidenceAggregator::new(
+        0.78,
+        Confidence::from_raw(0.35),
+        12,
+    ));
+    let cycle_detector = Arc::new(CycleDetector::new(HashMap::new()));
+
+    CognitiveRecallBuilder::new()
+        .vector_seeder(Arc::clone(seeder))
+        .spreading_engine(Arc::clone(engine))
+        .confidence_aggregator(aggregator)
+        .cycle_detector(cycle_detector)
+        .recall_mode(mode)
+        .time_budget(budget)
+        .build()
+        .expect("failed to build cognitive recall")
+}
+
+#[cfg(feature = "hnsw_index")]
+fn build_recall_with_config(
+    seeder: &Arc<VectorActivationSeeder>,
+    engine: &Arc<ParallelSpreadingEngine>,
+    config: RecallConfig,
+) -> CognitiveRecall {
+    let aggregator = Arc::new(ConfidenceAggregator::new(
+        0.72,
+        Confidence::from_raw(0.25),
+        16,
+    ));
+    let cycle_detector = Arc::new(CycleDetector::new(HashMap::new()));
+
+    CognitiveRecallBuilder::new()
+        .vector_seeder(Arc::clone(seeder))
+        .spreading_engine(Arc::clone(engine))
+        .confidence_aggregator(aggregator)
+        .cycle_detector(cycle_detector)
+        .config(config)
+        .build()
+        .expect("failed to build configured recall")
+}
+
+#[cfg(feature = "hnsw_index")]
+fn display_results(title: &str, results: &[engram_core::activation::RankedMemory]) {
+    println!("{title}:");
+    if results.is_empty() {
+        println!("  (no results)\n");
+        return;
+    }
+
+    for memory in results.iter().take(5) {
+        println!(
+            "  - {id} | activation={activation:.2} | confidence={confidence:.2} | rank={rank:.2}",
+            id = memory.episode.id,
+            activation = memory.activation,
+            confidence = memory.confidence.raw(),
+            rank = memory.rank_score,
+        );
+    }
+
+    println!("  total results: {}\n", results.len());
+}
+
+#[cfg(feature = "hnsw_index")]
+fn uniform_embedding(value: f32) -> [f32; 768] {
+    let mut embedding = [value; 768];
+    embedding[0] = value;
+    embedding[1] = value * 0.95;
+    embedding[2] = value * 0.9;
+    embedding
 }

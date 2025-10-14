@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 9448451ece77da7ab1c71c6faa0a4c44cb816a067f6c29c342f7a5982a4c681c # shrinks to scenario = ErdosRenyi { node_count: 4, edge_probability: 0.4, seed: 2217097008157717084 }
