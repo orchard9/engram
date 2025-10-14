@@ -183,7 +183,10 @@ async fn test_crash_consistency() {
             return;
         }
 
-        assert!(recovered >= 5, "Expected recovered entries after crash, got {recovered}");
+        assert!(
+            recovered >= 5,
+            "Expected recovered entries after crash, got {recovered}"
+        );
         store.initialize_persistence().unwrap();
 
         // Verify we can still recall the data
