@@ -143,7 +143,7 @@ fn fan_effect_reduces_activation_per_association() {
 
 #[cfg(feature = "hnsw_index")]
 #[test]
-#[ignore] // TODO: Investigate why "nurse" is not appearing in recall results
+#[ignore] // KNOWN BUG: Graph reports 0 nodes despite having edges. Spreading engine requires explicit node entries before it can propagate activation from seeds. Fix: Ensure ActivationGraph backend properly tracks nodes when edges are added, or add explicit node creation API.
 fn cognitive_recall_respects_semantic_priming_and_fan_effect() {
     let store = MemoryStore::new(128).with_hnsw_index();
 
