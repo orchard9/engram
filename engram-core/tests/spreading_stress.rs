@@ -66,7 +66,7 @@ fn scale_free_graphs_complete_within_budget() {
     }
 }
 
-#[ignore]
+#[ignore] // Expensive: 1M nodes, ~30-60s runtime. Run with: cargo test --test spreading_stress million_node_scale_free_soak -- --ignored --nocapture
 #[test]
 fn million_node_scale_free_soak() {
     let fixture = barabasi_albert(1_000_000, 6, 0xBEEF_CAFE);

@@ -269,7 +269,7 @@ fn test_implementation_validation() {
 
 /// Benchmark to ensure SIMD provides expected speedup
 #[test]
-#[ignore] // Run with --ignored to include benchmark
+#[ignore] // Benchmark: 10k iterations, ~5-10s runtime. Run with: cargo test --test simd_vector_tests bench_simd_speedup -- --ignored --nocapture
 fn bench_simd_speedup() {
     use std::time::Instant;
 
