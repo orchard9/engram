@@ -435,6 +435,23 @@ impl HnswGraph {
         results
     }
 
+    /// Get memory by ID for spreading activation
+    ///
+    /// Returns the Memory object associated with the given memory ID, or None if not found.
+    /// This is used by spreading activation to convert neighbor IDs to full Memory objects.
+    #[must_use]
+    pub fn get_memory(&self, memory_id: &str) -> Option<Arc<crate::Memory>> {
+        let guard = epoch::pin();
+
+        // Look up node ID from memory ID
+        let node_id = self.node_map.get(memory_id)?;
+
+        // Get the node and extract memory
+        self.get_node(*node_id, &guard)
+            .ok()
+            .map(|node| node.memory.clone())
+    }
+
     /// Validate graph structure integrity
     pub fn validate_structure(&self) -> bool {
         // Check that all nodes in higher layers also exist in lower layers

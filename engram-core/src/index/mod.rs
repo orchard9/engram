@@ -463,7 +463,7 @@ impl CognitiveHnswIndex {
             }
 
             // Merge new activations with existing results
-            results = self.merge_activations(results, new_activations, hop_energy);
+            results = Self::merge_activations(results, new_activations, hop_energy);
         }
 
         // Apply temporal boost for recent memories
@@ -529,24 +529,73 @@ impl CognitiveHnswIndex {
         memory_id: &str,
         energy: f32,
     ) -> Vec<(crate::Episode, Confidence)> {
-        // TODO: Implement using graph.get_neighbors() + memory lookup
-        // This is a placeholder implementation
-        let _ = self.params.m_max.load(Ordering::Relaxed);
-        let _ = (memory_id, energy);
-        Vec::new()
+        // Convert energy to max_hops (higher energy = more hops, up to 3)
+        let max_hops = ((energy * 5.0).ceil() as usize).clamp(1, 3);
+
+        // Get neighbors from graph using BFS traversal
+        let neighbors = self.graph.get_neighbors(memory_id, max_hops);
+
+        // Convert neighbors to Episodes
+        let mut result = Vec::with_capacity(neighbors.len());
+
+        for (neighbor_id, _distance, confidence) in neighbors {
+            // Look up the full Memory from the graph
+            if let Some(memory) = self.graph.get_memory(&neighbor_id) {
+                // Create a minimal Episode from Memory data
+                // Note: This is a best-effort conversion. A full implementation would
+                // require a MemoryStore to get complete Episode data with all fields.
+                let episode = crate::Episode::new(
+                    memory.id.clone(),
+                    memory.created_at,
+                    memory
+                        .content
+                        .clone()
+                        .unwrap_or_else(|| format!("Memory {}", memory.id)),
+                    memory.embedding,
+                    memory.confidence,
+                );
+                result.push((episode, confidence));
+            }
+        }
+
+        result
     }
 
     /// Merge new activations with existing results
     fn merge_activations(
-        &self,
-        existing: Vec<(crate::Episode, Confidence)>,
+        mut existing: Vec<(crate::Episode, Confidence)>,
         new_activations: Vec<(crate::Episode, Confidence)>,
         energy: f32,
     ) -> Vec<(crate::Episode, Confidence)> {
-        // TODO: Implement energy decay and confidence combination
-        // This is a placeholder implementation
-        let _ = self.params.pressure_sensitivity;
-        let _ = (new_activations, energy);
+        use std::collections::HashMap;
+
+        // Apply energy decay to new activations (lower energy = more decay)
+        let decay_factor = energy.clamp(0.0, 1.0);
+
+        // Build a map of existing episodes for O(1) lookup
+        let mut existing_map: HashMap<String, usize> = HashMap::new();
+        for (idx, (episode, _)) in existing.iter().enumerate() {
+            existing_map.insert(episode.id.clone(), idx);
+        }
+
+        // Process new activations
+        for (episode, new_confidence) in new_activations {
+            // Apply energy decay to the new activation's confidence
+            let decayed_confidence = Confidence::exact(new_confidence.raw() * decay_factor);
+
+            if let Some(&existing_idx) = existing_map.get(&episode.id) {
+                // Episode already exists - combine confidences using OR
+                // This models that multiple activation paths increase overall confidence
+                let existing_confidence = existing[existing_idx].1;
+                let combined = existing_confidence.or(decayed_confidence);
+                existing[existing_idx].1 = combined;
+            } else {
+                // New episode - add it to results
+                existing_map.insert(episode.id.clone(), existing.len());
+                existing.push((episode, decayed_confidence));
+            }
+        }
+
         existing
     }
 
