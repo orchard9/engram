@@ -1471,13 +1471,33 @@ pub trait ActivationGraphExt {
 impl ActivationGraphExt for ActivationGraph {
     fn add_edge(&self, source: NodeId, target: NodeId, weight: f32, _edge_type: EdgeType) {
         // Convert NodeId (String) to Uuid for the backend
+        use crate::memory_graph::traits::MemoryBackend;
         use uuid::Uuid;
         let source_id = Uuid::new_v5(&Uuid::NAMESPACE_OID, source.as_bytes());
         let target_id = Uuid::new_v5(&Uuid::NAMESPACE_OID, target.as_bytes());
 
         // Store reverse mappings for NodeId recovery in instance storage
-        self.uuid_mappings.insert(source_id, source);
-        self.uuid_mappings.insert(target_id, target);
+        self.uuid_mappings.insert(source_id, source.clone());
+        self.uuid_mappings.insert(target_id, target.clone());
+
+        // Ensure both nodes exist in backend for spreading activation to work
+        // The backend's spread_activation() only propagates to nodes in the memories DashMap
+        if !self.graph.contains(&source_id) {
+            let memory = crate::Memory::new(
+                source,
+                [0.0; 768], // Zero embedding - will be set separately if needed
+                crate::Confidence::LOW,
+            );
+            let _ = self.graph.backend().store(source_id, memory);
+        }
+        if !self.graph.contains(&target_id) {
+            let memory = crate::Memory::new(
+                target,
+                [0.0; 768], // Zero embedding - will be set separately if needed
+                crate::Confidence::LOW,
+            );
+            let _ = self.graph.backend().store(target_id, memory);
+        }
 
         // Add edge using the UnifiedMemoryGraph's add_edge method
         let _ = self.graph.add_edge(source_id, target_id, weight);
@@ -1516,7 +1536,9 @@ impl ActivationGraphExt for ActivationGraph {
     }
 
     fn node_count(&self) -> usize {
-        self.graph.count()
+        // Use uuid_mappings for consistency with get_all_nodes()
+        // This counts all nodes that have been added via add_edge()
+        self.uuid_mappings.len()
     }
 
     fn edge_count(&self) -> usize {
