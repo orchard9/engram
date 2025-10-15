@@ -94,7 +94,6 @@ pub struct ParallelSpreadingEngine {
     deterministic_trace: Arc<Mutex<Vec<TraceEntry>>>,
     adaptive_engine: Arc<Mutex<AdaptiveSpreadingEngine>>,
     /// Activation record pool shared across workers for low-allocation spreading
-    #[allow(dead_code)]
     activation_pool: Option<Arc<ActivationRecordPool>>,
     /// Adaptive batch sizing controller for dynamic performance optimization
     adaptive_batcher: Option<Arc<crate::activation::AdaptiveBatcher>>,
@@ -274,6 +273,7 @@ impl PhaseBarrier {
 /// hop-level synchronization. Future probabilistic features can add RNG if needed.
 struct WorkerContext {
     /// Worker ID reserved for future per-worker diagnostics and tracing
+    /// Currently unused but kept for planned tracing feature (Milestone 6+)
     #[allow(dead_code)]
     worker_id: usize,
     activation_records: Arc<DashMap<NodeId, Arc<ActivationRecord>>>,
@@ -287,7 +287,8 @@ struct WorkerContext {
     cycle_detector: Arc<CycleDetector>,
     deterministic_trace: Arc<Mutex<Vec<TraceEntry>>>,
     activation_pool: Option<Arc<ActivationRecordPool>>,
-    /// Adaptive engine reserved for future GPU-accelerated spreading
+    /// Adaptive engine reserved for future GPU-accelerated spreading (Milestone 11)
+    /// Currently unused but initialized for planned GPU offloading feature
     #[allow(dead_code)]
     adaptive_engine: Arc<Mutex<AdaptiveSpreadingEngine>>,
     /// Adaptive batch sizing controller shared across workers
