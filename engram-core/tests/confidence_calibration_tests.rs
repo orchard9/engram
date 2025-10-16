@@ -7,8 +7,8 @@
 #![allow(clippy::unwrap_used)] // Unwrap is acceptable in tests
 #![allow(clippy::float_cmp)]
 
-use engram_core::query::confidence_calibration::CalibrationTracker;
 use engram_core::Confidence;
+use engram_core::query::confidence_calibration::CalibrationTracker;
 
 /// Helper to generate calibrated samples with controlled accuracy
 fn generate_calibrated_samples(confidence: f32, num_samples: usize) -> Vec<(Confidence, bool)> {
@@ -201,18 +201,30 @@ fn test_bin_statistics_detailed_breakdown() {
     assert_eq!(metrics.bin_statistics.len(), 3);
 
     // Check bin 2 statistics
-    let bin2_stats = metrics.bin_statistics.iter().find(|s| s.bin_index == 2).unwrap();
+    let bin2_stats = metrics
+        .bin_statistics
+        .iter()
+        .find(|s| s.bin_index == 2)
+        .unwrap();
     assert_eq!(bin2_stats.sample_count, 100);
     assert!((bin2_stats.average_confidence - 0.25).abs() < 0.01);
     assert!((bin2_stats.accuracy - 0.25).abs() < 0.05); // Allow sampling variance
 
     // Check bin 5 statistics
-    let bin5_stats = metrics.bin_statistics.iter().find(|s| s.bin_index == 5).unwrap();
+    let bin5_stats = metrics
+        .bin_statistics
+        .iter()
+        .find(|s| s.bin_index == 5)
+        .unwrap();
     assert_eq!(bin5_stats.sample_count, 100);
     assert!((bin5_stats.average_confidence - 0.55).abs() < 0.01);
 
     // Check bin 8 statistics
-    let bin8_stats = metrics.bin_statistics.iter().find(|s| s.bin_index == 8).unwrap();
+    let bin8_stats = metrics
+        .bin_statistics
+        .iter()
+        .find(|s| s.bin_index == 8)
+        .unwrap();
     assert_eq!(bin8_stats.sample_count, 100);
     assert!((bin8_stats.average_confidence - 0.85).abs() < 0.01);
 }
@@ -263,8 +275,7 @@ fn test_high_confidence_accuracy_correlation() {
     if let Some(corr) = metrics.confidence_accuracy_correlation {
         assert!(
             corr > 0.8,
-            "Perfect calibration should have high correlation, got {}",
-            corr
+            "Perfect calibration should have high correlation, got {corr}"
         );
     } else {
         panic!("Expected correlation to be computed");

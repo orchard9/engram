@@ -6,7 +6,9 @@
 
 use super::{
     ConfidenceInterval, Evidence, EvidenceSource, MatchType, ProbabilisticQueryResult,
-    ProbabilisticRecall, UncertaintySource, VectorSimilarityEvidence, evidence::EvidenceAggregator,
+    ProbabilisticRecall, UncertaintySource, VectorSimilarityEvidence,
+    evidence_aggregator::{EvidenceAggregator, EvidenceInput},
+    uncertainty_tracker::UncertaintyTracker,
 };
 use crate::{Activation, Confidence, Cue, CueType, Episode, MemoryStore};
 use chrono::Utc;
@@ -24,60 +26,60 @@ impl ProbabilisticRecall for MemoryStore {
             return ProbabilisticQueryResult::from_episodes(Vec::new());
         }
 
-        // Build evidence chain from recall process
-        let mut evidence_aggregator = EvidenceAggregator::new();
-        let mut evidence_ids = Vec::new();
-        let mut uncertainty_sources = Vec::new();
+        // Build evidence inputs from recall process
+        let mut evidence_inputs = Vec::new();
+        let mut all_evidence = Vec::new();
 
-        // Add evidence for each recalled episode
+        // Create evidence for each recalled episode
         for (episode, confidence) in &standard_results {
-            let evidence_id = Self::create_evidence_for_episode(
+            let (evidence, evidence_input) = Self::create_evidence_for_episode(
                 episode,
                 *confidence,
                 &cue,
-                &mut evidence_aggregator,
+                evidence_inputs.len() as u64,
             );
-            evidence_ids.push(evidence_id);
+            all_evidence.push(evidence);
+            evidence_inputs.push(evidence_input);
         }
 
-        // Add system-level uncertainty sources
-        self.add_system_uncertainty_sources(&mut uncertainty_sources);
+        // Build uncertainty tracker and add system-level sources
+        let mut uncertainty_tracker = UncertaintyTracker::new();
+        self.add_system_uncertainty_sources(&mut uncertainty_tracker);
 
-        // Combine all evidence
-        let Ok(combined_evidence) = evidence_aggregator.combine_evidence(&evidence_ids) else {
+        // Combine all evidence using new aggregator
+        let aggregator = EvidenceAggregator::new(Confidence::from_raw(0.01), 20);
+        let Ok(outcome) = aggregator.aggregate_evidence(&evidence_inputs) else {
             // Fallback to standard result on error
             return ProbabilisticQueryResult::from_episodes(standard_results);
         };
 
         // Create enhanced confidence interval
-        let confidence_interval = ConfidenceInterval {
-            lower: combined_evidence.lower_bound,
-            upper: combined_evidence.upper_bound,
-            point: combined_evidence.confidence,
-            width: combined_evidence.upper_bound.raw() - combined_evidence.lower_bound.raw(),
-        };
+        let aggregate_conf = outcome.aggregate_confidence;
+
+        // Estimate uncertainty bounds from evidence diversity
+        let uncertainty = Self::calculate_evidence_diversity(&evidence_inputs);
+        let confidence_interval =
+            ConfidenceInterval::from_confidence_with_uncertainty(aggregate_conf, uncertainty);
 
         ProbabilisticQueryResult {
             episodes: standard_results,
             confidence_interval,
-            evidence_chain: combined_evidence
-                .contributing_sources
-                .into_iter()
-                .filter_map(|id| evidence_aggregator.get_evidence(id).cloned())
-                .collect(),
-            uncertainty_sources,
+            evidence_chain: all_evidence,
+            uncertainty_sources: uncertainty_tracker.sources().to_vec(),
         }
     }
 }
 
 impl MemoryStore {
     /// Create evidence for a recalled episode based on match type
+    ///
+    /// Returns both the Evidence (for chain tracking) and EvidenceInput (for aggregation)
     fn create_evidence_for_episode(
         episode: &Episode,
         confidence: Confidence,
         cue: &Cue,
-        aggregator: &mut EvidenceAggregator,
-    ) -> u64 {
+        evidence_id: u64,
+    ) -> (Evidence, EvidenceInput) {
         let evidence = match &cue.cue_type {
             CueType::Embedding {
                 vector,
@@ -112,10 +114,10 @@ impl MemoryStore {
             CueType::Context { .. } => {
                 // Temporal match evidence with decay
                 let signed_elapsed = Utc::now().signed_duration_since(episode.when);
-                let decay_evidence = match signed_elapsed.to_std() {
-                    Ok(elapsed) if !elapsed.is_zero() => EvidenceAggregator::evidence_from_decay(
-                        confidence, elapsed, 0.0001, // Conservative decay rate
-                    ),
+                match signed_elapsed.to_std() {
+                    Ok(elapsed) if !elapsed.is_zero() => {
+                        Self::evidence_from_decay(confidence, elapsed, 0.0001) // Conservative decay rate
+                    }
                     _ => Evidence {
                         source: EvidenceSource::DirectMatch {
                             cue_id: "temporal_match".to_string(),
@@ -126,9 +128,7 @@ impl MemoryStore {
                         timestamp: SystemTime::now(),
                         dependencies: Vec::new(),
                     },
-                };
-
-                return aggregator.add_evidence(decay_evidence);
+                }
             }
             CueType::Temporal { pattern: _, .. } => {
                 // Contextual match evidence
@@ -145,7 +145,63 @@ impl MemoryStore {
             }
         };
 
-        aggregator.add_evidence(evidence)
+        // Create EvidenceInput for aggregation
+        let evidence_input = EvidenceInput {
+            id: evidence_id,
+            source: evidence.source.clone(),
+            strength: evidence.strength,
+            timestamp: evidence.timestamp,
+            dependencies: evidence.dependencies.clone(),
+        };
+
+        (evidence, evidence_input)
+    }
+
+    /// Create evidence from temporal decay
+    fn evidence_from_decay(
+        original_confidence: Confidence,
+        time_elapsed: Duration,
+        decay_rate: f32,
+    ) -> Evidence {
+        // Apply exponential decay
+        let decay_factor = (-decay_rate * time_elapsed.as_secs_f32()).exp();
+        let decayed_confidence = Confidence::exact(original_confidence.raw() * decay_factor);
+
+        Evidence {
+            source: EvidenceSource::TemporalDecay {
+                original_confidence,
+                time_elapsed,
+                decay_rate,
+            },
+            strength: decayed_confidence,
+            timestamp: SystemTime::now(),
+            dependencies: Vec::new(),
+        }
+    }
+
+    /// Calculate evidence diversity for uncertainty estimation
+    fn calculate_evidence_diversity(evidence_inputs: &[EvidenceInput]) -> f32 {
+        if evidence_inputs.len() <= 1 {
+            return 0.0;
+        }
+
+        // Calculate variance in confidence across evidence
+        let mean: f32 = evidence_inputs
+            .iter()
+            .map(|e| e.strength.raw())
+            .sum::<f32>()
+            / evidence_inputs.len() as f32;
+
+        let variance: f32 = evidence_inputs
+            .iter()
+            .map(|e| {
+                let diff = e.strength.raw() - mean;
+                diff * diff
+            })
+            .sum::<f32>()
+            / evidence_inputs.len() as f32;
+
+        variance.sqrt().min(0.3) // Cap uncertainty at 0.3
     }
 
     /// Compute cosine similarity between embeddings
@@ -170,8 +226,8 @@ impl MemoryStore {
         }
     }
 
-    /// Add system-level uncertainty sources
-    fn add_system_uncertainty_sources(&self, uncertainty_sources: &mut Vec<UncertaintySource>) {
+    /// Add system-level uncertainty sources to tracker
+    fn add_system_uncertainty_sources(&self, uncertainty_tracker: &mut UncertaintyTracker) {
         // Memory pressure uncertainty
         let hot_memory_count = self.len();
         let pressure_level = if hot_memory_count > 10000 {
@@ -183,20 +239,20 @@ impl MemoryStore {
         };
 
         if pressure_level > 0.05 {
-            uncertainty_sources.push(UncertaintySource::SystemPressure {
+            uncertainty_tracker.add_source(UncertaintySource::SystemPressure {
                 pressure_level,
                 effect_on_confidence: pressure_level * 0.2,
             });
         }
 
         // Spreading activation noise (estimated)
-        uncertainty_sources.push(UncertaintySource::SpreadingActivationNoise {
+        uncertainty_tracker.add_source(UncertaintySource::SpreadingActivationNoise {
             activation_variance: 0.05, // Estimated from typical activation patterns
             path_diversity: 0.1,       // Estimated path diversity effect
         });
 
         // Add temporal decay uncertainty for older memories
-        uncertainty_sources.push(UncertaintySource::TemporalDecayUnknown {
+        uncertainty_tracker.add_source(UncertaintySource::TemporalDecayUnknown {
             time_since_encoding: Duration::from_secs(3600), // Assume 1 hour average age
             decay_model_uncertainty: 0.15,                  // Model uncertainty estimate
         });
@@ -227,11 +283,22 @@ impl MemoryStore {
         [(0.8_f32, 2_u16), (0.6, 4), (0.4, 6), (0.2, 8)]
             .into_iter()
             .map(|(activation_level, path_length)| {
-                EvidenceAggregator::evidence_from_activation(
-                    format!("spreading_activation_{activation_level}"),
-                    Activation::new(activation_level),
-                    path_length,
-                )
+                // Create spreading activation evidence
+                let base_confidence = Confidence::exact(activation_level);
+                let path_degradation = 1.0 / f32::from(path_length).mul_add(0.1, 1.0);
+                let degraded_confidence =
+                    Confidence::exact(base_confidence.raw() * path_degradation);
+
+                Evidence {
+                    source: EvidenceSource::SpreadingActivation {
+                        source_episode: format!("spreading_activation_{activation_level}"),
+                        activation_level: Activation::new(activation_level),
+                        path_length,
+                    },
+                    strength: degraded_confidence,
+                    timestamp: SystemTime::now(),
+                    dependencies: Vec::new(),
+                }
             })
             .collect()
     }
@@ -250,10 +317,7 @@ impl MemoryStore {
     /// Probabilistic recall with HNSW index integration
     #[cfg(feature = "hnsw_index")]
     pub fn recall_with_hnsw_probabilistic(&self, cue: Cue) -> ProbabilisticQueryResult {
-        // use super::evidence::EvidenceAggregator; // TODO: implement evidence aggregation
-
         // Try HNSW-accelerated recall first
-
         let Some(hnsw_index) = self.hnsw_index() else {
             // Fallback to standard probabilistic recall
             return self.recall_probabilistic(cue);

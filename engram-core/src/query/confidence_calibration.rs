@@ -181,7 +181,8 @@ impl CalibrationMetrics {
     /// Check if confidence-accuracy correlation meets >0.9 target
     #[must_use]
     pub fn has_high_correlation(&self) -> bool {
-        self.confidence_accuracy_correlation.is_some_and(|corr| corr > 0.9)
+        self.confidence_accuracy_correlation
+            .is_some_and(|corr| corr > 0.9)
     }
 }
 
@@ -196,6 +197,8 @@ pub struct CalibrationTracker {
     samples: Vec<CalibrationSample>,
     /// Maximum number of samples to retain (prevents unbounded memory growth)
     max_samples: usize,
+    /// Current write position for circular buffer (0..max_samples)
+    write_index: usize,
 }
 
 impl CalibrationTracker {
@@ -234,6 +237,7 @@ impl CalibrationTracker {
             num_bins,
             samples: Vec::new(),
             max_samples: 100_000, // Retain up to 100k samples
+            write_index: 0,
         }
     }
 
@@ -277,14 +281,15 @@ impl CalibrationTracker {
             bin.add_sample(confidence, was_correct);
         }
 
-        // Store sample for Brier score and correlation
+        // Store sample for Brier score and correlation (circular buffer)
         let sample = CalibrationSample::new(predicted, was_correct);
         if self.samples.len() < self.max_samples {
             self.samples.push(sample);
+            self.write_index = self.samples.len() % self.max_samples;
         } else {
-            // Replace oldest sample (circular buffer behavior)
-            let index = self.samples.len() % self.max_samples;
-            self.samples[index] = sample;
+            // Replace oldest sample at write_index (circular buffer behavior)
+            self.samples[self.write_index] = sample;
+            self.write_index = (self.write_index + 1) % self.max_samples;
         }
     }
 
@@ -432,7 +437,8 @@ impl CalibrationTracker {
     #[allow(clippy::unwrap_in_result)]
     fn compute_spearman_correlation(&self) -> Option<f32> {
         // Need at least 3 active bins for meaningful correlation
-        let active_bins: Vec<&CalibrationBin> = self.bins.values().filter(|b| !b.is_empty()).collect();
+        let active_bins: Vec<&CalibrationBin> =
+            self.bins.values().filter(|b| !b.is_empty()).collect();
         if active_bins.len() < 3 {
             return None;
         }
@@ -444,10 +450,22 @@ impl CalibrationTracker {
             .collect();
 
         // Check for variance in both dimensions
-        let conf_min = data.iter().map(|(c, _)| c).fold(f32::INFINITY, |a, &b| a.min(b));
-        let conf_max = data.iter().map(|(c, _)| c).fold(f32::NEG_INFINITY, |a, &b| a.max(b));
-        let acc_min = data.iter().map(|(_, a)| a).fold(f32::INFINITY, |a, &b| a.min(b));
-        let acc_max = data.iter().map(|(_, a)| a).fold(f32::NEG_INFINITY, |a, &b| a.max(b));
+        let conf_min = data
+            .iter()
+            .map(|(c, _)| c)
+            .fold(f32::INFINITY, |a, &b| a.min(b));
+        let conf_max = data
+            .iter()
+            .map(|(c, _)| c)
+            .fold(f32::NEG_INFINITY, |a, &b| a.max(b));
+        let acc_min = data
+            .iter()
+            .map(|(_, a)| a)
+            .fold(f32::INFINITY, |a, &b| a.min(b));
+        let acc_max = data
+            .iter()
+            .map(|(_, a)| a)
+            .fold(f32::NEG_INFINITY, |a, &b| a.max(b));
 
         if (conf_max - conf_min).abs() < f32::EPSILON || (acc_max - acc_min).abs() < f32::EPSILON {
             return None; // No variation
@@ -455,11 +473,19 @@ impl CalibrationTracker {
 
         // Compute ranks for confidence
         data.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-        let mut conf_ranks: Vec<(usize, f32)> = data.iter().enumerate().map(|(i, &(c, _a))| (i, c)).collect();
+        let mut conf_ranks: Vec<(usize, f32)> = data
+            .iter()
+            .enumerate()
+            .map(|(i, &(c, _a))| (i, c))
+            .collect();
 
         // Restore original order by accuracy for accuracy ranking
         data.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-        let mut acc_ranks: Vec<(usize, f32)> = data.iter().enumerate().map(|(i, &(_c, a))| (i, a)).collect();
+        let mut acc_ranks: Vec<(usize, f32)> = data
+            .iter()
+            .enumerate()
+            .map(|(i, &(_c, a))| (i, a))
+            .collect();
 
         // Compute Spearman correlation
         // ρ = 1 - (6 * Σd²) / (n * (n² - 1))
@@ -499,6 +525,7 @@ impl CalibrationTracker {
             bin.confidence_sum = 0.0;
         }
         self.samples.clear();
+        self.write_index = 0;
     }
 
     /// Get a calibration adjustment factor for a given confidence
@@ -567,6 +594,7 @@ impl Default for CalibrationTracker {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)] // Unwrap is acceptable in tests
 mod tests {
     use super::*;
 
