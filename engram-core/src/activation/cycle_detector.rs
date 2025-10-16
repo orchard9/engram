@@ -196,12 +196,12 @@ mod tests {
         let node = NodeId::from("test_node");
 
         // First few visits should be allowed
-        assert!(detector.should_visit(&node, 0, StorageTier::Hot, &[node.clone()]));
-        assert!(detector.should_visit(&node, 1, StorageTier::Hot, &[node.clone()]));
-        assert!(detector.should_visit(&node, 2, StorageTier::Hot, &[node.clone()]));
+        assert!(detector.should_visit(&node, 0, StorageTier::Hot, std::slice::from_ref(&node)));
+        assert!(detector.should_visit(&node, 1, StorageTier::Hot, std::slice::from_ref(&node)));
+        assert!(detector.should_visit(&node, 2, StorageTier::Hot, std::slice::from_ref(&node)));
 
         // After max visits, should detect cycle
-        assert!(!detector.should_visit(&node, 3, StorageTier::Hot, &[node.clone()]));
+        assert!(!detector.should_visit(&node, 3, StorageTier::Hot, std::slice::from_ref(&node)));
         assert!(detector.has_cycles());
     }
 

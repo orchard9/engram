@@ -112,11 +112,11 @@ impl AnnIndex for FaissAnnIndex {
                     if i < labels.len() {
                         // Use format/parse as a generic way to convert Idx to i64
                         let label_str = format!("{:?}", labels[i]);
-                        if let Ok(label_i64) = label_str.parse::<i64>() {
-                            if label_i64 >= 0 {
-                                let similarity = Self::l2_to_similarity(dist);
-                                results.push((label_i64 as usize, similarity));
-                            }
+                        if let Ok(label_i64) = label_str.parse::<i64>()
+                            && label_i64 >= 0
+                        {
+                            let similarity = Self::l2_to_similarity(dist);
+                            results.push((label_i64 as usize, similarity));
                         }
                     }
                 }

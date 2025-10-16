@@ -137,10 +137,7 @@ fn main() {
 
     // Drain metrics into a snapshot and run auto-tune evaluation for reporting.
     let snapshot = metrics.streaming_snapshot();
-    let mut applied_change = None;
-    if let Some(summary) = snapshot.spreading {
-        applied_change = auto_tuner.evaluate(&summary, &engine);
-    }
+    let applied_change = snapshot.spreading.map_or(None, |summary| auto_tuner.evaluate(&summary, &engine));
 
     let final_snapshot = metrics.streaming_snapshot();
     if let Some(summary) = final_snapshot.spreading.as_ref() {

@@ -109,7 +109,7 @@ mod migration_tests {
     #[test]
     fn test_backend_equivalence() -> TestResult {
         let mut embedding = [0.0; 768];
-        embedding.iter_mut().for_each(|v| *v = 0.1);
+        embedding.fill(0.1);
         let memory = Memory::new("test_memory".to_string(), embedding, Confidence::HIGH);
 
         // Create graphs with different backends
@@ -222,11 +222,11 @@ mod migration_tests {
 
         // Store two memories
         let mut embedding1 = [0.0; 768];
-        embedding1.iter_mut().for_each(|v| *v = 0.1);
+        embedding1.fill(0.1);
         let memory1 = Memory::new("memory1".to_string(), embedding1, Confidence::HIGH);
 
         let mut embedding2 = [0.0; 768];
-        embedding2.iter_mut().for_each(|v| *v = 0.2);
+        embedding2.fill(0.2);
         let memory2 = Memory::new("memory2".to_string(), embedding2, Confidence::HIGH);
 
         let id1 = graph
@@ -435,7 +435,7 @@ mod migration_tests {
 
     /// Performance benchmark comparison (not a pass/fail test)
     #[test]
-    #[ignore] // Run with --ignored flag for benchmarking
+    #[ignore = "Run with --ignored flag for benchmarking"]
     fn benchmark_backends() -> TestResult {
         use std::time::Instant;
 

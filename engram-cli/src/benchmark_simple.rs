@@ -128,11 +128,11 @@ pub fn run_benchmark(repo_url: &str, use_release: bool, verbose: bool) -> Result
             .args(["-s", "http://localhost:7432/health"])
             .output();
 
-        if let Ok(output) = health_check {
-            if output.status.success() {
-                server_ready = true;
-                break;
-            }
+        if let Ok(output) = health_check
+            && output.status.success()
+        {
+            server_ready = true;
+            break;
         }
     }
 

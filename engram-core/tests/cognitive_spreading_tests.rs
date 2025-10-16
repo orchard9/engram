@@ -143,7 +143,7 @@ fn fan_effect_reduces_activation_per_association() {
 
 #[cfg(feature = "hnsw_index")]
 #[test]
-#[ignore] // TODO: CognitiveRecall integration with ActivationGraph spreading needs architectural work. The spreading activates nodes in the graph, but mapping those back to episodes in MemoryStore requires the recall system to bridge between graph node IDs and episode IDs. This works for simple spreading tests but needs refinement for full MemoryStore+HNSW+Graph integration.
+#[ignore = "TODO: CognitiveRecall integration with ActivationGraph spreading needs architectural work. The spreading activates nodes in the graph, but mapping those back to episodes in MemoryStore requires the recall system to bridge between graph node IDs and episode IDs. This works for simple spreading tests but needs refinement for full MemoryStore+HNSW+Graph integration."]
 fn cognitive_recall_respects_semantic_priming_and_fan_effect() {
     let store = MemoryStore::new(128).with_hnsw_index();
 

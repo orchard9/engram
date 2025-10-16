@@ -337,14 +337,14 @@ impl MemoryStore {
     fn persist_episode(&self, memory_arc: &Arc<Memory>, episode: &Episode) {
         use std::convert::TryFrom;
 
-        if let Some(ref wal_writer) = self.wal_writer {
-            if let Ok(wal_entry) = crate::storage::wal::WalEntry::new_episode(episode) {
-                wal_writer.write_async(wal_entry);
-                let episode_size = std::mem::size_of::<Episode>() as u64
-                    + u64::try_from(episode.id.len()).unwrap_or(0)
-                    + u64::try_from(episode.what.len()).unwrap_or(0);
-                self.storage_metrics.record_write(episode_size);
-            }
+        if let Some(ref wal_writer) = self.wal_writer
+            && let Ok(wal_entry) = crate::storage::wal::WalEntry::new_episode(episode)
+        {
+            wal_writer.write_async(wal_entry);
+            let episode_size = std::mem::size_of::<Episode>() as u64
+                + u64::try_from(episode.id.len()).unwrap_or(0)
+                + u64::try_from(episode.what.len()).unwrap_or(0);
+            self.storage_metrics.record_write(episode_size);
         }
 
         if let Some(ref backend) = self.persistent_backend {
@@ -1226,10 +1226,10 @@ impl MemoryStore {
     ///
     /// Returns an error if the WAL writer fails to shut down cleanly.
     pub fn shutdown(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        if let Some(ref mut wal_writer) = self.wal_writer {
-            if let Some(writer) = Arc::get_mut(wal_writer) {
-                writer.shutdown()?;
-            }
+        if let Some(ref mut wal_writer) = self.wal_writer
+            && let Some(writer) = Arc::get_mut(wal_writer)
+        {
+            writer.shutdown()?;
         }
         Ok(())
     }
@@ -1580,11 +1580,11 @@ impl MemoryStore {
         // 1. Try HNSW index for embedding cues if available
         #[cfg(feature = "hnsw_index")]
         {
-            if let CueType::Embedding { vector, threshold } = &cue.cue_type {
-                if let Some(ref hnsw) = self.hnsw_index {
-                    self.flush_pending_hnsw_updates();
-                    return self.recall_with_hnsw(cue, hnsw, vector, *threshold).results;
-                }
+            if let CueType::Embedding { vector, threshold } = &cue.cue_type
+                && let Some(ref hnsw) = self.hnsw_index
+            {
+                self.flush_pending_hnsw_updates();
+                return self.recall_with_hnsw(cue, hnsw, vector, *threshold).results;
             }
         }
 
@@ -1605,11 +1605,11 @@ impl MemoryStore {
         // Try HNSW index for embedding cues if available
         #[cfg(feature = "hnsw_index")]
         {
-            if let CueType::Embedding { vector, threshold } = &cue.cue_type {
-                if let Some(ref hnsw) = self.hnsw_index {
-                    self.flush_pending_hnsw_updates();
-                    return self.recall_with_hnsw(cue, hnsw, vector, *threshold).results;
-                }
+            if let CueType::Embedding { vector, threshold } = &cue.cue_type
+                && let Some(ref hnsw) = self.hnsw_index
+            {
+                self.flush_pending_hnsw_updates();
+                return self.recall_with_hnsw(cue, hnsw, vector, *threshold).results;
             }
         }
 
@@ -1747,10 +1747,10 @@ impl MemoryStore {
         // Check location if provided
         if let Some(loc) = location {
             max_score += 1.0;
-            if let Some(ep_loc) = &episode.where_location {
-                if ep_loc.contains(loc) || loc.contains(ep_loc) {
-                    match_score += 1.0;
-                }
+            if let Some(ep_loc) = &episode.where_location
+                && (ep_loc.contains(loc) || loc.contains(ep_loc))
+            {
+                match_score += 1.0;
             }
         }
 
@@ -2139,26 +2139,26 @@ impl MemoryStore {
         let mut results = Vec::new();
 
         for addr in similar_addresses {
-            if let Some(memory_id) = self.content_index.get(&addr) {
-                if let Some(memory) = self.hot_memories.get(&memory_id) {
-                    // Calculate actual similarity
-                    let similarity =
-                        crate::compute::cosine_similarity_768(embedding, &memory.embedding);
+            if let Some(memory_id) = self.content_index.get(&addr)
+                && let Some(memory) = self.hot_memories.get(&memory_id)
+            {
+                // Calculate actual similarity
+                let similarity =
+                    crate::compute::cosine_similarity_768(embedding, &memory.embedding);
 
-                    if similarity > 0.8 {
-                        let episode = Episode::new(
-                            memory.id.clone(),
-                            memory.created_at,
-                            memory
-                                .content
-                                .clone()
-                                .unwrap_or_else(|| format!("Memory {}", memory.id)),
-                            memory.embedding,
-                            memory.confidence,
-                        );
+                if similarity > 0.8 {
+                    let episode = Episode::new(
+                        memory.id.clone(),
+                        memory.created_at,
+                        memory
+                            .content
+                            .clone()
+                            .unwrap_or_else(|| format!("Memory {}", memory.id)),
+                        memory.embedding,
+                        memory.confidence,
+                    );
 
-                        results.push((episode, Confidence::exact(similarity)));
-                    }
+                    results.push((episode, Confidence::exact(similarity)));
                 }
             }
         }

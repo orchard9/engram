@@ -225,10 +225,8 @@ impl HippocampalCompletion {
                     || what_lower.contains(&episode_what_lower)
                     || Self::word_level_similarity(&what_lower, &episode_what_lower) > 0.0;
 
-                if is_similar {
-                    if let Some(ref location) = episode.where_location {
-                        *location_counts.entry(location.clone()).or_insert(0) += 1;
-                    }
+                if is_similar && let Some(ref location) = episode.where_location {
+                    *location_counts.entry(location.clone()).or_insert(0) += 1;
                 }
             }
 
@@ -257,11 +255,9 @@ impl HippocampalCompletion {
                     || what_lower.contains(&episode_what_lower)
                     || Self::word_level_similarity(&what_lower, &episode_what_lower) > 0.0;
 
-                if is_similar {
-                    if let Some(ref participants) = episode.who {
-                        for participant in participants {
-                            *participant_counts.entry(participant.clone()).or_insert(0) += 1;
-                        }
+                if is_similar && let Some(ref participants) = episode.who {
+                    for participant in participants {
+                        *participant_counts.entry(participant.clone()).or_insert(0) += 1;
                     }
                 }
             }

@@ -61,10 +61,10 @@ pub async fn show_status() -> Result<()> {
 
                 // Try to get detailed health info
                 let detailed_health_url = format!("http://127.0.0.1:{port}/health");
-                if let Ok(health_response) = client.get(&detailed_health_url).send().await {
-                    if let Ok(health_data) = health_response.json::<Value>().await {
-                        print_health_details(&health_data);
-                    }
+                if let Ok(health_response) = client.get(&detailed_health_url).send().await
+                    && let Ok(health_data) = health_response.json::<Value>().await
+                {
+                    print_health_details(&health_data);
                 }
             } else {
                 println!("HTTP Health: Unhealthy (status: {})", response.status());
@@ -132,10 +132,10 @@ fn print_health_details(health_data: &Value) {
                 .unwrap_or(0.0);
             println!("    - {name}: {status} ({latency:.3}s)");
 
-            if let Some(message) = check.get("message").and_then(Value::as_str) {
-                if !message.is_empty() {
-                    println!("        {message}");
-                }
+            if let Some(message) = check.get("message").and_then(Value::as_str)
+                && !message.is_empty()
+            {
+                println!("        {message}");
             }
         }
     }

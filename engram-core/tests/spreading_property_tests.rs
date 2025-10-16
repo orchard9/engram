@@ -153,7 +153,7 @@ proptest! {
 }
 
 #[test]
-#[ignore] // Expensive: 10k+ cases, run with: cargo test --test spreading_property_tests spreading_activation_invariants_high_volume -- --ignored
+#[ignore = "Expensive: 10k+ cases, run with: cargo test --test spreading_property_tests spreading_activation_invariants_high_volume -- --ignored"]
 fn spreading_activation_invariants_high_volume() {
     let cases = std::env::var("PROPTEST_CASES")
         .ok()

@@ -361,7 +361,9 @@ impl DifferentialTestingHarness {
         let mut rng = thread_rng();
         let mut vec: Vec<f32> = (0..dimensions).map(|_| rng.r#gen::<f32>() - 0.5).collect();
         let norm: f32 = vec.iter().map(|x| x * x).sum::<f32>().sqrt();
-        vec.iter_mut().for_each(|x| *x /= norm);
+        for x in &mut vec {
+            *x /= norm;
+        }
         vec
     }
 }

@@ -219,12 +219,12 @@ fn test_null_completion_provider() {
 
     // Test completion
     let matches = completion
-        .complete(&partial, &[candidate.clone()], 0.0)
+        .complete(&partial, std::slice::from_ref(&candidate), 0.0)
         .unwrap();
     assert!(!matches.is_empty());
 
     // Test that sequence prediction fails gracefully
-    let prediction = completion.predict_next(&[partial.clone()], &[candidate]);
+    let prediction = completion.predict_next(std::slice::from_ref(&partial), &[candidate]);
     assert!(prediction.is_err());
 
     // Test gap filling

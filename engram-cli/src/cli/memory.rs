@@ -29,24 +29,24 @@ pub fn print_memory_result(memory: &Value) {
             println!("⏰ Created: {timestamp}");
         }
 
-        if let Some(associations) = obj.get("associations").and_then(|v| v.as_array()) {
-            if !associations.is_empty() {
-                println!("🔗 Associated memories: {}", associations.len());
-                for (i, assoc) in associations.iter().take(3).enumerate() {
-                    if let Some(assoc_obj) = assoc.as_object() {
-                        if let Some(content) = assoc_obj.get("content").and_then(|v| v.as_str()) {
-                            let preview = if content.len() > 50 {
-                                format!("{}...", &content[..47])
-                            } else {
-                                content.to_string()
-                            };
-                            println!("  {}. {}", i + 1, preview);
-                        }
-                    }
+        if let Some(associations) = obj.get("associations").and_then(|v| v.as_array())
+            && !associations.is_empty()
+        {
+            println!("🔗 Associated memories: {}", associations.len());
+            for (i, assoc) in associations.iter().take(3).enumerate() {
+                if let Some(assoc_obj) = assoc.as_object()
+                    && let Some(content) = assoc_obj.get("content").and_then(|v| v.as_str())
+                {
+                    let preview = if content.len() > 50 {
+                        format!("{}...", &content[..47])
+                    } else {
+                        content.to_string()
+                    };
+                    println!("  {}. {}", i + 1, preview);
                 }
-                if associations.len() > 3 {
-                    println!("  ... and {} more", associations.len() - 3);
-                }
+            }
+            if associations.len() > 3 {
+                println!("  ... and {} more", associations.len() - 3);
             }
         }
 

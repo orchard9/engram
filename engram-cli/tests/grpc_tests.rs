@@ -32,7 +32,7 @@ async fn start_test_grpc_server() -> u16 {
 }
 
 #[tokio::test]
-#[ignore] // Ignore by default since it requires server startup
+#[ignore = "Ignore by default since it requires server startup"]
 async fn test_grpc_remember_memory() {
     let port = start_test_grpc_server().await;
     let addr = format!("http://127.0.0.1:{}", port);
@@ -59,7 +59,7 @@ async fn test_grpc_remember_memory() {
 }
 
 #[tokio::test]
-#[ignore] // Ignore by default since it requires server startup
+#[ignore = "Ignore by default since it requires server startup"]
 async fn test_grpc_remember_episode() {
     let port = start_test_grpc_server().await;
     let addr = format!("http://127.0.0.1:{}", port);
@@ -90,7 +90,7 @@ async fn test_grpc_remember_episode() {
 }
 
 #[tokio::test]
-#[ignore] // Ignore by default since it requires server startup
+#[ignore = "Ignore by default since it requires server startup"]
 async fn test_grpc_recall() {
     let port = start_test_grpc_server().await;
     let addr = format!("http://127.0.0.1:{}", port);
@@ -116,7 +116,7 @@ async fn test_grpc_recall() {
 }
 
 #[tokio::test]
-#[ignore] // Ignore by default since it requires server startup
+#[ignore = "Ignore by default since it requires server startup"]
 async fn test_grpc_recognize() {
     let port = start_test_grpc_server().await;
     let addr = format!("http://127.0.0.1:{}", port);
@@ -140,7 +140,7 @@ async fn test_grpc_recognize() {
 }
 
 #[tokio::test]
-#[ignore] // Ignore by default since it requires server startup
+#[ignore = "Ignore by default since it requires server startup"]
 async fn test_grpc_forget() {
     let port = start_test_grpc_server().await;
     let addr = format!("http://127.0.0.1:{}", port);
@@ -162,7 +162,7 @@ async fn test_grpc_forget() {
 }
 
 #[tokio::test]
-#[ignore] // Ignore by default since it requires server startup
+#[ignore = "Ignore by default since it requires server startup"]
 async fn test_grpc_introspect() {
     let port = start_test_grpc_server().await;
     let addr = format!("http://127.0.0.1:{}", port);
@@ -188,7 +188,7 @@ async fn test_grpc_introspect() {
 }
 
 #[tokio::test]
-#[ignore] // Ignore by default since it requires server startup
+#[ignore = "Ignore by default since it requires server startup"]
 async fn test_grpc_error_handling() {
     let port = start_test_grpc_server().await;
     let addr = format!("http://127.0.0.1:{}", port);

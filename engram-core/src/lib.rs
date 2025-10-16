@@ -1012,9 +1012,8 @@ mod tests {
         let node = MemoryNode::new_unvalidated("test".to_string(), vec![]);
         let result = node.validate();
 
-        let err = match result {
-            Ok(_) => return Err("validation should fail for empty node".to_string()),
-            Err(err) => err,
+        let Err(err) = result else {
+            return Err("validation should fail for empty node".to_string());
         };
         let msg = err.to_string();
 

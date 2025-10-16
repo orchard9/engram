@@ -709,7 +709,7 @@ impl SpreadingMetrics {
             self.telemetry_sample_rate.store(10, Ordering::Relaxed);
         }
 
-        count % rate == 0
+        count.is_multiple_of(rate)
     }
 
     /// Record an activation latency observation for a tier and export telemetry.

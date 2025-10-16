@@ -337,7 +337,7 @@ impl Episode {
         self.recall_count += 1;
 
         // Testing effect: repeated recall can strengthen confidence
-        if self.recall_count % 3 == 0 {
+        if self.recall_count.is_multiple_of(3) {
             let boost = Confidence::exact(0.05); // Small confidence boost
             self.reliability_confidence = self
                 .reliability_confidence
@@ -376,15 +376,15 @@ impl Episode {
         if mask_percentage < 0.25 {
             known_fields.insert("what".to_string(), self.what.clone());
         }
-        if mask_percentage < 0.5 {
-            if let Some(ref loc) = self.where_location {
-                known_fields.insert("where".to_string(), loc.clone());
-            }
+        if mask_percentage < 0.5
+            && let Some(ref loc) = self.where_location
+        {
+            known_fields.insert("where".to_string(), loc.clone());
         }
-        if mask_percentage < 0.75 {
-            if let Some(ref who) = self.who {
-                known_fields.insert("who".to_string(), who.join(", "));
-            }
+        if mask_percentage < 0.75
+            && let Some(ref who) = self.who
+        {
+            known_fields.insert("who".to_string(), who.join(", "));
         }
 
         // Mask embedding dimensions

@@ -373,9 +373,9 @@ impl MetamorphicTestingEngine {
 
         let mut orthogonal = vec![0.0; a.len()];
         let mut rng = thread_rng();
-        orthogonal
-            .iter_mut()
-            .for_each(|component| *component = rng.r#gen::<f32>() - 0.5);
+        for component in &mut orthogonal {
+            *component = rng.r#gen::<f32>() - 0.5;
+        }
 
         let dot_a: f32 = orthogonal
             .iter()
@@ -409,9 +409,9 @@ impl MetamorphicTestingEngine {
 
         let norm: f32 = orthogonal.iter().map(|x| x * x).sum::<f32>().sqrt();
         if norm > 1e-10 {
-            orthogonal
-                .iter_mut()
-                .for_each(|component| *component /= norm);
+            for component in &mut orthogonal {
+                *component /= norm;
+            }
         }
 
         orthogonal

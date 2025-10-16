@@ -199,16 +199,16 @@ impl HnswGraph {
 
         for candidate in current_nearest.into_iter().take(k) {
             let similarity = (1.0 - candidate.distance).clamp(-1.0, 1.0);
-            if similarity >= threshold.raw() {
-                if let Ok(node) = self.get_node(candidate.node_id, &guard) {
-                    distances.push(candidate.distance);
-                    hits.push(SearchResult::new(
-                        candidate.node_id,
-                        candidate.distance,
-                        Confidence::exact(similarity.max(0.0)),
-                        node.memory.id.clone(),
-                    ));
-                }
+            if similarity >= threshold.raw()
+                && let Ok(node) = self.get_node(candidate.node_id, &guard)
+            {
+                distances.push(candidate.distance);
+                hits.push(SearchResult::new(
+                    candidate.node_id,
+                    candidate.distance,
+                    Confidence::exact(similarity.max(0.0)),
+                    node.memory.id.clone(),
+                ));
             }
         }
 
@@ -411,15 +411,15 @@ impl HnswGraph {
                     // Get connections from layer 0 (most connections)
                     if let Some(connections) = node.get_connections(0) {
                         for edge in connections {
-                            if visited.insert(edge.target_id) {
-                                if let Ok(neighbor) = self.get_node(edge.target_id, &guard) {
-                                    results.push((
-                                        neighbor.memory.id.clone(),
-                                        edge.cached_distance,
-                                        Confidence::exact(edge.confidence_weight),
-                                    ));
-                                    next_wave.push((edge.target_id, hop));
-                                }
+                            if visited.insert(edge.target_id)
+                                && let Ok(neighbor) = self.get_node(edge.target_id, &guard)
+                            {
+                                results.push((
+                                    neighbor.memory.id.clone(),
+                                    edge.cached_distance,
+                                    Confidence::exact(edge.confidence_weight),
+                                ));
+                                next_wave.push((edge.target_id, hop));
                             }
                         }
                     }
@@ -482,15 +482,15 @@ impl HnswGraph {
                 if let Some(connections) = node.get_connections(layer_idx) {
                     for edge in connections {
                         // Check that the target has a reverse edge
-                        if let Ok(target) = self.get_node(edge.target_id, &guard) {
-                            if let Some(target_connections) = target.get_connections(layer_idx) {
-                                let has_reverse = target_connections
-                                    .iter()
-                                    .any(|e| e.target_id == node.node_id);
+                        if let Ok(target) = self.get_node(edge.target_id, &guard)
+                            && let Some(target_connections) = target.get_connections(layer_idx)
+                        {
+                            let has_reverse = target_connections
+                                .iter()
+                                .any(|e| e.target_id == node.node_id);
 
-                                if !has_reverse {
-                                    return false;
-                                }
+                            if !has_reverse {
+                                return false;
                             }
                         }
                     }
@@ -514,10 +514,10 @@ impl HnswGraph {
             }
 
             // Check that the node's memory ID matches
-            if let Some(node_entry) = self.layers[0].get(&node_id) {
-                if node_entry.value().memory.id != *memory_id {
-                    return false;
-                }
+            if let Some(node_entry) = self.layers[0].get(&node_id)
+                && node_entry.value().memory.id != *memory_id
+            {
+                return false;
             }
         }
 

@@ -499,7 +499,7 @@ impl CognitiveHnswIndex {
             .unwrap_or_default()
             .as_secs();
 
-        cycle % 100 == 0 && now.saturating_sub(last_adaptation) >= 10
+        cycle.is_multiple_of(100) && now.saturating_sub(last_adaptation) >= 10
     }
 
     /// Compute cognitive hops based on biological principles

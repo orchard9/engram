@@ -485,10 +485,10 @@ impl AccessPredictor {
     /// Check if memory is likely to be accessed soon
     #[must_use]
     pub fn is_likely_access_soon(&self, memory_id: &str, threshold: Duration) -> bool {
-        if let Some(prediction) = self.get_prediction(memory_id) {
-            if let Ok(time_to_access) = prediction.next_access.duration_since(SystemTime::now()) {
-                return time_to_access <= threshold && prediction.confidence > 0.5;
-            }
+        if let Some(prediction) = self.get_prediction(memory_id)
+            && let Ok(time_to_access) = prediction.next_access.duration_since(SystemTime::now())
+        {
+            return time_to_access <= threshold && prediction.confidence > 0.5;
         }
         false
     }

@@ -18,7 +18,7 @@ use std::time::Duration;
 use tokio::time::timeout;
 
 #[tokio::test]
-#[ignore] // These port tests can be flaky in CI due to port conflicts
+#[ignore = "These port tests can be flaky in CI due to port conflicts"]
 async fn test_port_availability_check() {
     use rand::Rng;
     // Test that we can find an available port
@@ -41,7 +41,7 @@ async fn test_port_availability_check() {
 }
 
 #[tokio::test]
-#[ignore] // These port tests can be flaky in CI due to port conflicts
+#[ignore = "These port tests can be flaky in CI due to port conflicts"]
 async fn test_find_available_port_with_occupied_port() {
     use rand::Rng;
     // Use very high port range to ensure no conflicts
@@ -108,11 +108,11 @@ async fn test_cli_start_single_node() {
     let port = match find_available_port(0).await {
         Ok(port) => port,
         Err(err) => {
-            if let Some(io_err) = err.downcast_ref::<std::io::Error>() {
-                if io_err.kind() == std::io::ErrorKind::PermissionDenied {
-                    eprintln!("skipping test_cli_start_single_node: {io_err}");
-                    return;
-                }
+            if let Some(io_err) = err.downcast_ref::<std::io::Error>()
+                && io_err.kind() == std::io::ErrorKind::PermissionDenied
+            {
+                eprintln!("skipping test_cli_start_single_node: {io_err}");
+                return;
             }
             panic!("find_available_port failed: {err}");
         }
@@ -157,11 +157,11 @@ async fn test_port_discovery_timeout() {
     let port = match port_result {
         Ok(port) => port,
         Err(err) => {
-            if let Some(io_err) = err.downcast_ref::<std::io::Error>() {
-                if io_err.kind() == std::io::ErrorKind::PermissionDenied {
-                    eprintln!("skipping test_port_discovery_timeout: {io_err}");
-                    return;
-                }
+            if let Some(io_err) = err.downcast_ref::<std::io::Error>()
+                && io_err.kind() == std::io::ErrorKind::PermissionDenied
+            {
+                eprintln!("skipping test_port_discovery_timeout: {io_err}");
+                return;
             }
             panic!("find_available_port failed: {err}");
         }
@@ -407,7 +407,7 @@ async fn test_cli_config_path() {
 }
 
 #[tokio::test]
-#[ignore] // Requires actual server startup
+#[ignore = "Requires actual server startup"]
 async fn test_health_endpoint_during_startup() {
     use rand::Rng;
     use std::process::Stdio;
@@ -459,7 +459,7 @@ async fn test_health_endpoint_during_startup() {
 }
 
 #[tokio::test]
-#[ignore] // Requires actual server startup
+#[ignore = "Requires actual server startup"]
 async fn test_health_readiness_endpoint() {
     use rand::Rng;
     use std::process::Stdio;
@@ -513,7 +513,7 @@ async fn test_health_readiness_endpoint() {
 }
 
 #[tokio::test]
-#[ignore] // Requires actual server startup
+#[ignore = "Requires actual server startup"]
 async fn test_health_liveness_endpoint() {
     use rand::Rng;
     use std::process::Stdio;

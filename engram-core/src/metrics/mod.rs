@@ -231,20 +231,20 @@ impl MetricsRegistry {
             ("warm", SPREADING_LATENCY_WARM),
             ("cold", SPREADING_LATENCY_COLD),
         ] {
-            if let Some(aggregate) = metric_from_latency_windows(snapshot, metric) {
-                if aggregate.count > 0 {
-                    let p95 = percentile_interpolate(aggregate.p90, aggregate.p99, 0.5);
-                    summary.per_tier.insert(
-                        label.to_string(),
-                        TierLatencySummary {
-                            samples: aggregate.count,
-                            mean_seconds: aggregate.mean,
-                            p50_seconds: aggregate.p50,
-                            p95_seconds: p95,
-                            p99_seconds: aggregate.p99,
-                        },
-                    );
-                }
+            if let Some(aggregate) = metric_from_latency_windows(snapshot, metric)
+                && aggregate.count > 0
+            {
+                let p95 = percentile_interpolate(aggregate.p90, aggregate.p99, 0.5);
+                summary.per_tier.insert(
+                    label.to_string(),
+                    TierLatencySummary {
+                        samples: aggregate.count,
+                        mean_seconds: aggregate.mean,
+                        p50_seconds: aggregate.p50,
+                        p95_seconds: p95,
+                        p99_seconds: aggregate.p99,
+                    },
+                );
             }
         }
 

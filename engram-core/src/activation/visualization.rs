@@ -34,7 +34,7 @@ pub fn build_dot(
 ) -> String {
     let mut buffer = String::with_capacity(8 * 1024);
 
-    writeln!(&mut buffer, "digraph SpreadingActivation {{").expect("write header");
+    writeln!(&mut buffer, "digraph SpreadingActivation {{").ok();
     writeln!(
         &mut buffer,
         "  graph [rankdir=LR, bgcolor=\"#ffffff\", fontname=\"Helvetica\"];"

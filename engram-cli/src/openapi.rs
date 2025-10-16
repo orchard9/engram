@@ -2,6 +2,7 @@
 //!
 //! This module provides complete `OpenAPI` 3.0 documentation with cognitive-friendly
 //! organization and educational examples that follow progressive complexity patterns.
+#![allow(clippy::needless_for_each)]
 
 use axum::{
     Extension, Json, Router,
@@ -27,6 +28,7 @@ use crate::api::{
 use engram_core::activation::AutoTuneAuditEntry;
 
 /// Main `OpenAPI` specification with cognitive-friendly organization
+#[allow(clippy::needless_for_each)]
 #[derive(OpenApi)]
 #[openapi(
     info(

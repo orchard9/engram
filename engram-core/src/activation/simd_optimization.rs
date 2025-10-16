@@ -95,7 +95,7 @@ impl ActivationBatch {
     #[must_use]
     pub fn is_aligned(&self) -> bool {
         let ptr = self.embeddings.as_ptr() as usize;
-        ptr % 64 == 0
+        ptr.is_multiple_of(64)
     }
 
     /// Assert alignment for safety-critical operations

@@ -147,7 +147,7 @@ impl CollectedResults {
 
     /// Group results by operation type
     #[must_use]
-    pub fn group_by_type(&self) -> GroupedResults {
+    pub fn group_by_type(&self) -> GroupedResults<'_> {
         let mut stores = Vec::new();
         let mut recalls = Vec::new();
         let mut similarities = Vec::new();
