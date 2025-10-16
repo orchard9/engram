@@ -46,6 +46,9 @@ pub mod evidence_aggregator;
 // Uncertainty tracking system (Milestone 5 Task 003)
 pub mod uncertainty_tracker;
 
+// Confidence calibration framework (Milestone 5 Task 004)
+pub mod confidence_calibration;
+
 // Conditional compilation for SMT verification features
 #[cfg(feature = "probabilistic_queries")]
 pub mod evidence;
