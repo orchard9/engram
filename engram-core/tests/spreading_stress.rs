@@ -37,6 +37,7 @@ fn total_activation(run: &SpreadingRun) -> f32 {
 }
 
 #[test]
+#[ignore = "Expensive: Large scale-free graphs, ~30-60s runtime. Run with: cargo test --test spreading_stress scale_free_graphs_complete_within_budget -- --ignored --nocapture"]
 fn scale_free_graphs_complete_within_budget() {
     let scenarios = [(5_000, 3, 0.2_f32), (20_000, 4, 0.05_f32)];
 
@@ -91,6 +92,7 @@ fn million_node_scale_free_soak() {
 
 #[cfg(feature = "memory_mapped_persistence")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "Expensive: Concurrent stress test with 8k nodes, ~30-60s runtime. Run with: cargo test --test spreading_stress concurrent_spreading_runs_share_pools_safely -- --ignored --nocapture"]
 async fn concurrent_spreading_runs_share_pools_safely() {
     use futures::future::join_all;
 

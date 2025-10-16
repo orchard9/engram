@@ -90,6 +90,7 @@ impl SentenceTokenizer {
     /// # Errors
     ///
     /// Returns `EncodingFailed` if tokenization fails (e.g., invalid UTF-8).
+    #[allow(clippy::unused_self)] // self is used when multilingual_embeddings feature is enabled
     pub fn tokenize(&self, text: &str) -> Result<TokenizationResult, EmbeddingError> {
         #[cfg(feature = "multilingual_embeddings")]
         {
@@ -137,6 +138,7 @@ impl SentenceTokenizer {
     /// # Errors
     ///
     /// Returns `EncodingFailed` if any tokenization fails.
+    #[allow(clippy::unused_self)] // self is used when multilingual_embeddings feature is enabled
     pub fn tokenize_batch(
         &self,
         texts: &[&str],

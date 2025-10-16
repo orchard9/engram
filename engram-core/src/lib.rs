@@ -277,8 +277,8 @@ impl Confidence {
 ///
 /// let budget = ConfidenceBudget::new(1.0);
 /// assert!(budget.consume(0.3)); // succeeds
-/// assert!(budget.consume(0.8)); // fails, would exceed budget
-/// assert_eq!(budget.remaining(), 0.7);
+/// assert!(!budget.consume(0.8)); // fails, would exceed budget
+/// assert!((budget.remaining() - 0.7).abs() < 0.01);
 /// ```
 #[derive(Debug, Clone)]
 pub struct ConfidenceBudget {

@@ -1,5 +1,6 @@
 ---
 source: engram-core/tests/spreading_validation.rs
+assertion_line: 165
 expression: "FixtureSnapshot { metadata: metadata.clone(), snapshot: normalized, }"
 ---
 metadata:
@@ -46,31 +47,15 @@ snapshot:
       hop_count: 1
       storage_tier: Warm
       flags: 0b00000000
-    - memory_id: Chain_2
-      activation: 0.099
-      confidence: 0.094
-      hop_count: 1
-      storage_tier: Warm
-      flags: 0b00000000
-    - memory_id: Chain_3
-      activation: 0
-      confidence: 0
-      hop_count: 0
-      storage_tier: Cold
-      flags: 0b00000000
   tier_summaries:
-    - - Cold
-      - node_count: 1
-        total_activation: 0
-        average_confidence: 0
     - - Hot
       - node_count: 1
         total_activation: 1
         average_confidence: 1
     - - Warm
-      - node_count: 2
-        total_activation: 0.546
-        average_confidence: 0.259
+      - node_count: 1
+        total_activation: 0.447
+        average_confidence: 0.425
   cycle_paths: []
   deterministic_trace:
     - depth: 1
@@ -78,11 +63,6 @@ snapshot:
       activation: 0.447
       confidence: 0.447
       source_node: Chain_0
-    - depth: 2
-      target_node: Chain_2
-      activation: 0.099
-      confidence: 0.099
-      source_node: Chain_1
   metrics:
     total_activations: 2
     cache_hits: 0

@@ -25,12 +25,20 @@
 //!
 //! let mut tracker = CalibrationTracker::new(10); // 10 bins
 //!
-//! // Record predictions and outcomes
-//! tracker.record_sample(Confidence::from_raw(0.7), true);  // Correct prediction
-//! tracker.record_sample(Confidence::from_raw(0.8), false); // Incorrect prediction
+//! // Record well-calibrated predictions
+//! // 75% confidence should be ~75% accurate
+//! tracker.record_sample(Confidence::from_raw(0.75), true);
+//! tracker.record_sample(Confidence::from_raw(0.75), true);
+//! tracker.record_sample(Confidence::from_raw(0.75), true);
+//! tracker.record_sample(Confidence::from_raw(0.75), false);
+//!
+//! // 50% confidence should be ~50% accurate
+//! tracker.record_sample(Confidence::from_raw(0.5), true);
+//! tracker.record_sample(Confidence::from_raw(0.5), false);
 //!
 //! // Compute calibration metrics
 //! let metrics = tracker.compute_metrics();
+//! // With well-calibrated samples, ECE should be low
 //! assert!(metrics.expected_calibration_error < 0.05); // Target: <5%
 //! ```
 

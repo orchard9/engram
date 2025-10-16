@@ -16,7 +16,7 @@ error[E0599]: no method named `build` found for struct `MemoryBuilder<engram_cor
   --> tests/compile_fail/memory_builder_invalid_sequence.rs:24:35
    |
 24 |     let _memory = partial_builder.build(); //~ ERROR: method `build` not found for this value
-   |                                   ^^^^^ method not found in `MemoryBuilder<NoEmbedding>`
+   |                                   ^^^^^ method not found in `MemoryBuilder<engram_core::memory::memory_builder_states::NoEmbedding>`
    |
    = note: the method was found for
            - `MemoryBuilder<engram_core::memory::memory_builder_states::Ready>`

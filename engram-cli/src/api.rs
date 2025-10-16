@@ -31,6 +31,7 @@ use engram_core::{
         MetricsRegistry,
         health::{HealthCheck, HealthCheckType, HealthStatus},
     },
+    query::{EvidenceSource, UncertaintySource},
     store::MemoryEvent,
 };
 
@@ -212,6 +213,25 @@ pub struct RecallQuery {
     pub to_time: Option<DateTime<Utc>>,
     /// Location context filter
     pub location: Option<String>,
+    /// Recall mode to apply (similarity, spreading, hybrid)
+    pub mode: Option<String>,
+}
+
+/// Query parameters for probabilistic recall with uncertainty tracking
+#[derive(Debug, Deserialize, ToSchema, IntoParams)]
+pub struct ProbabilisticQueryRequest {
+    /// Search query using natural language
+    pub query: Option<String>,
+    /// Vector embedding for similarity search
+    pub embedding: Option<String>, // JSON-encoded Vec<f32>
+    /// Maximum number of memories to return
+    pub max_results: Option<usize>,
+    /// Minimum confidence threshold (0.0-1.0)
+    pub threshold: Option<f32>,
+    /// Include evidence chain in response?
+    pub include_evidence: Option<bool>,
+    /// Include uncertainty sources in response?
+    pub include_uncertainty: Option<bool>,
     /// Recall mode to apply (similarity, spreading, hybrid)
     pub mode: Option<String>,
 }
@@ -466,6 +486,56 @@ pub struct SimilarPattern {
     /// Type of pattern match
     pub pattern_type: String,
     /// Explanation of pattern similarity
+    pub explanation: String,
+}
+
+/// Probabilistic query response with uncertainty tracking
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ProbabilisticQueryResponse {
+    /// Found memories with confidence scores
+    pub memories: Vec<MemoryResult>,
+    /// Confidence interval with lower/upper bounds
+    pub confidence_interval: ConfidenceIntervalInfo,
+    /// Evidence chain showing how confidence was derived
+    pub evidence_chain: Option<Vec<EvidenceInfo>>,
+    /// Sources of uncertainty in the query results
+    pub uncertainty_sources: Option<Vec<UncertaintyInfo>>,
+    /// Educational message about probabilistic reasoning
+    pub system_message: String,
+}
+
+/// Confidence interval information
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ConfidenceIntervalInfo {
+    /// Lower bound of confidence
+    pub lower: f32,
+    /// Upper bound of confidence
+    pub upper: f32,
+    /// Point estimate
+    pub point: f32,
+    /// Interval width
+    pub width: f32,
+}
+
+/// Evidence information for transparency
+#[derive(Debug, Serialize, ToSchema)]
+pub struct EvidenceInfo {
+    /// Type of evidence source
+    pub source_type: String,
+    /// Strength of evidence
+    pub strength: f32,
+    /// Description of how evidence was collected
+    pub description: String,
+}
+
+/// Uncertainty source information
+#[derive(Debug, Serialize, ToSchema)]
+pub struct UncertaintyInfo {
+    /// Type of uncertainty source
+    pub source_type: String,
+    /// Impact on confidence
+    pub impact: f32,
+    /// Explanation of uncertainty
     pub explanation: String,
 }
 
@@ -978,6 +1048,287 @@ pub async fn recall_memories(
         "Recall completed: found {} vivid and {} associated memories",
         response.memories.vivid.len(),
         response.memories.associated.len()
+    );
+
+    Ok(Json(response))
+}
+
+/// GET /api/v1/query/probabilistic - Probabilistic recall with uncertainty tracking
+#[utoipa::path(
+    get,
+    path = "/api/v1/query/probabilistic",
+    tag = "queries",
+    params(ProbabilisticQueryRequest),
+    responses(
+        (status = 200, description = "Probabilistic query results with evidence and uncertainty", body = ProbabilisticQueryResponse),
+        (status = 400, description = "Invalid query parameters", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    )
+)]
+/// # Errors
+///
+/// Returns `ApiError` if probabilistic query fails
+pub async fn probabilistic_query(
+    State(state): State<ApiState>,
+    Query(params): Query<ProbabilisticQueryRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    use engram_core::query::ProbabilisticRecall;
+
+    let start_time = std::time::Instant::now();
+
+    info!(
+        "Processing probabilistic query request with query: {:?}",
+        params.query
+    );
+
+    // Validate query
+    if params.query.is_none() && params.embedding.is_none() {
+        return Err(ApiError::InvalidInput(
+            "Probabilistic query requires either a text query or embedding vector".to_string(),
+        ));
+    }
+
+    // Parse embedding if provided
+    let embedding_vector = if let Some(emb_str) = &params.embedding {
+        match serde_json::from_str::<Vec<f32>>(emb_str) {
+            Ok(vec) => Some(vec),
+            Err(_) => {
+                return Err(ApiError::InvalidInput(
+                    "Invalid embedding format. Expected JSON array of floats.".to_string(),
+                ));
+            }
+        }
+    } else {
+        None
+    };
+
+    // Create search cue
+    let cue = if let Some(query) = &params.query {
+        CoreCue::semantic(
+            "http_prob_query".to_string(),
+            query.clone(),
+            CoreConfidence::exact(params.threshold.unwrap_or(0.5)),
+        )
+    } else if let Some(embedding) = embedding_vector {
+        let embedding_array: [f32; 768] = embedding_to_array(&embedding)?;
+        CoreCue::embedding(
+            "http_prob_embedding_query".to_string(),
+            embedding_array,
+            CoreConfidence::exact(params.threshold.unwrap_or(0.5)),
+        )
+    } else {
+        return Err(ApiError::InvalidInput(
+            "No valid search cue provided".to_string(),
+        ));
+    };
+
+    // Perform probabilistic recall
+    let prob_result = state.store.recall_probabilistic(cue);
+
+    // Convert episodes to API format
+    let memories: Vec<MemoryResult> = prob_result
+        .episodes
+        .iter()
+        .take(params.max_results.unwrap_or(10))
+        .map(|(episode, confidence)| MemoryResult {
+            id: episode.id.clone(),
+            content: episode.what.clone(),
+            confidence: ConfidenceInfo {
+                value: confidence.raw(),
+                category: if confidence.is_high() {
+                    "High"
+                } else if confidence.is_medium() {
+                    "Medium"
+                } else {
+                    "Low"
+                }
+                .to_string(),
+                reasoning: "Probabilistic recall with uncertainty tracking".to_string(),
+            },
+            activation_level: confidence.raw(),
+            similarity_score: confidence.raw(),
+            retrieval_path: Some("Probabilistic query".to_string()),
+            last_access: Some(episode.when),
+            tags: vec![],
+            memory_type: "Episodic".to_string(),
+            relevance_explanation: format!(
+                "Retrieved with {:.2} confidence (range: {:.2}-{:.2})",
+                prob_result.confidence_interval.point.raw(),
+                prob_result.confidence_interval.lower.raw(),
+                prob_result.confidence_interval.upper.raw()
+            ),
+        })
+        .collect();
+
+    // Convert confidence interval
+    let confidence_interval = ConfidenceIntervalInfo {
+        lower: prob_result.confidence_interval.lower.raw(),
+        upper: prob_result.confidence_interval.upper.raw(),
+        point: prob_result.confidence_interval.point.raw(),
+        width: prob_result.confidence_interval.width,
+    };
+
+    // Convert evidence chain if requested
+    let evidence_chain = if params.include_evidence.unwrap_or(false) {
+        Some(
+            prob_result
+                .evidence_chain
+                .iter()
+                .map(|evidence| {
+                    let (source_type, description) = match &evidence.source {
+                        EvidenceSource::SpreadingActivation {
+                            source_episode,
+                            activation_level,
+                            path_length,
+                        } => (
+                            "spreading_activation".to_string(),
+                            format!(
+                                "Spreading activation from episode '{}' with {} activation over {} hops",
+                                source_episode,
+                                activation_level.value(),
+                                path_length
+                            ),
+                        ),
+                        EvidenceSource::TemporalDecay {
+                            original_confidence,
+                            time_elapsed,
+                            decay_rate,
+                        } => (
+                            "temporal_decay".to_string(),
+                            format!(
+                                "Temporal decay from {:.2} confidence over {:.0}s with {:.4} decay rate",
+                                original_confidence.raw(),
+                                time_elapsed.as_secs_f32(),
+                                decay_rate
+                            ),
+                        ),
+                        EvidenceSource::DirectMatch {
+                            cue_id,
+                            similarity_score,
+                            match_type,
+                        } => (
+                            "direct_match".to_string(),
+                            format!(
+                                "{match_type:?} match from cue '{cue_id}' with {similarity_score:.2} similarity"
+                            ),
+                        ),
+                        EvidenceSource::VectorSimilarity(vector_ev) => (
+                            "vector_similarity".to_string(),
+                            format!(
+                                "Vector similarity with distance {:.4} and index confidence {:.2}",
+                                vector_ev.result_distance,
+                                vector_ev.index_confidence.raw()
+                            ),
+                        ),
+                    };
+
+                    EvidenceInfo {
+                        source_type,
+                        strength: evidence.strength.raw(),
+                        description,
+                    }
+                })
+                .collect(),
+        )
+    } else {
+        None
+    };
+
+    // Convert uncertainty sources if requested
+    let uncertainty_sources = if params.include_uncertainty.unwrap_or(false) {
+        Some(
+            prob_result
+                .uncertainty_sources
+                .iter()
+                .map(|source| {
+                    let (source_type, impact, explanation) = match source {
+                        UncertaintySource::SystemPressure {
+                            pressure_level,
+                            effect_on_confidence,
+                        } => (
+                            "system_pressure".to_string(),
+                            *effect_on_confidence,
+                            format!(
+                                "System memory pressure at {:.1}% affecting confidence by {:.2}",
+                                pressure_level * 100.0,
+                                effect_on_confidence
+                            ),
+                        ),
+                        UncertaintySource::SpreadingActivationNoise {
+                            activation_variance,
+                            path_diversity,
+                        } => (
+                            "spreading_activation_noise".to_string(),
+                            *activation_variance,
+                            format!(
+                                "Activation spreading variance {activation_variance:.3} with path diversity {path_diversity:.3}"
+                            ),
+                        ),
+                        UncertaintySource::TemporalDecayUnknown {
+                            time_since_encoding,
+                            decay_model_uncertainty,
+                        } => (
+                            "temporal_decay_unknown".to_string(),
+                            *decay_model_uncertainty,
+                            format!(
+                                "Decay model uncertainty {:.2} for memories aged {:.0}s",
+                                decay_model_uncertainty,
+                                time_since_encoding.as_secs_f32()
+                            ),
+                        ),
+                        UncertaintySource::MeasurementError {
+                            error_magnitude,
+                            confidence_degradation,
+                        } => (
+                            "measurement_error".to_string(),
+                            *confidence_degradation,
+                            format!(
+                                "Measurement error magnitude {error_magnitude:.3} causing {confidence_degradation:.2} confidence degradation"
+                            ),
+                        ),
+                    };
+
+                    UncertaintyInfo {
+                        source_type,
+                        impact,
+                        explanation,
+                    }
+                })
+                .collect(),
+        )
+    } else {
+        None
+    };
+
+    let processing_time = u64::try_from(start_time.elapsed().as_millis()).unwrap_or(u64::MAX);
+
+    // Extract values before moving confidence_interval
+    let ci_lower = confidence_interval.lower;
+    let ci_upper = confidence_interval.upper;
+    let ci_point = confidence_interval.point;
+    let ci_width = confidence_interval.width;
+
+    let response = ProbabilisticQueryResponse {
+        memories,
+        confidence_interval,
+        evidence_chain,
+        uncertainty_sources,
+        system_message: format!(
+            "Probabilistic query completed in {}ms with confidence interval [{:.2}, {:.2}] (point: {:.2}). \
+             Uncertainty quantified from {} sources.",
+            processing_time,
+            ci_lower,
+            ci_upper,
+            ci_point,
+            prob_result.uncertainty_sources.len()
+        ),
+    };
+
+    info!(
+        "Probabilistic query completed: {} memories with confidence {:.2} ± {:.2}",
+        response.memories.len(),
+        ci_point,
+        ci_width / 2.0
     );
 
     Ok(Json(response))
@@ -2390,6 +2741,8 @@ pub fn create_api_routes() -> Router<ApiState> {
         .route("/api/v1/memories/remember", post(remember_memory))
         .route("/api/v1/memories/recall", get(recall_memories))
         .route("/api/v1/memories/recognize", post(recognize_pattern))
+        // Probabilistic query operations
+        .route("/api/v1/query/probabilistic", get(probabilistic_query))
         // REST-style endpoints for CLI compatibility
         .route("/api/v1/memories", post(create_memory_rest))
         .route("/api/v1/memories/{id}", get(get_memory_by_id))

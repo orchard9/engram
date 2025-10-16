@@ -6,3 +6,4 @@
 # everyone who runs the test benefits from these saved cases.
 cc 9448451ece77da7ab1c71c6faa0a4c44cb816a067f6c29c342f7a5982a4c681c # shrinks to scenario = ErdosRenyi { node_count: 4, edge_probability: 0.4, seed: 2217097008157717084 }
 cc a52b3e60cd4e279e54870238a68d833f58bf9eac6809568ded708bf3eadf58f9 # shrinks to scenario = ErdosRenyi { node_count: 4, edge_probability: 0.5, seed: 9034627953199725491 }
+cc e8a3e5152a233907ecd5c2e928587022614fde30c391c516dc3fdd3728216718 # shrinks to scenario = ErdosRenyi { node_count: 15, edge_probability: 0.8, seed: 13660196675033953520 }

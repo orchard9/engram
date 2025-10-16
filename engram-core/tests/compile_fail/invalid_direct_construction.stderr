@@ -39,3 +39,15 @@ help: you might have meant to use an associated function to build this type
 23 -     };
 11 +     let _memory = Memory::from_episode(_, _);
    |
+
+error[E0063]: missing fields `decay_function` and `embedding_provenance` in initializer of `Episode`
+  --> tests/compile_fail/invalid_direct_construction.rs:26:20
+   |
+26 |     let _episode = Episode {
+   |                    ^^^^^^^ missing `decay_function` and `embedding_provenance`
+
+error[E0063]: missing field `embedding_provenance` in initializer of `Cue`
+  --> tests/compile_fail/invalid_direct_construction.rs:45:16
+   |
+45 |     let _cue = Cue {
+   |                ^^^ missing `embedding_provenance`
