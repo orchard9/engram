@@ -36,6 +36,13 @@ pub mod lexicon;
 pub mod analogy;
 pub mod figurative;
 
+// Probabilistic query executor (Milestone 5 Task 001)
+pub mod executor;
+
+// Evidence aggregation with dependency tracking (Milestone 5 Task 002)
+pub mod dependency_graph;
+pub mod evidence_aggregator;
+
 // Conditional compilation for SMT verification features
 #[cfg(feature = "probabilistic_queries")]
 pub mod evidence;
