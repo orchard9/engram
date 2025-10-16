@@ -43,6 +43,9 @@ pub mod executor;
 pub mod dependency_graph;
 pub mod evidence_aggregator;
 
+// Uncertainty tracking system (Milestone 5 Task 003)
+pub mod uncertainty_tracker;
+
 // Conditional compilation for SMT verification features
 #[cfg(feature = "probabilistic_queries")]
 pub mod evidence;
