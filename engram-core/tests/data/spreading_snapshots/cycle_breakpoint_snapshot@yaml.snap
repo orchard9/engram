@@ -59,18 +59,30 @@ snapshot:
       storage_tier: Hot
       flags: 0b00000000
     - memory_id: CycleBreakpoint_1
-      activation: 0.372
-      confidence: 0.354
+      activation: 0.609
+      confidence: 0.579
       hop_count: 1
       storage_tier: Warm
       flags: 0b00000000
     - memory_id: CycleBreakpoint_2
-      activation: 0.069
-      confidence: 0.065
+      activation: 0.329
+      confidence: 0.312
       hop_count: 1
       storage_tier: Warm
       flags: 0b00000000
     - memory_id: CycleBreakpoint_3
+      activation: 0.163
+      confidence: 0.146
+      hop_count: 1
+      storage_tier: Cold
+      flags: 0b00000000
+    - memory_id: CycleBreakpoint_4
+      activation: 0
+      confidence: 0
+      hop_count: 0
+      storage_tier: Cold
+      flags: 0b00000000
+    - memory_id: CycleBreakpoint_break
       activation: 0
       confidence: 0
       hop_count: 0
@@ -78,31 +90,36 @@ snapshot:
       flags: 0b00000000
   tier_summaries:
     - - Cold
-      - node_count: 1
-        total_activation: 0
-        average_confidence: 0
+      - node_count: 3
+        total_activation: 0.163
+        average_confidence: 0.049
     - - Hot
       - node_count: 1
         total_activation: 1
         average_confidence: 1
     - - Warm
       - node_count: 2
-        total_activation: 0.441
-        average_confidence: 0.21
+        total_activation: 0.938
+        average_confidence: 0.445
   cycle_paths: []
   deterministic_trace:
     - depth: 1
       target_node: CycleBreakpoint_1
-      activation: 0.372
-      confidence: 0.372
+      activation: 0.609
+      confidence: 0.609
       source_node: CycleBreakpoint_0
     - depth: 2
       target_node: CycleBreakpoint_2
-      activation: 0.069
-      confidence: 0.069
+      activation: 0.329
+      confidence: 0.329
       source_node: CycleBreakpoint_1
+    - depth: 3
+      target_node: CycleBreakpoint_3
+      activation: 0.163
+      confidence: 0.163
+      source_node: CycleBreakpoint_2
   metrics:
-    total_activations: 2
+    total_activations: 3
     cache_hits: 0
     cache_misses: 0
     average_latency_ns: 0

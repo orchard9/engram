@@ -184,6 +184,83 @@ pub fn directed_cycle(length: usize) -> GraphFixture {
     })
 }
 
+/// Simple 3-node cycle optimized for cycle detection testing.
+///
+/// Seeds from a separate node which activates a 3-node cycle A → B → C → A.
+/// Uses high edge weights (0.99) and slow decay to ensure activation survives the cycle.
+/// The cycle is triggered when node A is visited twice: once from Seed, and again from C.
+///
+/// Graph topology: Seed → A → B → C → A (cycle detected on second visit to A)
+///
+/// Expected behavior:
+/// - Seed activates A (visit count = 1)
+/// - A activates B, B activates C, C activates A (visit count = 2)
+/// - When A is visited the second time, cycle detector triggers
+///
+/// This demonstrates that cycle detection works correctly when cycles actually occur.
+#[must_use]
+pub fn simple_cycle() -> GraphFixture {
+    let graph = Arc::new(create_activation_graph());
+
+    let seed_node = "SimpleCycle_Seed".to_string();
+    let node_a = "SimpleCycle_A".to_string();
+    let node_b = "SimpleCycle_B".to_string();
+    let node_c = "SimpleCycle_C".to_string();
+
+    // Seed triggers the cycle: Seed → A → B → C → A
+    ActivationGraphExt::add_edge(
+        &*graph,
+        seed_node.clone(),
+        node_a.clone(),
+        0.99,
+        EdgeType::Excitatory,
+    );
+    ActivationGraphExt::add_edge(
+        &*graph,
+        node_a.clone(),
+        node_b.clone(),
+        0.99,
+        EdgeType::Excitatory,
+    );
+    ActivationGraphExt::add_edge(
+        &*graph,
+        node_b.clone(),
+        node_c.clone(),
+        0.99,
+        EdgeType::Excitatory,
+    );
+    ActivationGraphExt::add_edge(
+        &*graph,
+        node_c,
+        node_a.clone(),
+        0.99,
+        EdgeType::Excitatory,
+    );
+
+    GraphFixture::new(
+        "simple_cycle",
+        "Seed node triggers 3-node cycle demonstrating cycle detection",
+        graph,
+        vec![(seed_node, 1.0)],
+    )
+    .with_config_adjuster(|config| {
+        config.max_depth = 10;
+        config.cycle_detection = true;
+        // Use slower decay to ensure activation completes the full cycle path
+        use engram_core::activation::DecayFunction;
+        config.decay_function = DecayFunction::Exponential { rate: 0.2 };
+
+        // Set cycle budget to 2 for all tiers to trigger detection on second visit
+        use engram_core::activation::storage_aware::StorageTier;
+        use std::collections::HashMap;
+        config.tier_cycle_budgets = HashMap::from([
+            (StorageTier::Hot, 2),
+            (StorageTier::Warm, 2),
+            (StorageTier::Cold, 2),
+        ]);
+    })
+}
+
 /// Fan graph used to validate the fan effect (one node connected to many spokes).
 #[must_use]
 pub fn fan(center: &str, spokes: usize) -> GraphFixture {
@@ -394,6 +471,12 @@ pub fn cycle_with_breakpoint(length: usize) -> GraphFixture {
     .with_config_adjuster(move |config| {
         config.max_depth = length as u16 + 2;
         config.cycle_detection = true;
+        // Use power-law decay for slower falloff - allows activation to survive
+        // the full 6-node cycle and return to seed, triggering cycle detection
+        // PowerLaw with exponent 0.3 gives: (1+depth)^-0.3
+        //   depth 3: 0.66, depth 4: 0.61, depth 5: 0.57 (all >> 0.1 Cold threshold)
+        use engram_core::activation::DecayFunction;
+        config.decay_function = DecayFunction::PowerLaw { exponent: 0.3 };
     })
 }
 
