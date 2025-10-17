@@ -9,11 +9,13 @@ When running locally: `http://localhost:7432`
 ## Quick Reference
 
 ### Memory Operations
+
 - `POST /api/v1/memories/remember` - Store a memory
 - `GET /api/v1/memories/recall` - Search and recall memories
 - `POST /api/v1/memories/recognize` - Pattern recognition
 
 ### System Endpoints
+
 - `GET /health` - Simple health check
 - `GET /api/v1/system/health` - Detailed system health
 - `GET /api/v1/system/introspect` - System statistics
@@ -30,6 +32,7 @@ Currently no authentication is required for local development. Production deploy
 ## Error Handling
 
 All errors return JSON with a consistent structure:
+
 ```json
 {
   "error": "description of the error",
@@ -41,6 +44,7 @@ All errors return JSON with a consistent structure:
 ## Response Format
 
 Successful responses include cognitive context and system messages:
+
 ```json
 {
   "data": {},

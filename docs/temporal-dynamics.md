@@ -21,18 +21,21 @@ Unlike traditional databases with background vacuum processes, Engram computes d
 Based on Complementary Learning Systems (CLS) theory (McClelland, McNaughton & O'Reilly, 1995):
 
 #### Hippocampal System (Fast Decay)
+
 - **Purpose**: New episodic memories with high detail
 - **Decay function**: Exponential `R(t) = e^(-t/τ)`
 - **Time scale**: Hours to days (τ ≈ 1.96 hours from Ebbinghaus replication)
 - **When used**: New memories, access_count < consolidation_threshold
 
 #### Neocortical System (Slow Decay)
+
 - **Purpose**: Consolidated semantic knowledge
 - **Decay function**: Power-law `R(t) = (1 + t)^(-α)`
 - **Time scale**: Months to years (α ≈ 0.18 from Bahrick permastore research)
 - **When used**: Frequently accessed memories, access_count ≥ threshold
 
 #### Consolidation Mechanism
+
 Memories automatically transition from hippocampal to neocortical decay after repeated retrieval (default: 3 accesses). This models systems consolidation observed in neuroscience where memories transfer from hippocampus to neocortex over time.
 
 ### 3. Configurable Per-Memory
@@ -98,21 +101,25 @@ let decayed_confidence = original_confidence * retention;  // e.g., 0.9 * 0.045 
 All decay functions validated against published research:
 
 ### Ebbinghaus (1885, 2015 Replication)
+
 - **Finding**: Exponential forgetting curve
 - **Replication**: Murre & Dros (2015) confirmed with modern methods
 - **Engram tau**: 1.96 hours matches replication data within 5%
 
 ### Bahrick (1984, 2023 Extensions)
+
 - **Finding**: Permastore memories follow power-law decay over 50+ years
 - **Long-term retention**: Spanish language skills show (1+t)^(-α) pattern
 - **Engram alpha**: 0.18 matches longitudinal data
 
 ### Wickelgren (1974, 2024 Updates)
+
 - **Finding**: Power-law better fit than exponential for long retention intervals
 - **Mathematical validation**: Confirmed across multiple memory domains
 - **Engram implementation**: Switches to power-law for consolidated memories
 
 ### SuperMemo Algorithm SM-18 (2024)
+
 - **Finding**: Two-component model with adaptive parameters
 - **Spaced repetition**: Retrieval strengthens memories (testing effect)
 - **Engram consolidation**: Threshold-based transition models this effect
@@ -130,6 +137,7 @@ All decay functions validated against published research:
 ### Why Lazy Evaluation?
 
 **Advantages**:
+
 - Avoids write amplification from frequent confidence updates
 - Enables deterministic, reproducible results for testing
 - Supports time-travel queries ("what was confidence at time T?")
@@ -137,30 +145,35 @@ All decay functions validated against published research:
 - No race conditions between decay and retrieval
 
 **Trade-offs**:
+
 - Small CPU cost during recall (mitigated by <100μs target)
 - Requires timestamp tracking (16 bytes per memory)
 
 ### Why Multiple Decay Functions?
 
 **Advantages**:
+
 - Different memory types have different natural forgetting patterns
 - Matches neuroscience evidence for dual hippocampal/neocortical systems
 - Allows domain-specific tuning (chat logs vs knowledge base)
 - Supports user preferences and personalization
 
 **Trade-offs**:
+
 - API complexity (4 decay functions to understand)
 - Configuration decisions (which function for which use case?)
 
 ### Why Track Access Count?
 
 **Advantages**:
+
 - Models spaced repetition effect from cognitive psychology
 - Triggers automatic consolidation (hippocampal → neocortical)
 - Enables adaptive decay based on usage patterns
 - Matches human memory: frequently retrieved memories last longer
 
 **Trade-offs**:
+
 - Storage cost (8 bytes per memory)
 - Potential write amplification if persisting counts frequently
 
@@ -212,16 +225,19 @@ All decay functions validated against published research:
 ## Integration Points
 
 ### With MemoryStore
+
 - **Access tracking**: Store updates `last_recall` and `recall_count` during retrieval
 - **Decay override**: Episode can specify `decay_function` field
 - **Lazy persistence**: Access counts persisted on checkpoint, not every retrieval
 
 ### With CognitiveRecall
+
 - **Pipeline integration**: Decay applied during result ranking
 - **Optional**: Set via `CognitiveRecallBuilder::decay_system()`
 - **Graceful degradation**: If no decay system, confidence unchanged
 
 ### With Confidence System
+
 - **Min threshold**: Decayed confidence clamped to `DecayConfig::min_confidence`
 - **Individual differences**: Calibration applied after decay computation
 - **Probabilistic**: Decay integrates with existing confidence propagation

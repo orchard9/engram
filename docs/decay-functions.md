@@ -20,6 +20,7 @@ R(t) = e^(-t/τ)
 ```
 
 Where:
+
 - `R(t)` = retention at time t (0.0 to 1.0)
 - `t` = elapsed time in hours
 - `τ` (tau) = time constant in hours
@@ -71,10 +72,12 @@ Determines how quickly memories decay:
 ### Psychological Basis
 
 **Ebbinghaus (1885)**:
+
 - Original forgetting curve from nonsense syllable experiments
 - Found exponential drop: 58% at 20 min, 44% at 1 hr, 28% at 9 hrs
 
 **Murre & Dros (2015)**:
+
 - Modern replication with 200+ participants
 - Confirmed exponential pattern: τ = 1.96 hours ± 0.3
 - Best fit for initial hours to days
@@ -96,6 +99,7 @@ R(t) = (1 + t)^(-β)
 ```
 
 Where:
+
 - `R(t)` = retention at time t (0.0 to 1.0)
 - `t` = elapsed time in hours
 - `β` (beta) = decay exponent
@@ -151,16 +155,19 @@ Controls decay speed across all time scales:
 ### Psychological Basis
 
 **Wickelgren (1974)**:
+
 - Proposed power-law as alternative to exponential
 - Better fit for retention intervals > 1 day
 - Mathematical framework for long-term forgetting
 
 **Bahrick (1984)**:
+
 - 50-year longitudinal study of Spanish language
 - Found power-law with β ≈ 0.15-0.20
 - Coined term "permastore" for very slow decay
 
 **Wixted & Ebbesen (1991)**:
+
 - Comprehensive comparison of exponential vs power-law
 - Power-law superior for retention intervals > 24 hours
 - Exponential better for < 24 hours
@@ -246,17 +253,20 @@ let retention_2 = e^(-6.0 / 10.0) = 0.549  // 6 hours, τ=10h
 ### Psychological Basis
 
 **McClelland, McNaughton & O'Reilly (1995)**:
+
 - Complementary Learning Systems (CLS) theory
 - Hippocampus: fast learning, pattern separation
 - Neocortex: slow learning, schema extraction
 - Systems consolidation: gradual transfer over time
 
 **Squire & Alvarez (1995)**:
+
 - Retrograde amnesia gradients support dual systems
 - Recent memories (hippocampal) more vulnerable
 - Remote memories (neocortical) more resilient
 
 **Roediger & Karpicke (2006)**:
+
 - Testing effect: retrieval strengthens memories
 - Repeated testing → better long-term retention
 - Models consolidation through practice
@@ -304,18 +314,21 @@ let config = DecayConfigBuilder::new()
 #### short_term_tau (τ)
 
 Controls exponential decay before transition:
+
 - **Typical range**: 0.5 - 2.0 hours
 - **Default**: 0.8 hours (matches Ebbinghaus initial drop)
 
 #### long_term_beta (β)
 
 Controls power-law decay after transition:
+
 - **Typical range**: 0.15 - 0.35
 - **Default**: 0.25 (balanced long-term forgetting)
 
 #### transition_point (seconds)
 
 When to switch from exponential to power-law:
+
 - **Typical values**: 3600 (1h), 86400 (24h), 604800 (1 week)
 - **Default**: 86400 seconds (24 hours)
 - **Rationale**: Ebbinghaus data shows inflection around 24h
@@ -336,16 +349,19 @@ let retention_long = (1 + 48)^(-0.25) = 0.461  // 46.1% retention
 ### Psychological Basis
 
 **Ebbinghaus (1885)**:
+
 - Original data shows two regimes
 - Fast initial drop (first hours)
 - Slower long-term decline (days to weeks)
 
 **Rubin & Wenzel (1996)**:
+
 - Multi-process forgetting theory
 - Different mechanisms at different time scales
 - Hybrid model captures both processes
 
 **Wixted (2004)**:
+
 - Reviewed 100+ years of forgetting curve data
 - Concluded: exponential short-term, power-law long-term
 - Transition typically 1-3 days post-encoding

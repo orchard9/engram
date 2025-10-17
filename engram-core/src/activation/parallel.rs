@@ -192,8 +192,9 @@ impl PhaseBarrier {
             drop(state);
             self.condvar.notify_all();
         } else {
-            let timeout_secs = (state.worker_count as u64 * 2).max(5);
-            let timeout = Duration::from_secs(timeout_secs);
+            // Reduced timeout: 2 seconds max to prevent cascading delays
+            // This is sufficient for workers to sync between phases
+            let timeout = Duration::from_secs(2);
             let start = Instant::now();
 
             while state.phase_counter == current_phase && state.enabled {
@@ -231,8 +232,9 @@ impl PhaseBarrier {
             drop(state);
             self.condvar.notify_all();
         } else {
-            let timeout_secs = (state.worker_count as u64 * 2).max(5);
-            let timeout = Duration::from_secs(timeout_secs);
+            // Reduced timeout: 2 seconds max to prevent cascading delays
+            // This is sufficient for workers to sync between phases
+            let timeout = Duration::from_secs(2);
             let start = Instant::now();
             let mut guard = state;
 
@@ -966,13 +968,19 @@ impl ParallelSpreadingEngine {
 
     /// Wait for all workers to complete processing
     fn wait_for_completion(&self) -> ActivationResult<()> {
-        // Adaptive timeout based on available system parallelism
-        // Base: 30s + 10s per available core (accounts for contention)
+        const MAX_POLL_INTERVAL_MS: u64 = 50;
+
+        // Reasonable timeout: 10 seconds base + 2 seconds per core
+        // This is sufficient for even very large graphs while preventing indefinite hangs
         let available_parallelism = std::thread::available_parallelism()
             .map(std::num::NonZero::get)
             .unwrap_or(4);
-        let timeout = Duration::from_secs(30 + (available_parallelism as u64 * 10));
+        let timeout = Duration::from_secs(10 + (available_parallelism as u64 * 2));
         let start = Instant::now();
+
+        // Use exponential backoff polling to reduce CPU usage
+        let mut poll_interval_ms = 1u64;
+
         while start.elapsed() < timeout {
             if self.scheduler.is_idle() {
                 // Disable phase barrier to release any waiting workers
@@ -980,15 +988,18 @@ impl ParallelSpreadingEngine {
                 break;
             }
 
-            thread::sleep(Duration::from_millis(1));
+            // Exponential backoff: 1ms -> 2ms -> 4ms -> ... -> 50ms
+            thread::sleep(Duration::from_millis(poll_interval_ms));
+            poll_interval_ms = (poll_interval_ms * 2).min(MAX_POLL_INTERVAL_MS);
         }
 
         if start.elapsed() >= timeout && !self.scheduler.is_idle() {
             // Disable barrier even on timeout to prevent hanging
             self.phase_barrier.disable();
-            return Err(ActivationError::ThreadingError(
-                "Timeout waiting for spreading completion".to_string(),
-            ));
+            return Err(ActivationError::ThreadingError(format!(
+                "Timeout waiting for spreading completion after {}s",
+                start.elapsed().as_secs()
+            )));
         }
 
         Ok(())
@@ -1570,7 +1581,6 @@ mod tests {
 
     #[test]
     #[serial(parallel_engine)]
-    #[ignore = "Flaky: Timeout waiting for spreading completion under system load. Root cause: Threading error in parallel spreading engine, same regression as property tests and validation tests. Needs investigation in engram-core/src/activation/parallel.rs wait_for_completion(). Run with: cargo test --lib activation::parallel::tests::test_metrics_tracking -- --ignored --nocapture"]
     fn test_metrics_tracking() {
         let mut config = fast_parallel_config();
         config.enable_metrics = true;

@@ -22,6 +22,7 @@ cargo build
 ```
 
 You should see:
+
 ```
 Engram Server Health Check
 ═══════════════════════════════════════

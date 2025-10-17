@@ -5,17 +5,20 @@ Engram's testing strategy follows a multi-layered approach designed to validate 
 ## Testing Layers
 
 ### 1. Unit Tests (`cargo test`)
+
 **Location:** `src/**/*.rs` (inline module tests)
 
 **Purpose:** Validate individual component correctness
 
 **Characteristics:**
+
 - Fast execution (< 1 second total)
 - Deterministic results
 - Pure function validation
 - Edge case coverage
 
 **Example:**
+
 ```rust
 #[cfg(test)]
 mod tests {
@@ -28,17 +31,20 @@ mod tests {
 ```
 
 ### 2. Integration Tests (`cargo test --test <name>`)
+
 **Location:** `engram-core/tests/*.rs`, `engram-cli/tests/*.rs`
 
 **Purpose:** Validate component interactions
 
 **Characteristics:**
+
 - Multiple components working together
 - Realistic data flows
 - API contract validation
 - Deterministic seeds for reproducibility
 
 **Example:**
+
 ```rust
 #[tokio::test]
 async fn test_store_and_recall_integration() {
@@ -50,22 +56,26 @@ async fn test_store_and_recall_integration() {
 ```
 
 **Long-running integration tests:**
+
 - Use `#[ignore]` attribute
 - Run with `cargo test --ignored`
 - Typically simulate server lifecycle (seconds to minutes)
 
 ### 3. Property-Based Tests (`cargo test`)
+
 **Location:** `engram-core/tests/confidence_property_tests.rs`
 
 **Purpose:** Validate probabilistic invariants
 
 **Characteristics:**
+
 - Randomized inputs
 - Invariant checking
 - Shrinking on failure
 - Coverage of input space
 
 **Example:**
+
 ```rust
 proptest! {
     #[test]
@@ -77,16 +87,19 @@ proptest! {
 ```
 
 ### 4. Compile-Time Tests
+
 **Location:** `engram-core/tests/compile_fail/*.rs`, `engram-core/tests/compile_pass/*.rs`
 
 **Purpose:** Validate type-state pattern and API ergonomics
 
 **Characteristics:**
+
 - Ensures invalid code doesn't compile
 - Documents API usage patterns
 - Zero runtime cost validation
 
 **Example:**
+
 ```rust
 // compile_fail/memory_builder_missing_confidence.rs
 // Should fail: confidence is required
@@ -97,17 +110,20 @@ let memory = MemoryBuilder::new()
 ```
 
 ### 5. Psychology Validation Tests (`cargo test --test psychology --ignored`)
+
 **Location:** `engram-core/tests/psychology/*.rs`
 
 **Purpose:** Validate against empirical psychology research (Milestone 12)
 
 **Characteristics:**
+
 - Long-running (hours to days)
 - Empirical data baselines from published research
 - Tolerance-based validation (typically ±5%)
 - Citations for all empirical baselines
 
 **Example:**
+
 ```rust
 #[tokio::test]
 #[ignore] // Simulates multi-day decay
@@ -120,6 +136,7 @@ async fn test_ebbinghaus_forgetting_curve() {
 ```
 
 **Required validations:**
+
 - DRM paradigm (false memory formation)
 - Proactive/retroactive interference
 - Forgetting curves (Ebbinghaus replication)
@@ -127,17 +144,20 @@ async fn test_ebbinghaus_forgetting_curve() {
 - Memory consolidation patterns
 
 ### 6. Benchmarks (`cargo bench`)
+
 **Location:** `engram-core/benches/**/*.rs`
 
 **Purpose:** Performance validation and regression detection
 
 **Characteristics:**
+
 - Criterion.rs framework
 - Statistical analysis
 - Comparison against baseline
 - Tracks allocations and time
 
 **Example:**
+
 ```rust
 fn benchmark_recall(c: &mut Criterion) {
     c.bench_function("recall_k10", |b| {
@@ -147,17 +167,20 @@ fn benchmark_recall(c: &mut Criterion) {
 ```
 
 **Performance requirements:**
+
 - All merges require benchmark comparison
 - P50, P95, P99 latency tracking
 - Allocation count monitoring
 - Flamegraphs for hot paths
 
 ### 7. Cognitive Workflow Scenarios (`cargo run --example scenarios/*`)
+
 **Location:** `engram-cli/examples/scenarios/*.rs`
 
 **Purpose:** End-to-end validation of complete workflows
 
 **Characteristics:**
+
 - Multi-phase operations
 - Human-readable output
 - Performance expectations documented
@@ -165,6 +188,7 @@ fn benchmark_recall(c: &mut Criterion) {
 - Not part of `cargo test`
 
 **Example:**
+
 ```rust
 // examples/scenarios/cognitive_workflow.rs
 fn main() {
@@ -179,11 +203,13 @@ fn main() {
 ```
 
 ### 8. Soak Tests (`cargo run --example soak/*`)
+
 **Location:** `engram-cli/examples/soak/*.rs`
 
 **Purpose:** Long-running stability and resource validation
 
 **Characteristics:**
+
 - Hours to days of execution
 - Memory leak detection
 - Performance degradation monitoring
@@ -191,6 +217,7 @@ fn main() {
 - Not part of `cargo test`
 
 **Example:**
+
 ```rust
 // examples/soak/memory_pool_soak.rs
 const ITERATIONS: usize = 86400; // 24 hours
@@ -203,17 +230,20 @@ for i in 0..ITERATIONS {
 ```
 
 ### 9. Differential Testing (`cargo test --test differential_testing`)
+
 **Location:** `engram-core/benches/milestone_1/differential_testing.rs`
 
 **Purpose:** Validate Rust and Zig implementations produce identical results (Milestone 9)
 
 **Characteristics:**
+
 - Bit-identical output validation
 - Million-operation traces
 - Cross-language correctness
 - Performance comparison
 
 **Example:**
+
 ```rust
 #[test]
 fn test_rust_zig_equivalence() {
@@ -228,11 +258,13 @@ fn test_rust_zig_equivalence() {
 ### Feature Flags
 
 **`long_running_tests`** - Enable multi-hour validation tests:
+
 ```bash
 cargo test --features long_running_tests
 ```
 
 **`monitoring`** - Enable metrics collection (default):
+
 ```bash
 cargo test  # Monitoring enabled
 cargo test --no-default-features  # Minimal build without monitoring
@@ -300,21 +332,24 @@ Each milestone specifies validation criteria:
 
 ## Continuous Integration
 
-### Quick Tests (every commit):
+### Quick Tests (every commit)
+
 ```bash
 cargo test --workspace
 cargo clippy --all-targets
 cargo fmt -- --check
 ```
 
-### Nightly Tests:
+### Nightly Tests
+
 ```bash
 cargo test --ignored
 cargo bench
 cargo run --example memory_pool_soak
 ```
 
-### Weekly Tests:
+### Weekly Tests
+
 ```bash
 cargo test --features long_running_tests --ignored
 # 24-hour soak tests
@@ -324,7 +359,8 @@ cargo test --features long_running_tests --ignored
 
 ## Debugging Failed Tests
 
-### For unit/integration test failures:
+### For unit/integration test failures
+
 ```bash
 # Verbose output
 cargo test -- --nocapture
@@ -336,14 +372,16 @@ cargo test test_name -- --exact --nocapture
 RUST_BACKTRACE=1 cargo test test_name
 ```
 
-### For psychology test failures:
+### For psychology test failures
+
 1. Check tolerance levels (5% from Milestone 4)
 2. Verify empirical baseline is correct
 3. Check for randomness/seed issues
 4. Compare against cited research
 5. Document deviations in test output
 
-### For soak test failures:
+### For soak test failures
+
 1. Check for memory leaks with valgrind
 2. Monitor resource usage (htop, Activity Monitor)
 3. Review snapshot outputs for anomalies

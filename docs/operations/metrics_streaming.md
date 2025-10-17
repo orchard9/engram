@@ -3,11 +3,13 @@
 > **Status**: Canonical live payloads updated for adaptive batching telemetry on 2025-10-15 – see `docs/assets/metrics/2025-10-15-adaptive-update/` for HTTP snapshot, SSE stream, and structured log samples (the 2025-10-10 capture remains for historical comparison).
 
 ## Overview
+
 - Engram now ships a streaming-first observability pipeline; the legacy Prometheus exporter is deprecated.
 - Operators consume metrics through three surfaces: HTTP `GET /metrics`, gRPC `metrics_snapshot_json`, and structured logs tagged `engram::metrics::stream`.
 - Current payloads expose activation pool health (available/in-flight/high-water, hit rate, utilization). Adaptive batching and hardware counters will land in upcoming milestones; placeholders are noted below.
 
 ## Streaming Snapshot API
+
 - The HTTP endpoint returns a JSON document with three top-level keys:
   - `schema_version`: semantic version string (e.g., "1.0.0") for backward compatibility tracking. Always check this field before parsing to ensure compatibility with your monitoring tools.
   - `snapshot`: object containing `schema_version` plus four rolling windows (`one_second`, `ten_seconds`, `one_minute`, `five_minutes`). Each window is keyed by metric name (e.g., `activation_pool_available_records`) with per-metric aggregates including `count`, `sum`, `mean`, `min`, `max`, `p50`, `p90`, and `p99`.
@@ -25,6 +27,7 @@
 - Long-run references: `docs/assets/metrics/2025-10-12-longrun/start_snapshot.json`, `mid_snapshot.json`, `end_snapshot.json` (synthetic soak using `generate_pool_soak_metrics`; augment with future live soak captures once the batch harness is stable).
 - Schema changes: see `docs/metrics-schema-changelog.md` for version history and migration guides.
 - Curl example (assumes `engram start` is serving on localhost):
+
   ```bash
   HTTP_PORT=3928 # replace with the port your daemon is listening on
   curl --silent "http://127.0.0.1:${HTTP_PORT}/metrics" |
@@ -32,6 +35,7 @@
   ```
 
 ## Structured Log Consumption
+
 - Logs tagged `engram::metrics::stream` emit the same snapshot payload the HTTP endpoint returns. Tail them with `rg --json` or `jq` to monitor pool behavior without polling HTTP.
 - Suggested workflow: `journalctl -u engram --follow | rg 'metrics::stream'` and pipe into `jq '.snapshot.one_second.activation_pool_available_records.mean'` for quick trend checks. Add TODO once final jq script is agreed.
 - Rotation cadence: logs adhere to standard CLI retention (7d rolling); increase retention if you rely on log-based dashboards.
@@ -40,11 +44,13 @@
 - Long-run log sample: `docs/assets/metrics/2025-10-12-longrun/stream.log` (synthetic soak). Replace with live CLI output after the 10‑minute soak validation.
 
 ## Reset Cadence & Expectations
+
 - Clarify when engine triggers `SpreadingMetrics::reset` (before each spread, on shutdown).
 - Add checklist for confirming zeroed gauges after maintenance.
 - Reference regression tests (`engram-core/tests/metrics_reset.rs`, `engram-cli/tests/http_api_tests.rs`).
 
 ## Schema Versioning & Compatibility
+
 - **Current version**: 1.0.0 (as of 2025-10-13)
 - All metrics exports include a `schema_version` field for tracking breaking changes
 - **Backward compatibility**: Missing `schema_version` indicates pre-1.0.0 format
@@ -55,12 +61,14 @@
 - **Migration**: see `docs/metrics-schema-changelog.md` for upgrade paths
 
 ## Troubleshooting
+
 - Symptoms when reset fails (stale pool utilization, diverging HTTP/log payloads).
 - Suggested diagnostics: rerun regression tests, capture streaming snapshot, inspect activation pool stats.
 - Planned alerts/dashboard updates (TODO).
 - **Schema incompatibility**: If `schema_version` is missing or incompatible, check `docs/metrics-schema-changelog.md` for migration instructions.
 
 ## Artifact Staging (Live Capture)
+
 - `docs/assets/metrics/2025-10-15-adaptive-update/http_metrics.json` – canonical `/metrics` HTTP payload (schema version 1.0.0 with adaptive batching fields).
 - `docs/assets/metrics/2025-10-15-adaptive-update/metrics_stream.log` – structured log export showing rolling windows pre/post activity.
 - `docs/assets/metrics/2025-10-15-adaptive-update/activities_stream.log` – SSE activity sample for storage events (copied from the latest live run).
@@ -68,9 +76,12 @@
 - Legacy baseline (pre-adaptive capture): `docs/assets/metrics/2025-10-10-live-session/` retained for regression diffs.
 
 ## Legacy Consumer Shim
+
 - Existing dashboards that still read `snapshot.one_second.pool_available` can apply `docs/assets/metrics/per_metric_compat_shim.jq` to rebuild the legacy field aliases from the new per-metric map:
+
   ```bash
   jq -f docs/assets/metrics/per_metric_compat_shim.jq docs/assets/metrics/2025-10-15-adaptive-update/http_metrics.json \
     > docs/assets/metrics/2025-10-15-adaptive-update/http_metrics.legacy.json
   ```
+
 - The shim copies activation pool metrics to their historical aliases (`pool_available`, `pool_in_flight`, etc.) without mutating the per-metric data, buying time while dashboards migrate to the richer schema.

@@ -1,0 +1,97 @@
+---
+source: engram-core/tests/spreading_validation.rs
+assertion_line: 166
+expression: "FixtureSnapshot { metadata: metadata.clone(), snapshot: normalized, }"
+---
+metadata:
+  name: chain
+  description: Linear chain graph used for deterministic snapshotting
+  seeds:
+    - - Chain_0
+      - 1
+  node_count: 5
+  edge_count: 4
+  average_out_degree: 0.8
+  adjacency:
+    Chain_0:
+      - target: Chain_1
+        weight: 0.9
+        edge_type: Excitatory
+    Chain_1:
+      - target: Chain_2
+        weight: 0.9
+        edge_type: Excitatory
+    Chain_2:
+      - target: Chain_3
+        weight: 0.9
+        edge_type: Excitatory
+    Chain_3:
+      - target: Chain_4
+        weight: 0.9
+        edge_type: Excitatory
+    Chain_4: []
+snapshot:
+  seeds:
+    - - Chain_0
+      - 1
+  activations:
+    - memory_id: Chain_0
+      activation: 1
+      confidence: 1
+      hop_count: 0
+      storage_tier: Hot
+      flags: 0b00000000
+    - memory_id: Chain_1
+      activation: 0.447
+      confidence: 0.425
+      hop_count: 1
+      storage_tier: Warm
+      flags: 0b00000000
+    - memory_id: Chain_2
+      activation: 0.099
+      confidence: 0.094
+      hop_count: 1
+      storage_tier: Warm
+      flags: 0b00000000
+    - memory_id: Chain_3
+      activation: 0
+      confidence: 0
+      hop_count: 0
+      storage_tier: Cold
+      flags: 0b00000000
+  tier_summaries:
+    - - Cold
+      - node_count: 1
+        total_activation: 0
+        average_confidence: 0
+    - - Hot
+      - node_count: 1
+        total_activation: 1
+        average_confidence: 1
+    - - Warm
+      - node_count: 2
+        total_activation: 0.546
+        average_confidence: 0.259
+  cycle_paths: []
+  deterministic_trace:
+    - depth: 1
+      target_node: Chain_1
+      activation: 0.447
+      confidence: 0.447
+      source_node: Chain_0
+    - depth: 2
+      target_node: Chain_2
+      activation: 0.099
+      confidence: 0.099
+      source_node: Chain_1
+  metrics:
+    total_activations: 2
+    cache_hits: 0
+    cache_misses: 0
+    average_latency_ns: 0
+    latency_budget_violations: 0
+    cycles_detected: 0
+    parallel_efficiency: 0
+    pool_available: 10000
+    pool_in_flight: 0
+    pool_high_water_mark: 10000

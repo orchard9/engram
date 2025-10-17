@@ -141,7 +141,7 @@ fn normalize(snapshot: &SpreadingSnapshot) -> NormalizedSnapshot {
 }
 
 #[test]
-#[ignore = "Flaky: Snapshots change between runs due to non-deterministic spreading depth. Root cause: Same parallel spreading regression as deterministic_chain_runs_consistently - sometimes spreads to 2 nodes, sometimes 4. Needs fix in engram-core/src/activation/parallel.rs"]
+#[ignore = "Flaky: Snapshots change between runs due to non-deterministic spreading depth despite deterministic config. Sometimes spreads to 2 nodes, sometimes 4. Timeout issue fixed in wait_for_completion(), but parallel spreading still shows non-deterministic depth behavior. Needs investigation of PhaseBarrier synchronization or task scheduling order. Run with: cargo test --test spreading_validation canonical_spreading_snapshots_are_stable -- --ignored --nocapture"]
 fn canonical_spreading_snapshots_are_stable() {
     let base_config = deterministic_config(4242);
     let mut base_config = base_config;
@@ -175,7 +175,7 @@ fn canonical_spreading_snapshots_are_stable() {
 }
 
 #[test]
-#[ignore = "Flaky: Sometimes returns 4 activations, sometimes 2. Root cause: Non-deterministic behavior in parallel spreading engine even with deterministic config. Regression from recent parallel changes. Needs investigation in engram-core/src/activation/parallel.rs"]
+#[ignore = "Flaky: Sometimes returns 4 activations, sometimes 2 despite deterministic config. Timeout issue fixed in wait_for_completion(), but parallel spreading still shows non-deterministic depth behavior. Needs investigation of PhaseBarrier synchronization or atomic accumulation ordering in engram-core/src/activation/parallel.rs. Run with: cargo test --test spreading_validation deterministic_chain_runs_consistently -- --ignored --nocapture"]
 fn deterministic_chain_runs_consistently() {
     let fixture = chain(4);
     let mut config = deterministic_config(7);
@@ -214,7 +214,6 @@ fn cycle_breakpoints_surface_cycle_paths() {
 }
 
 #[test]
-#[ignore = "Flaky: Timeout waiting for spreading completion (270s). Root cause: Same parallel spreading regression affecting all other tests. Threading error in engram-core/src/activation/parallel.rs wait_for_completion(). Run with: cargo test --test spreading_validation tier_summaries_capture_hot_tier_activity -- --ignored --nocapture"]
 fn tier_summaries_capture_hot_tier_activity() {
     let fixture = directed_cycle(5);
     let mut config = deterministic_config(1337);
