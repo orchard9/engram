@@ -340,14 +340,26 @@ impl TierQueue {
     }
 
     /// Pop task in deterministic mode with canonical ordering
+    ///
+    /// CRITICAL FIX: Increments in_flight BEFORE draining queue to maintain visibility
+    /// during the sorting phase. Without this, is_idle() can incorrectly return true
+    /// while tasks are being sorted, causing premature spreading termination.
     fn pop_deterministic(&self, now: Instant) -> Option<ScheduledTask> {
         let mut buffer = match self.deterministic_buffer.lock() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
 
+        // Track if we reserved an in_flight slot during buffer refill
+        let mut reserved_slot = false;
+
         // If buffer is empty, refill from queue with sorting
         if buffer.is_empty() {
+            // Reserve in_flight slot BEFORE draining to maintain visibility during sort
+            // This prevents is_idle() from returning true while tasks are being sorted
+            self.in_flight.fetch_add(1, Ordering::Relaxed);
+            reserved_slot = true;
+
             let mut tasks = Vec::new();
             while let Some(task) = self.tasks.pop() {
                 self.queued.fetch_sub(1, Ordering::Relaxed);
@@ -355,6 +367,8 @@ impl TierQueue {
             }
 
             if tasks.is_empty() {
+                // No tasks were drained, release the reserved slot
+                self.in_flight.fetch_sub(1, Ordering::Relaxed);
                 return None;
             }
 
@@ -386,10 +400,20 @@ impl TierQueue {
                 continue;
             }
 
-            self.in_flight.fetch_add(1, Ordering::Relaxed);
+            // Found valid task
+            if !reserved_slot {
+                // Buffer had existing tasks, increment now
+                self.in_flight.fetch_add(1, Ordering::Relaxed);
+            }
+            // Otherwise, we already incremented at refill start
             return Some(task);
         }
 
+        // Buffer exhausted without finding valid task
+        if reserved_slot {
+            // Release the reservation we made during refill
+            self.in_flight.fetch_sub(1, Ordering::Relaxed);
+        }
         None
     }
 

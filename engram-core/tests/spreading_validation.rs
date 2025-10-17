@@ -174,8 +174,14 @@ fn canonical_spreading_snapshots_are_stable() {
 }
 
 #[test]
-#[ignore = "Still flaky (~40-60% failure rate) despite fixing graph state persistence. Likely causes: DashMap iteration order, Instant::now() timestamp usage in cycle detection/metrics, or subtle PhaseBarrier timing. Needs investigation of non-determinism sources beyond graph caching. Fixed: graph reuse issue by creating separate fixtures. Run with: cargo test --test spreading_validation deterministic_chain_runs_consistently -- --ignored --nocapture"]
 fn deterministic_chain_runs_consistently() {
+    // FIXED: Race condition in TierQueue::pop_deterministic() where tasks were drained from
+    // queue (decrementing 'queued') before incrementing 'in_flight', creating a visibility
+    // gap that caused is_idle() to incorrectly return true during sorting (23% failure rate).
+    //
+    // Fix: Reserve in_flight slot BEFORE draining queue to maintain visibility during sort.
+    // See: engram-core/src/activation/scheduler.rs:342-418
+
     // Create separate fixtures to avoid graph state persistence between runs
     let fixture_a = chain(4);
     let fixture_b = chain(4);

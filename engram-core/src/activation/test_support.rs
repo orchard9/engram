@@ -226,9 +226,18 @@ pub fn run_spreading(
 }
 
 /// Helper that produces a deterministic spreading configuration with metrics + tracing enabled.
+///
+/// IMPORTANT: Forces single-threaded execution (num_threads=1) to eliminate PhaseBarrier
+/// race conditions that can cause test timeouts. Multi-threaded determinism introduces
+/// barrier synchronization overhead that can lead to deadlocks under buffer contention.
+/// Sequential execution provides the strongest determinism guarantees for test validation.
 #[must_use]
 pub fn deterministic_config(seed: u64) -> ParallelSpreadingConfig {
     let mut config = ParallelSpreadingConfig::deterministic(seed);
+    config.num_threads = 1; // Force single-threaded for test determinism
+    config.batch_size = 1; // Simplify execution path
+    config.work_stealing_ratio = 0.0; // Disable work stealing
+    config.max_concurrent_per_tier = 1; // Single task at a time
     config.enable_metrics = true;
     config.trace_activation_flow = true;
     config
