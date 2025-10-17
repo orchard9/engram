@@ -1,13 +1,15 @@
 #![allow(missing_docs)]
 mod support;
 
+use engram_core::activation::ActivationGraphExt;
+use engram_core::activation::ParallelSpreadingConfig;
 use engram_core::activation::storage_aware::StorageTier;
 use engram_core::activation::test_support::{
     SpreadingSnapshot, deterministic_config, run_spreading_snapshot,
 };
-use engram_core::activation::ParallelSpreadingConfig;
 use insta::assert_yaml_snapshot;
 use serde::Serialize;
+use std::collections::HashMap;
 use support::graph_builders::{
     canonical_fixtures, chain, cycle_with_breakpoint, directed_cycle, simple_cycle,
 };
@@ -219,7 +221,7 @@ fn cycle_breakpoints_surface_cycle_paths() {
 
     // Use less restrictive config to allow full spreading
     let mut config = ParallelSpreadingConfig::deterministic(99);
-    config.num_threads = 1;  // Keep deterministic
+    config.num_threads = 1; // Keep deterministic
     config.enable_metrics = true;
     config.trace_activation_flow = true;
     fixture.apply_config_adjustments(&mut config);
@@ -232,9 +234,19 @@ fn cycle_breakpoints_surface_cycle_paths() {
         eprintln!("=== DEBUG: Cycle paths empty ===");
         eprintln!("Total activations: {}", snapshot.metrics.total_activations);
         eprintln!("Cycles detected: {}", snapshot.metrics.cycles_detected);
-        eprintln!("Max depth: {}", snapshot.activations.iter().map(|a| a.hop_count).max().unwrap_or(0));
+        eprintln!(
+            "Max depth: {}",
+            snapshot
+                .activations
+                .iter()
+                .map(|a| a.hop_count)
+                .max()
+                .unwrap_or(0)
+        );
         eprintln!("Nodes activated: {}", snapshot.activations.len());
-        eprintln!("\nThis fixture requires architectural changes to work with current tier thresholds.");
+        eprintln!(
+            "\nThis fixture requires architectural changes to work with current tier thresholds."
+        );
         eprintln!("See test_cycle_detection_with_simple_cycle for working cycle detection demo.");
     }
 
@@ -279,7 +291,12 @@ fn test_cycle_detection_with_simple_cycle() {
         "Expected cycles to be detected in 3-node cycle with high edge weights. \
          cycles_detected={}, max_depth={}, nodes_activated={}",
         snapshot.metrics.cycles_detected,
-        snapshot.activations.iter().map(|a| a.hop_count).max().unwrap_or(0),
+        snapshot
+            .activations
+            .iter()
+            .map(|a| a.hop_count)
+            .max()
+            .unwrap_or(0),
         snapshot.activations.len()
     );
 
@@ -296,8 +313,7 @@ fn test_cycle_detection_with_simple_cycle() {
     let cycle_path = &snapshot.cycle_paths[0];
     assert!(
         cycle_path.contains(&"SimpleCycle_A".to_string()),
-        "Cycle path should contain SimpleCycle_A: {:?}",
-        cycle_path
+        "Cycle path should contain SimpleCycle_A: {cycle_path:?}"
     );
 
     // Verify all 3 nodes were activated
@@ -310,8 +326,6 @@ fn test_cycle_detection_with_simple_cycle() {
 
 #[test]
 fn debug_cycle_detection_behavior() {
-    use engram_core::activation::ActivationGraphExt;
-
     let fixture = cycle_with_breakpoint(6);
 
     // Debug graph structure first
@@ -337,19 +351,23 @@ fn debug_cycle_detection_behavior() {
     println!("Decay function: {:?}", config.decay_function);
     println!("Cycle detection: {}", config.cycle_detection);
 
-    let snapshot = run_spreading_snapshot(fixture.graph(), &fixture.seeds, config)
-        .expect("cycle run");
+    let snapshot =
+        run_spreading_snapshot(fixture.graph(), &fixture.seeds, config).expect("cycle run");
 
     println!("\n=== CYCLE DETECTION DEBUG ===");
     println!("Total activations: {}", snapshot.metrics.total_activations);
-    println!("Cycles detected (metric): {}", snapshot.metrics.cycles_detected);
+    println!(
+        "Cycles detected (metric): {}",
+        snapshot.metrics.cycles_detected
+    );
     println!("Cycle paths count: {}", snapshot.cycle_paths.len());
     println!("Cycle paths: {:?}", snapshot.cycle_paths);
 
     // Check activations to see how many nodes were visited
     println!("\n=== ACTIVATIONS ===");
     for activation in &snapshot.activations {
-        println!("Node: {}, Activation: {:.3}, Hop: {}, Tier: {}",
+        println!(
+            "Node: {}, Activation: {:.3}, Hop: {}, Tier: {}",
             activation.memory_id,
             activation.activation,
             activation.hop_count,
@@ -360,21 +378,24 @@ fn debug_cycle_detection_behavior() {
     // Check trace to see depth progression
     println!("\n=== TRACE (all) ===");
     for (i, trace) in snapshot.deterministic_trace.iter().enumerate() {
-        println!("{}: depth={}, node={}, activation={:.3}, source={:?}",
+        println!(
+            "{}: depth={}, node={}, activation={:.3}, source={:?}",
             i, trace.depth, trace.target_node, trace.activation, trace.source_node
         );
     }
 
     println!("\n=== ANALYSIS ===");
-    println!("Max depth reached: {}",
-        snapshot.activations.iter()
+    println!(
+        "Max depth reached: {}",
+        snapshot
+            .activations
+            .iter()
             .map(|a| a.hop_count)
             .max()
             .unwrap_or(0)
     );
 
     // Count how many times each node appears in trace (indicates revisits)
-    use std::collections::HashMap;
     let mut visit_counts: HashMap<String, u32> = HashMap::new();
     for trace in &snapshot.deterministic_trace {
         *visit_counts.entry(trace.target_node.clone()).or_insert(0) += 1;
@@ -383,6 +404,6 @@ fn debug_cycle_detection_behavior() {
     let mut sorted: Vec<_> = visit_counts.iter().collect();
     sorted.sort_by_key(|(node, _)| *node);
     for (node, count) in sorted {
-        println!("  {}: {} visits", node, count);
+        println!("  {node}: {count} visits");
     }
 }

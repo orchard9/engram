@@ -50,7 +50,7 @@ async fn test_basic_persistence_integration() {
     let temp_dir = TempDir::new().unwrap();
 
     // Create store with persistence
-    let mut store = MemoryStore::new(100)
+    let store = MemoryStore::new(100)
         .with_persistence(temp_dir.path())
         .unwrap();
 
@@ -95,7 +95,7 @@ async fn test_basic_persistence_integration() {
 async fn test_tier_migration() {
     let temp_dir = TempDir::new().unwrap();
 
-    let mut store = MemoryStore::new(20) // Small capacity to trigger migrations
+    let store = MemoryStore::new(20) // Small capacity to trigger migrations
         .with_persistence(temp_dir.path())
         .unwrap();
 
@@ -149,7 +149,7 @@ async fn test_crash_consistency() {
 
     // First session: store some data
     {
-        let mut store = MemoryStore::new(100)
+        let store = MemoryStore::new(100)
             .with_persistence(temp_dir.path())
             .unwrap();
 
@@ -168,7 +168,7 @@ async fn test_crash_consistency() {
 
     // Second session: verify data survived the "crash"
     {
-        let mut store = MemoryStore::new(100)
+        let store = MemoryStore::new(100)
             .with_persistence(temp_dir.path())
             .unwrap();
 
@@ -213,7 +213,7 @@ async fn test_crash_consistency() {
 async fn test_cognitive_workload_pattern() {
     let temp_dir = TempDir::new().unwrap();
 
-    let mut store = MemoryStore::new(1000)
+    let store = MemoryStore::new(1000)
         .with_persistence(temp_dir.path())
         .unwrap();
 
@@ -351,7 +351,7 @@ async fn test_graceful_degradation_under_errors() {
     let temp_dir = TempDir::new().unwrap();
 
     // Create store with very limited capacity to trigger pressure
-    let mut store = MemoryStore::new(5)
+    let store = MemoryStore::new(5)
         .with_persistence(temp_dir.path())
         .unwrap();
 
@@ -430,7 +430,7 @@ async fn test_concurrent_access_patterns() {
     ));
 
     {
-        let mut store_lock = store.lock().await;
+        let store_lock = store.lock().await;
         store_lock.initialize_persistence().unwrap();
     }
 
@@ -496,7 +496,7 @@ async fn test_concurrent_access_patterns() {
     drop(store_guard);
 
     {
-        let mut store_lock = store.lock().await;
+        let store_lock = store.lock().await;
         store_lock.shutdown().unwrap();
     }
 }

@@ -40,10 +40,10 @@ pub struct WalEntryHeader {
     pub entry_type: u32,
     /// Payload size in bytes
     pub payload_size: u32,
-    /// CRC32C checksum of header fields
-    pub header_crc: u32,
     /// CRC32C checksum of payload data
     pub payload_crc: u32,
+    /// CRC32C checksum of header fields
+    pub header_crc: u32,
     /// Reserved for future extensions - pad to exactly 64 bytes
     pub reserved: [u8; 20], // Account for alignment padding
 }
@@ -276,8 +276,8 @@ impl WalEntryHeader {
             timestamp,
             entry_type,
             payload_size,
-            header_crc,
             payload_crc,
+            header_crc,
             reserved,
         }
     }
@@ -470,8 +470,8 @@ pub struct WalWriter {
     /// Performance metrics
     metrics: Arc<StorageMetrics>,
 
-    /// Writer thread handle
-    writer_thread: Option<std::thread::JoinHandle<()>>,
+    /// Writer thread handle (uses interior mutability for shutdown)
+    writer_thread: Arc<parking_lot::Mutex<Option<std::thread::JoinHandle<()>>>>,
 
     /// Shutdown signal
     shutdown: Arc<std::sync::atomic::AtomicBool>,
@@ -530,7 +530,7 @@ impl WalWriter {
             max_batch_size: 1000,
             max_batch_delay: std::time::Duration::from_millis(10),
             metrics,
-            writer_thread: None,
+            writer_thread: Arc::new(parking_lot::Mutex::new(None)),
             shutdown: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         })
     }
@@ -540,9 +540,12 @@ impl WalWriter {
     /// # Errors
     ///
     /// Returns an error if spawning the writer thread fails.
-    pub fn start(&mut self) -> StorageResult<()> {
-        if self.writer_thread.is_some() {
-            return Ok(()); // Already started
+    pub fn start(&self) -> StorageResult<()> {
+        {
+            let writer_thread = self.writer_thread.lock();
+            if writer_thread.is_some() {
+                return Ok(()); // Already started
+            }
         }
 
         let entry_queue = self.entry_queue.clone();
@@ -570,7 +573,7 @@ impl WalWriter {
                 StorageError::wal_failed(&format!("Failed to start writer thread: {e}"))
             })?;
 
-        self.writer_thread = Some(handle);
+        *self.writer_thread.lock() = Some(handle);
         Ok(())
     }
 
@@ -756,10 +759,11 @@ impl WalWriter {
     /// # Errors
     ///
     /// Returns an error if the writer thread panics or final fsync fails.
-    pub fn shutdown(&mut self) -> StorageResult<()> {
+    pub fn shutdown(&self) -> StorageResult<()> {
         self.shutdown.store(true, Ordering::SeqCst);
 
-        if let Some(handle) = self.writer_thread.take() {
+        let handle = self.writer_thread.lock().take();
+        if let Some(handle) = handle {
             handle
                 .join()
                 .map_err(|_| StorageError::wal_failed("Writer thread panicked during shutdown"))?;
@@ -1069,7 +1073,7 @@ mod tests {
     fn test_wal_write_and_read() -> TestResult {
         let temp_dir = TempDir::new().into_test_result("create wal temp dir")?;
         let metrics = Arc::new(StorageMetrics::new());
-        let mut wal = WalWriter::new(temp_dir.path(), FsyncMode::PerWrite, Arc::clone(&metrics))
+        let wal = WalWriter::new(temp_dir.path(), FsyncMode::PerWrite, Arc::clone(&metrics))
             .into_test_result("construct wal writer for write/read test")?;
 
         let episode = create_test_episode();
@@ -1102,7 +1106,7 @@ mod tests {
         let metrics = Arc::new(StorageMetrics::new());
 
         // Write some entries
-        let mut wal = WalWriter::new(temp_dir.path(), FsyncMode::PerWrite, metrics.clone())
+        let wal = WalWriter::new(temp_dir.path(), FsyncMode::PerWrite, metrics.clone())
             .into_test_result("construct wal writer for recovery test")?;
 
         for _i in 0..5 {

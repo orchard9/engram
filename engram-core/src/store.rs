@@ -564,18 +564,10 @@ impl MemoryStore {
     ///
     /// # Errors
     ///
-    /// Returns an error if the WAL writer is still shared elsewhere or if
-    /// the underlying writer fails to start.
-    pub fn initialize_persistence(
-        &mut self,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        use crate::storage::StorageError;
-
-        if let Some(ref mut wal_writer) = self.wal_writer {
-            let writer = Arc::get_mut(wal_writer).ok_or_else(|| {
-                StorageError::wal_failed("WAL writer already in use; cannot start")
-            })?;
-            writer
+    /// Returns an error if the WAL writer fails to start.
+    pub fn initialize_persistence(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        if let Some(ref wal_writer) = self.wal_writer {
+            wal_writer
                 .start()
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
         }
@@ -893,6 +885,10 @@ impl MemoryStore {
                     match bincode::deserialize::<Episode>(&entry.payload) {
                         Ok(episode) => {
                             if self.hot_memories.contains_key(&episode.id) {
+                                tracing::debug!(
+                                    episode_id = %episode.id,
+                                    "Skipping episode already in hot tier"
+                                );
                                 continue;
                             }
 
@@ -920,8 +916,13 @@ impl MemoryStore {
 
                             self.memory_count.fetch_add(1, Ordering::Relaxed);
                             recovered += 1;
+                            tracing::info!(
+                                episode_id = %episode.id,
+                                "Successfully recovered episode from WAL"
+                            );
                         }
                         Err(error) => {
+                            eprintln!("WAL DESERIALIZATION ERROR: {error:?}");
                             tracing::warn!(
                                 ?error,
                                 "Failed to deserialize WAL episode during recovery"
@@ -1225,11 +1226,9 @@ impl MemoryStore {
     /// # Errors
     ///
     /// Returns an error if the WAL writer fails to shut down cleanly.
-    pub fn shutdown(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        if let Some(ref mut wal_writer) = self.wal_writer
-            && let Some(writer) = Arc::get_mut(wal_writer)
-        {
-            writer.shutdown()?;
+    pub fn shutdown(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        if let Some(ref wal_writer) = self.wal_writer {
+            wal_writer.shutdown()?;
         }
         Ok(())
     }

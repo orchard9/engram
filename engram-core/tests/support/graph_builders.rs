@@ -1,9 +1,10 @@
 use engram_core::activation::{
-    ActivationGraphExt, EdgeType, MemoryGraph, ParallelSpreadingConfig, create_activation_graph,
+    ActivationGraphExt, DecayFunction, EdgeType, MemoryGraph, ParallelSpreadingConfig,
+    create_activation_graph, storage_aware::StorageTier,
 };
 use rand::{Rng, SeedableRng, rngs::StdRng};
 use serde::Serialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 /// Metadata describing a graph fixture used in deterministic tests.
@@ -222,20 +223,8 @@ pub fn simple_cycle() -> GraphFixture {
         0.99,
         EdgeType::Excitatory,
     );
-    ActivationGraphExt::add_edge(
-        &*graph,
-        node_b.clone(),
-        node_c.clone(),
-        0.99,
-        EdgeType::Excitatory,
-    );
-    ActivationGraphExt::add_edge(
-        &*graph,
-        node_c,
-        node_a.clone(),
-        0.99,
-        EdgeType::Excitatory,
-    );
+    ActivationGraphExt::add_edge(&*graph, node_b, node_c.clone(), 0.99, EdgeType::Excitatory);
+    ActivationGraphExt::add_edge(&*graph, node_c, node_a, 0.99, EdgeType::Excitatory);
 
     GraphFixture::new(
         "simple_cycle",
@@ -247,12 +236,9 @@ pub fn simple_cycle() -> GraphFixture {
         config.max_depth = 10;
         config.cycle_detection = true;
         // Use slower decay to ensure activation completes the full cycle path
-        use engram_core::activation::DecayFunction;
         config.decay_function = DecayFunction::Exponential { rate: 0.2 };
 
         // Set cycle budget to 2 for all tiers to trigger detection on second visit
-        use engram_core::activation::storage_aware::StorageTier;
-        use std::collections::HashMap;
         config.tier_cycle_budgets = HashMap::from([
             (StorageTier::Hot, 2),
             (StorageTier::Warm, 2),
@@ -475,7 +461,6 @@ pub fn cycle_with_breakpoint(length: usize) -> GraphFixture {
         // the full 6-node cycle and return to seed, triggering cycle detection
         // PowerLaw with exponent 0.3 gives: (1+depth)^-0.3
         //   depth 3: 0.66, depth 4: 0.61, depth 5: 0.57 (all >> 0.1 Cold threshold)
-        use engram_core::activation::DecayFunction;
         config.decay_function = DecayFunction::PowerLaw { exponent: 0.3 };
     })
 }
