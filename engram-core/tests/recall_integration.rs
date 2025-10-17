@@ -332,7 +332,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Flaky: Fails under system load due to 5ms timeout being too short. Root cause: Timing-sensitive test that depends on system performance. Passes when run in isolation but fails when preceded by other tests. Needs either longer timeout or different approach to test fallback mechanism."]
     fn test_hybrid_mode_with_fallback() {
         let store = create_test_store();
         // Use the store's HNSW index (auto-populated during store.store())
@@ -353,7 +352,7 @@ mod tests {
 
         let recall_config = RecallConfig {
             recall_mode: RecallMode::Hybrid,
-            time_budget: Duration::from_millis(5), // Very short timeout to trigger fallback
+            time_budget: Duration::from_millis(50), // Increased from 5ms to 50ms to prevent flakiness under system load
             ..Default::default()
         };
 

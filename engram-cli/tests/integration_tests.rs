@@ -18,40 +18,28 @@ use std::time::Duration;
 use tokio::time::timeout;
 
 #[tokio::test]
-#[ignore = "These port tests can be flaky in CI due to port conflicts"]
 async fn test_port_availability_check() {
-    use rand::Rng;
-    // Test that we can find an available port
-    // Use high port range to avoid conflicts
-    let mut rng = rand::thread_rng();
-    let base_port = 40000 + rng.gen_range(0..10000);
-    let port = find_available_port(base_port).await.unwrap();
+    // Use ephemeral port (0) to let OS assign an available port - eliminates CI conflicts
+    let port = find_available_port(0).await.unwrap();
 
-    assert!(port >= base_port, "Port should be at or above base");
-    assert!(
-        port <= base_port + 100,
-        "Should find port within reasonable range"
-    );
+    // OS-assigned ephemeral ports are typically in range 32768-60999 (Linux) or 49152-65535 (Windows/macOS)
+    assert!(port > 1024, "Port should be above well-known port range");
 
-    // Verify the port is actually available
+    // Verify the port is actually available (OS guarantees this for ephemeral ports)
     assert!(
         is_port_available(port).await,
-        "Found port should be available"
+        "OS-assigned ephemeral port should be available"
     );
 }
 
 #[tokio::test]
-#[ignore = "These port tests can be flaky in CI due to port conflicts"]
 async fn test_find_available_port_with_occupied_port() {
-    use rand::Rng;
-    // Use very high port range to ensure no conflicts
-    let mut rng = rand::thread_rng();
-    let base_port = 50000 + rng.gen_range(0..10000);
-
-    // Bind to a specific port first
-    let _listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{}", base_port))
+    // Bind to an OS-assigned ephemeral port to get a truly unused port
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
-        .expect("Should be able to bind to high port");
+        .expect("Should be able to bind to ephemeral port");
+
+    let base_port = listener.local_addr().unwrap().port();
 
     // Port should now be occupied
     assert!(
@@ -79,6 +67,9 @@ async fn test_find_available_port_with_occupied_port() {
         is_port_available(new_port).await,
         "Found port should be available"
     );
+
+    // Drop listener to clean up
+    drop(listener);
 }
 
 #[tokio::test]
