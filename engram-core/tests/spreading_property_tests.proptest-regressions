@@ -8,3 +8,4 @@ cc 9448451ece77da7ab1c71c6faa0a4c44cb816a067f6c29c342f7a5982a4c681c # shrinks to
 cc a52b3e60cd4e279e54870238a68d833f58bf9eac6809568ded708bf3eadf58f9 # shrinks to scenario = ErdosRenyi { node_count: 4, edge_probability: 0.5, seed: 9034627953199725491 }
 cc e8a3e5152a233907ecd5c2e928587022614fde30c391c516dc3fdd3728216718 # shrinks to scenario = ErdosRenyi { node_count: 15, edge_probability: 0.8, seed: 13660196675033953520 }
 cc aa33415f25ecb77f155b824955b1fbb97c3d0f9a77c376d1dbfd8c66aca02e8f # shrinks to scenario = BarabasiAlbert { node_count: 6, attachment_count: 3, seed: 6358505223951489594 }
+cc e81bde75cd0b2e6eaff014ae27ec984bddc228d174c58dac13c1d765693a8eb8 # shrinks to scenario = BarabasiAlbert { node_count: 15, attachment_count: 3, seed: 5725497534369461662 }

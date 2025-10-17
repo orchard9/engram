@@ -141,7 +141,6 @@ fn normalize(snapshot: &SpreadingSnapshot) -> NormalizedSnapshot {
 }
 
 #[test]
-#[ignore = "Flaky: Snapshots change between runs due to non-deterministic spreading depth despite deterministic config. Sometimes spreads to 2 nodes, sometimes 4. Timeout issue fixed in wait_for_completion(), but parallel spreading still shows non-deterministic depth behavior. Needs investigation of PhaseBarrier synchronization or task scheduling order. Run with: cargo test --test spreading_validation canonical_spreading_snapshots_are_stable -- --ignored --nocapture"]
 fn canonical_spreading_snapshots_are_stable() {
     let base_config = deterministic_config(4242);
     let mut base_config = base_config;
@@ -175,15 +174,17 @@ fn canonical_spreading_snapshots_are_stable() {
 }
 
 #[test]
-#[ignore = "Flaky: Sometimes returns 4 activations, sometimes 2 despite deterministic config. Timeout issue fixed in wait_for_completion(), but parallel spreading still shows non-deterministic depth behavior. Needs investigation of PhaseBarrier synchronization or atomic accumulation ordering in engram-core/src/activation/parallel.rs. Run with: cargo test --test spreading_validation deterministic_chain_runs_consistently -- --ignored --nocapture"]
+#[ignore = "Still flaky (~40-60% failure rate) despite fixing graph state persistence. Likely causes: DashMap iteration order, Instant::now() timestamp usage in cycle detection/metrics, or subtle PhaseBarrier timing. Needs investigation of non-determinism sources beyond graph caching. Fixed: graph reuse issue by creating separate fixtures. Run with: cargo test --test spreading_validation deterministic_chain_runs_consistently -- --ignored --nocapture"]
 fn deterministic_chain_runs_consistently() {
-    let fixture = chain(4);
+    // Create separate fixtures to avoid graph state persistence between runs
+    let fixture_a = chain(4);
+    let fixture_b = chain(4);
     let mut config = deterministic_config(7);
-    fixture.apply_config_adjustments(&mut config);
+    fixture_a.apply_config_adjustments(&mut config);
 
-    let snapshot_a = run_spreading_snapshot(fixture.graph(), &fixture.seeds, config.clone())
+    let snapshot_a = run_spreading_snapshot(fixture_a.graph(), &fixture_a.seeds, config.clone())
         .expect("spreading should succeed");
-    let snapshot_b = run_spreading_snapshot(fixture.graph(), &fixture.seeds, config)
+    let snapshot_b = run_spreading_snapshot(fixture_b.graph(), &fixture_b.seeds, config)
         .expect("spreading should succeed");
 
     assert_eq!(
