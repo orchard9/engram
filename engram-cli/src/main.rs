@@ -29,9 +29,9 @@ use tracing_subscriber::FmtSubscriber;
 mod cli;
 mod config;
 use cli::{
-    Cli, Commands, ConfigAction, MemoryAction, create_memory, delete_memory, get_memory,
-    get_server_connection, list_memories, remove_pid_file, search_memories, show_status,
-    stop_server, write_pid_file,
+    Cli, Commands, ConfigAction, MemoryAction, OutputFormat, create_memory, delete_memory,
+    get_memory, get_server_connection, list_memories, remove_pid_file, search_memories,
+    show_status, stop_server, write_pid_file,
 };
 use config::ConfigManager;
 
@@ -102,6 +102,12 @@ async fn main() -> Result<()> {
             list,
             export,
         } => handle_docs_command(section, list, export),
+
+        Commands::Query {
+            query,
+            limit,
+            format,
+        } => handle_query_command(query, limit, format).await,
     }
 }
 
@@ -681,4 +687,128 @@ async fn show_status_json() -> Result<()> {
     }
 
     Ok(())
+}
+
+async fn handle_query_command(query: String, limit: usize, format: OutputFormat) -> Result<()> {
+    let (port, _grpc_port) = get_server_connection().await?;
+
+    // Make HTTP request
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()?;
+
+    let url = format!("http://127.0.0.1:{port}/api/v1/query/probabilistic");
+
+    let response = client
+        .get(&url)
+        .query(&[("query", &query), ("limit", &limit.to_string())])
+        .send()
+        .await
+        .context("Failed to send request to server")?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        anyhow::bail!("Server returned error {status}: {error_text}");
+    }
+
+    let result: serde_json::Value = response
+        .json()
+        .await
+        .context("Failed to parse server response")?;
+
+    // Format and print output
+    match format {
+        OutputFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(&result)?);
+        }
+        OutputFormat::Table => {
+            print_probabilistic_table(&result);
+        }
+        OutputFormat::Compact => {
+            print_probabilistic_compact(&result);
+        }
+    }
+
+    Ok(())
+}
+
+fn print_probabilistic_table(result: &serde_json::Value) {
+    // Parse response fields
+    let confidence_interval = &result["confidence_interval"];
+    let point = confidence_interval["point"].as_f64().unwrap_or(0.0);
+    let lower = confidence_interval["lower"].as_f64().unwrap_or(0.0);
+    let upper = confidence_interval["upper"].as_f64().unwrap_or(0.0);
+    let is_successful = result["is_successful"].as_bool().unwrap_or(false);
+
+    println!("\nProbabilistic Query Results\n");
+    println!(
+        "Confidence: {:.2}% [{:.2}% - {:.2}%]",
+        point * 100.0,
+        lower * 100.0,
+        upper * 100.0
+    );
+    println!(
+        "Status: {}\n",
+        if is_successful {
+            "Successful"
+        } else {
+            "Low Confidence"
+        }
+    );
+
+    // Print episodes table
+    if let Some(episodes) = result["episodes"].as_array() {
+        for (i, ep_conf) in episodes.iter().enumerate() {
+            let confidence = ep_conf["confidence"].as_f64().unwrap_or(0.0);
+            let what = ep_conf["episode"]["what"].as_str().unwrap_or("");
+            println!("{:2}. [{}] {}", i + 1, format_confidence(confidence), what);
+        }
+    }
+
+    // Print evidence chain
+    if let Some(evidence_chain) = result["evidence_chain"].as_array()
+        && !evidence_chain.is_empty()
+    {
+        println!("\nEvidence Chain:");
+        for evidence in evidence_chain {
+            let source = evidence["source"].as_str().unwrap_or("unknown");
+            let confidence_pct = evidence["confidence"].as_f64().unwrap_or(0.0) * 100.0;
+            println!("  - {source}: {confidence_pct:.2}%");
+        }
+    }
+
+    // Print uncertainty sources
+    if let Some(uncertainty_sources) = result["uncertainty_sources"].as_array()
+        && !uncertainty_sources.is_empty()
+    {
+        println!("\nUncertainty Sources:");
+        for source in uncertainty_sources {
+            let description = source["description"].as_str().unwrap_or("unknown");
+            println!("  - {description}");
+        }
+    }
+}
+
+fn print_probabilistic_compact(result: &serde_json::Value) {
+    let confidence_interval = &result["confidence_interval"];
+    let point_pct = confidence_interval["point"].as_f64().unwrap_or(0.0) * 100.0;
+
+    println!("Confidence: {point_pct:.1}%");
+
+    if let Some(episodes) = result["episodes"].as_array() {
+        for (i, ep_conf) in episodes.iter().enumerate() {
+            let confidence_pct = ep_conf["confidence"].as_f64().unwrap_or(0.0) * 100.0;
+            let what = ep_conf["episode"]["what"].as_str().unwrap_or("");
+            println!("{}. [{confidence_pct:.1}%] {what}", i + 1);
+        }
+    }
+}
+
+fn format_confidence(confidence: f64) -> String {
+    let percentage = confidence * 100.0;
+    format!("{percentage:.1}%")
 }

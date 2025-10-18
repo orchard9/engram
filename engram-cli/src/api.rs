@@ -1072,8 +1072,6 @@ pub async fn probabilistic_query(
     State(state): State<ApiState>,
     Query(params): Query<ProbabilisticQueryRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    use engram_core::query::ProbabilisticRecall;
-
     let start_time = std::time::Instant::now();
 
     info!(
@@ -1123,7 +1121,7 @@ pub async fn probabilistic_query(
     };
 
     // Perform probabilistic recall
-    let prob_result = state.store.recall_probabilistic(cue);
+    let prob_result = state.store.recall_probabilistic(&cue);
 
     // Convert episodes to API format
     let memories: Vec<MemoryResult> = prob_result

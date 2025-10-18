@@ -6,6 +6,8 @@
 
 use crate::memory_graph::{GraphConfig, InfallibleBackend, UnifiedMemoryGraph};
 use crate::numeric::{u64_to_f64, unit_ratio_to_f32};
+use crate::query::executor::ProbabilisticQueryExecutor;
+use crate::query::{ProbabilisticQueryResult, UncertaintySource};
 use crate::storage::{
     ContentAddress, ContentIndex, DeduplicationAction, MergeStrategy, SemanticDeduplicator,
 };
@@ -1352,6 +1354,69 @@ impl MemoryStore {
     #[must_use]
     pub fn recall_with_mode(&self, cue: &Cue, mode: crate::activation::RecallMode) -> RecallResult {
         self.recall_internal(cue, Some(mode))
+    }
+
+    /// Recall memories with full probabilistic query support
+    ///
+    /// Returns a `ProbabilisticQueryResult` with confidence intervals, evidence chains,
+    /// and uncertainty sources. This provides richer information than standard `recall()`,
+    /// including:
+    /// - Confidence intervals with lower/upper bounds
+    /// - Evidence chain tracking where confidence came from
+    /// - Uncertainty sources from system state
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use engram_core::{MemoryStore, Cue, Confidence};
+    ///
+    /// let store = MemoryStore::new(16);
+    /// let cue = Cue::semantic(
+    ///     "query".to_string(),
+    ///     "hospital visit".to_string(),
+    ///     Confidence::HIGH
+    /// );
+    ///
+    /// let result = store.recall_probabilistic(&cue);
+    /// assert!(result.confidence_interval.point.raw() >= 0.0);
+    /// assert!(result.confidence_interval.point.raw() <= 1.0);
+    /// ```
+    #[must_use]
+    pub fn recall_probabilistic(&self, cue: &Cue) -> ProbabilisticQueryResult {
+        // Step 1: Perform standard recall
+        let recall_result = self.recall(cue);
+
+        // Step 2: Extract activation paths (empty for now - would need cognitive recall metadata)
+        let activation_paths = vec![]; // TODO: Extract from spreading activation context
+
+        // Step 3: Gather uncertainty sources from system state
+        let mut uncertainty_sources = Vec::new();
+
+        // Add system pressure uncertainty if we can determine pressure
+        // For now, we'll skip this as it requires metrics integration
+        // In the future: check memory usage, query rate, etc.
+
+        // Add spreading activation uncertainty if spreading is enabled
+        #[cfg(feature = "hnsw_index")]
+        {
+            use crate::activation::RecallMode;
+            if self.recall_config.recall_mode == RecallMode::Spreading
+                || self.recall_config.recall_mode == RecallMode::Hybrid
+            {
+                uncertainty_sources.push(UncertaintySource::SpreadingActivationNoise {
+                    activation_variance: 0.05,
+                    path_diversity: 0.1,
+                });
+            }
+        }
+
+        // Step 4: Execute probabilistic query
+        let executor = ProbabilisticQueryExecutor::default();
+        executor.execute(
+            recall_result.results,
+            &activation_paths,
+            uncertainty_sources,
+        )
     }
 
     fn recall_internal(

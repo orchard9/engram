@@ -97,6 +97,46 @@ pub enum Commands {
         #[arg(long)]
         export: Option<String>,
     },
+
+    /// Query with probabilistic confidence intervals
+    Query {
+        /// Query text
+        query: String,
+
+        /// Maximum number of results
+        #[arg(short, long, default_value = "10")]
+        limit: usize,
+
+        /// Output format (json, table, compact)
+        #[arg(short, long, default_value = "table")]
+        format: OutputFormat,
+    },
+}
+
+/// Output format for probabilistic queries
+#[derive(Clone)]
+pub enum OutputFormat {
+    /// JSON format
+    Json,
+    /// Table format with full details
+    Table,
+    /// Compact format
+    Compact,
+}
+
+impl std::str::FromStr for OutputFormat {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "json" => Ok(Self::Json),
+            "table" => Ok(Self::Table),
+            "compact" => Ok(Self::Compact),
+            _ => Err(format!(
+                "Invalid format: {s}. Valid options: json, table, compact"
+            )),
+        }
+    }
 }
 
 /// Memory-specific operations

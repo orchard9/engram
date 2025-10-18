@@ -20,10 +20,11 @@ use utoipa_swagger_ui::{self, Config, Url};
 
 use crate::api::{
     ActivationMonitoringQuery, AutoLink, AutoTuneResponse, CausalityMonitoringQuery,
-    ConfidenceInfo, MemoryResult, MonitoringQuery, QueryAnalysis, RecallMetadata, RecallQuery,
-    RecallResponse, RecallResults, RecognizeRequest, RecognizeResponse, RememberEpisodeRequest,
-    RememberMemoryRequest, RememberResponse, SimilarPattern, StreamActivityQuery,
-    StreamConsolidationQuery, StreamMemoryQuery,
+    ConfidenceInfo, ConfidenceIntervalInfo, EvidenceInfo, MemoryResult, MonitoringQuery,
+    ProbabilisticQueryRequest, ProbabilisticQueryResponse, QueryAnalysis, RecallMetadata,
+    RecallQuery, RecallResponse, RecallResults, RecognizeRequest, RecognizeResponse,
+    RememberEpisodeRequest, RememberMemoryRequest, RememberResponse, SimilarPattern,
+    StreamActivityQuery, StreamConsolidationQuery, StreamMemoryQuery, UncertaintyInfo,
 };
 use engram_core::activation::AutoTuneAuditEntry;
 
@@ -88,6 +89,7 @@ Headers:
         crate::api::recognize_pattern,
         crate::api::remember_episode,
         crate::api::replay_episodes,
+        crate::api::probabilistic_query,
         crate::api::spreading_health,
         crate::api::spreading_config,
         crate::api::system_health,
@@ -116,6 +118,11 @@ Headers:
             QueryAnalysis,
             RecallMetadata,
             SimilarPattern,
+            ProbabilisticQueryRequest,
+            ProbabilisticQueryResponse,
+            ConfidenceIntervalInfo,
+            EvidenceInfo,
+            UncertaintyInfo,
             StreamActivityQuery,
             StreamMemoryQuery,
             StreamConsolidationQuery,
@@ -134,6 +141,7 @@ Headers:
     tags(
         (name = "memories", description = "Core memory operations"),
         (name = "episodes", description = "Episodic memory with rich context"),
+        (name = "queries", description = "Probabilistic query operations with confidence intervals"),
         (name = "system", description = "System health and introspection"),
         (name = "streaming", description = "Server-Sent Events for real-time updates"),
         (name = "monitoring", description = "Debugging and performance monitoring")
