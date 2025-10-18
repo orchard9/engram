@@ -369,6 +369,143 @@ impl ProbabilisticQueryResult {
     pub const fn is_empty(&self) -> bool {
         self.episodes.is_empty()
     }
+
+    /// Conjunctive query: A AND B
+    ///
+    /// Combines two query results using intersection semantics:
+    /// - Episodes: Returns episodes present in both results
+    /// - Confidence: Multiplies intervals (independence assumption)
+    /// - Evidence: Merges both chains
+    /// - Uncertainty: Combines sources from both queries
+    #[must_use]
+    pub fn and(&self, other: &Self) -> Self {
+        // Intersect episodes: only keep episodes in both results
+        let episodes = self.intersect_episodes(&other.episodes);
+
+        // Combine confidence intervals (AND operation)
+        let confidence_interval = self.confidence_interval.and(&other.confidence_interval);
+
+        // Merge evidence chains
+        let evidence_chain = self.merge_evidence_chains(&other.evidence_chain);
+
+        // Combine uncertainty sources
+        let uncertainty_sources = self.combine_uncertainty_sources(&other.uncertainty_sources);
+
+        Self {
+            episodes,
+            confidence_interval,
+            evidence_chain,
+            uncertainty_sources,
+        }
+    }
+
+    /// Disjunctive query: A OR B
+    ///
+    /// Combines two query results using union semantics:
+    /// - Episodes: Returns episodes from either result
+    /// - Confidence: Combines intervals using probabilistic OR
+    /// - Evidence: Merges both chains
+    /// - Uncertainty: Combines sources from both queries
+    #[must_use]
+    pub fn or(&self, other: &Self) -> Self {
+        // Union episodes: keep all unique episodes
+        let episodes = self.union_episodes(&other.episodes);
+
+        // Combine confidence intervals (OR operation)
+        let confidence_interval = self.confidence_interval.or(&other.confidence_interval);
+
+        // Merge evidence chains
+        let evidence_chain = self.merge_evidence_chains(&other.evidence_chain);
+
+        // Combine uncertainty sources
+        let uncertainty_sources = self.combine_uncertainty_sources(&other.uncertainty_sources);
+
+        Self {
+            episodes,
+            confidence_interval,
+            evidence_chain,
+            uncertainty_sources,
+        }
+    }
+
+    /// Negation query: NOT A
+    ///
+    /// Negates the confidence of a query result:
+    /// - Episodes: Kept unchanged (negation affects confidence only)
+    /// - Confidence: Inverted using NOT operation
+    /// - Evidence: Preserved as-is
+    /// - Uncertainty: Preserved as-is
+    #[must_use]
+    pub fn not(&self) -> Self {
+        // Episodes remain unchanged (negation is confidence-only)
+        let episodes = self.episodes.clone();
+
+        // Negate confidence interval
+        let confidence_interval = self.confidence_interval.not();
+
+        // Evidence and uncertainty unchanged
+        let evidence_chain = self.evidence_chain.clone();
+        let uncertainty_sources = self.uncertainty_sources.clone();
+
+        Self {
+            episodes,
+            confidence_interval,
+            evidence_chain,
+            uncertainty_sources,
+        }
+    }
+
+    /// Helper: Intersect episode sets (for AND operation)
+    fn intersect_episodes(
+        &self,
+        other_episodes: &[(Episode, Confidence)],
+    ) -> Vec<(Episode, Confidence)> {
+        let other_ids: std::collections::HashSet<_> =
+            other_episodes.iter().map(|(ep, _)| &ep.id).collect();
+
+        self.episodes
+            .iter()
+            .filter(|(ep, _)| other_ids.contains(&ep.id))
+            .cloned()
+            .collect()
+    }
+
+    /// Helper: Union episode sets (for OR operation)
+    fn union_episodes(
+        &self,
+        other_episodes: &[(Episode, Confidence)],
+    ) -> Vec<(Episode, Confidence)> {
+        let mut result = self.episodes.clone();
+
+        // Collect existing IDs first to avoid borrow issues
+        let existing_ids: std::collections::HashSet<_> =
+            self.episodes.iter().map(|(ep, _)| &ep.id).collect();
+
+        for (ep, conf) in other_episodes {
+            if !existing_ids.contains(&ep.id) {
+                result.push((ep.clone(), *conf));
+            }
+        }
+
+        result
+    }
+
+    /// Helper: Merge evidence chains from two queries
+    fn merge_evidence_chains(&self, other_evidence: &[Evidence]) -> Vec<Evidence> {
+        let mut result = self.evidence_chain.clone();
+        result.extend_from_slice(other_evidence);
+        result
+    }
+
+    /// Helper: Combine uncertainty sources from two queries
+    fn combine_uncertainty_sources(
+        &self,
+        other_uncertainty: &[UncertaintySource],
+    ) -> Vec<UncertaintySource> {
+        let mut result = self.uncertainty_sources.clone();
+        result.extend_from_slice(other_uncertainty);
+        result
+    }
 }
 
 // Extension trait for existing MemoryStore
@@ -467,5 +604,360 @@ mod tests {
         assert!(!result.is_successful());
         assert!(result.is_empty());
         assert_eq!(result.confidence_interval.point, Confidence::NONE);
+    }
+
+    // Helper function to create test episodes
+    fn create_test_episode(id: &str, confidence: Confidence) -> Episode {
+        use chrono::Utc;
+        Episode {
+            id: id.to_string(),
+            when: Utc::now(),
+            where_location: None,
+            who: None,
+            what: format!("test episode {id}"),
+            embedding: [0.5f32; 768],
+            embedding_provenance: None,
+            encoding_confidence: confidence,
+            vividness_confidence: confidence,
+            reliability_confidence: confidence,
+            last_recall: Utc::now(),
+            recall_count: 0,
+            decay_rate: 0.1,
+            decay_function: None,
+        }
+    }
+
+    #[test]
+    fn test_query_and_operation_intersection_semantics() {
+        // Create two query results with overlapping episodes
+        let episode1 = create_test_episode("ep1", Confidence::HIGH);
+        let episode2 = create_test_episode("ep2", Confidence::HIGH);
+        let episode3 = create_test_episode("ep3", Confidence::MEDIUM);
+
+        let result_a = ProbabilisticQueryResult::from_episodes(vec![
+            (episode1, Confidence::HIGH),
+            (episode2.clone(), Confidence::HIGH),
+        ]);
+
+        let result_b = ProbabilisticQueryResult::from_episodes(vec![
+            (episode2, Confidence::MEDIUM),
+            (episode3, Confidence::MEDIUM),
+        ]);
+
+        // AND operation should only keep episode2 (present in both)
+        let and_result = result_a.and(&result_b);
+
+        assert_eq!(and_result.len(), 1);
+        assert_eq!(and_result.episodes[0].0.id, "ep2");
+
+        // Confidence should be lower due to AND operation (multiplication)
+        assert!(
+            and_result.confidence_interval.point.raw() <= result_a.confidence_interval.point.raw()
+        );
+        assert!(
+            and_result.confidence_interval.point.raw() <= result_b.confidence_interval.point.raw()
+        );
+    }
+
+    #[test]
+    fn test_query_or_operation_union_semantics() {
+        // Create two query results with different episodes
+        let episode1 = create_test_episode("ep1", Confidence::HIGH);
+        let episode2 = create_test_episode("ep2", Confidence::MEDIUM);
+        let episode3 = create_test_episode("ep3", Confidence::MEDIUM);
+
+        let result_a = ProbabilisticQueryResult::from_episodes(vec![
+            (episode1, Confidence::HIGH),
+            (episode2.clone(), Confidence::MEDIUM),
+        ]);
+
+        let result_b = ProbabilisticQueryResult::from_episodes(vec![
+            (episode2, Confidence::MEDIUM),
+            (episode3, Confidence::MEDIUM),
+        ]);
+
+        // OR operation should include all unique episodes
+        let or_result = result_a.or(&result_b);
+
+        assert_eq!(or_result.len(), 3);
+
+        // Check all episodes are present
+        let ids: Vec<_> = or_result
+            .episodes
+            .iter()
+            .map(|(ep, _)| ep.id.as_str())
+            .collect();
+        assert!(ids.contains(&"ep1"));
+        assert!(ids.contains(&"ep2"));
+        assert!(ids.contains(&"ep3"));
+
+        // Confidence should be higher due to OR operation
+        assert!(
+            or_result.confidence_interval.point.raw()
+                >= result_a
+                    .confidence_interval
+                    .point
+                    .raw()
+                    .min(result_b.confidence_interval.point.raw())
+        );
+    }
+
+    #[test]
+    fn test_query_not_operation_negation_semantics() {
+        let episode1 = create_test_episode("ep1", Confidence::HIGH);
+        let episode2 = create_test_episode("ep2", Confidence::MEDIUM);
+
+        let result = ProbabilisticQueryResult::from_episodes(vec![
+            (episode1, Confidence::HIGH),
+            (episode2, Confidence::MEDIUM),
+        ]);
+
+        // NOT operation should negate confidence but keep episodes
+        let not_result = result.not();
+
+        // Episodes should be unchanged
+        assert_eq!(not_result.len(), result.len());
+        assert_eq!(not_result.episodes[0].0.id, result.episodes[0].0.id);
+        assert_eq!(not_result.episodes[1].0.id, result.episodes[1].0.id);
+
+        // Confidence should be inverted
+        let original_conf = result.confidence_interval.point.raw();
+        let negated_conf = not_result.confidence_interval.point.raw();
+        assert!((negated_conf - (1.0 - original_conf)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_query_and_with_empty_results() {
+        let episode1 = create_test_episode("ep1", Confidence::HIGH);
+        let result = ProbabilisticQueryResult::from_episodes(vec![(episode1, Confidence::HIGH)]);
+        let empty = ProbabilisticQueryResult::from_episodes(Vec::new());
+
+        let and_result = result.and(&empty);
+
+        // AND with empty should yield empty
+        assert!(and_result.is_empty());
+    }
+
+    #[test]
+    fn test_query_or_with_empty_results() {
+        let episode1 = create_test_episode("ep1", Confidence::HIGH);
+        let result = ProbabilisticQueryResult::from_episodes(vec![(episode1, Confidence::HIGH)]);
+        let empty = ProbabilisticQueryResult::from_episodes(Vec::new());
+
+        let or_result = result.or(&empty);
+
+        // OR with empty should preserve original
+        assert_eq!(or_result.len(), 1);
+        assert_eq!(or_result.episodes[0].0.id, "ep1");
+    }
+
+    #[test]
+    fn test_evidence_chain_merging() {
+        use std::time::SystemTime;
+
+        let episode1 = create_test_episode("ep1", Confidence::HIGH);
+        let episode2 = create_test_episode("ep2", Confidence::HIGH);
+
+        // Create result A with evidence chain
+        let mut result_a =
+            ProbabilisticQueryResult::from_episodes(vec![(episode1, Confidence::HIGH)]);
+        result_a.evidence_chain = vec![Evidence {
+            source: EvidenceSource::DirectMatch {
+                cue_id: "cue1".to_string(),
+                similarity_score: 0.9,
+                match_type: MatchType::Embedding,
+            },
+            strength: Confidence::HIGH,
+            timestamp: SystemTime::now(),
+            dependencies: vec![],
+        }];
+
+        // Create result B with different evidence
+        let mut result_b =
+            ProbabilisticQueryResult::from_episodes(vec![(episode2, Confidence::MEDIUM)]);
+        result_b.evidence_chain = vec![Evidence {
+            source: EvidenceSource::DirectMatch {
+                cue_id: "cue2".to_string(),
+                similarity_score: 0.7,
+                match_type: MatchType::Semantic,
+            },
+            strength: Confidence::MEDIUM,
+            timestamp: SystemTime::now(),
+            dependencies: vec![],
+        }];
+
+        // AND operation should merge evidence chains
+        let and_result = result_a.and(&result_b);
+        assert_eq!(and_result.evidence_chain.len(), 2);
+
+        // OR operation should also merge evidence chains
+        let or_result = result_a.or(&result_b);
+        assert_eq!(or_result.evidence_chain.len(), 2);
+    }
+
+    #[test]
+    fn test_uncertainty_source_combining() {
+        let episode1 = create_test_episode("ep1", Confidence::HIGH);
+        let episode2 = create_test_episode("ep2", Confidence::HIGH);
+
+        // Create result A with uncertainty source
+        let mut result_a =
+            ProbabilisticQueryResult::from_episodes(vec![(episode1, Confidence::HIGH)]);
+        result_a.uncertainty_sources = vec![UncertaintySource::SystemPressure {
+            pressure_level: 0.3,
+            effect_on_confidence: 0.1,
+        }];
+
+        // Create result B with different uncertainty
+        let mut result_b =
+            ProbabilisticQueryResult::from_episodes(vec![(episode2, Confidence::MEDIUM)]);
+        result_b.uncertainty_sources = vec![UncertaintySource::SpreadingActivationNoise {
+            activation_variance: 0.05,
+            path_diversity: 0.2,
+        }];
+
+        // AND operation should combine uncertainty sources
+        let and_result = result_a.and(&result_b);
+        assert_eq!(and_result.uncertainty_sources.len(), 2);
+
+        // OR operation should also combine uncertainty sources
+        let or_result = result_a.or(&result_b);
+        assert_eq!(or_result.uncertainty_sources.len(), 2);
+    }
+
+    #[test]
+    fn test_conjunction_bound_axiom() {
+        // Verify P(A AND B) <= min(P(A), P(B))
+        let episode1 = create_test_episode("ep1", Confidence::HIGH);
+        let episode2 = create_test_episode("ep2", Confidence::HIGH);
+
+        let result_a =
+            ProbabilisticQueryResult::from_episodes(vec![(episode1, Confidence::exact(0.8))]);
+        let result_b =
+            ProbabilisticQueryResult::from_episodes(vec![(episode2, Confidence::exact(0.6))]);
+
+        let and_result = result_a.and(&result_b);
+
+        // Conjunction bound: P(A ∧ B) ≤ min(P(A), P(B))
+        let min_confidence = result_a
+            .confidence_interval
+            .point
+            .raw()
+            .min(result_b.confidence_interval.point.raw());
+        assert!(and_result.confidence_interval.point.raw() <= min_confidence + 1e-6);
+    }
+
+    #[test]
+    fn test_disjunction_bound_axiom() {
+        // Verify P(A OR B) >= max(P(A), P(B))
+        let episode1 = create_test_episode("ep1", Confidence::MEDIUM);
+        let episode2 = create_test_episode("ep2", Confidence::LOW);
+
+        let result_a =
+            ProbabilisticQueryResult::from_episodes(vec![(episode1, Confidence::exact(0.5))]);
+        let result_b =
+            ProbabilisticQueryResult::from_episodes(vec![(episode2, Confidence::exact(0.3))]);
+
+        let or_result = result_a.or(&result_b);
+
+        // Disjunction bound: P(A ∨ B) ≥ max(P(A), P(B))
+        let max_confidence = result_a
+            .confidence_interval
+            .point
+            .raw()
+            .max(result_b.confidence_interval.point.raw());
+        assert!(or_result.confidence_interval.point.raw() >= max_confidence - 1e-6);
+    }
+
+    #[test]
+    fn test_negation_bounds_axiom() {
+        // Verify P(NOT A) = 1 - P(A) and stays within [0,1]
+        let episode1 = create_test_episode("ep1", Confidence::HIGH);
+        let result =
+            ProbabilisticQueryResult::from_episodes(vec![(episode1, Confidence::exact(0.75))]);
+
+        let not_result = result.not();
+
+        // Check negation formula
+        let expected = 1.0 - result.confidence_interval.point.raw();
+        assert!((not_result.confidence_interval.point.raw() - expected).abs() < 1e-6);
+
+        // Check bounds
+        assert!(not_result.confidence_interval.point.raw() >= 0.0);
+        assert!(not_result.confidence_interval.point.raw() <= 1.0);
+    }
+
+    #[test]
+    fn test_associativity_of_and_operation() {
+        // Verify (A AND B) AND C = A AND (B AND C)
+        let ep1 = create_test_episode("ep1", Confidence::HIGH);
+
+        let a = ProbabilisticQueryResult::from_episodes(vec![(ep1.clone(), Confidence::HIGH)]);
+        let b = ProbabilisticQueryResult::from_episodes(vec![(ep1.clone(), Confidence::MEDIUM)]);
+        let c = ProbabilisticQueryResult::from_episodes(vec![(ep1, Confidence::LOW)]);
+
+        let left = a.and(&b).and(&c);
+        let right = a.and(&b.and(&c));
+
+        // Confidence should be approximately equal (within floating point error)
+        assert!(
+            (left.confidence_interval.point.raw() - right.confidence_interval.point.raw()).abs()
+                < 1e-5
+        );
+    }
+
+    #[test]
+    fn test_commutativity_of_and_operation() {
+        // Verify A AND B = B AND A
+        let ep1 = create_test_episode("ep1", Confidence::HIGH);
+        let ep2 = create_test_episode("ep2", Confidence::MEDIUM);
+
+        let a = ProbabilisticQueryResult::from_episodes(vec![(ep1, Confidence::HIGH)]);
+        let b = ProbabilisticQueryResult::from_episodes(vec![(ep2, Confidence::MEDIUM)]);
+
+        let ab = a.and(&b);
+        let ba = b.and(&a);
+
+        // Results should be equal (order shouldn't matter)
+        assert_eq!(ab.len(), ba.len());
+        assert!(
+            (ab.confidence_interval.point.raw() - ba.confidence_interval.point.raw()).abs() < 1e-6
+        );
+    }
+
+    #[test]
+    fn test_commutativity_of_or_operation() {
+        // Verify A OR B = B OR A
+        let ep1 = create_test_episode("ep1", Confidence::HIGH);
+        let ep2 = create_test_episode("ep2", Confidence::MEDIUM);
+
+        let a = ProbabilisticQueryResult::from_episodes(vec![(ep1, Confidence::HIGH)]);
+        let b = ProbabilisticQueryResult::from_episodes(vec![(ep2, Confidence::MEDIUM)]);
+
+        let ab = a.or(&b);
+        let ba = b.or(&a);
+
+        // Results should be equal (order shouldn't matter)
+        assert_eq!(ab.len(), ba.len());
+        assert!(
+            (ab.confidence_interval.point.raw() - ba.confidence_interval.point.raw()).abs() < 1e-6
+        );
+    }
+
+    #[test]
+    fn test_double_negation_law() {
+        // Verify NOT (NOT A) ≈ A
+        let ep1 = create_test_episode("ep1", Confidence::HIGH);
+        let result = ProbabilisticQueryResult::from_episodes(vec![(ep1, Confidence::exact(0.7))]);
+
+        let double_negated = result.not().not();
+
+        // Should approximately equal original
+        assert!(
+            (double_negated.confidence_interval.point.raw()
+                - result.confidence_interval.point.raw())
+            .abs()
+                < 1e-5
+        );
     }
 }
