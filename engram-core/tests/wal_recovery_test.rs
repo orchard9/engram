@@ -9,9 +9,6 @@ use std::sync::Arc;
 use tempfile::tempdir;
 
 #[test]
-#[ignore = "Bincode deserialization issue: Episode fails to deserialize with InvalidTagEncoding(102). \
-            WAL shutdown mechanism is fixed (entries are written), but Episode serialization needs \
-            investigation. Likely bincode 1.3 compatibility issue. See: tmp/wal_recovery_investigation_final.md"]
 fn wal_recovery_round_trip() {
     let temp_dir = tempdir().expect("temporary directory");
     println!("=== WAL RECOVERY TEST ===");
@@ -103,8 +100,7 @@ fn wal_recovery_round_trip() {
                 println!("WalReader.scan_all() returned {} entries", entries.len());
                 for (i, entry) in entries.iter().enumerate() {
                     println!(
-                        "  Entry {}: type={}, payload_size={}, header_valid={:?}, payload_valid={:?}",
-                        i,
+                        "  Entry {i}: type={}, payload_size={}, header_valid={:?}, payload_valid={:?}",
                         entry.header.entry_type,
                         entry.header.payload_size,
                         entry.header.validate(),

@@ -60,7 +60,7 @@ pub struct Memory {
     pub content: Option<String>,
 
     /// Optional provenance metadata for the embedding (model version, language, etc.)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub embedding_provenance: Option<EmbeddingProvenance>,
 }
 
@@ -229,7 +229,7 @@ pub struct Episode {
     pub embedding: [f32; 768],
 
     /// Optional provenance metadata for the embedding (model version, language, etc.)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub embedding_provenance: Option<EmbeddingProvenance>,
 
     /// Confidence in episode encoding quality
@@ -515,7 +515,7 @@ pub struct Cue {
     pub max_results: usize,
 
     /// Optional provenance metadata for embedding-based cues
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub embedding_provenance: Option<EmbeddingProvenance>,
 }
 
