@@ -24,7 +24,8 @@ fn create_test_router() -> Router {
     let store = Arc::new(engram_core::MemoryStore::new(100));
     let metrics = engram_core::metrics::init();
     let auto_tuner = SpreadingAutoTuner::new(0.10, 16);
-    let api_state = ApiState::new(store, metrics, auto_tuner);
+    let (shutdown_tx, _shutdown_rx) = tokio::sync::watch::channel(false);
+    let api_state = ApiState::new(store, metrics, auto_tuner, Arc::new(shutdown_tx));
 
     create_api_routes().with_state(api_state)
 }
@@ -647,7 +648,8 @@ async fn test_end_to_end_sse_event_delivery_after_remember() {
     let metrics = engram_core::metrics::init();
 
     let auto_tuner = SpreadingAutoTuner::new(0.10, 16);
-    let api_state = ApiState::new(store.clone(), metrics, auto_tuner);
+    let (shutdown_tx, _shutdown_rx) = tokio::sync::watch::channel(false);
+    let api_state = ApiState::new(store.clone(), metrics, auto_tuner, Arc::new(shutdown_tx));
     let app = create_api_routes().with_state(api_state);
 
     // Step 1: Verify SSE stream endpoint is available

@@ -114,6 +114,11 @@ async fn main() -> Result<()> {
 async fn start_server(port: u16, grpc_port: u16, cli_config: &config::CliConfig) -> Result<()> {
     info!(" Starting Engram server...");
 
+    // Create shutdown signal channel for graceful termination
+    // All background tasks subscribe to shutdown_rx to know when to exit
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+    let shutdown_tx = Arc::new(shutdown_tx);
+
     let actual_port = find_available_port(port).await?;
     let actual_grpc_port = find_available_port(grpc_port).await?;
 
@@ -195,48 +200,63 @@ async fn start_server(port: u16, grpc_port: u16, cli_config: &config::CliConfig)
     // always has at least one active receiver. This prevents events from
     // being silently dropped when no SSE clients are connected.
     info!(" Keepalive subscriber started - maintaining event streaming invariant");
-    tokio::spawn(async move {
+    let mut keepalive_shutdown = shutdown_rx.clone();
+    let keepalive_handle = tokio::spawn(async move {
         let mut lagged_count = 0u64;
         let mut events_received = 0u64;
         let mut last_health_log = std::time::Instant::now();
 
         loop {
-            match event_rx.recv().await {
-                Ok(_event) => {
-                    events_received += 1;
-
-                    // Periodic health reporting (every 10 seconds)
-                    if last_health_log.elapsed() >= std::time::Duration::from_secs(10) {
-                        info!(
-                            events_received,
-                            lagged_count,
-                            "Keepalive subscriber healthy - {} events received, {} lagged",
-                            events_received,
-                            lagged_count
-                        );
-                        last_health_log = std::time::Instant::now();
-                    }
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
-                    lagged_count += skipped;
-                    warn!(
-                        lagged_count,
-                        skipped,
-                        "Keepalive event subscriber lagging - {} events skipped (total: {}). \
-                         This indicates high event volume or slow processing.",
-                        skipped,
-                        lagged_count
-                    );
-                }
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                    error!(
+            tokio::select! {
+                _ = keepalive_shutdown.changed() => {
+                    info!(
                         events_received,
                         lagged_count,
-                        "CRITICAL: Event broadcast channel closed - keepalive subscriber exiting. \
-                         Event streaming is now BROKEN. {} events were received before shutdown.",
-                        events_received
+                        "Keepalive subscriber shutting down gracefully - {} events received, {} lagged",
+                        events_received,
+                        lagged_count
                     );
                     break;
+                }
+                result = event_rx.recv() => {
+                    match result {
+                        Ok(_event) => {
+                            events_received += 1;
+
+                            // Periodic health reporting (every 10 seconds)
+                            if last_health_log.elapsed() >= std::time::Duration::from_secs(10) {
+                                info!(
+                                    events_received,
+                                    lagged_count,
+                                    "Keepalive subscriber healthy - {} events received, {} lagged",
+                                    events_received,
+                                    lagged_count
+                                );
+                                last_health_log = std::time::Instant::now();
+                            }
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                            lagged_count += skipped;
+                            warn!(
+                                lagged_count,
+                                skipped,
+                                "Keepalive event subscriber lagging - {} events skipped (total: {}). \
+                                 This indicates high event volume or slow processing.",
+                                skipped,
+                                lagged_count
+                            );
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                            error!(
+                                events_received,
+                                lagged_count,
+                                "CRITICAL: Event broadcast channel closed - keepalive subscriber exiting. \
+                                 Event streaming is now BROKEN. {} events were received before shutdown.",
+                                events_received
+                            );
+                            break;
+                        }
+                    }
                 }
             }
         }
@@ -248,15 +268,23 @@ async fn start_server(port: u16, grpc_port: u16, cli_config: &config::CliConfig)
     let tuner_auto = Arc::clone(&auto_tuner);
     #[cfg(feature = "hnsw_index")]
     let tuner_store = Arc::clone(&memory_store);
+    let mut autotuner_shutdown = shutdown_rx.clone();
     let auto_tune_handle = tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
         loop {
-            interval.tick().await;
-            let snapshot = tuner_metrics.streaming_snapshot();
-            if let Some(summary) = snapshot.spreading.clone() {
-                #[cfg(feature = "hnsw_index")]
-                if let Some(engine) = tuner_store.spreading_engine() {
-                    let _ = tuner_auto.evaluate(&summary, &engine);
+            tokio::select! {
+                _ = autotuner_shutdown.changed() => {
+                    info!("Auto-tuner shutting down gracefully");
+                    break;
+                }
+                _ = interval.tick() => {
+                    let snapshot = tuner_metrics.streaming_snapshot();
+                    if let Some(summary) = snapshot.spreading.clone() {
+                        #[cfg(feature = "hnsw_index")]
+                        if let Some(engine) = tuner_store.spreading_engine() {
+                            let _ = tuner_auto.evaluate(&summary, &engine);
+                        }
+                    }
                 }
             }
         }
@@ -264,17 +292,25 @@ async fn start_server(port: u16, grpc_port: u16, cli_config: &config::CliConfig)
     info!(" Auto-tuner background worker started (5 minute interval)");
 
     let health_metrics = Arc::clone(&metrics);
+    let mut health_shutdown = shutdown_rx.clone();
     let health_handle = tokio::spawn(async move {
         let registry = health_metrics.health_registry();
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(10));
         loop {
-            interval.tick().await;
-            let status = registry.check_all();
-            tracing::trace!(
-                target = "engram::health",
-                ?status,
-                "health probes evaluated"
-            );
+            tokio::select! {
+                _ = health_shutdown.changed() => {
+                    info!("Health monitor shutting down gracefully");
+                    break;
+                }
+                _ = interval.tick() => {
+                    let status = registry.check_all();
+                    tracing::trace!(
+                        target = "engram::health",
+                        ?status,
+                        "health probes evaluated"
+                    );
+                }
+            }
         }
     });
 
@@ -297,6 +333,7 @@ async fn start_server(port: u16, grpc_port: u16, cli_config: &config::CliConfig)
         Arc::clone(&memory_store),
         Arc::clone(&metrics),
         Arc::clone(&auto_tuner),
+        Arc::clone(&shutdown_tx),
     );
 
     // Clone memory store for gRPC before moving api_state into router
@@ -313,11 +350,19 @@ async fn start_server(port: u16, grpc_port: u16, cli_config: &config::CliConfig)
 
     // Emit periodic structured metrics logs for operators tailing logs.
     let logging_metrics = Arc::clone(&metrics);
+    let mut logging_shutdown = shutdown_rx.clone();
     let logging_handle = tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
         loop {
-            interval.tick().await;
-            logging_metrics.log_streaming_snapshot("daemon");
+            tokio::select! {
+                _ = logging_shutdown.changed() => {
+                    info!("Metrics logging shutting down gracefully");
+                    break;
+                }
+                _ = interval.tick() => {
+                    logging_metrics.log_streaming_snapshot("daemon");
+                }
+            }
         }
     });
 
@@ -352,16 +397,34 @@ async fn start_server(port: u16, grpc_port: u16, cli_config: &config::CliConfig)
     println!(" Use 'engram stop' to shutdown the server");
 
     // Start HTTP server with graceful shutdown, alongside gRPC
+    let shutdown_signal_tx = Arc::clone(&shutdown_tx);
     axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
+        .with_graceful_shutdown(shutdown_signal(shutdown_signal_tx))
         .await?;
 
-    // gRPC server will be cancelled when the tokio runtime shuts down
-    // Explicitly abort to ensure clean shutdown
+    info!(" HTTP server shutdown complete, cleaning up background tasks");
+
+    // Gracefully shutdown all background tasks with timeout
+    let shutdown_timeout = std::time::Duration::from_secs(3);
+    let shutdown_result = tokio::time::timeout(shutdown_timeout, async {
+        // Wait for all background tasks to exit gracefully
+        // Tasks will see the shutdown signal and exit their loops
+        let _ = tokio::join!(
+            keepalive_handle,
+            auto_tune_handle,
+            health_handle,
+            logging_handle,
+        );
+        info!(" All background tasks stopped");
+    })
+    .await;
+
+    if shutdown_result.is_err() {
+        warn!(" Background task shutdown timeout, aborting remaining tasks");
+    }
+
+    // Abort gRPC server (doesn't have shutdown signal integration yet)
     grpc_handle.abort();
-    logging_handle.abort();
-    auto_tune_handle.abort();
-    health_handle.abort();
 
     // Cleanup on exit
     remove_pid_file()?;
@@ -567,7 +630,9 @@ async fn handle_benchmark_command(
     Ok(())
 }
 
-async fn shutdown_signal() {
+async fn shutdown_signal(shutdown_tx: Arc<tokio::sync::watch::Sender<bool>>) {
+    let mut shutdown_rx = shutdown_tx.subscribe();
+
     let ctrl_c = async {
         signal::ctrl_c()
             .await
@@ -585,12 +650,26 @@ async fn shutdown_signal() {
     #[cfg(not(unix))]
     let terminate = std::future::pending::<()>();
 
+    let api_shutdown = async {
+        let _ = shutdown_rx.changed().await;
+    };
+
     tokio::select! {
-        () = ctrl_c => {},
-        () = terminate => {},
+        () = ctrl_c => {
+            info!(" Ctrl+C received");
+        },
+        () = terminate => {
+            info!(" TERM signal received");
+        },
+        () = api_shutdown => {
+            info!(" API shutdown endpoint called");
+        },
     }
 
     info!(" Shutdown signal received");
+
+    // Notify all background tasks to shutdown
+    shutdown_tx.send(true).ok();
 }
 
 fn handle_docs_command(section: Option<String>, list: bool, export: Option<String>) -> Result<()> {

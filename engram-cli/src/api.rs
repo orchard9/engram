@@ -46,6 +46,8 @@ pub struct ApiState {
     pub metrics: Arc<MetricsRegistry>,
     /// Auto-tuning audit log
     pub auto_tuner: Arc<SpreadingAutoTuner>,
+    /// Shutdown signal sender for graceful termination
+    pub shutdown_tx: Arc<tokio::sync::watch::Sender<bool>>,
 }
 
 /// Auto-tuning response payload used by the REST API and OpenAPI schema.
@@ -61,6 +63,7 @@ impl ApiState {
         store: Arc<MemoryStore>,
         metrics: Arc<MetricsRegistry>,
         auto_tuner: Arc<SpreadingAutoTuner>,
+        shutdown_tx: Arc<tokio::sync::watch::Sender<bool>>,
     ) -> Self {
         let memory_service = Arc::new(MemoryService::new(Arc::clone(&store), Arc::clone(&metrics)));
         Self {
@@ -68,6 +71,7 @@ impl ApiState {
             memory_service,
             metrics,
             auto_tuner,
+            shutdown_tx,
         }
     }
 }
@@ -1624,6 +1628,29 @@ pub async fn spreading_health(
     }
 }
 
+/// POST /shutdown - Initiate graceful server shutdown
+///
+/// # Errors
+///
+/// Returns error if shutdown signal cannot be sent
+pub async fn shutdown_server(State(state): State<ApiState>) -> Result<impl IntoResponse, ApiError> {
+    tracing::info!("Shutdown endpoint called - initiating graceful shutdown");
+
+    // Send shutdown signal to all background tasks
+    state
+        .shutdown_tx
+        .send(true)
+        .map_err(|_| ApiError::SystemError("Failed to send shutdown signal".to_string()))?;
+
+    Ok((
+        StatusCode::OK,
+        Json(json!({
+            "status": "shutdown_initiated",
+            "message": "Server is shutting down gracefully"
+        })),
+    ))
+}
+
 /// GET /api/v1/system/health - Comprehensive system health
 #[utoipa::path(
     get,
@@ -2732,6 +2759,8 @@ pub fn create_api_routes() -> Router<ApiState> {
     let swagger_router = create_swagger_ui().with_state::<ApiState>(());
 
     Router::new()
+        // Server lifecycle
+        .route("/shutdown", post(shutdown_server))
         // Simple health endpoint for status checks
         .route("/health", get(simple_health))
         .route("/health/spreading", get(spreading_health))
