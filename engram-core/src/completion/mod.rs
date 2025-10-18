@@ -17,6 +17,7 @@ pub mod hippocampal;
 pub mod hypothesis;
 pub mod numeric;
 pub mod reconstruction;
+pub mod scheduler;
 
 pub use confidence::MetacognitiveConfidence;
 pub use consolidation::ConsolidationEngine;
@@ -24,6 +25,9 @@ pub use context::{EntorhinalContext, GridModule};
 pub use hippocampal::HippocampalCompletion;
 pub use hypothesis::{Hypothesis, System2Reasoner};
 pub use reconstruction::PatternReconstructor;
+pub use scheduler::{
+    ConsolidationScheduler, ConsolidationStats as SchedulerStats, SchedulerConfig, SchedulerState,
+};
 
 /// Error types for pattern completion operations
 #[derive(Debug, Error)]

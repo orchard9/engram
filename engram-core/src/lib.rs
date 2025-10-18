@@ -475,9 +475,10 @@ pub use decay::{
 #[cfg(feature = "pattern_completion")]
 pub use completion::{
     ActivationPathway, ActivationTrace, CompletedEpisode, CompletionConfig, CompletionError,
-    CompletionResult, ConsolidationEngine, EntorhinalContext, GridModule, HippocampalCompletion,
-    Hypothesis, MemorySource, MetacognitiveConfidence, PartialEpisode, PatternCompleter,
-    PatternReconstructor, SourceMap, System2Reasoner,
+    CompletionResult, ConsolidationEngine, ConsolidationScheduler, EntorhinalContext, GridModule,
+    HippocampalCompletion, Hypothesis, MemorySource, MetacognitiveConfidence, PartialEpisode,
+    PatternCompleter, PatternReconstructor, SchedulerConfig, SchedulerState, SchedulerStats,
+    SourceMap, System2Reasoner,
 };
 
 // Type-state pattern: Memory node states
