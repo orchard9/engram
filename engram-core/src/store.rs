@@ -1558,6 +1558,14 @@ impl MemoryStore {
             }))
     }
 
+    /// Get all episodes as a Vec (convenience method for dream operation)
+    #[must_use]
+    pub fn all_episodes(&self) -> Vec<Episode> {
+        self.get_all_episodes()
+            .map(|(_, episode)| episode)
+            .collect()
+    }
+
     /// Generate a snapshot of consolidated semantic patterns using the cached scheduler output when available.
     #[must_use]
     pub fn consolidation_snapshot(&self, max_episodes: usize) -> ConsolidationSnapshot {

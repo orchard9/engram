@@ -1,11 +1,13 @@
 //! Consolidation service abstractions for caching, observability, and persistence.
 
 pub mod compaction;
+pub mod dream;
 pub mod pattern_detector;
 pub mod service;
 pub mod statistical_tests;
 
 pub use compaction::{CompactionConfig, CompactionResult, StorageCompactor};
+pub use dream::{DreamConfig, DreamEngine, DreamError, DreamOutcome};
 pub use pattern_detector::{
     EpisodicPattern, PatternDetectionConfig, PatternDetector, PatternFeature,
 };
