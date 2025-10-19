@@ -970,12 +970,18 @@ impl ParallelSpreadingEngine {
     fn wait_for_completion(&self) -> ActivationResult<()> {
         const MAX_POLL_INTERVAL_MS: u64 = 50;
 
-        // Reasonable timeout: 10 seconds base + 2 seconds per core
-        // This is sufficient for even very large graphs while preventing indefinite hangs
-        let available_parallelism = std::thread::available_parallelism()
-            .map(std::num::NonZero::get)
-            .unwrap_or(4);
-        let timeout = Duration::from_secs(10 + (available_parallelism as u64 * 2));
+        // Use configured timeout if provided, otherwise compute based on available parallelism
+        let timeout = {
+            let config = self.config.read();
+            config.completion_timeout.unwrap_or_else(|| {
+                // Reasonable timeout: 10 seconds base + 2 seconds per core
+                // This is sufficient for even very large graphs while preventing indefinite hangs
+                let available_parallelism = std::thread::available_parallelism()
+                    .map(std::num::NonZero::get)
+                    .unwrap_or(4);
+                Duration::from_secs(10 + (available_parallelism as u64 * 2))
+            })
+        };
         let start = Instant::now();
 
         // Use exponential backoff polling to reduce CPU usage

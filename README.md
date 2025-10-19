@@ -144,7 +144,7 @@ Returns:
 
 Consolidation runs asynchronously after `remember` writes, transforming episodic memories into semantic beliefs with complete provenance trails. Query the new endpoints to inspect those beliefs:
 
-- `GET /api/v1/consolidations` — returns the current snapshot of semantic beliefs with citation metadata, timestamps (`observed_at`, `last_access`), and freshness metrics
+- `GET /api/v1/consolidations` — returns the scheduler-backed snapshot of semantic beliefs with citation metadata, timestamps (`observed_at`, `stored_at`, `last_access`), and freshness metrics without running on-demand consolidation
 - `GET /api/v1/consolidations/{pattern_id}` — drills into a specific belief with contributing episodes and decay signals
 - `GET /api/v1/stream/consolidation` — SSE stream that emits belief updates whenever consolidation strengthens or forms new schemas
 

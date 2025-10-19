@@ -5,7 +5,8 @@
 //! and resumable, following cognitive principles of sleep-based memory consolidation.
 
 use super::{CompletionConfig, ConsolidationEngine};
-use crate::{Episode, MemoryStore};
+use crate::consolidation::ConsolidationCacheSource;
+use crate::{Episode, MemoryStore, metrics};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
@@ -149,6 +150,7 @@ impl ConsolidationScheduler {
 
                         // Run consolidation
                         if let Err(e) = self.run_consolidation(&store).await {
+                            metrics::increment_counter("engram_consolidation_failures_total", 1);
                             warn!(error = ?e, "Consolidation run failed");
                         }
                     }
@@ -180,7 +182,7 @@ impl ConsolidationScheduler {
         debug!("Starting consolidation run");
 
         // Get episodes from store
-        let episodes = self.collect_episodes_for_consolidation(store).await?;
+        let episodes = self.collect_episodes_for_consolidation(store);
 
         if episodes.len() < self.config.min_episodes_threshold {
             debug!(
@@ -201,17 +203,23 @@ impl ConsolidationScheduler {
             "Running consolidation on episodes"
         );
 
-        // Run consolidation engine
-        {
+        // Run consolidation engine and capture scheduler snapshot
+        let snapshot = {
             let mut engine = self.engine.write().await;
             engine.ripple_replay(&episodes);
-        }
+            engine.snapshot()
+        };
+
+        store
+            .consolidation_service()
+            .update_cache(&snapshot, ConsolidationCacheSource::Scheduler);
 
         // Update statistics
         let duration = start_time.elapsed().as_secs_f32();
         let mut consolidation_stats = self.stats.write().await;
         consolidation_stats.total_runs += 1;
         consolidation_stats.episodes_consolidated += episodes.len();
+        consolidation_stats.patterns_extracted = snapshot.patterns.len();
         consolidation_stats.last_run = Some(chrono::Utc::now());
 
         // Update average duration
@@ -224,6 +232,7 @@ impl ConsolidationScheduler {
             duration_secs = duration,
             episodes_processed = episodes.len(),
             total_runs = consolidation_stats.total_runs,
+            patterns_extracted = snapshot.patterns.len(),
             "Consolidation run completed"
         );
 
@@ -241,15 +250,26 @@ impl ConsolidationScheduler {
     /// This method prioritizes recent episodes with high prediction error
     /// for consolidation, following psychological principles of memory replay.
     ///
-    /// TODO: Implement episode collection from MemoryStore when API is extended
-    #[allow(clippy::unused_async)]
-    async fn collect_episodes_for_consolidation(
-        &self,
-        _store: &Arc<MemoryStore>,
-    ) -> Result<Vec<Episode>, String> {
-        // Placeholder - will be async when MemoryStore episode enumeration is implemented
-        debug!("Episode collection not yet implemented");
-        Ok(Vec::new())
+    fn collect_episodes_for_consolidation(&self, store: &Arc<MemoryStore>) -> Vec<Episode> {
+        let mut episodes: Vec<Episode> = store
+            .get_all_episodes()
+            .map(|(_, episode)| episode)
+            .collect();
+
+        if episodes.is_empty() {
+            debug!("No episodes available for consolidation");
+            return Vec::new();
+        }
+
+        // Prioritize recent episodes while keeping ordering deterministic for tests
+        episodes.sort_by(|a, b| b.when.cmp(&a.when));
+
+        if self.config.max_episodes_per_run > 0 && episodes.len() > self.config.max_episodes_per_run
+        {
+            episodes.truncate(self.config.max_episodes_per_run);
+        }
+
+        episodes
     }
 
     /// Get current scheduler state
@@ -306,6 +326,11 @@ impl ConsolidationScheduler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        Confidence, EpisodeBuilder, metrics, metrics::CONSOLIDATION_RUNS_TOTAL, store::MemoryStore,
+    };
+    use chrono::Utc;
+    use std::sync::Arc;
 
     #[test]
     fn test_scheduler_config_defaults() {
@@ -372,5 +397,64 @@ mod tests {
         assert_eq!(stats.patterns_extracted, 0);
         assert_eq!(stats.episodes_consolidated, 0);
         assert!(stats.last_run.is_none());
+    }
+
+    fn test_embedding(seed: f32) -> [f32; 768] {
+        let mut embedding = [0.0f32; 768];
+        for (idx, value) in embedding.iter_mut().enumerate() {
+            *value = seed + idx as f32 * 0.0001;
+        }
+        embedding
+    }
+
+    #[tokio::test]
+    async fn test_scheduler_populates_cache_and_metrics() -> Result<(), String> {
+        let _ = metrics::init();
+
+        let store = Arc::new(MemoryStore::new(64));
+        for idx in 0..6 {
+            let episode = EpisodeBuilder::new()
+                .id(format!("ep_cache_{idx}"))
+                .when(Utc::now())
+                .what(format!("episode {idx}"))
+                .embedding(test_embedding(idx as f32))
+                .confidence(Confidence::HIGH)
+                .build();
+            store.store(episode);
+        }
+
+        let scheduler_config = SchedulerConfig {
+            consolidation_interval_secs: 1,
+            min_episodes_threshold: 1,
+            max_episodes_per_run: 32,
+            enabled: true,
+        };
+        let scheduler = ConsolidationScheduler::new(CompletionConfig::default(), scheduler_config);
+
+        if store.cached_consolidation_snapshot().is_some() {
+            return Err("cache should start empty".to_string());
+        }
+
+        scheduler
+            .run_consolidation(&store)
+            .await
+            .map_err(|err| format!("consolidation run failed: {err}"))?;
+
+        let cached = store
+            .cached_consolidation_snapshot()
+            .ok_or_else(|| "scheduler run should populate cache".to_string())?;
+        let via_api = store.consolidation_snapshot(0);
+
+        if cached.generated_at != via_api.generated_at {
+            return Err("cached snapshot should match API snapshot".to_string());
+        }
+
+        let registry =
+            metrics::metrics().ok_or_else(|| "metrics registry unavailable".to_string())?;
+        if registry.counter_value(CONSOLIDATION_RUNS_TOTAL) < 1 {
+            return Err("scheduler run counter should increment".to_string());
+        }
+
+        Ok(())
     }
 }

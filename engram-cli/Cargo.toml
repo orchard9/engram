@@ -27,6 +27,10 @@ path = "src/error_reviewer.rs"
 name = "fuzz-spreading-latency"
 path = "src/bin/fuzz_spreading_latency.rs"
 
+[[bin]]
+name = "consolidation-soak"
+path = "src/bin/consolidation_soak.rs"
+
 [features]
 default = ["hnsw_index", "memory_mapped_persistence", "monitoring"]
 hnsw_index = ["engram-core/hnsw_index"]

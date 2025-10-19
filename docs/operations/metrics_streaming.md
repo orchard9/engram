@@ -23,6 +23,16 @@
   - `adaptive_batch_latency_ewma_ns` (smoothed latency EWMA in nanoseconds captured from recent spreads).
   - `adaptive_batch_hot_size`, `adaptive_batch_warm_size`, `adaptive_batch_cold_size` (latest recommended batch sizes per tier after guardrail adjustments).
   - `adaptive_batch_hot_confidence`, `adaptive_batch_warm_confidence`, `adaptive_batch_cold_confidence` (0.0–1.0 convergence confidence for each tier’s controller).
+- `engram_consolidation_runs_total`, `engram_consolidation_failures_total` (monotonic counters emitted by the consolidation scheduler).
+- `engram_consolidation_novelty_gauge`, `engram_consolidation_freshness_seconds`, `engram_consolidation_citations_current` (gauges reflecting scheduler novelty deltas, snapshot staleness, and current citation counts).
+
+### Consolidation Metric Schema Guarantees
+
+- Names are stable and versioned via `schema_version`; do not rename without bumping the stream schema.
+- All consolidation metrics include a `labels` map with at least `consolidation="scheduler"` to allow future sources (e.g., distributed runners) without breaking dashboards.
+- Counters expose monotonic `u64` values; gauges use finite `f64` readings and must never emit `NaN`.
+- Additions require: (1) entry in `docs/metrics-schema-changelog.md`, (2) contract test covering Prometheus snapshot, (3) OpenAPI update when surfaced via HTTP.
+- Baseline JSONL captures produced by `consolidation-soak` live in `docs/assets/consolidation/baseline/`; use them when validating parsers or dashboards offline.
 - Sample payload: `docs/assets/metrics/2025-10-15-adaptive-update/http_metrics.json` (captured from a live CLI session after a `remember` operation). The synthetic generator remains in `docs/assets/metrics/sample_metrics.json` for regression harness parity.
 - Long-run references: `docs/assets/metrics/2025-10-12-longrun/start_snapshot.json`, `mid_snapshot.json`, `end_snapshot.json` (synthetic soak using `generate_pool_soak_metrics`; augment with future live soak captures once the batch harness is stable).
 - Schema changes: see `docs/metrics-schema-changelog.md` for version history and migration guides.

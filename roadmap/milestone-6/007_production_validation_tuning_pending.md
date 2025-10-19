@@ -26,4 +26,6 @@ See MILESTONE_5_6_ROADMAP.md for detailed acceptance criteria.
 See MILESTONE_5_6_ROADMAP.md for comprehensive testing strategy.
 
 ## Notes
-This task file provides summary information. Complete implementation-ready specifications are in MILESTONE_5_6_ROADMAP.md.
+- Use the soak harness outputs as baselines for production readiness checks (latency, freshness, novelty).
+- Incorporate consolidated dashboards/alerts into the validation checklist before promoting builds.
+- Coordinate with Task 006 to ensure observability thresholds are enforced during production tuning.

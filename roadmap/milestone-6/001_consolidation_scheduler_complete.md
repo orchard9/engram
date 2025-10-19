@@ -1,7 +1,7 @@
 # Task 001: Consolidation Scheduler
 
 ## Status
-PENDING
+COMPLETE
 
 ## Priority
 P0 (Critical Path)
@@ -26,4 +26,6 @@ See MILESTONE_5_6_ROADMAP.md for detailed acceptance criteria.
 See MILESTONE_5_6_ROADMAP.md for comprehensive testing strategy.
 
 ## Notes
-This task file provides summary information. Complete implementation-ready specifications are in MILESTONE_5_6_ROADMAP.md.
+- Background scheduler implemented with asynchronous runs, interruption handling, and consolidated integration tests.
+- Consolidation API surfaces now consume scheduler-backed snapshots (see Tasks 002/003 updates).
+- Follow-up work tracked under Tasks 002/003/006 for cache reuse, semantic extraction metrics, and observability.

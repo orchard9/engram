@@ -138,9 +138,11 @@ fn pattern_to_belief(pattern: SemanticPattern, store: &MemoryStore) -> Consolida
         .iter()
         .map(|episode_id| {
             if let Some(episode) = store.get_episode(episode_id) {
+                let stored_at = store.stored_timestamp(&episode.id).unwrap_or(episode.when);
                 BeliefCitation {
                     episode_id: episode.id.clone(),
                     observed_at: episode.when,
+                    stored_at,
                     last_access: Some(episode.last_recall),
                     encoding_confidence: build_confidence_info(
                         episode.encoding_confidence.raw(),
@@ -153,6 +155,9 @@ fn pattern_to_belief(pattern: SemanticPattern, store: &MemoryStore) -> Consolida
                 BeliefCitation {
                     episode_id: episode_id.clone(),
                     observed_at: pattern.last_consolidated,
+                    stored_at: store
+                        .stored_timestamp(episode_id)
+                        .unwrap_or(pattern.last_consolidated),
                     last_access: None,
                     encoding_confidence: build_confidence_info(
                         0.0,
@@ -519,6 +524,8 @@ pub struct BeliefCitation {
     pub episode_id: String,
     /// When the episode occurred
     pub observed_at: DateTime<Utc>,
+    /// When the episode was stored in Engram
+    pub stored_at: DateTime<Utc>,
     /// When the episode was most recently recalled
     pub last_access: Option<DateTime<Utc>>,
     /// Encoding confidence for the episode

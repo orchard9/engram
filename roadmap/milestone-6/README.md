@@ -60,14 +60,16 @@ Milestone 6 implements `consolidate_async()` and `dream()` operations that trans
 ```
 roadmap/milestone-6/
 ├── README.md                                      # This overview
-├── 001_consolidation_scheduler_pending.md        # Async scheduler (3 days)
-├── 002_pattern_detection_engine_pending.md       # Unsupervised detection (4 days)
-├── 003_semantic_memory_extraction_pending.md     # Episode→Semantic (3 days)
-├── 004_storage_compaction_pending.md             # Safe replacement (2 days)
-├── 005_dream_operation_pending.md                # Offline consolidation (3 days)
-├── 006_consolidation_metrics_observability_pending.md # Monitoring (1 day)
-└── 007_production_validation_tuning_pending.md   # Parameter tuning (2 days)
+├── 001_consolidation_scheduler_complete.md       # ✅ Async scheduler (3 days)
+├── 002_pattern_detection_engine_complete.md      # ✅ Unsupervised detection (4 days)
+├── 003_semantic_memory_extraction_in_progress.md # 🔄 Episode→Semantic (3 days)
+├── 004_storage_compaction_in_progress.md         # 🔄 Safe replacement (2 days)
+├── 005_dream_operation_pending.md                # 📋 Offline consolidation (3 days)
+├── 006_consolidation_metrics_observability_in_progress.md # 🔄 Monitoring (1 day)
+└── 007_production_validation_tuning_pending.md   # 📋 Parameter tuning (2 days)
 ```
+
+**Status Key:** ✅ Complete | 🔄 In Progress | 📋 Pending
 
 ## Integration with Existing System
 

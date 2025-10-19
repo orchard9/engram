@@ -2,9 +2,9 @@
 
 use crate::completion::ConsolidationSnapshot;
 use crate::metrics::{
-    self, CONSOLIDATION_CITATIONS_CURRENT, CONSOLIDATION_CITATION_CHURN,
-    CONSOLIDATION_FRESHNESS_SECONDS, CONSOLIDATION_NOVELTY_GAUGE,
-    CONSOLIDATION_NOVELTY_VARIANCE, CONSOLIDATION_RUNS_TOTAL,
+    self, CONSOLIDATION_CITATION_CHURN, CONSOLIDATION_CITATIONS_CURRENT,
+    CONSOLIDATION_FRESHNESS_SECONDS, CONSOLIDATION_NOVELTY_GAUGE, CONSOLIDATION_NOVELTY_VARIANCE,
+    CONSOLIDATION_RUNS_TOTAL,
 };
 use chrono::{DateTime, Utc};
 use parking_lot::RwLock;
@@ -220,10 +220,8 @@ impl InMemoryConsolidationService {
         };
 
         // Compute citation churn: percentage of patterns with citation changes
-        let patterns_with_citation_changes = updates
-            .iter()
-            .filter(|u| u.citation_delta != 0)
-            .count();
+        let patterns_with_citation_changes =
+            updates.iter().filter(|u| u.citation_delta != 0).count();
         let citation_churn = if updates.is_empty() {
             0.0
         } else {

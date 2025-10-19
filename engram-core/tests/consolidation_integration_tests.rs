@@ -353,7 +353,9 @@ fn test_systems_consolidation_time_delay() {
 /// Semantic extraction quality regression tests
 mod semantic_quality_tests {
     use super::*;
-    use engram_core::consolidation::{ConsolidationCacheSource, ConsolidationService, InMemoryConsolidationService};
+    use engram_core::consolidation::{
+        ConsolidationCacheSource, ConsolidationService, InMemoryConsolidationService,
+    };
 
     /// Test that consolidation service computes belief updates correctly
     #[test]
@@ -380,12 +382,18 @@ mod semantic_quality_tests {
 
         // Verify update properties
         for update in &updates {
-            assert!(!update.pattern_id.is_empty(), "Update should have pattern ID");
+            assert!(
+                !update.pattern_id.is_empty(),
+                "Update should have pattern ID"
+            );
             assert!(
                 update.confidence_delta.abs() <= 1.0,
                 "Confidence delta should be bounded"
             );
-            assert!(update.generated_at <= Utc::now(), "Update timestamp should be valid");
+            assert!(
+                update.generated_at <= Utc::now(),
+                "Update timestamp should be valid"
+            );
         }
     }
 
@@ -469,10 +477,7 @@ mod semantic_quality_tests {
                 / updates.len() as f32;
 
             // Heterogeneous updates may have higher variance (though depends on pattern detection)
-            assert!(
-                variance >= 0.0,
-                "Variance should be non-negative"
-            );
+            assert!(variance >= 0.0, "Variance should be non-negative");
         }
     }
 
@@ -538,10 +543,7 @@ mod semantic_quality_tests {
             let churn_rate = (patterns_with_citation_changes as f32 / updates.len() as f32) * 100.0;
 
             // New patterns should have citation changes
-            assert!(
-                churn_rate >= 0.0,
-                "Citation churn should be non-negative"
-            );
+            assert!(churn_rate >= 0.0, "Citation churn should be non-negative");
         }
     }
 

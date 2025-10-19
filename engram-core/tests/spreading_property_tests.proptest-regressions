@@ -9,3 +9,6 @@ cc a52b3e60cd4e279e54870238a68d833f58bf9eac6809568ded708bf3eadf58f9 # shrinks to
 cc e8a3e5152a233907ecd5c2e928587022614fde30c391c516dc3fdd3728216718 # shrinks to scenario = ErdosRenyi { node_count: 15, edge_probability: 0.8, seed: 13660196675033953520 }
 cc aa33415f25ecb77f155b824955b1fbb97c3d0f9a77c376d1dbfd8c66aca02e8f # shrinks to scenario = BarabasiAlbert { node_count: 6, attachment_count: 3, seed: 6358505223951489594 }
 cc e81bde75cd0b2e6eaff014ae27ec984bddc228d174c58dac13c1d765693a8eb8 # shrinks to scenario = BarabasiAlbert { node_count: 15, attachment_count: 3, seed: 5725497534369461662 }
+cc 4c7fcfff0f29747ddfea6be492bf54cab867e3368e4b54c759f668f397b94d6b # shrinks to scenario = BarabasiAlbert { node_count: 10, attachment_count: 4, seed: 10793033129957603731 }
+cc ec17552b935610a371db78b800dfa4c2a7d7488b85f8cefec5bbba97b91fca50 # shrinks to scenario = ErdosRenyi { node_count: 8, edge_probability: 0.5, seed: 7593501806661497250 }
+cc c95c1bb17cf73b38017b063c7a104656da64beca9881e23441eb75fcad164b4e # shrinks to scenario = BarabasiAlbert { node_count: 15, attachment_count: 1, seed: 8123005758331760388 }

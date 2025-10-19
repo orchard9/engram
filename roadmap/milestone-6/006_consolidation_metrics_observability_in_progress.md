@@ -23,11 +23,13 @@ Refer to main roadmap document for detailed implementation plan, code examples, 
 - `/api/v1/consolidations` and `/api/v1/consolidations/{id}` now expose semantic belief snapshots with citation trails, schema confidence, and freshness metrics.
 - Consolidation SSE stream emits `belief`, `progress`, and keepalive events with novelty thresholds and consolidation run statistics.
 - Temporal provenance (`observed_at`, `stored_at`, `last_access`) is available in write and recall responses to support drift monitoring.
+- Scheduler-backed consolidation snapshots update metrics gauges/counters (`engram_consolidation_*`) and persist belief-delta logs to `data/consolidation/alerts/` for alerting.
+- `consolidation-soak` harness + baseline artifacts (docs/assets/consolidation/baseline) provide repeatable telemetry for dashboard validation.
 
 ## Remaining Work
-- Persist consolidation run metrics and belief update deltas into the metrics registry/export pipeline for long-term alerting.
-- Document alert thresholds (failed_consolidations spikes, stale beliefs) and operator responses in Task 006 playbooks.
-- Add integration coverage for the new metrics exports once persistence is wired in.
+- Wire the new consolidation metrics into dashboards/alerting rules and document operator response playbooks (use `docs/operations/consolidation_dashboard.md`).
+- Expand integration coverage around the persisted belief-update log and scheduler gauges to guard against regressions (promote `consolidation_soak` + future load tests into CI once stable).
+- Run long-window soak tests to baseline freshness/novelty thresholds and capture reference dashboards for docs (replace baseline artifacts with 1h capture before release).
 
 ## Acceptance Criteria
 See MILESTONE_5_6_ROADMAP.md for detailed acceptance criteria.

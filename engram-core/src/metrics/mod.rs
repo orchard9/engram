@@ -70,6 +70,18 @@ pub const CONSOLIDATION_FRESHNESS_SECONDS: &str = "engram_consolidation_freshnes
 /// Total citations captured in the most recent consolidation snapshot.
 pub const CONSOLIDATION_CITATIONS_CURRENT: &str = "engram_consolidation_citations_current";
 
+// Storage compaction metrics
+/// Total number of storage compaction attempts initiated.
+pub const COMPACTION_ATTEMPTS_TOTAL: &str = "engram_compaction_attempts_total";
+/// Count of successful storage compactions where episodes were replaced with semantic patterns.
+pub const COMPACTION_SUCCESS_TOTAL: &str = "engram_compaction_success_total";
+/// Count of compactions that were rolled back due to verification failure.
+pub const COMPACTION_ROLLBACK_TOTAL: &str = "engram_compaction_rollback_total";
+/// Number of episodes removed during successful compaction operations.
+pub const COMPACTION_EPISODES_REMOVED: &str = "engram_compaction_episodes_removed";
+/// Total bytes of storage space reclaimed through compaction.
+pub const COMPACTION_STORAGE_SAVED_BYTES: &str = "engram_compaction_storage_saved_bytes";
+
 /// Global metrics registry for the Engram system
 pub struct MetricsRegistry {
     /// Lock-free counters for operation counts

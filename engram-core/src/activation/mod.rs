@@ -1271,6 +1271,11 @@ pub struct ParallelSpreadingConfig {
     // Adaptive batching configuration
     /// Adaptive batching mode and configuration
     pub adaptive_batcher_config: Option<AdaptiveBatcherConfig>,
+
+    // Completion timeout configuration
+    /// Maximum duration to wait for spreading completion before timing out.
+    /// If None, uses a computed timeout based on available parallelism.
+    pub completion_timeout: Option<Duration>,
 }
 
 impl Default for ParallelSpreadingConfig {
@@ -1314,6 +1319,7 @@ impl Default for ParallelSpreadingConfig {
             pool_chunk_size: 8192,         // 8KB per chunk
             pool_max_chunks: 16,           // Max 128KB total
             adaptive_batcher_config: None, // Disabled by default
+            completion_timeout: None,      // Use computed timeout by default
         }
     }
 }
