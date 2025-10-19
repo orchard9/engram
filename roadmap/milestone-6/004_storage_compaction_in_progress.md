@@ -32,12 +32,14 @@ See MILESTONE_5_6_ROADMAP.md for comprehensive testing strategy.
   - `verify_reconstruction()` validates semantic memory can reconstruct episodes with ≥0.8 similarity before deletion
   - `is_episode_eligible()` checks both age and confidence criteria to protect high-value memories
   - `compute_storage_reduction()` calculates storage savings from replacing episodes with semantic patterns
+  - `compact_storage()` orchestrates full compaction process (Phases 1-2 implemented, Phases 3-5 delegated to caller)
   - `CompactionResult` tracks episodes_removed, storage_reduction_bytes, and average_similarity
-- **NEW (2025-10-19)**: Comprehensive test coverage with 8 unit tests
+- **NEW (2025-10-19)**: Comprehensive test coverage with 12 unit tests
   - Embedding similarity computation (identical and orthogonal cases)
   - Reconstruction verification (success and failure paths)
   - Episode eligibility filtering (by age and confidence)
   - Storage reduction computation and ratio calculation
+  - Full compact_storage() integration tests (success, failure, empty episodes, average similarity)
   - All tests passing with zero clippy warnings
 
 ## Next Checkpoints

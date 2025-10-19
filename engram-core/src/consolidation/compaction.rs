@@ -67,20 +67,20 @@ impl StorageCompactor {
         &self,
         episodes: &[Episode],
         semantic_memory: &SemanticPattern,
-    ) -> Result<(), CognitiveError> {
+    ) -> Result<(), Box<CognitiveError>> {
         for episode in episodes {
             let similarity =
                 Self::embedding_similarity(&episode.embedding, &semantic_memory.embedding);
 
             if similarity < self.config.reconstruction_threshold {
-                return Err(CognitiveError::new(
+                return Err(Box::new(CognitiveError::new(
                     format!(
                         "Reconstruction verification failed for episode {}",
                         episode.id
                     ),
                     ErrorContext::new(
                         format!("similarity >= {:.3}", self.config.reconstruction_threshold),
-                        format!("similarity {:.3}", similarity),
+                        format!("similarity {similarity:.3}"),
                     ),
                     "Adjust reconstruction threshold or review semantic memory quality",
                     format!(
@@ -88,7 +88,7 @@ impl StorageCompactor {
                         self.config.reconstruction_threshold, similarity
                     ),
                     Confidence::HIGH,
-                ));
+                )));
             }
         }
         Ok(())
@@ -109,15 +109,12 @@ impl StorageCompactor {
 
     /// Compute storage reduction in bytes from replacing episodes with semantic memory
     #[must_use]
-    pub fn compute_storage_reduction(
+    pub const fn compute_storage_reduction(
         episodes: &[Episode],
         _semantic_memory: &SemanticPattern,
     ) -> u64 {
-        let episode_size = std::mem::size_of::<Episode>();
-        let semantic_size = std::mem::size_of::<SemanticPattern>();
-
-        let before = (episodes.len() * episode_size) as u64;
-        let after = semantic_size as u64;
+        let before = std::mem::size_of_val(episodes) as u64;
+        let after = std::mem::size_of::<SemanticPattern>() as u64;
         before.saturating_sub(after)
     }
 
@@ -137,6 +134,53 @@ impl StorageCompactor {
             episode.encoding_confidence.raw() < self.config.preserve_threshold;
 
         age_eligible && confidence_eligible
+    }
+
+    /// Perform complete storage compaction with 5-phase verification
+    ///
+    /// This method implements the full compaction process:
+    /// - Phase 1: Verify reconstruction quality (semantic memory can reconstruct episodes)
+    /// - Phase 2: Compute storage metrics
+    /// - Phases 3-5: Caller is responsible for storage mutations
+    ///
+    /// # Errors
+    ///
+    /// Returns error if reconstruction verification fails (Phase 1)
+    ///
+    /// # Implementation Note
+    ///
+    /// This method performs non-destructive verification only. The caller must handle:
+    /// - Phase 3: Mark episodes as consolidated (soft delete)
+    /// - Phase 4: Verify retrieval still works
+    /// - Phase 5: Remove consolidated episodes (hard delete)
+    pub fn compact_storage(
+        &self,
+        episodes: &[Episode],
+        semantic_memory: &SemanticPattern,
+    ) -> Result<CompactionResult, Box<CognitiveError>> {
+        // Phase 1: Verify reconstruction before any modifications
+        self.verify_reconstruction(episodes, semantic_memory)?;
+
+        // Phase 2: Compute storage metrics
+        let storage_reduction_bytes = Self::compute_storage_reduction(episodes, semantic_memory);
+
+        // Calculate average similarity for observability
+        let total_similarity: f32 = episodes
+            .iter()
+            .map(|ep| Self::embedding_similarity(&ep.embedding, &semantic_memory.embedding))
+            .sum();
+        let average_similarity = if episodes.is_empty() {
+            0.0
+        } else {
+            total_similarity / episodes.len() as f32
+        };
+
+        Ok(CompactionResult {
+            episodes_removed: episodes.len(),
+            semantic_memory_id: semantic_memory.id.clone(),
+            storage_reduction_bytes,
+            average_similarity,
+        })
     }
 }
 
@@ -166,25 +210,28 @@ impl CompactionResult {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)] // Tests are allowed to use unwrap
+    #![allow(clippy::float_cmp)] // Tests use exact float comparisons
+
     use super::*;
     use crate::Confidence;
     use chrono::Utc;
 
-    fn create_test_episode(id: &str, embedding: [f32; 768], age_days: i64) -> Episode {
+    fn create_test_episode(id: &str, embedding: &[f32; 768], age_days: i64) -> Episode {
         let when = Utc::now() - chrono::Duration::days(age_days);
         Episode::new(
             id.to_string(),
             when,
             format!("Test episode {id}"),
-            embedding,
+            *embedding,
             Confidence::exact(0.8),
         )
     }
 
-    fn create_test_semantic_pattern(id: &str, embedding: [f32; 768]) -> SemanticPattern {
+    fn create_test_semantic_pattern(id: &str, embedding: &[f32; 768]) -> SemanticPattern {
         SemanticPattern {
             id: id.to_string(),
-            embedding,
+            embedding: *embedding,
             source_episodes: vec!["ep1".to_string(), "ep2".to_string()],
             strength: 0.9,
             schema_confidence: Confidence::exact(0.85),
@@ -222,11 +269,11 @@ mod tests {
         let embedding = [0.5; 768];
 
         let episodes = vec![
-            create_test_episode("ep1", embedding, 10),
-            create_test_episode("ep2", embedding, 12),
+            create_test_episode("ep1", &embedding, 10),
+            create_test_episode("ep2", &embedding, 12),
         ];
 
-        let semantic_memory = create_test_semantic_pattern("pattern1", embedding);
+        let semantic_memory = create_test_semantic_pattern("pattern1", &embedding);
 
         let result = compactor.verify_reconstruction(&episodes, &semantic_memory);
         assert!(
@@ -241,8 +288,8 @@ mod tests {
         let episode_embedding = [1.0; 768];
         let semantic_embedding = [0.0; 768];
 
-        let episodes = vec![create_test_episode("ep1", episode_embedding, 10)];
-        let semantic_memory = create_test_semantic_pattern("pattern1", semantic_embedding);
+        let episodes = vec![create_test_episode("ep1", &episode_embedding, 10)];
+        let semantic_memory = create_test_semantic_pattern("pattern1", &semantic_embedding);
 
         let result = compactor.verify_reconstruction(&episodes, &semantic_memory);
         assert!(
@@ -263,14 +310,14 @@ mod tests {
         let now = Utc::now();
 
         // Old episode (10 days) - should be eligible
-        let old_episode = create_test_episode("old", [0.5; 768], 10);
+        let old_episode = create_test_episode("old", &[0.5; 768], 10);
         assert!(
             compactor.is_episode_eligible(&old_episode, now),
             "Episode older than min_age should be eligible"
         );
 
         // Recent episode (5 days) - should not be eligible
-        let recent_episode = create_test_episode("recent", [0.5; 768], 5);
+        let recent_episode = create_test_episode("recent", &[0.5; 768], 5);
         assert!(
             !compactor.is_episode_eligible(&recent_episode, now),
             "Episode younger than min_age should not be eligible"
@@ -313,11 +360,11 @@ mod tests {
     #[test]
     fn test_storage_reduction_computation() {
         let episodes = vec![
-            create_test_episode("ep1", [0.5; 768], 10),
-            create_test_episode("ep2", [0.5; 768], 11),
-            create_test_episode("ep3", [0.5; 768], 12),
+            create_test_episode("ep1", &[0.5; 768], 10),
+            create_test_episode("ep2", &[0.5; 768], 11),
+            create_test_episode("ep3", &[0.5; 768], 12),
         ];
-        let semantic_memory = create_test_semantic_pattern("pattern1", [0.5; 768]);
+        let semantic_memory = create_test_semantic_pattern("pattern1", &[0.5; 768]);
 
         let reduction = StorageCompactor::compute_storage_reduction(&episodes, &semantic_memory);
 
@@ -344,6 +391,120 @@ mod tests {
         assert!(
             zero_ratio.abs() < 1e-5,
             "Should handle zero original storage gracefully"
+        );
+    }
+
+    #[test]
+    fn test_compact_storage_success() {
+        let compactor = StorageCompactor::default_config();
+        let embedding = [0.5; 768];
+
+        let episodes = vec![
+            create_test_episode("ep1", &embedding, 10),
+            create_test_episode("ep2", &embedding, 12),
+            create_test_episode("ep3", &embedding, 14),
+        ];
+
+        let semantic_memory = create_test_semantic_pattern("pattern1", &embedding);
+
+        let result = compactor.compact_storage(&episodes, &semantic_memory);
+        assert!(
+            result.is_ok(),
+            "Compaction should succeed with good similarity"
+        );
+
+        let compaction_result = result.unwrap();
+        assert_eq!(
+            compaction_result.episodes_removed, 3,
+            "Should report 3 episodes removed"
+        );
+        assert_eq!(
+            compaction_result.semantic_memory_id, "pattern1",
+            "Should report correct semantic memory ID"
+        );
+        assert!(
+            compaction_result.average_similarity > 0.9,
+            "Average similarity should be high for identical embeddings"
+        );
+        assert!(
+            compaction_result.storage_reduction_bytes > 0,
+            "Should report positive storage reduction"
+        );
+    }
+
+    #[test]
+    fn test_compact_storage_fails_on_poor_reconstruction() {
+        let compactor = StorageCompactor::default_config();
+        let episode_embedding = [1.0; 768];
+        let semantic_embedding = [0.0; 768];
+
+        let episodes = vec![create_test_episode("ep1", &episode_embedding, 10)];
+        let semantic_memory = create_test_semantic_pattern("pattern1", &semantic_embedding);
+
+        let result = compactor.compact_storage(&episodes, &semantic_memory);
+        assert!(
+            result.is_err(),
+            "Compaction should fail when reconstruction similarity is too low"
+        );
+    }
+
+    #[test]
+    fn test_compact_storage_empty_episodes() {
+        let compactor = StorageCompactor::default_config();
+        let embedding = [0.5; 768];
+        let episodes: Vec<Episode> = vec![];
+        let semantic_memory = create_test_semantic_pattern("pattern1", &embedding);
+
+        let result = compactor.compact_storage(&episodes, &semantic_memory);
+        assert!(
+            result.is_ok(),
+            "Should handle empty episode list gracefully"
+        );
+
+        let compaction_result = result.unwrap();
+        assert_eq!(
+            compaction_result.episodes_removed, 0,
+            "Should report 0 episodes removed"
+        );
+        assert_eq!(
+            compaction_result.average_similarity, 0.0,
+            "Average similarity should be 0 for empty list"
+        );
+    }
+
+    #[test]
+    fn test_compact_storage_calculates_correct_average_similarity() {
+        let compactor = StorageCompactor::default_config();
+
+        // Create semantic embedding
+        let mut semantic_embedding = [0.0; 768];
+        for (i, val) in semantic_embedding.iter_mut().enumerate() {
+            *val = (i as f32) / 768.0; // Increasing values
+        }
+
+        // Create episodes with varying similarity to semantic pattern
+        let ep1_embedding = semantic_embedding;
+        let mut ep2_embedding = [0.0; 768];
+        for (i, val) in ep2_embedding.iter_mut().enumerate() {
+            *val = ((i + 100) as f32) / 768.0; // Shifted pattern
+        }
+
+        let episodes = vec![
+            create_test_episode("ep1", &ep1_embedding, 10), // High similarity
+            create_test_episode("ep2", &ep2_embedding, 11), // Lower similarity
+        ];
+
+        let semantic_memory = create_test_semantic_pattern("pattern1", &semantic_embedding);
+
+        let result = compactor.compact_storage(&episodes, &semantic_memory);
+        assert!(result.is_ok(), "Compaction should succeed");
+
+        let compaction_result = result.unwrap();
+        // Average should be above reconstruction threshold (0.8)
+        assert!(
+            compaction_result.average_similarity > 0.8,
+            "Average similarity should be above threshold, got {}",
+            compaction_result.average_similarity
         );
     }
 }
