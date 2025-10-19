@@ -53,6 +53,23 @@ const SPREADING_LATENCY_COLD: &str = "engram_spreading_latency_cold_seconds";
 /// storing an episode with `embedding_provenance.is_some()`.
 const EMBEDDING_COVERAGE_TOTAL: &str = "engram_episodes_with_embeddings_total";
 
+/// Total number of consolidation runs completed by the background scheduler.
+pub const CONSOLIDATION_RUNS_TOTAL: &str = "engram_consolidation_runs_total";
+/// Count of consolidation runs that failed due to validation or runtime errors.
+pub const CONSOLIDATION_FAILURES_TOTAL: &str = "engram_consolidation_failures_total";
+/// Latest observed novelty delta emitted by the scheduler, used for stagnation detection.
+pub const CONSOLIDATION_NOVELTY_GAUGE: &str = "engram_consolidation_novelty_gauge";
+/// Variance of novelty across all patterns in the current consolidation run.
+/// Measures diversity of pattern changes, high variance indicates heterogeneous updates.
+pub const CONSOLIDATION_NOVELTY_VARIANCE: &str = "engram_consolidation_novelty_variance";
+/// Citation churn rate: percentage of patterns with citation changes between snapshots.
+/// High churn (>50%) indicates volatile consolidation, low churn (<10%) suggests stability.
+pub const CONSOLIDATION_CITATION_CHURN: &str = "engram_consolidation_citation_churn";
+/// Age in seconds of the cached consolidation snapshot.
+pub const CONSOLIDATION_FRESHNESS_SECONDS: &str = "engram_consolidation_freshness_seconds";
+/// Total citations captured in the most recent consolidation snapshot.
+pub const CONSOLIDATION_CITATIONS_CURRENT: &str = "engram_consolidation_citations_current";
+
 /// Global metrics registry for the Engram system
 pub struct MetricsRegistry {
     /// Lock-free counters for operation counts

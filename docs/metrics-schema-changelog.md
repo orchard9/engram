@@ -78,3 +78,18 @@ Added schema version tracking to all metrics exports.
 - Restructure window aggregates to include timestamp ranges
 - Add metric-specific aggregations (counter sums, gauge latest values)
 - Separate spreading metrics from general metrics
+
+## 2025-10-19 — Consolidation Quality Metrics (schema 1.2.0)
+
+- Added consolidation quality gauges (`engram_consolidation_novelty_variance`, `engram_consolidation_citation_churn`).
+- `engram_consolidation_novelty_variance`: Measures diversity of pattern changes across consolidation run (variance of novelty deltas).
+- `engram_consolidation_citation_churn`: Percentage of patterns with citation changes (0-100%), indicates consolidation volatility.
+- High variance (>0.1) suggests heterogeneous pattern updates; low variance (<0.01) indicates uniform changes.
+- High churn (>50%) indicates volatile consolidation; low churn (<10%) suggests stability.
+- No breaking changes; minor version bump signals new optional quality metrics.
+
+## 2025-10-18 — Consolidation Scheduler Metrics (schema 1.1.0)
+
+- Added consolidation counters/gauges (`engram_consolidation_runs_total`, `engram_consolidation_failures_total`, `engram_consolidation_novelty_gauge`, `engram_consolidation_freshness_seconds`, `engram_consolidation_citations_current`).
+- Established label contract (`consolidation="scheduler"`) and forward-compatible schema requirements documented in `docs/operations/metrics_streaming.md`.
+- No breaking changes; minor version bump signals new optional fields.

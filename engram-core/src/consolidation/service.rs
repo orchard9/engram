@@ -2,8 +2,9 @@
 
 use crate::completion::ConsolidationSnapshot;
 use crate::metrics::{
-    self, CONSOLIDATION_CITATIONS_CURRENT, CONSOLIDATION_FRESHNESS_SECONDS,
-    CONSOLIDATION_NOVELTY_GAUGE, CONSOLIDATION_RUNS_TOTAL,
+    self, CONSOLIDATION_CITATIONS_CURRENT, CONSOLIDATION_CITATION_CHURN,
+    CONSOLIDATION_FRESHNESS_SECONDS, CONSOLIDATION_NOVELTY_GAUGE,
+    CONSOLIDATION_NOVELTY_VARIANCE, CONSOLIDATION_RUNS_TOTAL,
 };
 use chrono::{DateTime, Utc};
 use parking_lot::RwLock;
@@ -201,8 +202,38 @@ impl InMemoryConsolidationService {
             .map(|update| update.novelty.abs())
             .fold(0.0_f32, f32::max);
 
+        // Compute novelty variance across all updates
+        let novelty_variance = if updates.len() > 1 {
+            let mean_novelty: f32 =
+                updates.iter().map(|u| u.novelty.abs()).sum::<f32>() / updates.len() as f32;
+            let variance: f32 = updates
+                .iter()
+                .map(|u| {
+                    let diff = u.novelty.abs() - mean_novelty;
+                    diff * diff
+                })
+                .sum::<f32>()
+                / updates.len() as f32;
+            variance
+        } else {
+            0.0
+        };
+
+        // Compute citation churn: percentage of patterns with citation changes
+        let patterns_with_citation_changes = updates
+            .iter()
+            .filter(|u| u.citation_delta != 0)
+            .count();
+        let citation_churn = if updates.is_empty() {
+            0.0
+        } else {
+            (patterns_with_citation_changes as f32 / updates.len() as f32) * 100.0
+        };
+
         metrics::record_gauge(CONSOLIDATION_FRESHNESS_SECONDS, freshness_seconds);
         metrics::record_gauge(CONSOLIDATION_NOVELTY_GAUGE, f64::from(max_novelty));
+        metrics::record_gauge(CONSOLIDATION_NOVELTY_VARIANCE, f64::from(novelty_variance));
+        metrics::record_gauge(CONSOLIDATION_CITATION_CHURN, f64::from(citation_churn));
         metrics::record_gauge(CONSOLIDATION_CITATIONS_CURRENT, total_citations as f64);
 
         if matches!(source, ConsolidationCacheSource::Scheduler) {
