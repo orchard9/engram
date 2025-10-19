@@ -20,7 +20,9 @@ pub mod reconstruction;
 pub mod scheduler;
 
 pub use confidence::MetacognitiveConfidence;
-pub use consolidation::ConsolidationEngine;
+pub use consolidation::{
+    ConsolidationEngine, ConsolidationSnapshot, ConsolidationStats, SemanticPattern,
+};
 pub use context::{EntorhinalContext, GridModule};
 pub use hippocampal::HippocampalCompletion;
 pub use hypothesis::{Hypothesis, System2Reasoner};

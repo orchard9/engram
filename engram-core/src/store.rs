@@ -4,6 +4,9 @@
 //! degrade gracefully under pressure, returning activation levels that
 //! indicate store quality.
 
+use crate::completion::{
+    CompletionConfig, ConsolidationEngine, ConsolidationSnapshot, ConsolidationStats,
+};
 use crate::memory_graph::{GraphConfig, InfallibleBackend, UnifiedMemoryGraph};
 use crate::numeric::{u64_to_f64, unit_ratio_to_f32};
 use crate::query::executor::ProbabilisticQueryExecutor;
@@ -29,9 +32,7 @@ use std::time::Instant;
 use crate::metrics::cognitive::CognitiveMetric;
 
 #[cfg(feature = "pattern_completion")]
-use crate::completion::{
-    CompletedEpisode, CompletionConfig, PartialEpisode, PatternCompleter, PatternReconstructor,
-};
+use crate::completion::{CompletedEpisode, PartialEpisode, PatternCompleter, PatternReconstructor};
 
 #[cfg(feature = "hnsw_index")]
 use crate::index::CognitiveHnswIndex;
@@ -1326,6 +1327,32 @@ impl MemoryStore {
                 );
                 (memory.id.clone(), episode)
             }))
+    }
+
+    /// Generate a snapshot of consolidated semantic patterns using current episodes
+    #[must_use]
+    pub fn consolidation_snapshot(&self, max_episodes: usize) -> ConsolidationSnapshot {
+        let episodes_iter = self.get_all_episodes().map(|(_, episode)| episode);
+        let mut episodes: Vec<Episode> = if max_episodes == 0 {
+            episodes_iter.collect()
+        } else {
+            episodes_iter.take(max_episodes).collect()
+        };
+
+        if episodes.is_empty() {
+            return ConsolidationSnapshot {
+                generated_at: Utc::now(),
+                patterns: Vec::new(),
+                stats: ConsolidationStats::default(),
+            };
+        }
+
+        episodes.sort_by_key(|episode| episode.when);
+
+        let mut engine = ConsolidationEngine::new(CompletionConfig::default());
+        engine.ripple_replay(&episodes);
+
+        engine.snapshot()
     }
 
     /// Recall memories based on a cue, returning episodes with confidence scores and streaming status

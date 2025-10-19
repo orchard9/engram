@@ -140,15 +140,15 @@ Returns:
 - Architecture docs: [vision.md](vision.md)
 - Roadmap: [roadmap/](roadmap/)
 
-#### Consolidated Beliefs (Upcoming)
+#### Consolidated Beliefs API
 
-Consolidation runs asynchronously after `remember` writes, transforming episodic memories into semantic beliefs with complete provenance trails. We are stabilizing a dedicated `/api/v1/consolidations/{pattern_id}` endpoint that will surface:
+Consolidation runs asynchronously after `remember` writes, transforming episodic memories into semantic beliefs with complete provenance trails. Query the new endpoints to inspect those beliefs:
 
-- the synthesized belief (semantic pattern) and its schema-level confidence
-- `source_episodes` citations with the timestamps and confidence captured during replay
-- decay and reinforcement signals so you can trace why a belief strengthened or weakened
+- `GET /api/v1/consolidations` — returns the current snapshot of semantic beliefs with citation metadata, timestamps (`observed_at`, `last_access`), and freshness metrics
+- `GET /api/v1/consolidations/{pattern_id}` — drills into a specific belief with contributing episodes and decay signals
+- `GET /api/v1/stream/consolidation` — SSE stream that emits belief updates whenever consolidation strengthens or forms new schemas
 
-Until that endpoint ships, `remember` responses include a `consolidation_state` hint. Subscribe to `/api/v1/stream/consolidation` to receive notifications when new beliefs are available.
+Write responses include `observed_at`, `stored_at`, and a `links.consolidation` pointer so clients can jump directly into belief inspection.
 
 ## Testing
 

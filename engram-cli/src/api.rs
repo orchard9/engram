@@ -6,7 +6,7 @@
 use axum::response::sse::{Event, KeepAlive};
 use axum::{
     Router,
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Json, Sse},
     routing::{get, post},
@@ -26,6 +26,7 @@ use crate::openapi::create_swagger_ui;
 use engram_core::{
     Confidence as CoreConfidence, Cue as CoreCue, Episode, MemoryStore,
     activation::{AutoTuneAuditEntry, RecallMode, SpreadingAutoTuner},
+    completion::{ConsolidationStats as CoreConsolidationStats, SemanticPattern},
     memory::EpisodeBuilder as CoreEpisodeBuilder,
     metrics::{
         MetricsRegistry,
@@ -104,6 +105,110 @@ fn parse_recall_mode(value: &str) -> Result<RecallMode, ApiError> {
     }
 }
 
+const fn confidence_category(value: f32) -> &'static str {
+    if value > 0.7 {
+        "High"
+    } else if value > 0.4 {
+        "Medium"
+    } else {
+        "Low"
+    }
+}
+
+fn build_confidence_info(value: f32, reasoning: impl Into<String>) -> ConfidenceInfo {
+    ConfidenceInfo {
+        value,
+        category: confidence_category(value).to_string(),
+        reasoning: reasoning.into(),
+    }
+}
+
+fn truncate_content(content: &str) -> String {
+    const MAX_PREVIEW: usize = 160;
+    if content.len() <= MAX_PREVIEW {
+        content.to_string()
+    } else {
+        format!("{}…", &content[..MAX_PREVIEW])
+    }
+}
+
+fn pattern_to_belief(pattern: SemanticPattern, store: &MemoryStore) -> ConsolidatedBeliefResponse {
+    let citations: Vec<BeliefCitation> = pattern
+        .source_episodes
+        .iter()
+        .map(|episode_id| {
+            if let Some(episode) = store.get_episode(episode_id) {
+                BeliefCitation {
+                    episode_id: episode.id.clone(),
+                    observed_at: episode.when,
+                    last_access: Some(episode.last_recall),
+                    encoding_confidence: build_confidence_info(
+                        episode.encoding_confidence.raw(),
+                        "Initial encoding confidence",
+                    ),
+                    reinforcement_count: episode.recall_count,
+                    content_preview: truncate_content(&episode.what),
+                }
+            } else {
+                BeliefCitation {
+                    episode_id: episode_id.clone(),
+                    observed_at: pattern.last_consolidated,
+                    last_access: None,
+                    encoding_confidence: build_confidence_info(
+                        0.0,
+                        "Episode not currently loaded in memory store",
+                    ),
+                    reinforcement_count: 0,
+                    content_preview: "[episode unavailable]".to_string(),
+                }
+            }
+        })
+        .collect();
+
+    let average_source_confidence = if citations.is_empty() {
+        0.0
+    } else {
+        citations
+            .iter()
+            .map(|citation| citation.encoding_confidence.value)
+            .sum::<f32>()
+            / citations.len() as f32
+    };
+
+    let freshness_hours = (Utc::now() - pattern.last_consolidated).num_minutes() as f32 / 60.0;
+
+    ConsolidatedBeliefResponse {
+        id: pattern.id,
+        strength: pattern.strength,
+        schema_confidence: build_confidence_info(
+            pattern.schema_confidence.raw(),
+            format!("Derived from {} episodic contributions", citations.len()),
+        ),
+        last_consolidated: pattern.last_consolidated,
+        citations,
+        stats: ConsolidationBeliefStats {
+            episode_count: pattern.source_episodes.len(),
+            average_source_confidence,
+            freshness_hours: freshness_hours.max(0.0),
+        },
+    }
+}
+
+impl From<CoreConsolidationStats> for ConsolidationRunStats {
+    fn from(stats: CoreConsolidationStats) -> Self {
+        Self {
+            total_replays: stats.total_replays,
+            successful_consolidations: stats.successful_consolidations,
+            failed_consolidations: stats.failed_consolidations,
+            average_replay_speed: stats.average_replay_speed,
+            total_patterns_extracted: stats.total_patterns_extracted,
+            avg_ripple_frequency: stats.avg_ripple_frequency,
+            avg_ripple_duration: stats.avg_ripple_duration,
+            last_replay_timestamp: stats.last_replay_timestamp,
+        }
+    }
+}
+
 const fn format_health_status(status: HealthStatus) -> &'static str {
     match status {
         HealthStatus::Healthy => "healthy",
@@ -159,6 +264,8 @@ pub struct RememberMemoryRequest {
     pub tags: Option<Vec<String>>,
     /// Type of memory (semantic, episodic, procedural)
     pub memory_type: Option<String>,
+    /// When this memory was observed (optional, defaults to current time)
+    pub timestamp: Option<DateTime<Utc>>,
     /// Should we automatically link to similar memories?
     pub auto_link: Option<bool>,
     /// Threshold for automatic linking (0.0-1.0)
@@ -351,10 +458,118 @@ pub struct RememberResponse {
     pub storage_confidence: ConfidenceInfo,
     /// Current consolidation state
     pub consolidation_state: String,
+    /// When the memory event originally occurred (observation timestamp)
+    pub observed_at: DateTime<Utc>,
+    /// When Engram ingested this memory into its store
+    pub stored_at: DateTime<Utc>,
+    /// Helpful links to related background processes
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub links: Option<RememberLinks>,
     /// Automatic links created (if enabled)
     pub auto_links: Vec<AutoLink>,
     /// Educational message about the memory storage
     pub system_message: String,
+}
+
+/// Related resources for newly stored memories
+#[derive(Debug, Serialize, ToSchema)]
+pub struct RememberLinks {
+    /// Endpoint for consolidated beliefs derived from this memory
+    pub consolidation: Option<String>,
+}
+
+/// Query parameters for consolidation summaries
+#[derive(Debug, Deserialize, ToSchema, IntoParams)]
+pub struct ConsolidationQuery {
+    /// Maximum episodes to consider during snapshot (0 = all episodes currently stored)
+    pub max_episodes: Option<usize>,
+    /// Maximum number of consolidated beliefs to include in the response
+    pub max_patterns: Option<usize>,
+}
+
+/// Query parameters for consolidation detail lookups
+#[derive(Debug, Deserialize, ToSchema, IntoParams)]
+pub struct ConsolidationDetailQuery {
+    /// Maximum episodes to consider during snapshot (0 = all episodes currently stored)
+    pub max_episodes: Option<usize>,
+}
+
+/// Consolidated belief response summarizing semantic memory
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ConsolidatedBeliefResponse {
+    /// Stable identifier for the semantic pattern
+    pub id: String,
+    /// Aggregate strength derived from contributing episodes
+    pub strength: f32,
+    /// Confidence that this schema represents supported knowledge
+    pub schema_confidence: ConfidenceInfo,
+    /// When the semantic pattern was last strengthened
+    pub last_consolidated: DateTime<Utc>,
+    /// Citations to episodic memories that contributed to this belief
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub citations: Vec<BeliefCitation>,
+    /// Roll-up statistics describing this belief
+    pub stats: ConsolidationBeliefStats,
+}
+
+/// Citation information for an episodic memory contributing to a belief
+#[derive(Debug, Serialize, ToSchema)]
+pub struct BeliefCitation {
+    /// Episode identifier
+    pub episode_id: String,
+    /// When the episode occurred
+    pub observed_at: DateTime<Utc>,
+    /// When the episode was most recently recalled
+    pub last_access: Option<DateTime<Utc>>,
+    /// Encoding confidence for the episode
+    pub encoding_confidence: ConfidenceInfo,
+    /// Number of times the episode has been recalled
+    pub reinforcement_count: u32,
+    /// Preview of the episodic content
+    pub content_preview: String,
+}
+
+/// Belief-level statistics summarizing consolidation dynamics
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ConsolidationBeliefStats {
+    /// Number of episodic memories backing this belief
+    pub episode_count: usize,
+    /// Average source confidence across contributing episodes
+    pub average_source_confidence: f32,
+    /// Age in hours since the belief was last consolidated
+    pub freshness_hours: f32,
+}
+
+/// Snapshot-wide statistics surfaced alongside consolidation summaries
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ConsolidationRunStats {
+    /// Total replay iterations executed during consolidation
+    pub total_replays: usize,
+    /// Successfully extracted semantic patterns
+    pub successful_consolidations: usize,
+    /// Consolidation attempts that failed to meet thresholds
+    pub failed_consolidations: usize,
+    /// Average replay speed observed during the run
+    pub average_replay_speed: f32,
+    /// Total semantic patterns produced
+    pub total_patterns_extracted: usize,
+    /// Average ripple frequency (Hz)
+    pub avg_ripple_frequency: f32,
+    /// Average ripple duration (ms)
+    pub avg_ripple_duration: f32,
+    /// Timestamp of the most recent replay event
+    pub last_replay_timestamp: Option<DateTime<Utc>>,
+}
+
+/// Consolidation snapshot response encapsulating beliefs and run metrics
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ConsolidationSummaryResponse {
+    /// When the snapshot was generated
+    pub generated_at: DateTime<Utc>,
+    /// Consolidated beliefs discovered during this run
+    pub beliefs: Vec<ConsolidatedBeliefResponse>,
+    /// Snapshot-wide statistics
+    pub stats: ConsolidationRunStats,
 }
 
 /// Response for memory recall operations
@@ -398,6 +613,8 @@ pub struct MemoryResult {
     pub similarity_score: f32,
     /// How we found this memory
     pub retrieval_path: Option<String>,
+    /// When this memory was originally observed/encoded
+    pub observed_at: DateTime<Utc>,
     /// When memory was last accessed
     pub last_access: Option<DateTime<Utc>>,
     /// Associated tags
@@ -627,9 +844,10 @@ pub async fn remember_memory(
     };
 
     // Store in MemoryStore as an episode
+    let observed_at = request.timestamp.unwrap_or_else(Utc::now);
     let episode = Episode::new(
         memory_id.clone(),
-        Utc::now(),
+        observed_at,
         request.content.clone(),
         embedding_array,
         core_confidence,
@@ -664,22 +882,21 @@ pub async fn remember_memory(
         vec![]
     };
 
+    let stored_at = Utc::now();
     let actual_confidence = store_result.activation.value();
     let response = RememberResponse {
         memory_id: memory_id.clone(),
         storage_confidence: ConfidenceInfo {
             value: actual_confidence,
-            category: if actual_confidence > 0.7 {
-                "High"
-            } else if actual_confidence > 0.4 {
-                "Medium"
-            } else {
-                "Low"
-            }
-            .to_string(),
+            category: confidence_category(actual_confidence).to_string(),
             reasoning: confidence_reasoning,
         },
         consolidation_state: format!("{:?}", ConsolidationState::Recent),
+        observed_at,
+        stored_at,
+        links: Some(RememberLinks {
+            consolidation: Some("/api/v1/consolidations".to_string()),
+        }),
         auto_links,
         system_message: format!(
             "Memory '{}' successfully encoded with {:.2} activation. {}",
@@ -776,23 +993,22 @@ pub async fn remember_episode(
     }
 
     let actual_confidence = store_result.activation.value();
+    let stored_at = Utc::now();
     let response = RememberResponse {
         memory_id: episode_id.clone(),
         storage_confidence: ConfidenceInfo {
             value: actual_confidence,
-            category: if actual_confidence > 0.7 {
-                "High"
-            } else if actual_confidence > 0.4 {
-                "Medium"
-            } else {
-                "Low"
-            }
-            .to_string(),
+            category: confidence_category(actual_confidence).to_string(),
             reasoning: format!(
                 "Episodic memory stored with activation {actual_confidence:.2}, rich context aids consolidation"
             ),
         },
         consolidation_state: format!("{:?}", ConsolidationState::Recent),
+        observed_at: request.when,
+        stored_at,
+        links: Some(RememberLinks {
+            consolidation: Some("/api/v1/consolidations".to_string()),
+        }),
         auto_links: vec![],
         system_message: format!(
             "Episode '{episode_id}' successfully encoded with {actual_confidence:.2} activation. Rich episodes consolidate better over time."
@@ -927,22 +1143,15 @@ pub async fn recall_memories(
         let result = MemoryResult {
             id: episode.id.clone(),
             content: episode.what.clone(),
-            confidence: ConfidenceInfo {
-                value: confidence.raw(),
-                category: if confidence.is_high() {
-                    "High"
-                } else if confidence.is_medium() {
-                    "Medium"
-                } else {
-                    "Low"
-                }
-                .to_string(),
-                reasoning: "Recalled from memory store with confidence score".to_string(),
-            },
+            confidence: build_confidence_info(
+                confidence.raw(),
+                "Recalled from memory store with confidence score",
+            ),
             activation_level: confidence.raw(),
             similarity_score: confidence.raw(),
             retrieval_path: Some("Memory store recall".to_string()),
-            last_access: Some(episode.when),
+            observed_at: episode.when,
+            last_access: Some(episode.last_recall),
             tags: vec![],
             memory_type: "Episodic".to_string(),
             relevance_explanation: format!("Retrieved with {:.2} confidence", confidence.raw()),
@@ -1135,22 +1344,15 @@ pub async fn probabilistic_query(
         .map(|(episode, confidence)| MemoryResult {
             id: episode.id.clone(),
             content: episode.what.clone(),
-            confidence: ConfidenceInfo {
-                value: confidence.raw(),
-                category: if confidence.is_high() {
-                    "High"
-                } else if confidence.is_medium() {
-                    "Medium"
-                } else {
-                    "Low"
-                }
-                .to_string(),
-                reasoning: "Probabilistic recall with uncertainty tracking".to_string(),
-            },
+            confidence: build_confidence_info(
+                confidence.raw(),
+                "Probabilistic recall with uncertainty tracking",
+            ),
             activation_level: confidence.raw(),
             similarity_score: confidence.raw(),
             retrieval_path: Some("Probabilistic query".to_string()),
-            last_access: Some(episode.when),
+            observed_at: episode.when,
+            last_access: Some(episode.last_recall),
             tags: vec![],
             memory_type: "Episodic".to_string(),
             relevance_explanation: format!(
@@ -1336,6 +1538,89 @@ pub async fn probabilistic_query(
     Ok(Json(response))
 }
 
+/// GET /api/v1/consolidations - List consolidated beliefs with citations
+#[utoipa::path(
+    get,
+    path = "/api/v1/consolidations",
+    tag = "consolidation",
+    params(ConsolidationQuery),
+    responses(
+        (status = 200, description = "Consolidated beliefs with provenance", body = ConsolidationSummaryResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    )
+)]
+pub async fn list_consolidations(
+    State(state): State<ApiState>,
+    Query(params): Query<ConsolidationQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    let max_episodes = params.max_episodes.unwrap_or(256);
+    let snapshot = state.store.consolidation_snapshot(max_episodes);
+
+    let mut beliefs: Vec<ConsolidatedBeliefResponse> = snapshot
+        .patterns
+        .into_iter()
+        .map(|pattern| pattern_to_belief(pattern, state.store.as_ref()))
+        .collect();
+
+    beliefs.sort_by(|a, b| {
+        b.strength
+            .partial_cmp(&a.strength)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    if let Some(max_patterns) = params.max_patterns {
+        beliefs.truncate(max_patterns);
+    }
+
+    let response = ConsolidationSummaryResponse {
+        generated_at: snapshot.generated_at,
+        stats: ConsolidationRunStats::from(snapshot.stats),
+        beliefs,
+    };
+
+    Ok(Json(response))
+}
+
+/// GET /api/v1/consolidations/{id} - Retrieve a specific consolidated belief
+#[utoipa::path(
+    get,
+    path = "/api/v1/consolidations/{id}",
+    tag = "consolidation",
+    params(
+        ("id" = String, Path, description = "Consolidated belief identifier"),
+        ConsolidationDetailQuery
+    ),
+    responses(
+        (status = 200, description = "Consolidated belief with citations", body = ConsolidationSummaryResponse),
+        (status = 404, description = "Consolidated belief not found", body = ErrorResponse),
+        (status = 500, description = "Internal server error", body = ErrorResponse)
+    )
+)]
+pub async fn get_consolidation(
+    State(state): State<ApiState>,
+    Path(id): Path<String>,
+    Query(params): Query<ConsolidationDetailQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    let max_episodes = params.max_episodes.unwrap_or(0);
+    let snapshot = state.store.consolidation_snapshot(max_episodes);
+
+    if let Some(pattern) = snapshot
+        .patterns
+        .into_iter()
+        .find(|pattern| pattern.id == id)
+    {
+        let belief = pattern_to_belief(pattern, state.store.as_ref());
+        let response = ConsolidationSummaryResponse {
+            generated_at: snapshot.generated_at,
+            stats: ConsolidationRunStats::from(snapshot.stats),
+            beliefs: vec![belief],
+        };
+        return Ok(Json(response));
+    }
+
+    Err(ApiError::ConsolidationNotFound(id))
+}
+
 /// POST /api/v1/memories/recognize - Pattern recognition
 #[utoipa::path(
     post,
@@ -1434,6 +1719,7 @@ pub async fn create_memory_rest(
         confidence_reasoning: None,
         memory_type: Some("semantic".to_string()),
         tags: None,
+        timestamp: None,
         auto_link: Some(false),
         link_threshold: None,
     };
@@ -1761,7 +2047,23 @@ pub async fn system_introspect(
 pub async fn metrics_snapshot(
     State(state): State<ApiState>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let snapshot = state.metrics.streaming_snapshot();
+    // Drain any pending updates to avoid divergence between HTTP and in-memory snapshots.
+    let aggregator = state.metrics.streaming_aggregator();
+    aggregator.set_export_enabled(false);
+    let mut snapshot = state.metrics.streaming_snapshot();
+    loop {
+        let next = state.metrics.streaming_snapshot();
+        if serde_json::to_value(&next).ok() == serde_json::to_value(&snapshot).ok() {
+            snapshot = next;
+            break;
+        }
+        snapshot = next;
+    }
+    let aggregator_clone = Arc::clone(&aggregator);
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        aggregator_clone.set_export_enabled(true);
+    });
     let export = state.metrics.streaming_stats();
 
     Ok(Json(json!({
@@ -1824,6 +2126,8 @@ pub enum ApiError {
     InvalidInput(String),
     /// Requested memory not found
     MemoryNotFound(String),
+    /// Requested consolidated belief not found
+    ConsolidationNotFound(String),
     /// Internal system error occurred
     SystemError(String),
     /// Data validation failed
@@ -1844,6 +2148,13 @@ impl IntoResponse for ApiError {
                 "MEMORY_NOT_FOUND", 
                 format!("Memory '{id}' not found in the cognitive graph"),
                 "Memory retrieval failed - the requested memory may have been forgotten or never encoded. Try a broader search query.".to_string()
+            ),
+            Self::ConsolidationNotFound(id) => (
+                StatusCode::NOT_FOUND,
+                "CONSOLIDATION_NOT_FOUND",
+                format!("Consolidated belief '{id}' not available"),
+                "Consolidation snapshots are generated from current episodic memories. Ensure the contributing episodes still exist or regenerate the snapshot."
+                    .to_string(),
             ),
             Self::SystemError(msg) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -2320,42 +2631,86 @@ fn create_memory_stream(
     ReceiverStream::new(rx)
 }
 
-/// Create consolidation stream (future work - not yet implemented with real events)
+/// Create consolidation stream delivering semantic belief updates in real-time snapshots
 fn create_consolidation_stream(
-    _store: Arc<MemoryStore>,
+    store: Arc<MemoryStore>,
     session_id: String,
-    _include_replay: bool,
-    _include_insights: bool,
-    _include_progress: bool,
-    _min_novelty: f32,
+    include_replay: bool,
+    include_insights: bool,
+    include_progress: bool,
+    min_novelty: f32,
 ) -> impl Stream<Item = Result<Event, std::convert::Infallible>> {
     let (tx, rx) = tokio::sync::mpsc::channel(32);
 
     tokio::spawn(async move {
-        // Send informational message about consolidation streaming status
-        let info_event = Event::default()
-            .event("info")
-            .data(json!({
-                "message": "Consolidation streaming not yet implemented with real events",
-                "status": "future_work",
-                "description": "Memory consolidation (replay, insights, progress) will be available in a future release. Currently, only storage and recall events are streamed in real-time.",
-                "session_id": session_id,
-                "available_streams": ["activities", "memories"],
-                "timestamp": Utc::now().to_rfc3339(),
-                "recommendation": "Use /api/v1/stream/activities or /api/v1/stream/memories for real-time event monitoring"
-            }).to_string());
+        use std::collections::HashMap;
 
-        if tx.send(Ok(info_event)).await.is_err() {
-            return;
-        }
+        let mut seen_strengths: HashMap<String, f32> = HashMap::new();
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(10));
 
-        // Keep connection alive but don't send more events
         loop {
-            tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
+            interval.tick().await;
 
-            // Send keepalive comment
-            let keepalive = Event::default()
-                .comment("Consolidation streaming will be available in future release");
+            let snapshot = store.consolidation_snapshot(128);
+            let run_stats = ConsolidationRunStats::from(snapshot.stats.clone());
+
+            if include_progress {
+                let progress_payload = json!({
+                    "session_id": session_id.as_str(),
+                    "generated_at": snapshot.generated_at,
+                    "stats": &run_stats,
+                });
+
+                let progress_event = Event::default()
+                    .event("progress")
+                    .data(progress_payload.to_string());
+
+                if tx.send(Ok(progress_event)).await.is_err() {
+                    return;
+                }
+            }
+
+            for pattern in snapshot.patterns {
+                let previous = seen_strengths.insert(pattern.id.clone(), pattern.strength);
+                let novelty = previous.map_or(pattern.strength, |strength| {
+                    (pattern.strength - strength).abs()
+                });
+
+                if novelty < min_novelty {
+                    continue;
+                }
+
+                let mut belief = pattern_to_belief(pattern, store.as_ref());
+                if !include_replay {
+                    belief.citations = Vec::new();
+                }
+
+                let mut payload = json!({
+                    "session_id": session_id.as_str(),
+                    "generated_at": snapshot.generated_at,
+                    "novelty": novelty,
+                    "belief": belief,
+                });
+
+                if include_insights {
+                    payload["stats"] = serde_json::to_value(&run_stats).unwrap_or_default();
+                }
+
+                let belief_event = Event::default()
+                    .event("belief")
+                    .id(uuid::Uuid::new_v4().to_string())
+                    .data(payload.to_string());
+
+                if tx.send(Ok(belief_event)).await.is_err() {
+                    return;
+                }
+            }
+
+            // Keep SSE connection warm even if no new beliefs were emitted
+            let keepalive = Event::default().comment(format!(
+                "consolidation heartbeat for session {}",
+                session_id.as_str()
+            ));
 
             if tx.send(Ok(keepalive)).await.is_err() {
                 return;
@@ -2768,6 +3123,8 @@ pub fn create_api_routes() -> Router<ApiState> {
         .route("/api/v1/memories/remember", post(remember_memory))
         .route("/api/v1/memories/recall", get(recall_memories))
         .route("/api/v1/memories/recognize", post(recognize_pattern))
+        .route("/api/v1/consolidations", get(list_consolidations))
+        .route("/api/v1/consolidations/{id}", get(get_consolidation))
         // Probabilistic query operations
         .route("/api/v1/query/probabilistic", get(probabilistic_query))
         // REST-style endpoints for CLI compatibility

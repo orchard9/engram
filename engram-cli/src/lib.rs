@@ -57,6 +57,7 @@ async fn reserve_ephemeral_port() -> Result<u16> {
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let port = listener.local_addr()?.port();
     drop(listener);
+    tokio::time::sleep(Duration::from_millis(50)).await;
     Ok(port)
 }
 

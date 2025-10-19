@@ -5,6 +5,7 @@ use super::numeric::{i64_to_f32, ratio, safe_divide, usize_to_f32};
 use crate::{Confidence, Episode, Memory};
 use chrono::{DateTime, Duration, Utc};
 use std::collections::{HashMap, VecDeque};
+use uuid::Uuid;
 
 /// Consolidation engine for memory transformation
 pub struct ConsolidationEngine {
@@ -62,15 +63,34 @@ pub struct SemanticPattern {
 
 /// Statistics for consolidation process
 #[derive(Debug, Clone, Default)]
-struct ConsolidationStats {
-    total_replays: usize,
-    successful_consolidations: usize,
-    failed_consolidations: usize,
-    average_replay_speed: f32,
-    total_patterns_extracted: usize,
-    avg_ripple_frequency: f32,
-    avg_ripple_duration: f32,
-    last_replay_timestamp: Option<DateTime<Utc>>,
+pub struct ConsolidationStats {
+    /// Total number of replay cycles executed
+    pub total_replays: usize,
+    /// Successful consolidation events producing semantic patterns
+    pub successful_consolidations: usize,
+    /// Consolidation attempts that failed validation thresholds
+    pub failed_consolidations: usize,
+    /// Average replay speed multiplier observed (relative to real time)
+    pub average_replay_speed: f32,
+    /// Total semantic patterns extracted during consolidation
+    pub total_patterns_extracted: usize,
+    /// Average sharp-wave ripple frequency recorded for replays
+    pub avg_ripple_frequency: f32,
+    /// Average sharp-wave ripple duration recorded for replays
+    pub avg_ripple_duration: f32,
+    /// Timestamp of the most recent replay processed
+    pub last_replay_timestamp: Option<DateTime<Utc>>,
+}
+
+/// Snapshot of consolidation output captured at a specific moment
+#[derive(Debug, Clone)]
+pub struct ConsolidationSnapshot {
+    /// When the snapshot was generated
+    pub generated_at: DateTime<Utc>,
+    /// Semantic patterns discovered during consolidation
+    pub patterns: Vec<SemanticPattern>,
+    /// Aggregated statistics recorded during consolidation
+    pub stats: ConsolidationStats,
 }
 
 impl ConsolidationEngine {
@@ -82,6 +102,34 @@ impl ConsolidationEngine {
             replay_buffer: VecDeque::with_capacity(100),
             semantic_patterns: HashMap::new(),
             stats: ConsolidationStats::default(),
+        }
+    }
+
+    /// Returns the currently accumulated consolidation statistics
+    #[must_use]
+    pub fn stats(&self) -> ConsolidationStats {
+        self.stats.clone()
+    }
+
+    /// Returns all semantic patterns discovered so far
+    #[must_use]
+    pub fn patterns(&self) -> Vec<SemanticPattern> {
+        self.semantic_patterns.values().cloned().collect()
+    }
+
+    /// Returns a semantic pattern by identifier, if present
+    #[must_use]
+    pub fn pattern_by_id(&self, id: &str) -> Option<SemanticPattern> {
+        self.semantic_patterns.get(id).cloned()
+    }
+
+    /// Create a snapshot containing the current semantic patterns and metrics
+    #[must_use]
+    pub fn snapshot(&self) -> ConsolidationSnapshot {
+        ConsolidationSnapshot {
+            generated_at: Utc::now(),
+            patterns: self.patterns(),
+            stats: self.stats(),
         }
     }
 
@@ -283,8 +331,13 @@ impl ConsolidationEngine {
         }
         strength = safe_divide(strength, episodes.len());
 
+        let mut source_ids: Vec<String> = episodes.iter().map(|e| e.id.clone()).collect();
+        source_ids.sort();
+        let canonical = source_ids.join("::");
+        let pattern_uuid = Uuid::new_v5(&Uuid::NAMESPACE_URL, canonical.as_bytes());
+
         SemanticPattern {
-            id: format!("pattern_{}", Utc::now().timestamp()),
+            id: format!("pattern_{pattern_uuid}"),
             embedding: avg_embedding,
             source_episodes: episodes.iter().map(|e| e.id.clone()).collect(),
             strength,
