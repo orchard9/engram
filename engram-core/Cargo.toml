@@ -110,6 +110,10 @@ serial_test = "3.2.0"
 loom = "0.7"
 tokio = { version = "1.0", features = ["test-util", "rt", "time", "sync", "macros", "rt-multi-thread"] }
 
+[[bench]]
+name = "pattern_detection"
+harness = false
+
 [features]
 default = ["hnsw_index", "memory_mapped_persistence", "psychological_decay", "probabilistic_queries", "pattern_completion", "monitoring"]
 # For systems where Z3 is available

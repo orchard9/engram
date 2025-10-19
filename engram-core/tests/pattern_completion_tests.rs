@@ -217,20 +217,28 @@ fn test_sharp_wave_ripple_consolidation() {
     let mut consolidator = ConsolidationEngine::new(config);
 
     // Create episodes with varying prediction errors
+    // Need at least 3 similar episodes for pattern detection (min_cluster_size=3)
     let episodes = vec![
         Episode::new(
-            "high_error".to_string(),
+            "high_error_1".to_string(),
             Utc::now(),
             "unexpected event".to_string(),
             [0.9; 768],
             Confidence::exact(0.5), // Low confidence = high prediction error
         ),
         Episode::new(
-            "low_error".to_string(),
+            "high_error_2".to_string(),
             Utc::now(),
-            "routine event".to_string(),
-            [0.3; 768],
-            Confidence::exact(0.95), // High confidence = low prediction error
+            "unexpected event".to_string(),
+            [0.91; 768], // Similar embedding
+            Confidence::exact(0.5),
+        ),
+        Episode::new(
+            "high_error_3".to_string(),
+            Utc::now(),
+            "unexpected event".to_string(),
+            [0.92; 768], // Similar embedding
+            Confidence::exact(0.5),
         ),
     ];
 

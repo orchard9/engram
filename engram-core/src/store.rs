@@ -7,6 +7,9 @@
 use crate::completion::{
     CompletionConfig, ConsolidationEngine, ConsolidationSnapshot, ConsolidationStats,
 };
+use crate::consolidation::{
+    ConsolidationCacheSource, ConsolidationService, InMemoryConsolidationService,
+};
 use crate::memory_graph::{GraphConfig, InfallibleBackend, UnifiedMemoryGraph};
 use crate::numeric::{u64_to_f64, unit_ratio_to_f32};
 use crate::query::executor::ProbabilisticQueryExecutor;
@@ -20,11 +23,11 @@ use dashmap::DashMap;
 use parking_lot::RwLock;
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_992; // 2^53
-
 #[cfg(feature = "monitoring")]
 use std::time::Instant;
 
@@ -221,6 +224,9 @@ pub struct MemoryStore {
     /// Write-ahead log for durability (non-blocking)
     pub(crate) wal_buffer: Arc<DashMap<String, Episode>>,
 
+    /// Stored-at timestamps for episodic memories
+    episode_stored_at: DashMap<String, chrono::DateTime<chrono::Utc>>,
+
     /// Event broadcaster for real-time observability (optional)
     event_tx: Option<tokio::sync::broadcast::Sender<MemoryEvent>>,
 
@@ -288,6 +294,9 @@ pub struct MemoryStore {
 
     /// Configuration for recall operations
     recall_config: crate::activation::RecallConfig,
+
+    /// Consolidation service responsible for caching and observability
+    consolidation_service: Arc<dyn ConsolidationService>,
 }
 
 /// Wrapper for f32 that implements Ord for `BTreeMap`
@@ -408,6 +417,7 @@ impl MemoryStore {
             graph,
             hot_memories: DashMap::new(),
             wal_buffer: Arc::new(DashMap::new()),
+            episode_stored_at: DashMap::new(),
             event_tx: None,
             max_memories,
             memory_count: AtomicUsize::new(0),
@@ -438,6 +448,7 @@ impl MemoryStore {
             #[cfg(feature = "hnsw_index")]
             cognitive_recall: None,
             recall_config: crate::activation::RecallConfig::default(),
+            consolidation_service: Arc::new(InMemoryConsolidationService::default()),
         }
     }
 
@@ -939,6 +950,7 @@ impl MemoryStore {
                             self.memory_count.fetch_sub(1, Ordering::Relaxed);
                         }
                         self.wal_buffer.remove(&memory_id);
+                        self.episode_stored_at.remove(&memory_id);
                         let _ = self.content_index.remove_by_memory_id(&memory_id);
                         {
                             let mut queue = self.eviction_queue.write();
@@ -1034,6 +1046,7 @@ impl MemoryStore {
             DeduplicationAction::Replace(existing_id) => {
                 self.hot_memories.remove(&existing_id);
                 let _ = self.content_index.remove(&content_address);
+                self.episode_stored_at.remove(&existing_id);
             }
             DeduplicationAction::Merge(existing_id) => {
                 if let Some(existing) = self.hot_memories.get(&existing_id) {
@@ -1071,6 +1084,8 @@ impl MemoryStore {
         self.persist_episode(&memory_arc, &wal_episode);
 
         self.wal_buffer.insert(memory_id.clone(), wal_episode);
+        self.episode_stored_at
+            .insert(memory_id.clone(), chrono::Utc::now());
 
         // Queue HNSW update for async processing instead of blocking
         #[cfg(feature = "hnsw_index")]
@@ -1097,16 +1112,18 @@ impl MemoryStore {
 
         #[cfg(feature = "monitoring")]
         {
-            use crate::metrics;
-            metrics::increment_counter("memories_created_total", 1);
-            metrics::observe_histogram("store_activation", f64::from(activation));
-            metrics::observe_histogram("store_duration_seconds", start.elapsed().as_secs_f64());
+            crate::metrics::increment_counter("memories_created_total", 1);
+            crate::metrics::observe_histogram("store_activation", f64::from(activation));
+            crate::metrics::observe_histogram(
+                "store_duration_seconds",
+                start.elapsed().as_secs_f64(),
+            );
 
             let metric = CognitiveMetric::CLSContribution {
                 hippocampal: 1.0 - pressure,
                 neocortical: pressure,
             };
-            metrics::record_cognitive(&metric);
+            crate::metrics::record_cognitive(&metric);
         }
 
         // Publish event for real-time observability
@@ -1151,6 +1168,7 @@ impl MemoryStore {
         if let Some(id) = candidate {
             self.hot_memories.remove(&id);
             self.wal_buffer.remove(&id);
+            self.episode_stored_at.remove(&id);
             self.memory_count.fetch_sub(1, Ordering::Relaxed);
         }
     }
@@ -1185,6 +1203,28 @@ impl MemoryStore {
         }
 
         None
+    }
+
+    /// Acquire a shared reference to an in-memory representation of a memory node
+    pub fn get_memory_arc(&self, id: &str) -> Option<Arc<Memory>> {
+        self.hot_memories
+            .get(id)
+            .map(|entry| Arc::clone(entry.value()))
+    }
+
+    /// Retrieve the stored-at timestamp for a given episode id, if known
+    pub fn stored_timestamp(&self, id: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+        self.episode_stored_at.get(id).map(|entry| *entry.value())
+    }
+
+    /// Test-only helper to override the consolidation alert log destination.
+    /// Override the consolidation alert log destination (useful for tests and soak harnesses).
+    pub fn set_consolidation_alert_log_path(&self, path: PathBuf) {
+        self.consolidation_service.set_alert_log_path(path);
+    }
+
+    pub(crate) fn consolidation_service(&self) -> Arc<dyn ConsolidationService> {
+        Arc::clone(&self.consolidation_service)
     }
 
     /// Get current system pressure
@@ -1329,9 +1369,25 @@ impl MemoryStore {
             }))
     }
 
-    /// Generate a snapshot of consolidated semantic patterns using current episodes
+    /// Generate a snapshot of consolidated semantic patterns using the cached scheduler output when available.
     #[must_use]
     pub fn consolidation_snapshot(&self, max_episodes: usize) -> ConsolidationSnapshot {
+        if let Some(snapshot) = self.cached_consolidation_snapshot() {
+            return snapshot;
+        }
+
+        let snapshot = self.build_consolidation_snapshot(max_episodes);
+        self.consolidation_service
+            .update_cache(&snapshot, ConsolidationCacheSource::OnDemand);
+        snapshot
+    }
+
+    #[must_use]
+    pub(crate) fn cached_consolidation_snapshot(&self) -> Option<ConsolidationSnapshot> {
+        self.consolidation_service.cached_snapshot()
+    }
+
+    fn build_consolidation_snapshot(&self, max_episodes: usize) -> ConsolidationSnapshot {
         let episodes_iter = self.get_all_episodes().map(|(_, episode)| episode);
         let mut episodes: Vec<Episode> = if max_episodes == 0 {
             episodes_iter.collect()
@@ -1351,7 +1407,6 @@ impl MemoryStore {
 
         let mut engine = ConsolidationEngine::new(CompletionConfig::default());
         engine.ripple_replay(&episodes);
-
         engine.snapshot()
     }
 
@@ -1546,11 +1601,13 @@ impl MemoryStore {
 
         #[cfg(feature = "monitoring")]
         {
-            use crate::metrics;
-            metrics::increment_counter("queries_executed_total", 1);
-            metrics::observe_histogram("query_duration_seconds", start.elapsed().as_secs_f64());
+            crate::metrics::increment_counter("queries_executed_total", 1);
+            crate::metrics::observe_histogram(
+                "query_duration_seconds",
+                start.elapsed().as_secs_f64(),
+            );
             if let Ok(result_len) = u64::try_from(results.len()) {
-                metrics::observe_histogram("query_result_count", u64_to_f64(result_len));
+                crate::metrics::observe_histogram("query_result_count", u64_to_f64(result_len));
             }
         }
 
@@ -1983,13 +2040,12 @@ impl MemoryStore {
                     Ok(completed) => {
                         #[cfg(feature = "monitoring")]
                         {
-                            use crate::metrics;
-                            metrics::increment_counter("pattern_completions_total", 1);
-                            metrics::observe_histogram(
+                            crate::metrics::increment_counter("pattern_completions_total", 1);
+                            crate::metrics::observe_histogram(
                                 "pattern_completion_duration_seconds",
                                 start.elapsed().as_secs_f64(),
                             );
-                            metrics::record_cognitive(&CognitiveMetric::PatternCompletion {
+                            crate::metrics::record_cognitive(&CognitiveMetric::PatternCompletion {
                                 plausibility: 0.8,
                                 is_false_memory: false,
                             });
@@ -2298,6 +2354,7 @@ mod tests {
     use chrono::Utc;
     use std::convert::TryFrom;
     use std::fmt::Debug;
+    use tempfile::tempdir;
 
     type TestResult<T = ()> = Result<T, String>;
 
@@ -2379,6 +2436,76 @@ mod tests {
         // Should return high activation with no pressure
         assert!(store_result.activation.value() > 0.8);
         assert!(store_result.activation.value() <= 1.0);
+    }
+
+    #[test]
+    fn test_store_records_stored_timestamp() -> TestResult {
+        let store = MemoryStore::new(10);
+        let before = Utc::now();
+
+        let episode = EpisodeBuilder::new()
+            .id("ep_ts".to_string())
+            .when(Utc::now())
+            .what("timestamp episode".to_string())
+            .embedding(create_test_embedding(0.42))
+            .confidence(Confidence::HIGH)
+            .build();
+
+        store.store(episode);
+
+        let stored_at = store
+            .stored_timestamp("ep_ts")
+            .ok_or_else(|| "stored timestamp should be recorded".to_string())?;
+        let after = Utc::now();
+
+        if stored_at < before {
+            return Err("stored timestamp should not precede creation time".to_string());
+        }
+        if stored_at > after {
+            return Err("stored timestamp should not be in the future".to_string());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_belief_updates_persist_to_disk() -> TestResult {
+        use crate::completion::{ConsolidationSnapshot, SemanticPattern};
+
+        let dir = tempdir().map_err(|err| err.to_string())?;
+        let log_path = dir.path().join("belief_updates.jsonl");
+        let store = MemoryStore::new(16);
+        store.set_consolidation_alert_log_path(log_path.clone());
+
+        // Create a snapshot with a semantic pattern directly
+        // This tests the consolidation service persistence, not pattern detection
+        let pattern = SemanticPattern {
+            id: "test_pattern".to_string(),
+            embedding: [0.8; 768],
+            source_episodes: vec!["ep1".to_string(), "ep2".to_string()],
+            strength: 0.9,
+            schema_confidence: Confidence::HIGH,
+            last_consolidated: Utc::now(),
+        };
+
+        let snapshot = ConsolidationSnapshot {
+            generated_at: Utc::now(),
+            patterns: vec![pattern],
+            stats: ConsolidationStats::default(),
+        };
+
+        store
+            .consolidation_service()
+            .update_cache(&snapshot, ConsolidationCacheSource::Scheduler);
+
+        // Log file should be created when consolidation snapshot has patterns
+        ensure(
+            log_path.exists(),
+            "consolidation belief update log should be created when snapshot has patterns",
+        )?;
+        let contents = std::fs::read_to_string(&log_path).map_err(|err| err.to_string())?;
+        ensure(!contents.trim().is_empty(), "log should contain updates")?;
+
+        Ok(())
     }
 
     // test_store_never_panics removed as redundant with test_eviction_of_low_activation

@@ -25,6 +25,7 @@ pub mod batch;
 #[cfg(feature = "pattern_completion")]
 pub mod completion;
 pub mod compute;
+pub mod consolidation;
 pub mod cue;
 #[cfg(feature = "psychological_decay")]
 pub mod decay;

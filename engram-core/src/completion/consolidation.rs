@@ -2,10 +2,10 @@
 
 use super::CompletionConfig;
 use super::numeric::{i64_to_f32, ratio, safe_divide, usize_to_f32};
+use crate::consolidation::{EpisodicPattern, PatternDetectionConfig, PatternDetector};
 use crate::{Confidence, Episode, Memory};
 use chrono::{DateTime, Duration, Utc};
 use std::collections::{HashMap, VecDeque};
-use uuid::Uuid;
 
 /// Consolidation engine for memory transformation
 pub struct ConsolidationEngine {
@@ -20,6 +20,9 @@ pub struct ConsolidationEngine {
 
     /// Consolidation statistics
     stats: ConsolidationStats,
+
+    /// Pattern detector for unsupervised pattern discovery
+    pattern_detector: PatternDetector,
 }
 
 /// A replay event during sharp-wave ripples
@@ -61,6 +64,22 @@ pub struct SemanticPattern {
     pub last_consolidated: DateTime<Utc>,
 }
 
+impl From<EpisodicPattern> for SemanticPattern {
+    /// Convert an episodic pattern to a semantic pattern
+    fn from(episodic: EpisodicPattern) -> Self {
+        Self {
+            id: episodic.id,
+            embedding: episodic.embedding,
+            source_episodes: episodic.source_episodes,
+            strength: episodic.strength,
+            // Use pattern strength as confidence measure
+            schema_confidence: Confidence::exact(episodic.strength),
+            // Use last occurrence as consolidation time
+            last_consolidated: episodic.last_occurrence,
+        }
+    }
+}
+
 /// Statistics for consolidation process
 #[derive(Debug, Clone, Default)]
 pub struct ConsolidationStats {
@@ -97,11 +116,19 @@ impl ConsolidationEngine {
     /// Create a new consolidation engine
     #[must_use]
     pub fn new(config: CompletionConfig) -> Self {
+        // Create pattern detector with config mapped from completion config
+        let pattern_config = PatternDetectionConfig {
+            min_cluster_size: 3,
+            similarity_threshold: 0.8,
+            max_patterns: 100,
+        };
+
         Self {
             config,
             replay_buffer: VecDeque::with_capacity(100),
             semantic_patterns: HashMap::new(),
             stats: ConsolidationStats::default(),
+            pattern_detector: PatternDetector::new(pattern_config),
         }
     }
 
@@ -215,28 +242,29 @@ impl ConsolidationEngine {
         best_match
     }
 
-    /// Extract semantic patterns from episodes
+    /// Extract semantic patterns from episodes using unsupervised detection
     fn extract_patterns(&mut self, event: &ReplayEvent) -> usize {
-        // Group episodes by semantic similarity
-        let clusters = Self::cluster_episodes(&event.episodes);
+        // Use the new pattern detector for unsupervised clustering
+        let episodic_patterns = self.pattern_detector.detect_patterns(&event.episodes);
+
         let mut extracted = 0;
 
-        for cluster in clusters {
-            if cluster.len() >= 2 {
-                // Extract common pattern
-                let pattern = Self::extract_common_pattern(&cluster);
+        for episodic_pattern in episodic_patterns {
+            // Convert episodic pattern to semantic pattern
+            let semantic_pattern = SemanticPattern::from(episodic_pattern);
 
-                // Store pattern
-                self.semantic_patterns.insert(pattern.id.clone(), pattern);
-                extracted += 1;
-            } else {
-                self.stats.failed_consolidations += 1;
-            }
+            // Store pattern
+            self.semantic_patterns
+                .insert(semantic_pattern.id.clone(), semantic_pattern);
+            extracted += 1;
         }
 
         if extracted > 0 {
             self.stats.total_patterns_extracted += extracted;
             self.stats.successful_consolidations += extracted;
+        } else if !event.episodes.is_empty() {
+            // Only count as failed if we had episodes but found no patterns
+            self.stats.failed_consolidations += 1;
         }
 
         extracted
@@ -279,71 +307,6 @@ impl ConsolidationEngine {
             total_replays,
         );
         self.stats.last_replay_timestamp = Some(event.timestamp);
-    }
-
-    /// Cluster episodes by semantic similarity
-    fn cluster_episodes(episodes: &[Episode]) -> Vec<Vec<Episode>> {
-        let mut clusters: Vec<Vec<Episode>> = Vec::new();
-
-        for episode in episodes {
-            let mut added = false;
-
-            // Try to add to existing cluster
-            for cluster in &mut clusters {
-                if !cluster.is_empty() {
-                    let similarity =
-                        Self::embedding_similarity(&episode.embedding, &cluster[0].embedding);
-
-                    if similarity > 0.8 {
-                        cluster.push(episode.clone());
-                        added = true;
-                        break;
-                    }
-                }
-            }
-
-            // Create new cluster if needed
-            if !added {
-                clusters.push(vec![episode.clone()]);
-            }
-        }
-
-        clusters
-    }
-
-    /// Extract common pattern from episode cluster
-    fn extract_common_pattern(episodes: &[Episode]) -> SemanticPattern {
-        // Average embeddings
-        let mut avg_embedding = [0.0f32; 768];
-        for episode in episodes {
-            for (avg_val, episode_val) in avg_embedding.iter_mut().zip(&episode.embedding) {
-                *avg_val += episode_val;
-            }
-        }
-        for avg_val in &mut avg_embedding {
-            *avg_val = safe_divide(*avg_val, episodes.len());
-        }
-
-        // Calculate pattern strength
-        let mut strength = 0.0;
-        for episode in episodes {
-            strength += episode.encoding_confidence.raw();
-        }
-        strength = safe_divide(strength, episodes.len());
-
-        let mut source_ids: Vec<String> = episodes.iter().map(|e| e.id.clone()).collect();
-        source_ids.sort();
-        let canonical = source_ids.join("::");
-        let pattern_uuid = Uuid::new_v5(&Uuid::NAMESPACE_URL, canonical.as_bytes());
-
-        SemanticPattern {
-            id: format!("pattern_{pattern_uuid}"),
-            embedding: avg_embedding,
-            source_episodes: episodes.iter().map(|e| e.id.clone()).collect(),
-            strength,
-            schema_confidence: Confidence::exact(strength),
-            last_consolidated: Utc::now(),
-        }
     }
 
     /// Calculate embedding similarity
@@ -460,7 +423,10 @@ mod tests {
     }
 
     #[test]
-    fn test_cluster_episodes() {
+    fn test_pattern_extraction() {
+        let config = CompletionConfig::default();
+        let mut engine = ConsolidationEngine::new(config);
+
         let episodes = vec![
             Episode::new(
                 "ep1".to_string(),
@@ -480,12 +446,16 @@ mod tests {
                 "ep3".to_string(),
                 Utc::now(),
                 "test3".to_string(),
-                [0.0; 768], // Different, should be separate cluster
+                [1.0; 768], // Same embedding, should cluster together
                 Confidence::exact(0.7),
             ),
         ];
 
-        let clusters = ConsolidationEngine::cluster_episodes(&episodes);
-        assert_eq!(clusters.len(), 2); // Two clusters expected
+        // Perform consolidation
+        engine.ripple_replay(&episodes);
+
+        // Should extract at least one pattern from similar episodes
+        assert!(!engine.semantic_patterns.is_empty());
+        assert!(engine.stats.total_patterns_extracted > 0);
     }
 }
