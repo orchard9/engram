@@ -111,6 +111,39 @@ async fn main() -> Result<()> {
     }
 }
 
+/// Wait for gRPC server to be ready to accept connections
+///
+/// # Errors
+///
+/// Returns error if gRPC server doesn't become ready within timeout
+async fn wait_for_grpc_ready(port: u16) -> Result<()> {
+    use std::time::Duration;
+    use tokio::net::TcpStream;
+
+    let max_attempts = 20; // 20 * 500ms = 10 seconds
+    let retry_interval = Duration::from_millis(500);
+
+    for attempt in 1..=max_attempts {
+        match TcpStream::connect(format!("127.0.0.1:{port}")).await {
+            Ok(_) => {
+                info!(" gRPC server ready (attempt {attempt})");
+                return Ok(());
+            }
+            Err(_) => {
+                if attempt < max_attempts {
+                    tokio::time::sleep(retry_interval).await;
+                }
+            }
+        }
+    }
+
+    Err(anyhow::anyhow!(
+        "❌ gRPC server did not become ready within 10 seconds\\n\\\
+         🔍 The server may have failed to start or is taking too long to initialize.\\n\\\
+         💡 Check logs for gRPC server errors"
+    ))
+}
+
 async fn start_server(port: u16, grpc_port: u16, cli_config: &config::CliConfig) -> Result<()> {
     info!(" Starting Engram server...");
 
@@ -386,6 +419,9 @@ async fn start_server(port: u16, grpc_port: u16, cli_config: &config::CliConfig)
             error!(" gRPC server error: {}", e);
         }
     });
+
+    // Wait for gRPC server to be ready before announcing success
+    wait_for_grpc_ready(actual_grpc_port).await?;
 
     println!(" Engram server started successfully!");
     println!(" HTTP API: http://127.0.0.1:{actual_port}");
