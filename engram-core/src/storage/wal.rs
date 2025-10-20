@@ -449,6 +449,17 @@ impl Default for WalBatch {
     }
 }
 
+/// Statistics from WAL compaction
+#[derive(Debug, Clone, Copy)]
+pub struct CompactionStats {
+    /// Number of episodes written to new WAL
+    pub entries_written: usize,
+    /// Total bytes written
+    pub bytes_written: u64,
+    /// Bytes reclaimed by removing old WAL files
+    pub bytes_reclaimed: u64,
+}
+
 /// High-performance write-ahead log implementation
 pub struct WalWriter {
     /// Root directory where WAL files are written
@@ -865,6 +876,127 @@ impl WalWriter {
         } else {
             Ok(sequences)
         }
+    }
+
+    /// Compact WAL by rewriting only valid current state.
+    ///
+    /// This creates a new WAL file containing only episodes currently in memory,
+    /// effectively removing all corrupt entries and deleted episodes.
+    ///
+    /// # Safety
+    ///
+    /// Must be called AFTER recover_from_wal() completes, with all episodes
+    /// successfully loaded into memory. Otherwise, data loss will occur.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Cannot create new WAL file
+    /// - Writing episodes fails
+    /// - Cannot atomically rename files
+    /// - Cannot remove old WAL files
+    ///
+    /// If an error occurs mid-compaction, old WAL files are preserved.
+    #[must_use = "WAL compaction failures can cause unbounded disk growth"]
+    pub fn compact_from_memory<I>(&self, episodes: I) -> StorageResult<CompactionStats>
+    where
+        I: Iterator<Item = Episode>,
+    {
+        // 1. Create new temporary WAL file
+        let timestamp = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        let temp_filename = format!("wal-{timestamp:016x}.log.tmp");
+        let temp_path = self.wal_dir.join(&temp_filename);
+
+        let temp_file = OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(&temp_path)?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = temp_file.metadata()?.permissions();
+            perms.set_mode(0o600);
+            std::fs::set_permissions(&temp_path, perms)?;
+        }
+
+        let mut buf_writer = BufWriter::with_capacity(64 * 1024, temp_file);
+
+        // 2. Write all valid episodes to new WAL
+        let mut entries_written = 0usize;
+        let mut bytes_written = 0u64;
+
+        for (sequence, episode) in episodes.enumerate() {
+            let mut entry = WalEntry::new_episode(&episode)?;
+            entry.header.sequence = sequence as u64;
+
+            #[cfg(feature = "memory_mapped_persistence")]
+            {
+                entry.header.header_crc = entry.header.compute_header_crc();
+            }
+
+            let header_bytes = entry.header.as_bytes();
+            buf_writer.write_all(&header_bytes)?;
+            buf_writer.write_all(&entry.payload)?;
+
+            bytes_written += (HEADER_SIZE + entry.payload.len()) as u64;
+            entries_written += 1;
+        }
+
+        // 3. Fsync new WAL
+        buf_writer.flush()?;
+        buf_writer.get_mut().sync_all()?;
+        drop(buf_writer);
+
+        // 4. Get size of old WAL files for metrics
+        let mut old_bytes = 0u64;
+        for entry in std::fs::read_dir(&self.wal_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+
+            if path.extension().is_some_and(|ext| ext == "log")
+                && !path.to_str().unwrap_or("").contains(".tmp")
+                && let Ok(metadata) = path.metadata()
+            {
+                old_bytes += metadata.len();
+            }
+        }
+
+        // 5. Atomically rename new WAL (this is the commit point)
+        let final_filename = format!("wal-{timestamp:016x}.log");
+        let final_path = self.wal_dir.join(&final_filename);
+        std::fs::rename(&temp_path, &final_path)?;
+
+        // 6. Remove old WAL files (safe after atomic rename)
+        for entry in std::fs::read_dir(&self.wal_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+
+            if path != final_path && path.extension().is_some_and(|ext| ext == "log") {
+                std::fs::remove_file(&path)?;
+                tracing::info!("Removed old WAL file: {}", path.display());
+            }
+        }
+
+        let stats = CompactionStats {
+            entries_written,
+            bytes_written,
+            bytes_reclaimed: old_bytes.saturating_sub(bytes_written),
+        };
+
+        tracing::info!(
+            entries_written = entries_written,
+            bytes_written = bytes_written,
+            bytes_reclaimed = stats.bytes_reclaimed,
+            "WAL compaction completed"
+        );
+
+        Ok(stats)
     }
 }
 

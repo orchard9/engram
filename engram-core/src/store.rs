@@ -885,6 +885,8 @@ impl MemoryStore {
             return Ok(0);
         };
 
+        let recovery_start = std::time::Instant::now();
+
         let wal_reader = WalReader::new(
             wal_writer.wal_directory(),
             Arc::clone(&self.storage_metrics),
@@ -892,6 +894,7 @@ impl MemoryStore {
         let entries = wal_reader.scan_all()?;
 
         let mut recovered = 0usize;
+        let mut failed = 0usize;
 
         for entry in entries {
             let entry_type = WalEntryType::from(entry.header.entry_type);
@@ -931,16 +934,31 @@ impl MemoryStore {
 
                             self.memory_count.fetch_add(1, Ordering::Relaxed);
                             recovered += 1;
+
+                            // Update metrics
+                            crate::metrics::increment_counter(
+                                crate::metrics::WAL_RECOVERY_SUCCESSES_TOTAL,
+                                1,
+                            );
+
                             tracing::info!(
                                 episode_id = %episode.id,
                                 "Successfully recovered episode from WAL"
                             );
                         }
                         Err(error) => {
-                            eprintln!("WAL DESERIALIZATION ERROR: {error:?}");
+                            failed += 1;
+
                             tracing::warn!(
                                 ?error,
+                                failed_count = failed,
                                 "Failed to deserialize WAL episode during recovery"
+                            );
+
+                            // Update metrics
+                            crate::metrics::increment_counter(
+                                crate::metrics::WAL_RECOVERY_FAILURES_TOTAL,
+                                1,
                             );
                         }
                     }
@@ -968,6 +986,60 @@ impl MemoryStore {
                     tracing::debug!(
                         entry_type = ?entry_type,
                         "Skipping WAL entry type during recovery"
+                    );
+                }
+            }
+        }
+
+        // Log recovery summary
+        let recovery_duration = recovery_start.elapsed();
+        crate::metrics::observe_histogram(
+            crate::metrics::WAL_RECOVERY_DURATION_SECONDS,
+            recovery_duration.as_secs_f64(),
+        );
+
+        tracing::info!(
+            recovered = recovered,
+            failed = failed,
+            duration_ms = recovery_duration.as_millis(),
+            corruption_rate = if recovered + failed > 0 {
+                (failed as f64) / ((recovered + failed) as f64) * 100.0
+            } else {
+                0.0
+            },
+            "WAL recovery completed"
+        );
+
+        // Compact WAL after successful recovery
+        if recovered > 0 || failed > 0 {
+            tracing::info!("Starting WAL compaction to remove corrupt entries");
+
+            // Collect all episodes currently in memory
+            let episodes: Vec<Episode> = self
+                .wal_buffer
+                .iter()
+                .map(|entry| entry.value().clone())
+                .collect();
+
+            match wal_writer.compact_from_memory(episodes.into_iter()) {
+                Ok(stats) => {
+                    tracing::info!(
+                        entries_written = stats.entries_written,
+                        bytes_reclaimed = stats.bytes_reclaimed,
+                        "WAL compaction succeeded"
+                    );
+
+                    crate::metrics::increment_counter(crate::metrics::WAL_COMPACTION_RUNS_TOTAL, 1);
+                    crate::metrics::increment_counter(
+                        crate::metrics::WAL_COMPACTION_BYTES_RECLAIMED,
+                        stats.bytes_reclaimed,
+                    );
+                }
+                Err(e) => {
+                    // Non-fatal: WAL compaction failure doesn't affect recovered data
+                    tracing::error!(
+                        error = ?e,
+                        "WAL compaction failed - will retry on next restart"
                     );
                 }
             }

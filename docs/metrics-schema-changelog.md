@@ -79,6 +79,17 @@ Added schema version tracking to all metrics exports.
 - Add metric-specific aggregations (counter sums, gauge latest values)
 - Separate spreading metrics from general metrics
 
+## 2025-10-20 — WAL Observability Metrics (schema 1.3.0)
+
+- Added WAL (Write-Ahead Log) metrics for persistence observability.
+- `engram_wal_recovery_successes_total`: Episodes successfully recovered from WAL during startup.
+- `engram_wal_recovery_failures_total`: WAL entries that failed deserialization during recovery.
+- `engram_wal_recovery_duration_seconds`: Time taken to recover WAL entries on startup (histogram).
+- `engram_wal_compaction_runs_total`: WAL compaction operations performed.
+- `engram_wal_compaction_bytes_reclaimed`: Bytes saved by WAL compaction.
+- Enables monitoring of WAL health, corruption rates, and automatic compaction effectiveness.
+- No breaking changes; minor version bump signals new optional WAL metrics.
+
 ## 2025-10-19 — Consolidation Quality Metrics (schema 1.2.0)
 
 - Added consolidation quality gauges (`engram_consolidation_novelty_variance`, `engram_consolidation_citation_churn`).

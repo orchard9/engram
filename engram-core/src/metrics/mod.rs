@@ -82,6 +82,18 @@ pub const COMPACTION_EPISODES_REMOVED: &str = "engram_compaction_episodes_remove
 /// Total bytes of storage space reclaimed through compaction.
 pub const COMPACTION_STORAGE_SAVED_BYTES: &str = "engram_compaction_storage_saved_bytes";
 
+// WAL (Write-Ahead Log) metrics
+/// Total number of episodes successfully recovered from WAL during server startup.
+pub const WAL_RECOVERY_SUCCESSES_TOTAL: &str = "engram_wal_recovery_successes_total";
+/// Total number of WAL entries that failed deserialization during recovery.
+pub const WAL_RECOVERY_FAILURES_TOTAL: &str = "engram_wal_recovery_failures_total";
+/// Time taken to recover WAL entries on startup (histogram).
+pub const WAL_RECOVERY_DURATION_SECONDS: &str = "engram_wal_recovery_duration_seconds";
+/// Total number of WAL compaction operations performed.
+pub const WAL_COMPACTION_RUNS_TOTAL: &str = "engram_wal_compaction_runs_total";
+/// Total bytes reclaimed by WAL compaction.
+pub const WAL_COMPACTION_BYTES_RECLAIMED: &str = "engram_wal_compaction_bytes_reclaimed";
+
 /// Global metrics registry for the Engram system
 pub struct MetricsRegistry {
     /// Lock-free counters for operation counts
