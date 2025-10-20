@@ -1319,6 +1319,9 @@ mod tests {
                 Duration::from_millis(50),
                 Duration::from_millis(100),
             ],
+            // Explicit timeout for tests: 5 seconds is sufficient for small test graphs
+            // This prevents the default timeout (10s + 2s per core) from causing long waits
+            completion_timeout: Some(Duration::from_secs(5)),
             ..ParallelSpreadingConfig::deterministic(seed)
         }
     }
