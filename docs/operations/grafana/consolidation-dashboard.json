@@ -1,0 +1,542 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "engram-consolidation",
+    "title": "Engram Consolidation Monitoring",
+    "description": "Real-time monitoring of memory consolidation system health, semantic pattern evolution, and storage efficiency",
+    "tags": ["engram", "consolidation", "memory", "semantic"],
+    "timezone": "browser",
+    "schemaVersion": 38,
+    "version": 1,
+    "refresh": "30s",
+    "time": {
+      "from": "now-6h",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "Run Cadence & Failures",
+        "type": "timeseries",
+        "gridPos": {
+          "x": 0,
+          "y": 0,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "rate(engram_consolidation_runs_total[5m])",
+            "legendFormat": "Successful runs/sec",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(engram_consolidation_failures_total[5m])",
+            "legendFormat": "Failures/sec",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "axisLabel": "Runs per second",
+              "drawStyle": "line",
+              "fillOpacity": 20,
+              "showPoints": "auto"
+            },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "value": null,
+                  "color": "green"
+                },
+                {
+                  "value": 0.01,
+                  "color": "red"
+                }
+              ]
+            }
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "Failures/sec"
+              },
+              "properties": [
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "red",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "options": {
+          "legend": {
+            "calcs": ["mean", "lastNotNull"],
+            "displayMode": "table",
+            "placement": "bottom"
+          },
+          "tooltip": {
+            "mode": "multi"
+          }
+        },
+        "alert": {
+          "name": "High Consolidation Failure Rate",
+          "conditions": [
+            {
+              "evaluator": {
+                "params": [0.005],
+                "type": "gt"
+              },
+              "operator": {
+                "type": "and"
+              },
+              "query": {
+                "params": ["B", "5m", "now"]
+              },
+              "reducer": {
+                "params": [],
+                "type": "avg"
+              },
+              "type": "query"
+            }
+          ],
+          "executionErrorState": "alerting",
+          "frequency": "1m",
+          "handler": 1,
+          "message": "Consolidation failure rate >0.005/sec sustained over 5 minutes. Check scheduler health.",
+          "name": "High Consolidation Failure Rate",
+          "noDataState": "no_data",
+          "notifications": []
+        }
+      },
+      {
+        "id": 2,
+        "title": "Snapshot Freshness Heatmap",
+        "type": "heatmap",
+        "gridPos": {
+          "x": 12,
+          "y": 0,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "engram_consolidation_freshness_seconds",
+            "legendFormat": "Freshness (seconds)",
+            "refId": "A",
+            "format": "time_series"
+          }
+        ],
+        "options": {
+          "calculate": true,
+          "calculation": {
+            "xBuckets": {
+              "mode": "size",
+              "value": "1min"
+            },
+            "yBuckets": {
+              "mode": "size",
+              "value": "60"
+            }
+          },
+          "cellGap": 2,
+          "color": {
+            "exponent": 0.5,
+            "fill": "dark-green",
+            "mode": "scheme",
+            "reverse": false,
+            "scale": "exponential",
+            "scheme": "Greens",
+            "steps": 128
+          },
+          "exemplars": {
+            "color": "rgba(255,0,255,0.7)"
+          },
+          "filterValues": {
+            "le": 1e-9
+          },
+          "legend": {
+            "show": true
+          },
+          "rowsFrame": {
+            "layout": "auto"
+          },
+          "tooltip": {
+            "show": true,
+            "yHistogram": true
+          },
+          "yAxis": {
+            "axisLabel": "Freshness (seconds)",
+            "axisPlacement": "left",
+            "decimals": 0,
+            "reverse": false
+          }
+        },
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "hideFrom": {
+                "tooltip": false,
+                "viz": false,
+                "legend": false
+              }
+            }
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "Novelty Trend & Stagnation Detection",
+        "type": "timeseries",
+        "gridPos": {
+          "x": 0,
+          "y": 8,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "engram_consolidation_novelty_gauge",
+            "legendFormat": "Novelty delta",
+            "refId": "A"
+          },
+          {
+            "expr": "vector(0.01)",
+            "legendFormat": "Stagnation threshold",
+            "refId": "B"
+          },
+          {
+            "expr": "vector(0.1)",
+            "legendFormat": "Heterogeneous threshold",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "axisLabel": "Novelty",
+              "drawStyle": "line",
+              "fillOpacity": 15,
+              "lineWidth": 2,
+              "pointSize": 5,
+              "showPoints": "auto"
+            },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "value": null,
+                  "color": "red"
+                },
+                {
+                  "value": 0.01,
+                  "color": "yellow"
+                },
+                {
+                  "value": 0.05,
+                  "color": "green"
+                }
+              ]
+            }
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "Stagnation threshold"
+              },
+              "properties": [
+                {
+                  "id": "custom.lineStyle",
+                  "value": {
+                    "dash": [10, 10],
+                    "fill": "dash"
+                  }
+                },
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "red",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "Heterogeneous threshold"
+              },
+              "properties": [
+                {
+                  "id": "custom.lineStyle",
+                  "value": {
+                    "dash": [10, 10],
+                    "fill": "dash"
+                  }
+                },
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "blue",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "options": {
+          "legend": {
+            "calcs": ["mean", "lastNotNull", "min", "max"],
+            "displayMode": "table",
+            "placement": "bottom"
+          },
+          "tooltip": {
+            "mode": "multi"
+          }
+        }
+      },
+      {
+        "id": 4,
+        "title": "Belief Update Feed (Recent Citations & Confidence Changes)",
+        "type": "logs",
+        "gridPos": {
+          "x": 12,
+          "y": 8,
+          "w": 12,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "{filename=~\".*consolidation/alerts/belief_updates.jsonl\"} |= `` | json | line_format \"{{.timestamp}} [{{.pattern_id}}] Confidence: {{.old_confidence}}→{{.new_confidence}} Citations: {{.citation_delta}}\"",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "showTime": true,
+          "showLabels": false,
+          "showCommonLabels": false,
+          "wrapLogMessage": false,
+          "prettifyLogMessage": false,
+          "enableLogDetails": true,
+          "dedupStrategy": "none",
+          "sortOrder": "Descending"
+        }
+      },
+      {
+        "id": 5,
+        "title": "Failover Indicator & Health Status",
+        "type": "stat",
+        "gridPos": {
+          "x": 0,
+          "y": 16,
+          "w": 6,
+          "h": 4
+        },
+        "targets": [
+          {
+            "expr": "(time() - (engram_consolidation_runs_total > 0)) > 450",
+            "legendFormat": "Health Contract Breach",
+            "refId": "A",
+            "instant": true
+          },
+          {
+            "expr": "engram_consolidation_freshness_seconds > 900",
+            "legendFormat": "Snapshot Stale",
+            "refId": "B",
+            "instant": true
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "mappings": [
+              {
+                "options": {
+                  "0": {
+                    "text": "HEALTHY",
+                    "color": "green"
+                  },
+                  "1": {
+                    "text": "FAILOVER",
+                    "color": "red"
+                  }
+                },
+                "type": "value"
+              }
+            ],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "value": null,
+                  "color": "green"
+                },
+                {
+                  "value": 0.5,
+                  "color": "red"
+                }
+              ]
+            }
+          }
+        },
+        "options": {
+          "orientation": "horizontal",
+          "textMode": "value_and_name",
+          "colorMode": "background",
+          "graphMode": "none",
+          "justifyMode": "center",
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"],
+            "fields": ""
+          }
+        }
+      },
+      {
+        "id": 6,
+        "title": "Citation Count Trend",
+        "type": "timeseries",
+        "gridPos": {
+          "x": 6,
+          "y": 16,
+          "w": 6,
+          "h": 4
+        },
+        "targets": [
+          {
+            "expr": "engram_consolidation_citations_current",
+            "legendFormat": "Total citations",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "axisLabel": "Citations",
+              "drawStyle": "line",
+              "fillOpacity": 10,
+              "lineWidth": 2
+            }
+          }
+        },
+        "options": {
+          "legend": {
+            "calcs": ["lastNotNull", "delta"],
+            "displayMode": "list",
+            "placement": "bottom"
+          }
+        }
+      },
+      {
+        "id": 7,
+        "title": "Storage Metrics",
+        "type": "stat",
+        "gridPos": {
+          "x": 12,
+          "y": 16,
+          "w": 12,
+          "h": 4
+        },
+        "targets": [
+          {
+            "expr": "sum(rate(engram_consolidation_runs_total[1h]))",
+            "legendFormat": "Runs/hour",
+            "refId": "A",
+            "instant": true
+          },
+          {
+            "expr": "avg(engram_consolidation_novelty_gauge)",
+            "legendFormat": "Avg novelty (1h)",
+            "refId": "B",
+            "instant": true
+          },
+          {
+            "expr": "avg(engram_consolidation_freshness_seconds)",
+            "legendFormat": "Avg freshness (s)",
+            "refId": "C",
+            "instant": true
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "decimals": 2,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "value": null,
+                  "color": "green"
+                }
+              ]
+            }
+          }
+        },
+        "options": {
+          "orientation": "horizontal",
+          "textMode": "value_and_name",
+          "colorMode": "value",
+          "graphMode": "area",
+          "justifyMode": "auto",
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"],
+            "fields": ""
+          }
+        }
+      }
+    ],
+    "annotations": {
+      "list": [
+        {
+          "datasource": "-- Grafana --",
+          "enable": true,
+          "hide": false,
+          "iconColor": "red",
+          "name": "SLA Breaches",
+          "type": "tags"
+        }
+      ]
+    },
+    "templating": {
+      "list": []
+    },
+    "links": [
+      {
+        "title": "Consolidation Observability Playbook",
+        "url": "/docs/operations/consolidation_observability.md",
+        "type": "link"
+      },
+      {
+        "title": "Belief Update Logs",
+        "url": "/data/consolidation/alerts/",
+        "type": "link"
+      }
+    ]
+  },
+  "overwrite": true,
+  "folderUid": "engram",
+  "message": "Consolidation monitoring dashboard v1.0"
+}

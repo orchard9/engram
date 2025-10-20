@@ -83,6 +83,7 @@ logs/
 # Test artifacts
 test-results/
 test-output/
+*.proptest-regressions
 
 # Development monitoring
 .watch-now.yaml
