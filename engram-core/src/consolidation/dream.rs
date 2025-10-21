@@ -86,7 +86,7 @@ impl DreamConfig {
     /// - `max_episodes_per_iteration`: 10 (vs 50)
     #[cfg(test)]
     #[must_use]
-    pub fn test_config() -> Self {
+    pub const fn test_config() -> Self {
         Self {
             dream_duration: Duration::from_secs(10),
             replay_speed: 15.0,

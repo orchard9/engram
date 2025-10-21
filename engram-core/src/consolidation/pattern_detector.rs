@@ -76,13 +76,25 @@ pub struct EpisodicPattern {
 #[derive(Debug, Clone)]
 pub enum PatternFeature {
     /// Temporal sequence with typical interval
-    TemporalSequence { interval: Duration },
+    TemporalSequence {
+        /// Average time interval between episodes in the pattern
+        interval: Duration,
+    },
     /// Spatial proximity with location
-    SpatialProximity { location: String },
+    SpatialProximity {
+        /// Common location string extracted from episodes
+        location: String,
+    },
     /// Conceptual theme
-    ConceptualTheme { theme: String },
+    ConceptualTheme {
+        /// Extracted thematic concept
+        theme: String,
+    },
     /// Emotional valence (-1.0 to 1.0)
-    EmotionalValence { valence: f32 },
+    EmotionalValence {
+        /// Emotional polarity score from -1.0 (negative) to 1.0 (positive)
+        valence: f32,
+    },
 }
 
 impl PatternDetector {
@@ -125,7 +137,7 @@ impl PatternDetector {
         }
 
         // Phase 3: Merge similar patterns
-        self.merge_similar_patterns(patterns)
+        Self::merge_similar_patterns(patterns)
     }
 
     /// Cluster episodes using hierarchical agglomerative clustering with centroid linkage
@@ -140,7 +152,7 @@ impl PatternDetector {
         // Cache cluster centroids for performance (avoid recomputation)
         let mut centroids: Vec<[f32; 768]> = clusters
             .iter()
-            .map(|cluster| self.compute_centroid(cluster))
+            .map(|cluster| Self::compute_centroid(cluster))
             .collect();
 
         // Iteratively merge most similar clusters
@@ -158,14 +170,14 @@ impl PatternDetector {
             clusters[i].extend(cluster_j);
 
             // Recompute centroid for merged cluster
-            centroids[i] = self.compute_centroid(&clusters[i]);
+            centroids[i] = Self::compute_centroid(&clusters[i]);
         }
 
         clusters
     }
 
     /// Compute centroid (average embedding) of a cluster
-    fn compute_centroid(&self, cluster: &[Episode]) -> [f32; 768] {
+    fn compute_centroid(cluster: &[Episode]) -> [f32; 768] {
         if cluster.is_empty() {
             return [0.0; 768];
         }
@@ -280,7 +292,7 @@ impl PatternDetector {
         // Extract temporal sequence if present
         if episodes.len() >= 2 {
             let timestamps: Vec<DateTime<Utc>> = episodes.iter().map(|ep| ep.when).collect();
-            if let Some(interval) = self.detect_temporal_pattern(&timestamps) {
+            if let Some(interval) = Self::detect_temporal_pattern(&timestamps) {
                 features.push(PatternFeature::TemporalSequence { interval });
             }
         }
@@ -294,7 +306,7 @@ impl PatternDetector {
     }
 
     /// Detect temporal pattern in timestamps
-    fn detect_temporal_pattern(&self, timestamps: &[DateTime<Utc>]) -> Option<Duration> {
+    fn detect_temporal_pattern(timestamps: &[DateTime<Utc>]) -> Option<Duration> {
         if timestamps.len() < 2 {
             return None;
         }
@@ -313,14 +325,17 @@ impl PatternDetector {
             return None;
         }
 
-        let total_ms: i64 = intervals.iter().map(|d| d.num_milliseconds()).sum();
+        let total_ms: i64 = intervals
+            .iter()
+            .map(chrono::TimeDelta::num_milliseconds)
+            .sum();
         let avg_interval = Duration::milliseconds(total_ms / intervals.len() as i64);
 
         Some(avg_interval)
     }
 
     /// Merge similar patterns to avoid redundancy
-    fn merge_similar_patterns(&self, patterns: Vec<EpisodicPattern>) -> Vec<EpisodicPattern> {
+    fn merge_similar_patterns(patterns: Vec<EpisodicPattern>) -> Vec<EpisodicPattern> {
         if patterns.len() <= 1 {
             return patterns;
         }
@@ -346,7 +361,7 @@ impl PatternDetector {
                     Self::embedding_similarity(&current.embedding, &patterns[j].embedding);
                 if similarity > 0.9 {
                     // Merge patterns
-                    current = self.merge_two_patterns(current, patterns[j].clone());
+                    current = Self::merge_two_patterns(current, patterns[j].clone());
                     used[j] = true;
                 }
             }
@@ -358,7 +373,7 @@ impl PatternDetector {
     }
 
     /// Merge two similar patterns into one
-    fn merge_two_patterns(&self, mut a: EpisodicPattern, b: EpisodicPattern) -> EpisodicPattern {
+    fn merge_two_patterns(mut a: EpisodicPattern, b: EpisodicPattern) -> EpisodicPattern {
         // Combine source episodes
         a.source_episodes.extend(b.source_episodes);
         a.source_episodes.sort();
