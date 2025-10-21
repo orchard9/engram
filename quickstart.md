@@ -173,3 +173,20 @@ docker run -p 7432:7432 engram/engram:latest
 ---
 
 🎉 **Congratulations!** You've successfully stored and recalled your first memory in Engram. The system is now learning from your interactions and building connections between memories.
+## Memory Consolidation (Optional)
+
+Engram automatically consolidates episodic memories into semantic patterns.
+
+**Note**: Episodes must be >1 day old to consolidate (biological design). Use backdated timestamps for immediate testing.
+
+Check consolidation status:
+```bash
+curl http://localhost:7432/api/v1/consolidations | jq '.'
+```
+
+Stream real-time belief updates:
+```bash
+curl -N http://localhost:7432/api/v1/stream/consolidation
+```
+
+**Next Steps**: See [README.md](README.md) for full API documentation and [consolidation timing details](README.md#consolidation-timing).

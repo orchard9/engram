@@ -1,0 +1,4 @@
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0100   586  100   468  100   118   1915    483 --:--:-- --:--:-- --:--:--  2401
+{"memory_id":"mem_9579a7d2","storage_confidence":{"value":0.85499567,"category":"High","reasoning":"Default confidence for user-provided memory"},"consolidation_state":"Recent","observed_at":"2024-01-04T08:15:00Z","stored_at":"2025-10-21T18:29:18.951310Z","links":{"consolidation":"/api/v1/consolidations"},"auto_links":[],"system_message":"Memory 'mem_9579a7d2' successfully encoded with 0.85 activation. Consider enabling auto-linking to discover related memories."}

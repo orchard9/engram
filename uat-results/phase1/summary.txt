@@ -1,0 +1,4 @@
+=== Scenario 1.1: Server Startup ===
+PASS - Server started and status shows healthy (PID 79280)
+Startup time: <3 seconds
+

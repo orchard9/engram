@@ -77,7 +77,7 @@ cargo test --workspace
 | **HNSW Index** | ✅ Production | High-performance approximate nearest neighbor search |
 | **Psychological Decay** | ✅ Production | Ebbinghaus forgetting curves, spaced repetition |
 | **Pattern Completion** | ✅ Beta | Reconstruct missing details from partial memories |
-| **Memory Consolidation** | 🚧 In Development | Episodic→semantic transformation (Milestone 6) |
+| **Memory Consolidation** | ✅ Production | Asynchronous episodic→semantic transformation with pattern detection |
 | **SMT Verification** | ✅ Production | Correctness proofs for probability propagation |
 | **Streaming Monitoring** | ✅ Production | Real-time SSE streams of memory dynamics |
 
@@ -149,6 +149,28 @@ Consolidation runs asynchronously after `remember` writes, transforming episodic
 - `GET /api/v1/stream/consolidation` — SSE stream that emits belief updates whenever consolidation strengthens or forms new schemas
 
 Write responses include `observed_at`, `stored_at`, and a `links.consolidation` pointer so clients can jump directly into belief inspection.
+
+### Consolidation Timing
+
+Memory consolidation is biologically-inspired and runs asynchronously with configurable behavior:
+
+- **Episode Age Requirement**: Episodes must be at least 1 day old before consolidation (default). This mimics biological memory consolidation during sleep, not immediate encoding.
+- **Consolidation Cadence**: Runs automatically every 60 seconds (configurable)
+- **Why Age Threshold?**: Prevents premature consolidation of volatile recent memories, allowing time for interference patterns to stabilize
+
+**Testing with fresh episodes**: Use backdated timestamps to test consolidation immediately:
+
+```bash
+curl -X POST http://localhost:7432/api/v1/episodes/remember \
+  -H "Content-Type: application/json" \
+  -d '{
+    "what": "Test episode for immediate consolidation",
+    "when": "2025-10-19T10:00:00Z",
+    "confidence": 0.9
+  }'
+```
+
+The `when` field is 2+ days in the past, making the episode immediately eligible for consolidation.
 
 ## Testing
 

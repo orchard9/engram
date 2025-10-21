@@ -1,0 +1,4 @@
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0100   639  100   485  100   154   515k   163k --:--:-- --:--:-- --:--:--  624k
+{"memory_id":"ep_434c3b3e","storage_confidence":{"value":0.44999772,"category":"Medium","reasoning":"Episodic memory stored with activation 0.45, rich context aids consolidation"},"consolidation_state":"Recent","observed_at":"2023-03-15T10:00:00Z","stored_at":"2025-10-21T18:29:27.109947Z","links":{"consolidation":"/api/v1/consolidations"},"auto_links":[],"system_message":"Episode 'ep_434c3b3e' successfully encoded with 0.45 activation. Rich episodes consolidate better over time."}

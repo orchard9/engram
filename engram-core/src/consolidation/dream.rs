@@ -5,7 +5,8 @@
 
 use crate::completion::consolidation::SemanticPattern;
 use crate::consolidation::{
-    CompactionResult, EpisodicPattern, PatternDetectionConfig, PatternDetector, StorageCompactor,
+    CompactionConfig, CompactionResult, EpisodicPattern, PatternDetectionConfig, PatternDetector,
+    StorageCompactor,
 };
 use crate::{Episode, MemoryStore};
 use chrono::Utc;
@@ -76,6 +77,28 @@ impl Default for DreamConfig {
     }
 }
 
+impl DreamConfig {
+    /// Create test configuration with reduced episode age threshold for rapid testing
+    ///
+    /// Use this in integration tests to avoid waiting for episodes to age.
+    /// - `min_episode_age`: 1 second (vs 1 day in production)
+    /// - `dream_duration`: 10 seconds (vs 10 minutes)
+    /// - `max_episodes_per_iteration`: 10 (vs 50)
+    #[cfg(test)]
+    #[must_use]
+    pub fn test_config() -> Self {
+        Self {
+            dream_duration: Duration::from_secs(10),
+            replay_speed: 15.0,
+            replay_iterations: 5,
+            ripple_frequency: 200.0,
+            min_episode_age: Duration::from_secs(1), // 1 second for testing
+            max_episodes_per_iteration: 10,
+            enable_compaction: true,
+        }
+    }
+}
+
 /// Engine for running dream consolidation cycles
 pub struct DreamEngine {
     /// Configuration for dream cycles
@@ -99,7 +122,15 @@ impl DreamEngine {
             max_patterns: 100,
         };
         let pattern_detector = Arc::new(PatternDetector::new(pattern_config));
-        let compactor = Arc::new(StorageCompactor::default_config());
+
+        // Create compactor with aligned min_episode_age from DreamConfig
+        let compaction_config = CompactionConfig {
+            min_episode_age: config.min_episode_age,
+            preserve_threshold: 0.95,
+            verify_retrieval: true,
+            reconstruction_threshold: 0.8,
+        };
+        let compactor = Arc::new(StorageCompactor::new(compaction_config));
 
         Self {
             config,

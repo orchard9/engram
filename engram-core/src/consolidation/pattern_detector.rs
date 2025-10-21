@@ -1,12 +1,3 @@
-#![allow(
-    dead_code,
-    missing_docs,
-    clippy::unused_self,
-    clippy::must_use_candidate,
-    clippy::collapsible_if,
-    clippy::redundant_closure_for_method_calls
-)]
-
 //! Pattern detection engine for unsupervised statistical pattern detection.
 //!
 //! This module implements hierarchical agglomerative clustering to identify
@@ -45,12 +36,14 @@ impl Default for PatternDetectionConfig {
 pub struct PatternDetector {
     /// Configuration for pattern detection
     config: PatternDetectionConfig,
-    /// Cached patterns for fast lookup
+    /// Cached patterns for fast lookup (reserved for future optimization)
+    #[allow(dead_code)]
     pattern_cache: Arc<DashMap<PatternSignature, CachedPattern>>,
 }
 
-/// Cached pattern for fast lookups
+/// Cached pattern for fast lookups (reserved for future optimization)
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct CachedPattern {
     /// Pattern data
     pattern: EpisodicPattern,
@@ -107,6 +100,7 @@ impl PatternDetector {
     /// # Performance
     /// - <100ms for 100 episodes
     /// - <1s for 1000 episodes
+    #[must_use]
     pub fn detect_patterns(&self, episodes: &[Episode]) -> Vec<EpisodicPattern> {
         if episodes.is_empty() {
             return Vec::new();
@@ -118,14 +112,14 @@ impl PatternDetector {
         // Phase 2: Extract common patterns from clusters
         let mut patterns = Vec::new();
         for cluster in clusters {
-            if cluster.len() >= self.config.min_cluster_size {
-                if let Some(pattern) = self.extract_pattern(&cluster) {
-                    patterns.push(pattern);
+            if cluster.len() >= self.config.min_cluster_size
+                && let Some(pattern) = self.extract_pattern(&cluster)
+            {
+                patterns.push(pattern);
 
-                    // Stop if we've hit the max patterns limit
-                    if patterns.len() >= self.config.max_patterns {
-                        break;
-                    }
+                // Stop if we've hit the max patterns limit
+                if patterns.len() >= self.config.max_patterns {
+                    break;
                 }
             }
         }
@@ -151,7 +145,7 @@ impl PatternDetector {
 
         // Iteratively merge most similar clusters
         while clusters.len() > 1 {
-            let (i, j, similarity) = self.find_most_similar_clusters_centroid(&centroids);
+            let (i, j, similarity) = Self::find_most_similar_clusters_centroid(&centroids);
 
             if similarity < self.config.similarity_threshold {
                 break; // No more similar clusters to merge
@@ -176,13 +170,13 @@ impl PatternDetector {
             return [0.0; 768];
         }
 
-        self.average_embeddings(cluster)
+        Self::average_embeddings(cluster)
     }
 
     /// Find the two most similar clusters using centroid linkage
     ///
     /// Returns (index_i, index_j, similarity) where i < j
-    fn find_most_similar_clusters_centroid(&self, centroids: &[[f32; 768]]) -> (usize, usize, f32) {
+    fn find_most_similar_clusters_centroid(centroids: &[[f32; 768]]) -> (usize, usize, f32) {
         let mut best_i = 0;
         let mut best_j = 1;
         let mut best_similarity = 0.0;
@@ -208,10 +202,10 @@ impl PatternDetector {
         }
 
         // Compute average embedding
-        let avg_embedding = self.average_embeddings(episodes);
+        let avg_embedding = Self::average_embeddings(episodes);
 
         // Compute pattern strength (coherence measure)
-        let strength = self.compute_pattern_strength(episodes, &avg_embedding);
+        let strength = Self::compute_pattern_strength(episodes, &avg_embedding);
 
         // Extract common features
         let features = self.extract_common_features(episodes);
@@ -246,7 +240,7 @@ impl PatternDetector {
     }
 
     /// Compute average embedding from episodes
-    fn average_embeddings(&self, episodes: &[Episode]) -> [f32; 768] {
+    fn average_embeddings(episodes: &[Episode]) -> [f32; 768] {
         let mut avg = [0.0f32; 768];
         let count = episodes.len() as f32;
 
@@ -264,7 +258,7 @@ impl PatternDetector {
     }
 
     /// Compute pattern strength (cluster coherence)
-    fn compute_pattern_strength(&self, episodes: &[Episode], centroid: &[f32; 768]) -> f32 {
+    fn compute_pattern_strength(episodes: &[Episode], centroid: &[f32; 768]) -> f32 {
         if episodes.is_empty() {
             return 0.0;
         }
@@ -279,6 +273,7 @@ impl PatternDetector {
     }
 
     /// Extract common features from episode cluster
+    #[allow(clippy::unused_self)] // Reserved for future feature extraction config
     fn extract_common_features(&self, episodes: &[Episode]) -> Vec<PatternFeature> {
         let mut features = Vec::new();
 
@@ -290,7 +285,7 @@ impl PatternDetector {
             }
         }
 
-        // TODO: Add more feature extraction as needed
+        // Future feature extraction (deferred to future milestones):
         // - Spatial proximity detection
         // - Conceptual theme extraction
         // - Emotional valence analysis

@@ -1,0 +1,4 @@
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0100   416  100   416    0     0   429k      0 --:--:-- --:--:-- --:--:--  406k
+{"memories":[],"confidence_interval":{"lower":0.0,"upper":0.0,"point":0.0,"width":0.0},"evidence_chain":[],"uncertainty_sources":[{"source_type":"spreading_activation_noise","impact":0.05,"explanation":"Activation spreading variance 0.050 with path diversity 0.100"}],"system_message":"Probabilistic query completed in 0ms with confidence interval [0.00, 0.00] (point: 0.00). Uncertainty quantified from 1 sources."}
