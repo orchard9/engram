@@ -29,6 +29,27 @@ curl -X POST http://localhost:7432/api/v1/memories/remember \
 curl http://localhost:7432/api/v1/memories/recall?query=mitochondria
 ```
 
+## Novelty Showcase Demo
+
+Want to see what makes Engram genuinely different? Run the 8-minute interactive demo showcasing:
+
+- **Psychological Decay** - Ebbinghaus forgetting curves at the storage layer
+- **Spreading Activation** - Associative memory retrieval through neural dynamics
+- **Memory Consolidation** - Automatic pattern learning from experiences
+
+```bash
+cd demos/novelty-showcase
+./demo.sh
+```
+
+The demo includes:
+- Live comparison with traditional databases
+- Real-time spreading activation visualization
+- Automatic pattern extraction from episodes
+- Key performance metrics and competitive positioning
+
+See [demos/novelty-showcase/README.md](demos/novelty-showcase/README.md) for details.
+
 ## Installation
 
 ### Prerequisites
