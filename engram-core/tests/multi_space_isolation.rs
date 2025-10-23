@@ -10,10 +10,7 @@ use tempfile::tempdir;
 /// Test helper: Create a registry with custom store factory
 fn test_registry(temp_path: &std::path::Path) -> MemorySpaceRegistry {
     MemorySpaceRegistry::new(temp_path, |space_id, _directories| {
-        Ok(Arc::new(MemoryStore::for_space(
-            space_id.clone(),
-            1000,
-        )))
+        Ok(Arc::new(MemoryStore::for_space(space_id.clone(), 1000)))
     })
     .expect("registry creation")
 }
@@ -102,9 +99,7 @@ async fn verify_space_catches_wrong_store_usage() {
     // Runtime guard should catch mismatch
     let result = alpha_store.verify_space(&beta);
     assert!(result.is_err());
-    assert!(result
-        .unwrap_err()
-        .contains("Memory space mismatch"));
+    assert!(result.unwrap_err().contains("Memory space mismatch"));
 
     // Correct usage should succeed
     let result = alpha_store.verify_space(&alpha);
@@ -208,7 +203,11 @@ async fn default_space_backward_compatibility() {
     let store = handle.store();
     store.store(episode);
 
-    let cue = Cue::semantic("test".to_string(), "default".to_string(), Confidence::exact(0.5));
+    let cue = Cue::semantic(
+        "test".to_string(),
+        "default".to_string(),
+        Confidence::exact(0.5),
+    );
     let results = store.recall(&cue);
 
     assert_eq!(results.results.len(), 1);
