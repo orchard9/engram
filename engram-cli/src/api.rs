@@ -41,6 +41,28 @@ use engram_core::{
 #[derive(Clone)]
 pub struct ApiState {
     /// Cognitive memory store with HNSW indexing and activation spreading
+    ///
+    /// # Deprecation Notice
+    /// This field is deprecated and will be removed in a future version.
+    /// Use `registry.create_or_get(&space_id)` instead to obtain space-specific store handles.
+    ///
+    /// ## Migration Guide
+    /// ```ignore
+    /// // Old pattern (deprecated):
+    /// let result = state.store.recall(&cue);
+    ///
+    /// // New pattern (registry-based):
+    /// let space_id = extract_memory_space_id(query_space, body_space, &state.default_space)?;
+    /// let handle = state.registry.create_or_get(&space_id).await?;
+    /// let store = handle.store();
+    /// let result = store.recall(&cue);
+    /// ```
+    #[deprecated(
+        since = "0.2.0",
+        note = "Use `registry.create_or_get(&space_id)` for multi-tenant isolation. \
+                This field provides access to the default space only and will be removed \
+                after all handlers migrate to the registry pattern."
+    )]
     pub store: Arc<MemoryStore>,
     /// gRPC memory service for complex operations
     pub memory_service: Arc<MemoryService>,
@@ -100,6 +122,7 @@ impl From<SpaceSummary> for MemorySpaceDescriptor {
 
 impl ApiState {
     /// Create new API state with memory store
+    #[allow(deprecated)] // Constructor needs to initialize the deprecated field during migration
     pub fn new(
         store: Arc<MemoryStore>,
         registry: Arc<MemorySpaceRegistry>,
@@ -516,6 +539,8 @@ pub struct ProbabilisticQueryRequest {
     pub include_uncertainty: Option<bool>,
     /// Recall mode to apply (similarity, spreading, hybrid)
     pub mode: Option<String>,
+    /// Memory space identifier for multi-tenant isolation (defaults to server default)
+    pub space: Option<String>,
 }
 
 /// Query parameters for streaming activities
@@ -656,6 +681,8 @@ pub struct ConsolidationQuery {
     pub max_episodes: Option<usize>,
     /// Maximum number of consolidated beliefs to include in the response
     pub max_patterns: Option<usize>,
+    /// Memory space identifier for multi-tenant isolation (defaults to server default)
+    pub space: Option<String>,
 }
 
 /// Query parameters for consolidation detail lookups
@@ -663,6 +690,8 @@ pub struct ConsolidationQuery {
 pub struct ConsolidationDetailQuery {
     /// Maximum episodes to consider during snapshot (0 = all episodes currently stored)
     pub max_episodes: Option<usize>,
+    /// Memory space identifier for multi-tenant isolation (defaults to server default)
+    pub space: Option<String>,
 }
 
 /// Consolidated belief response summarizing semantic memory
@@ -1016,6 +1045,26 @@ pub async fn remember_memory(
         memory
     };
 
+    // Extract memory space ID with fallback to default
+    let space_id = extract_memory_space_id(
+        None,
+        request.memory_space_id.as_deref(),
+        &state.default_space,
+    )?;
+
+    // Get space-specific store handle from registry
+    let handle = state
+        .registry
+        .create_or_get(&space_id)
+        .await
+        .map_err(|e| ApiError::SystemError(format!("Failed to access memory space: {e}")))?;
+    let store = handle.store();
+
+    // Runtime verification (defense-in-depth)
+    store
+        .verify_space(&space_id)
+        .map_err(ApiError::SystemError)?;
+
     // Store in MemoryStore as an episode
     let observed_at = request.timestamp.unwrap_or_else(Utc::now);
     let episode = Episode::new(
@@ -1026,7 +1075,7 @@ pub async fn remember_memory(
         core_confidence,
     );
 
-    let store_result = state.store.store(episode);
+    let store_result = store.store(episode);
 
     // Check if streaming failed - this is a critical failure that should be surfaced
     if !store_result.streaming_delivered {
@@ -1337,7 +1386,7 @@ pub async fn recall_memories(
         ));
     }
 
-    let total_memories = state.store.count();
+    let total_memories = store.count();
 
     // Convert results to API response format
     let mut vivid_results = Vec::new();
@@ -1541,8 +1590,24 @@ pub async fn probabilistic_query(
         ));
     };
 
-    // Perform probabilistic recall
-    let prob_result = state.store.recall_probabilistic(&cue);
+    // Extract memory space ID with fallback to default
+    let space_id = extract_memory_space_id(params.space.as_deref(), None, &state.default_space)?;
+
+    // Get space-specific store handle from registry
+    let handle = state
+        .registry
+        .create_or_get(&space_id)
+        .await
+        .map_err(|e| ApiError::SystemError(format!("Failed to access memory space: {e}")))?;
+    let store = handle.store();
+
+    // Runtime verification (defense-in-depth)
+    store
+        .verify_space(&space_id)
+        .map_err(ApiError::SystemError)?;
+
+    // Perform probabilistic recall on space-specific store
+    let prob_result = store.recall_probabilistic(&cue);
 
     // Convert episodes to API format
     let memories: Vec<MemoryResult> = prob_result
@@ -1761,13 +1826,29 @@ pub async fn list_consolidations(
     State(state): State<ApiState>,
     Query(params): Query<ConsolidationQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
+    // Extract memory space ID with fallback to default
+    let space_id = extract_memory_space_id(params.space.as_deref(), None, &state.default_space)?;
+
+    // Get space-specific store handle from registry
+    let handle = state
+        .registry
+        .create_or_get(&space_id)
+        .await
+        .map_err(|e| ApiError::SystemError(format!("Failed to access memory space: {e}")))?;
+    let store = handle.store();
+
+    // Runtime verification (defense-in-depth)
+    store
+        .verify_space(&space_id)
+        .map_err(ApiError::SystemError)?;
+
     let max_episodes = params.max_episodes.unwrap_or(256);
-    let snapshot = state.store.consolidation_snapshot(max_episodes);
+    let snapshot = store.consolidation_snapshot(max_episodes);
 
     let mut beliefs: Vec<ConsolidatedBeliefResponse> = snapshot
         .patterns
         .into_iter()
-        .map(|pattern| pattern_to_belief(pattern, state.store.as_ref()))
+        .map(|pattern| pattern_to_belief(pattern, store.as_ref()))
         .collect();
 
     beliefs.sort_by(|a, b| {
@@ -1809,15 +1890,31 @@ pub async fn get_consolidation(
     Path(id): Path<String>,
     Query(params): Query<ConsolidationDetailQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
+    // Extract memory space ID with fallback to default
+    let space_id = extract_memory_space_id(params.space.as_deref(), None, &state.default_space)?;
+
+    // Get space-specific store handle from registry
+    let handle = state
+        .registry
+        .create_or_get(&space_id)
+        .await
+        .map_err(|e| ApiError::SystemError(format!("Failed to access memory space: {e}")))?;
+    let store = handle.store();
+
+    // Runtime verification (defense-in-depth)
+    store
+        .verify_space(&space_id)
+        .map_err(ApiError::SystemError)?;
+
     let max_episodes = params.max_episodes.unwrap_or(0);
-    let snapshot = state.store.consolidation_snapshot(max_episodes);
+    let snapshot = store.consolidation_snapshot(max_episodes);
 
     if let Some(pattern) = snapshot
         .patterns
         .into_iter()
         .find(|pattern| pattern.id == id)
     {
-        let belief = pattern_to_belief(pattern, state.store.as_ref());
+        let belief = pattern_to_belief(pattern, store.as_ref());
         let response = ConsolidationSummaryResponse {
             generated_at: snapshot.generated_at,
             stats: ConsolidationRunStats::from(snapshot.stats),
@@ -1939,12 +2036,34 @@ pub async fn create_memory_rest(
 }
 
 /// GET /api/v1/memories/{id} - Retrieve memory by ID (CLI-compatible)
+#[allow(clippy::implicit_hasher)] // Simple query params, no custom hasher needed
 pub async fn get_memory_by_id(
     State(state): State<ApiState>,
     axum::extract::Path(id): axum::extract::Path<String>,
+    Query(params): Query<HashMap<String, String>>,
 ) -> Result<impl IntoResponse, ApiError> {
+    // Extract memory space ID with fallback to default
+    let space_id = extract_memory_space_id(
+        params.get("space").map(String::as_str),
+        None,
+        &state.default_space,
+    )?;
+
+    // Get space-specific store handle from registry
+    let handle = state
+        .registry
+        .create_or_get(&space_id)
+        .await
+        .map_err(|e| ApiError::SystemError(format!("Failed to access memory space: {e}")))?;
+    let store = handle.store();
+
+    // Runtime verification (defense-in-depth)
+    store
+        .verify_space(&space_id)
+        .map_err(ApiError::SystemError)?;
+
     // Direct O(1) lookup by ID
-    if let Some(episode) = state.store.get_by_id(&id) {
+    if let Some(episode) = store.get_by_id(&id) {
         let memory_data = json!({
             "id": episode.id,
             "content": episode.what,
@@ -1976,9 +2095,29 @@ pub async fn search_memories_rest(
         .and_then(|s| s.parse::<usize>().ok())
         .unwrap_or(10);
 
-    // Call recall directly on store for simple CLI response
+    // Extract memory space ID with fallback to default
+    let space_id = extract_memory_space_id(
+        params.get("space").map(String::as_str),
+        None,
+        &state.default_space,
+    )?;
+
+    // Get space-specific store handle from registry
+    let handle = state
+        .registry
+        .create_or_get(&space_id)
+        .await
+        .map_err(|e| ApiError::SystemError(format!("Failed to access memory space: {e}")))?;
+    let store = handle.store();
+
+    // Runtime verification (defense-in-depth)
+    store
+        .verify_space(&space_id)
+        .map_err(ApiError::SystemError)?;
+
+    // Call recall on space-specific store for simple CLI response
     let cue = CoreCue::semantic(query.clone(), query.clone(), CoreConfidence::exact(0.7));
-    let recall_result = state.store.recall(&cue);
+    let recall_result = store.recall(&cue);
 
     // Check if streaming failed
     if !recall_result.streaming_delivered {
@@ -2168,7 +2307,16 @@ pub async fn system_health(State(state): State<ApiState>) -> Result<impl IntoRes
     let registry = state.metrics.health_registry();
     let overall_status = registry.check_all();
     let report = registry.health_report();
-    let memory_count = state.store.count();
+
+    // Get default space store handle for system-wide stats
+    let handle = state
+        .registry
+        .create_or_get(&state.default_space)
+        .await
+        .map_err(|e| {
+            ApiError::SystemError(format!("Failed to access default memory space: {e}"))
+        })?;
+    let memory_count = handle.store().count();
 
     let checks: Vec<_> = report.checks.iter().map(health_check_to_json).collect();
 
@@ -2221,7 +2369,15 @@ pub async fn spreading_config(
 pub async fn system_introspect(
     State(state): State<ApiState>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let memory_count = state.store.count();
+    // Get default space store handle for system-wide stats
+    let handle = state
+        .registry
+        .create_or_get(&state.default_space)
+        .await
+        .map_err(|e| {
+            ApiError::SystemError(format!("Failed to access default memory space: {e}"))
+        })?;
+    let memory_count = handle.store().count();
 
     let introspection_data = json!({
         "memory_statistics": {
@@ -2447,6 +2603,7 @@ impl From<MemorySpaceError> for ApiError {
         (status = 400, description = "Invalid streaming parameters", body = ErrorResponse)
     )
 )]
+#[allow(deprecated)] // TODO: Migrate to registry pattern once streaming supports per-space event filtering
 pub async fn stream_activities(
     State(state): State<ApiState>,
     Query(params): Query<StreamActivityQuery>,
@@ -2499,6 +2656,7 @@ pub async fn stream_activities(
         (status = 400, description = "Invalid streaming parameters", body = ErrorResponse)
     )
 )]
+#[allow(deprecated)] // TODO: Migrate to registry pattern once streaming supports per-space event filtering
 pub async fn stream_memories(
     State(state): State<ApiState>,
     Query(params): Query<StreamMemoryQuery>,
@@ -2557,6 +2715,7 @@ pub async fn stream_memories(
         (status = 400, description = "Invalid streaming parameters", body = ErrorResponse)
     )
 )]
+#[allow(deprecated)] // TODO: Migrate to registry pattern once streaming supports per-space event filtering
 pub async fn stream_consolidation(
     State(state): State<ApiState>,
     Query(params): Query<StreamConsolidationQuery>,
@@ -3409,4 +3568,98 @@ pub fn create_api_routes() -> Router<ApiState> {
         .route("/api/v1/monitor/causality", get(monitor_causality))
         // Swagger UI documentation
         .merge(swagger_router)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_space_prefers_query_over_body() {
+        let query = Some("alpha");
+        let body = Some("beta");
+        let default = MemorySpaceId::default();
+
+        let result = extract_memory_space_id(query, body, &default).unwrap();
+
+        assert_eq!(
+            result.as_str(),
+            "alpha",
+            "Query parameter should take priority over body field"
+        );
+    }
+
+    #[test]
+    fn test_extract_space_uses_body_when_no_query() {
+        let query = None;
+        let body = Some("gamma");
+        let default = MemorySpaceId::default();
+
+        let result = extract_memory_space_id(query, body, &default).unwrap();
+
+        assert_eq!(
+            result.as_str(),
+            "gamma",
+            "Body field should be used when query parameter is absent"
+        );
+    }
+
+    #[test]
+    fn test_extract_space_falls_back_to_default() {
+        let query = None;
+        let body = None;
+        let default = MemorySpaceId::try_from("custom-default").unwrap();
+
+        let result = extract_memory_space_id(query, body, &default).unwrap();
+
+        assert_eq!(
+            result.as_str(),
+            "custom-default",
+            "Should fall back to default when both query and body are absent"
+        );
+    }
+
+    #[test]
+    fn test_extract_space_rejects_invalid_query_param() {
+        let query = Some("INVALID SPACE!");
+        let body = Some("valid-space");
+        let default = MemorySpaceId::default();
+
+        let result = extract_memory_space_id(query, body, &default);
+
+        assert!(
+            result.is_err(),
+            "Should reject invalid space ID in query parameter"
+        );
+        if let Err(ApiError::InvalidInput(msg)) = result {
+            assert!(
+                msg.contains("query parameter"),
+                "Error should mention query parameter"
+            );
+        } else {
+            panic!("Expected ApiError::InvalidInput");
+        }
+    }
+
+    #[test]
+    fn test_extract_space_rejects_invalid_body_field() {
+        let query = None;
+        let body = Some("INVALID SPACE!");
+        let default = MemorySpaceId::default();
+
+        let result = extract_memory_space_id(query, body, &default);
+
+        assert!(
+            result.is_err(),
+            "Should reject invalid space ID in body field"
+        );
+        if let Err(ApiError::InvalidInput(msg)) = result {
+            assert!(
+                msg.contains("request body"),
+                "Error should mention request body"
+            );
+        } else {
+            panic!("Expected ApiError::InvalidInput");
+        }
+    }
 }

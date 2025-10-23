@@ -376,6 +376,7 @@ async fn start_server(port: u16, grpc_port: u16, cli_config: &config::CliConfig)
     );
 
     // Clone memory store for gRPC before moving api_state into router
+    #[allow(deprecated)] // TODO: Migrate to registry pattern once gRPC service is updated
     let grpc_memory_store = Arc::clone(&api_state.store);
     let grpc_metrics = Arc::clone(&api_state.metrics);
 

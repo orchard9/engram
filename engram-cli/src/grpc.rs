@@ -4,7 +4,8 @@
 //! and educational error messages that teach memory system concepts.
 
 use engram_core::{
-    Confidence as CoreConfidence, Cue as CoreCue, Episode, MemoryStore, metrics::MetricsRegistry,
+    Confidence as CoreConfidence, Cue as CoreCue, Episode, MemorySpaceId, MemorySpaceRegistry,
+    MemoryStore, metrics::MetricsRegistry,
 };
 use engram_proto::cue::CueType;
 use engram_proto::engram_service_server::{EngramService, EngramServiceServer};
@@ -35,13 +36,25 @@ use tonic::{Request, Response, Status, transport::Server};
 pub struct MemoryService {
     store: Arc<MemoryStore>,
     metrics: Arc<MetricsRegistry>,
+    registry: Arc<MemorySpaceRegistry>,
+    default_space: MemorySpaceId,
 }
 
 impl MemoryService {
     /// Create a new memory service with the given memory store.
     #[allow(clippy::missing_const_for_fn)]
-    pub fn new(store: Arc<MemoryStore>, metrics: Arc<MetricsRegistry>) -> Self {
-        Self { store, metrics }
+    pub fn new(
+        store: Arc<MemoryStore>,
+        metrics: Arc<MetricsRegistry>,
+        registry: Arc<MemorySpaceRegistry>,
+        default_space: MemorySpaceId,
+    ) -> Self {
+        Self {
+            store,
+            metrics,
+            registry,
+            default_space,
+        }
     }
 
     /// Start the gRPC server on the specified port.
@@ -75,6 +88,14 @@ impl EngramService for MemoryService {
     ) -> Result<Response<RememberResponse>, Status> {
         let req = request.into_inner();
 
+        // Get default space store handle from registry
+        let handle = self
+            .registry
+            .create_or_get(&self.default_space)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to access default memory space: {e}")))?;
+        let store = handle.store();
+
         // Extract memory from request and store to MemoryStore
         let (memory_id, confidence_value) = match req.memory_type {
             Some(remember_request::MemoryType::Memory(memory)) => {
@@ -95,7 +116,7 @@ impl EngramService for MemoryService {
                 );
 
                 // Store and check streaming status
-                let store_result = self.store.store(episode);
+                let store_result = store.store(episode);
 
                 // Check if streaming failed - return gRPC error
                 if !store_result.streaming_delivered {
@@ -126,7 +147,7 @@ impl EngramService for MemoryService {
                     Episode::new(id.clone(), when, proto_episode.what, embedding, confidence);
 
                 // Store and check streaming status
-                let store_result = self.store.store(episode);
+                let store_result = store.store(episode);
 
                 // Check if streaming failed - return gRPC error
                 if !store_result.streaming_delivered {
@@ -170,6 +191,14 @@ impl EngramService for MemoryService {
         request: Request<RecallRequest>,
     ) -> Result<Response<RecallResponse>, Status> {
         let req = request.into_inner();
+
+        // Get default space store handle from registry
+        let handle = self
+            .registry
+            .create_or_get(&self.default_space)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to access default memory space: {e}")))?;
+        let store = handle.store();
 
         // Validate cue presence
         let _cue = req.cue.ok_or_else(|| {
@@ -237,7 +266,7 @@ impl EngramService for MemoryService {
             }
         };
 
-        let recall_result = self.store.recall(&core_cue);
+        let recall_result = store.recall(&core_cue);
 
         // Check if streaming failed - return gRPC error
         if !recall_result.streaming_delivered {
