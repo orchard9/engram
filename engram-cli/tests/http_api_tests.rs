@@ -486,9 +486,19 @@ async fn test_system_health() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(response["status"].as_str().unwrap(), "healthy");
     assert!(response["timestamp"].is_string());
-    assert!(response["memory"].is_object());
-    assert!(response["memory"]["total_memories"].is_number());
+    assert!(response["spaces"].is_array());
     assert!(response["checks"].is_array());
+
+    // Verify per-space metrics structure
+    if let Some(spaces) = response["spaces"].as_array()
+        && let Some(first_space) = spaces.first()
+    {
+        assert!(first_space["space"].is_string());
+        assert!(first_space["memories"].is_number());
+        assert!(first_space["pressure"].is_number());
+        assert!(first_space["wal_lag_ms"].is_number());
+        assert!(first_space["consolidation_rate"].is_number());
+    }
 }
 
 #[tokio::test]

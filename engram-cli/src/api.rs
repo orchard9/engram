@@ -120,6 +120,37 @@ impl From<SpaceSummary> for MemorySpaceDescriptor {
     }
 }
 
+/// Per-space health metrics for multi-tenant monitoring.
+#[derive(Serialize, ToSchema, Clone, Debug)]
+pub struct SpaceHealthMetrics {
+    /// Memory space identifier
+    pub space: String,
+    /// Total number of memories in this space
+    pub memories: u64,
+    /// Capacity utilization pressure (0.0-1.0)
+    /// TODO(Task 006c): Wire up actual pressure metrics from tier backend
+    pub pressure: f64,
+    /// Write-Ahead Log lag in milliseconds
+    /// TODO(Task 006c): Wire up actual WAL lag from persistence handle
+    pub wal_lag_ms: f64,
+    /// Consolidation rate (memories/sec)
+    /// TODO(Task 006c): Wire up actual consolidation throughput metrics
+    pub consolidation_rate: f64,
+}
+
+/// Enhanced health response with per-space metrics.
+#[derive(Serialize, ToSchema, Clone, Debug)]
+pub struct HealthResponse {
+    /// Overall system health status
+    pub status: String,
+    /// Timestamp of health check
+    pub timestamp: String,
+    /// System-wide health checks
+    pub checks: Vec<serde_json::Value>,
+    /// Per-space health metrics
+    pub spaces: Vec<SpaceHealthMetrics>,
+}
+
 impl ApiState {
     /// Create new API state with memory store
     #[allow(deprecated)] // Constructor needs to initialize the deprecated field during migration
@@ -2346,13 +2377,13 @@ pub async fn shutdown_server(State(state): State<ApiState>) -> Result<impl IntoR
     ))
 }
 
-/// GET /api/v1/system/health - Comprehensive system health
+/// GET /api/v1/system/health - Comprehensive system health with per-space metrics
 #[utoipa::path(
     get,
     path = "/api/v1/system/health",
     tag = "system",
     responses(
-        (status = 200, description = "System health information", body = HealthResponse),
+        (status = 200, description = "System health information with per-space metrics", body = HealthResponse),
         (status = 500, description = "System health check failed", body = ErrorResponse)
     )
 )]
@@ -2360,37 +2391,53 @@ pub async fn shutdown_server(State(state): State<ApiState>) -> Result<impl IntoR
 ///
 /// Returns `ApiError` if system health check fails
 pub async fn system_health(State(state): State<ApiState>) -> Result<impl IntoResponse, ApiError> {
-    let registry = state.metrics.health_registry();
-    let overall_status = registry.check_all();
-    let report = registry.health_report();
+    let health_registry = state.metrics.health_registry();
+    let overall_status = health_registry.check_all();
+    let report = health_registry.health_report();
 
-    // Get default space store handle for system-wide stats
-    let handle = state
-        .registry
-        .create_or_get(&state.default_space)
-        .await
-        .map_err(|e| {
-            ApiError::SystemError(format!("Failed to access default memory space: {e}"))
+    // Collect per-space health metrics
+    let space_summaries = state.registry.list();
+    let mut space_metrics = Vec::new();
+
+    for summary in space_summaries {
+        let space_id = summary.id.clone();
+
+        // Get handle for this space
+        let handle = state.registry.create_or_get(&space_id).await.map_err(|e| {
+            ApiError::SystemError(format!(
+                "Failed to access memory space '{}': {}",
+                space_id, e
+            ))
         })?;
-    let memory_count = handle.store().count();
+
+        let memory_count = handle.store().count();
+
+        // Collect metrics for this space
+        // TODO(Task 006c): Wire up actual metrics from tier backend and persistence handle
+        space_metrics.push(SpaceHealthMetrics {
+            space: space_id.as_str().to_string(),
+            memories: memory_count as u64,
+            pressure: 0.0,           // Placeholder: will be actual tier utilization
+            wal_lag_ms: 0.0,         // Placeholder: will be actual WAL replication lag
+            consolidation_rate: 0.0, // Placeholder: will be actual consolidation throughput
+        });
+    }
 
     let checks: Vec<_> = report.checks.iter().map(health_check_to_json).collect();
 
-    let payload = json!({
-        "status": format_health_status(report.status),
-        "timestamp": Utc::now().to_rfc3339(),
-        "memory": {
-            "total_memories": memory_count,
-        },
-        "checks": checks,
-    });
+    let response = HealthResponse {
+        status: format_health_status(report.status).to_string(),
+        timestamp: Utc::now().to_rfc3339(),
+        checks,
+        spaces: space_metrics,
+    };
 
     let status_code = match overall_status {
         HealthStatus::Healthy | HealthStatus::Degraded => StatusCode::OK,
         HealthStatus::Unhealthy => StatusCode::SERVICE_UNAVAILABLE,
     };
 
-    Ok((status_code, Json(payload)))
+    Ok((status_code, Json(response)))
 }
 
 /// GET /api/v1/system/spreading/config - Auto-tuning history

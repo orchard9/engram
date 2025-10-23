@@ -68,27 +68,22 @@ async fn main() -> Result<()> {
             stop_server().await
         }
 
-        Commands::Status {
-            json,
-            watch,
-            space: _,
-        } => {
-            // Note: space parameter currently unused - status shows server-wide health
-            // TODO: Add per-space metrics in future milestone
+        Commands::Status { json, watch, space } => {
+            // Task 006b: Per-space metrics now supported
             if watch {
                 println!("  Watching status (press Ctrl+C to exit)...");
                 loop {
                     if json {
                         show_status_json().await?;
                     } else {
-                        show_status().await?;
+                        show_status(space.as_deref()).await?;
                     }
                     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                 }
             } else if json {
                 show_status_json().await
             } else {
-                show_status().await
+                show_status(space.as_deref()).await
             }
         }
 
@@ -767,7 +762,7 @@ async fn execute_shell_command(cmd: &str) -> Result<()> {
     }
 
     match parts.first().copied() {
-        Some("status") => show_status().await,
+        Some("status") => show_status(None).await,
         Some("create") => {
             if parts.len() < 2 {
                 eprintln!("Usage: create <content>");

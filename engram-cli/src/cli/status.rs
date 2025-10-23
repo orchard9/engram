@@ -2,15 +2,34 @@
 
 use crate::cli::server::{is_process_running, pid_file_path, read_pid_file};
 use anyhow::Result;
-use serde_json::Value;
+use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
 
-/// Show comprehensive server status
+/// Per-space health metrics from the API
+#[derive(Debug, Deserialize, Serialize)]
+struct SpaceHealthMetrics {
+    space: String,
+    memories: u64,
+    pressure: f64,
+    wal_lag_ms: f64,
+    consolidation_rate: f64,
+}
+
+/// Enhanced health response with per-space metrics
+#[derive(Debug, Deserialize, Serialize)]
+struct HealthResponse {
+    status: String,
+    timestamp: String,
+    checks: Vec<serde_json::Value>,
+    spaces: Vec<SpaceHealthMetrics>,
+}
+
+/// Show comprehensive server status with per-space metrics
 ///
 /// # Errors
 ///
 /// Returns error if status check fails
-pub async fn show_status() -> Result<()> {
+pub async fn show_status(space_filter: Option<&str>) -> Result<()> {
     println!("Engram Server Health Check");
     println!("═══════════════════════════════════════");
 
@@ -49,7 +68,7 @@ pub async fn show_status() -> Result<()> {
         .timeout(Duration::from_secs(5))
         .build()?;
 
-    let health_url = format!("http://127.0.0.1:{port}/health");
+    let health_url = format!("http://127.0.0.1:{port}/api/v1/system/health");
     let start_time = Instant::now();
 
     match client.get(&health_url).send().await {
@@ -59,12 +78,9 @@ pub async fn show_status() -> Result<()> {
             if response.status().is_success() {
                 println!("HTTP Health: Responding ({response_time:?})");
 
-                // Try to get detailed health info
-                let detailed_health_url = format!("http://127.0.0.1:{port}/health");
-                if let Ok(health_response) = client.get(&detailed_health_url).send().await
-                    && let Ok(health_data) = health_response.json::<Value>().await
-                {
-                    print_health_details(&health_data);
+                // Try to get detailed health info with per-space metrics
+                if let Ok(health_data) = response.json::<HealthResponse>().await {
+                    print_health_details(&health_data, space_filter);
                 }
             } else {
                 println!("HTTP Health: Unhealthy (status: {})", response.status());
@@ -76,79 +92,91 @@ pub async fn show_status() -> Result<()> {
         }
     }
 
-    // Check API endpoints
-    println!("\nAPI Endpoints:");
-    check_endpoint(
-        &client,
-        format!("http://127.0.0.1:{port}/api/v1/system/health"),
-        "System Health API",
-    )
-    .await;
-    check_endpoint(
-        &client,
-        format!("http://127.0.0.1:{port}/api/v1/memories/recall?query=test"),
-        "Memory Recall API",
-    )
-    .await;
-
     println!("\nUseful commands:");
     println!("  engram memory list          # List all memories");
     println!("  engram memory create \"text\" # Create a memory");
+    println!("  engram status --space <id>  # Show specific space health");
     println!("  engram stop                 # Stop the server");
 
     Ok(())
 }
 
-/// Print detailed health information
-fn print_health_details(health_data: &Value) {
-    println!("\n Detailed Health:");
+/// Print detailed health information with per-space metrics table
+fn print_health_details(health_data: &HealthResponse, space_filter: Option<&str>) {
+    println!("\nOverall Status: {}", health_data.status);
 
-    if let Some(status) = health_data.get("status").and_then(|s| s.as_str()) {
-        println!("  Overall: {status}");
+    // Filter spaces if requested
+    let spaces_to_display: Vec<&SpaceHealthMetrics> = space_filter.map_or_else(
+        || health_data.spaces.iter().collect(),
+        |filter| {
+            health_data
+                .spaces
+                .iter()
+                .filter(|s| s.space == filter)
+                .collect()
+        },
+    );
+
+    if spaces_to_display.is_empty() {
+        if let Some(filter) = space_filter {
+            println!("\nNo space found matching '{filter}'");
+        } else {
+            println!("\nNo memory spaces found");
+        }
+        return;
     }
 
-    if let Some(memory_total) = health_data
-        .get("memory")
-        .and_then(|m| m.get("total_memories"))
-        .and_then(Value::as_u64)
-    {
-        println!("  Memories: {memory_total}");
+    // Print per-space metrics table
+    println!("\nPer-Space Metrics:");
+    println!("┌────────────────────┬───────────┬──────────┬─────────────┬─────────────────┐");
+    println!("│ Space              │ Memories  │ Pressure │ WAL Lag (ms)│ Consolidation   │");
+    println!("├────────────────────┼───────────┼──────────┼─────────────┼─────────────────┤");
+
+    for space in &spaces_to_display {
+        println!(
+            "│ {:<18} │ {:>9} │ {:>7.1}% │ {:>11.2} │ {:>13.2}/s │",
+            truncate_string(&space.space, 18),
+            space.memories,
+            space.pressure * 100.0,
+            space.wal_lag_ms,
+            space.consolidation_rate
+        );
     }
 
-    if let Some(checks) = health_data.get("checks").and_then(Value::as_array) {
-        println!("  Probes:");
-        for check in checks {
+    println!("└────────────────────┴───────────┴──────────┴─────────────┴─────────────────┘");
+
+    // Print health checks summary
+    if !health_data.checks.is_empty() {
+        println!("\nHealth Checks:");
+        for check in &health_data.checks {
             let name = check
                 .get("name")
-                .and_then(Value::as_str)
+                .and_then(|v| v.as_str())
                 .unwrap_or("unknown");
             let status = check
                 .get("status")
-                .and_then(Value::as_str)
+                .and_then(|v| v.as_str())
                 .unwrap_or("unknown");
             let latency = check
                 .get("latency_seconds")
-                .and_then(Value::as_f64)
+                .and_then(serde_json::Value::as_f64)
                 .unwrap_or(0.0);
-            println!("    - {name}: {status} ({latency:.3}s)");
+            println!("  - {name}: {status} ({latency:.3}s)");
 
-            if let Some(message) = check.get("message").and_then(Value::as_str)
+            if let Some(message) = check.get("message").and_then(|v| v.as_str())
                 && !message.is_empty()
             {
-                println!("        {message}");
+                println!("      {message}");
             }
         }
     }
 }
 
-/// Check if an API endpoint is responding
-async fn check_endpoint(client: &reqwest::Client, url: String, name: &str) {
-    match client.get(&url).send().await {
-        Ok(response) => {
-            println!("  {}: {}", name, response.status());
-        }
-        Err(_) => {
-            println!("   {name}: Unreachable");
-        }
+/// Truncate a string to a maximum length, adding ellipsis if needed
+fn truncate_string(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        s.to_string()
+    } else {
+        format!("{}...", &s[..max_len.saturating_sub(3)])
     }
 }
