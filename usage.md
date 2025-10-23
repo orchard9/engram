@@ -213,6 +213,82 @@ eventSource.addEventListener('consolidation', (event) => {
 - Payload size: ~2KB average
 - Connection: HTTP/2 with keep-alive
 
+### Multi-Tenancy (Memory Spaces)
+
+Engram supports isolated memory spaces for multi-tenant deployments using the `X-Memory-Space` header:
+
+#### HTTP Examples
+
+Store memory in specific space:
+```http
+POST /api/v1/memories/remember
+Content-Type: application/json
+X-Memory-Space: production
+
+{
+  "content": "Critical production data",
+  "confidence": 0.95
+}
+```
+
+Recall from specific space:
+```http
+GET /api/v1/memories/recall?query=data
+X-Memory-Space: production
+```
+
+Per-space health metrics:
+```http
+GET /api/v1/system/health
+
+Response: 200 OK
+{
+  "spaces": [
+    {
+      "space": "default",
+      "memories": 150,
+      "pressure": 0.0,
+      "wal_lag_ms": 0.0,
+      "consolidation_rate": 0.0
+    },
+    {
+      "space": "production",
+      "memories": 450,
+      "pressure": 0.0,
+      "wal_lag_ms": 0.0,
+      "consolidation_rate": 0.0
+    }
+  ]
+}
+```
+
+#### Space Routing Precedence
+
+1. `X-Memory-Space` header (highest priority)
+2. `?space=<space_id>` query parameter
+3. `"memory_space"` field in request body
+
+#### gRPC Memory Spaces
+
+For gRPC, include `memory_space_id` in request messages:
+
+```python
+# Store in specific space
+episode = engram.Episode(
+    embedding=text_to_embedding("data"),
+    memory_space_id="production"
+)
+response = memory.Store(episode)
+
+# Recall from specific space
+request = engram.RecallRequest(
+    embedding=query_vec,
+    memory_space_id="production"
+)
+for recall in memory.Recall(request):
+    print(recall)
+```
+
 ## Selection Criteria
 
 ### Use gRPC when:

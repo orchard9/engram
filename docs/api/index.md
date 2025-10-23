@@ -29,6 +29,85 @@ For full interactive API documentation with examples, visit:
 
 Currently no authentication is required for local development. Production deployments should implement proper authentication.
 
+## Multi-Tenancy (Memory Spaces)
+
+Engram supports isolated memory spaces for multi-tenant deployments. Each space maintains separate storage, persistence, and metrics.
+
+### X-Memory-Space Header
+
+Use the `X-Memory-Space` header to route requests to specific memory spaces:
+
+```bash
+curl -X POST http://localhost:7432/api/v1/memories/remember \
+  -H "Content-Type: application/json" \
+  -H "X-Memory-Space: production" \
+  -d '{"content": "Important data", "confidence": 0.95}'
+```
+
+### Space Routing Precedence
+
+When multiple sources specify a memory space, the following precedence applies:
+
+1. **Header**: `X-Memory-Space` header (highest priority)
+2. **Query Parameter**: `?space=<space_id>` in URL
+3. **Request Body**: `"memory_space"` field in JSON payload
+
+If no space is specified, requests default to the `default` space for backward compatibility.
+
+### Examples
+
+Using header (recommended):
+```bash
+curl -H "X-Memory-Space: research" \
+  http://localhost:7432/api/v1/memories/recall?query=CRISPR
+```
+
+Using query parameter:
+```bash
+curl http://localhost:7432/api/v1/memories/recall?space=research&query=CRISPR
+```
+
+Using request body:
+```bash
+curl -X POST http://localhost:7432/api/v1/memories/remember \
+  -H "Content-Type: application/json" \
+  -d '{"content": "Data", "confidence": 0.9, "memory_space": "research"}'
+```
+
+### Space Management
+
+List available spaces:
+```bash
+curl http://localhost:7432/api/v1/spaces
+```
+
+Get per-space health metrics:
+```bash
+curl http://localhost:7432/api/v1/system/health
+```
+
+Response includes metrics for all spaces:
+```json
+{
+  "spaces": [
+    {
+      "space": "default",
+      "memories": 150,
+      "pressure": 0.0,
+      "wal_lag_ms": 0.0,
+      "consolidation_rate": 0.0
+    },
+    {
+      "space": "production",
+      "memories": 450,
+      "pressure": 0.0,
+      "wal_lag_ms": 0.0,
+      "consolidation_rate": 0.0
+    }
+  ]
+}
+```
+
 ## Error Handling
 
 All errors return JSON with a consistent structure:
