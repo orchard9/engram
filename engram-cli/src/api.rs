@@ -18,7 +18,7 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio_stream::{Stream, wrappers::ReceiverStream};
-use tracing::{info, Span};
+use tracing::{Span, info};
 use utoipa::{IntoParams, ToSchema};
 
 use crate::grpc::MemoryService;
@@ -217,11 +217,15 @@ fn extract_memory_space_id(
 ) -> Result<MemorySpaceId, ApiError> {
     // Priority 1: X-Engram-Memory-Space header (RESTful, explicit, works with all methods)
     if let Some(header_value) = headers.get("x-engram-memory-space") {
-        let space_str = header_value
-            .to_str()
-            .map_err(|_| ApiError::InvalidInput("X-Engram-Memory-Space header contains invalid UTF-8".to_string()))?;
+        let space_str = header_value.to_str().map_err(|_| {
+            ApiError::InvalidInput(
+                "X-Engram-Memory-Space header contains invalid UTF-8".to_string(),
+            )
+        })?;
         return MemorySpaceId::try_from(space_str).map_err(|e| {
-            ApiError::InvalidInput(format!("Invalid memory space ID in X-Engram-Memory-Space header: {e}"))
+            ApiError::InvalidInput(format!(
+                "Invalid memory space ID in X-Engram-Memory-Space header: {e}"
+            ))
         });
     }
 
@@ -1616,7 +1620,12 @@ pub async fn probabilistic_query(
     };
 
     // Extract memory space ID with fallback to default
-    let space_id = extract_memory_space_id(&headers, params.space.as_deref(), None, &state.default_space)?;
+    let space_id = extract_memory_space_id(
+        &headers,
+        params.space.as_deref(),
+        None,
+        &state.default_space,
+    )?;
     Span::current().record("memory_space_id", space_id.as_str());
 
     // Get space-specific store handle from registry
@@ -1854,7 +1863,12 @@ pub async fn list_consolidations(
     Query(params): Query<ConsolidationQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
     // Extract memory space ID with fallback to default
-    let space_id = extract_memory_space_id(&headers, params.space.as_deref(), None, &state.default_space)?;
+    let space_id = extract_memory_space_id(
+        &headers,
+        params.space.as_deref(),
+        None,
+        &state.default_space,
+    )?;
     Span::current().record("memory_space_id", space_id.as_str());
 
     // Get space-specific store handle from registry
@@ -1920,7 +1934,12 @@ pub async fn get_consolidation(
     Query(params): Query<ConsolidationDetailQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
     // Extract memory space ID with fallback to default
-    let space_id = extract_memory_space_id(&headers, params.space.as_deref(), None, &state.default_space)?;
+    let space_id = extract_memory_space_id(
+        &headers,
+        params.space.as_deref(),
+        None,
+        &state.default_space,
+    )?;
     Span::current().record("memory_space_id", space_id.as_str());
 
     // Get space-specific store handle from registry

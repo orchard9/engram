@@ -135,3 +135,4 @@
 {"pattern_id":"pattern_3198468130569756910","confidence_delta":0.9999998,"citation_delta":5,"novelty":0.9999998,"generated_at":"2025-10-23T06:11:49.396949Z","snapshot_generated_at":"2025-10-23T06:11:49.396946Z","source":"scheduler"}
 {"pattern_id":"pattern_3198468130569756910","confidence_delta":0.9999998,"citation_delta":5,"novelty":0.9999998,"generated_at":"2025-10-23T06:11:49.397986Z","snapshot_generated_at":"2025-10-23T06:11:49.397984Z","source":"scheduler"}
 {"pattern_id":"pattern_3198468130569756910","confidence_delta":-1.1920929e-7,"citation_delta":0,"novelty":-1.1920929e-7,"generated_at":"2025-10-23T06:11:49.399072Z","snapshot_generated_at":"2025-10-23T06:11:49.399064Z","source":"scheduler"}
+{"pattern_id":"pattern_3862844349895466841","confidence_delta":0.9427038,"citation_delta":4,"novelty":0.9427038,"generated_at":"2025-10-23T06:53:55.578729Z","snapshot_generated_at":"2025-10-23T06:53:55.578723Z","source":"scheduler"}

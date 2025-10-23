@@ -65,7 +65,12 @@ pub fn print_memory_result(memory: &Value) {
 /// # Errors
 ///
 /// Returns error if HTTP request fails or server returns an error
-pub async fn create_memory(port: u16, content: String, confidence: Option<f64>, space_id: &MemorySpaceId) -> Result<()> {
+pub async fn create_memory(
+    port: u16,
+    content: String,
+    confidence: Option<f64>,
+    space_id: &MemorySpaceId,
+) -> Result<()> {
     let client = reqwest::Client::new();
     let url = format!("http://127.0.0.1:{port}/api/v1/memories");
 
@@ -147,7 +152,12 @@ pub async fn get_memory(port: u16, id: String, space_id: &MemorySpaceId) -> Resu
 /// # Errors
 ///
 /// Returns error if HTTP request fails or search fails
-pub async fn search_memories(port: u16, query: String, limit: Option<usize>, space_id: &MemorySpaceId) -> Result<()> {
+pub async fn search_memories(
+    port: u16,
+    query: String,
+    limit: Option<usize>,
+    space_id: &MemorySpaceId,
+) -> Result<()> {
     let client = reqwest::Client::new();
     let mut url = format!(
         "http://127.0.0.1:{}/api/v1/memories/search?query={}",

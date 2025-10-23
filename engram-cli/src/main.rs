@@ -68,7 +68,11 @@ async fn main() -> Result<()> {
             stop_server().await
         }
 
-        Commands::Status { json, watch, space: _ } => {
+        Commands::Status {
+            json,
+            watch,
+            space: _,
+        } => {
             // Note: space parameter currently unused - status shows server-wide health
             // TODO: Add per-space metrics in future milestone
             if watch {
@@ -139,11 +143,11 @@ fn resolve_memory_space(
     }
 
     // Priority 2: Environment variable
-    if let Ok(env_space) = std::env::var("ENGRAM_MEMORY_SPACE") {
-        if !env_space.trim().is_empty() {
-            return MemorySpaceId::try_from(env_space.as_str())
-                .map_err(|e| anyhow::anyhow!("Invalid ENGRAM_MEMORY_SPACE: {e}"));
-        }
+    if let Ok(env_space) = std::env::var("ENGRAM_MEMORY_SPACE")
+        && !env_space.trim().is_empty()
+    {
+        return MemorySpaceId::try_from(env_space.as_str())
+            .map_err(|e| anyhow::anyhow!("Invalid ENGRAM_MEMORY_SPACE: {e}"));
     }
 
     // Priority 3: Config default
@@ -611,7 +615,11 @@ async fn handle_memory_command(action: MemoryAction, config: &config::CliConfig)
             let space_id = resolve_memory_space(space, &config.memory_spaces.default_space)?;
             get_memory(port, id, &space_id).await
         }
-        MemoryAction::Search { query, limit, space } => {
+        MemoryAction::Search {
+            query,
+            limit,
+            space,
+        } => {
             let space_id = resolve_memory_space(space, &config.memory_spaces.default_space)?;
             search_memories(port, query, limit, &space_id).await
         }
