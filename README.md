@@ -305,6 +305,39 @@ cargo clean && cargo build
 rustc --version  # Should be 1.75+
 ```
 
+### Memory Spaces (Multi-Tenancy)
+
+Common issues with multi-tenant deployments:
+
+**Space Not Found**
+```bash
+# List all spaces
+./target/debug/engram space list
+
+# Create missing space explicitly
+./target/debug/engram space create production
+```
+
+**Cross-Space Data Leakage**
+```bash
+# Verify space isolation
+curl -H "X-Memory-Space: tenant-a" \
+  http://localhost:7432/api/v1/memories/recall?query=test
+
+# Should return only tenant-a memories (not tenant-b data)
+```
+
+**WAL Recovery Failures**
+```bash
+# Check recovery logs on startup
+./target/debug/engram start 2>&1 | grep "Recovered"
+
+# Expected output shows recovery per space:
+# INFO Recovered 'default': 1200 entries, 0 corrupted, took 45ms
+```
+
+For comprehensive multi-tenant troubleshooting, see [docs/operations/memory-space-migration.md](docs/operations/memory-space-migration.md#troubleshooting).
+
 ### Performance Tuning
 
 For optimal performance:
