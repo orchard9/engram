@@ -823,7 +823,10 @@ impl EngramService for MemoryService {
 
         // Get space-specific store handle from registry
         let _handle = self.registry.create_or_get(&space_id).await.map_err(|e| {
-            Status::internal(format!("Failed to access memory space '{}': {}", space_id, e))
+            Status::internal(format!(
+                "Failed to access memory space '{}': {}",
+                space_id, e
+            ))
         })?;
 
         // TODO(Task 005c): Wire up per-space event filtering
