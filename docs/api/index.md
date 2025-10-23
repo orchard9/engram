@@ -57,17 +57,20 @@ If no space is specified, requests default to the `default` space for backward c
 ### Examples
 
 Using header (recommended):
+
 ```bash
 curl -H "X-Memory-Space: research" \
   http://localhost:7432/api/v1/memories/recall?query=CRISPR
 ```
 
 Using query parameter:
+
 ```bash
 curl http://localhost:7432/api/v1/memories/recall?space=research&query=CRISPR
 ```
 
 Using request body:
+
 ```bash
 curl -X POST http://localhost:7432/api/v1/memories/remember \
   -H "Content-Type: application/json" \
@@ -77,16 +80,19 @@ curl -X POST http://localhost:7432/api/v1/memories/remember \
 ### Space Management
 
 List available spaces:
+
 ```bash
 curl http://localhost:7432/api/v1/spaces
 ```
 
 Get per-space health metrics:
+
 ```bash
 curl http://localhost:7432/api/v1/system/health
 ```
 
 Response includes metrics for all spaces:
+
 ```json
 {
   "spaces": [

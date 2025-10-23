@@ -1,42 +1,51 @@
 # Engram Novelty Showcase Demo
 
-An 8-minute interactive demonstration of Engram's three most novel features.
+An 8-minute interactive demonstration of three features you won't find in traditional databases.
 
-## What This Demo Showcases
+## What You'll Experience
 
-Based on comprehensive novelty analysis (scored 1-10 on Technical Novelty, Implementation Quality, Practical Impact, Differentiation, and Value Delivery):
+This demo shows cognitive memory operations that eliminate entire categories of manual database work.
 
-### 1. Psychological Decay (Score: 8.2/10)
-**Why Novel**: No other production database implements Ebbinghaus forgetting curves as a storage primitive.
+### Memories That Fade Naturally
 
-**Demo**:
-- Store 3 memories at different ages (1 day, 1 week, 1 month old)
-- Show automatic decay over time with confidence intervals
-- Demonstrate spaced repetition effect (accessing old memory refreshes it)
+**The Problem**: Your production database remembers a bug report from 3 months ago with the same clarity as yesterday's deploy. Traditional TTL is binary (exists or deleted) and requires manual configuration per table.
 
-**Impact**: Eliminates manual TTL management, enables spaced repetition systems, provides human-like memory behavior
+**What Engram Does**: Implements Ebbinghaus forgetting curves at the storage layer. Older memories naturally decay in confidence without configuration. Accessing a memory refreshes it (spaced repetition effect).
 
-### 2. Spreading Activation (Score: 7.3/10)
-**Why Novel**: Uses cognitive science activation dynamics instead of traditional graph traversal
+**You'll See**:
+- Three memories stored at different ages (1 day, 1 week, 1 month)
+- Automatic confidence decay matching psychological research
+- Spaced repetition: accessing an old memory increases its confidence
 
-**Demo**:
-- Build knowledge graph about cellular biology
+**Technical Impact**: Zero TTL configuration, human-like memory behavior, built-in spaced repetition for learning systems
+
+### Finding Connections You Never Created
+
+**The Problem**: In SQL, you only find what you explicitly join. In graph databases, you only traverse relationships you defined. If you didn't link "mitochondria" to "ATP synthesis," that connection doesn't exist.
+
+**What Engram Does**: Uses spreading activation from cognitive science. Query for one concept, activation spreads through semantic similarity to related concepts - no predefined schema required.
+
+**You'll See**:
+- Build a knowledge graph with 5-6 biological concepts
 - Query for "mitochondria"
-- Show activation spreading to related concepts (ATP, respiration, DNA)
-- Contrast with SQL WHERE clauses (only exact matches)
+- Watch activation spread to ATP, cellular respiration, DNA
+- Contrast with SQL WHERE clause (zero results without exact match)
 
-**Impact**: Discover connections without schema knowledge, more human-like association, no explicit relationship traversal needed
+**Technical Impact**: Schema-free relationship discovery, sub-10ms single-hop activation, human-like associative recall
 
-### 3. Memory Consolidation (Score: 7.2/10)
-**Why Novel**: Automatic pattern extraction from episodes with no manual ETL
+### A Database That Learns Patterns Automatically
 
-**Demo**:
-- Store 20 episodes about "learning Rust" over several days
-- Show automatic scheduler running every 60s
-- Display discovered semantic patterns
-- Demonstrate storage compression (20:1 ratio)
+**The Problem**: Extracting patterns from raw events requires manual ETL pipelines, custom aggregation queries, or separate analytics databases. You're the pattern detector.
 
-**Impact**: Database learns from your data automatically, significant storage savings, maintains citation trails
+**What Engram Does**: Automatic episodic-to-semantic consolidation. Store raw episodes, come back later to find the system has discovered patterns, compressed storage, and can explain what it learned with full citation trails.
+
+**You'll See**:
+- Store 20 episodes about "learning Rust" (backdated for demo)
+- Scheduler runs every 60 seconds
+- Semantic patterns automatically extracted
+- 20:1 storage compression with source attribution
+
+**Technical Impact**: Zero ETL code, 95% storage reduction, maintains evidence chains for explainability
 
 ## Prerequisites
 
@@ -95,49 +104,57 @@ cd demos/novelty-showcase
 bash demo.sh < /dev/null
 ```
 
-## Demo Structure
+## Demo Walkthrough
 
-### Act 1: The Problem (30 seconds)
-Explains why traditional databases fail at human-like memory:
-- Binary TTL vs gradual decay
-- Exact matches vs associative recall
-- No pattern learning
+### Part 0: Setup & Verification (1 minute)
+Before starting, verify your environment:
+- Server running at `http://localhost:7432`
+- Required tools: `curl`, `jq`, Bash 4.0+
+- Run `./preflight-check.sh` for automated verification
 
-### Act 2: Psychological Decay (2 minutes)
-Demonstrates Ebbinghaus forgetting curves:
-1. Store memories at different ages
-2. Show confidence decay over time
-3. Access old memory to refresh it
-4. Re-query to show spaced repetition effect
+### Part 1: Watch Memories Fade (2 minutes)
+**What Happens**: Store three memories at different ages (1 day, 1 week, 1 month old). Query them to see confidence scores decay over time. Access the oldest memory to trigger spaced repetition, then re-query to see its confidence increase.
 
-**Key Metric**: Decay accuracy within 5% of Ebbinghaus curve
+**Technical Details**:
+- Uses backdated timestamps: `date -u -v-7d` (macOS) or `date -d '7 days ago'` (Linux)
+- Confidence decay follows Ebbinghaus curve (within 5% accuracy)
+- Spaced repetition effect refreshes old memories
 
-### Act 3: Spreading Activation (2 minutes)
-Shows associative memory retrieval:
-1. Build knowledge graph (5-6 related concepts)
-2. Query for single concept
-3. Display spreading activation results
-4. Contrast with SQL WHERE clause
+**Success Indicator**: Older memories show progressively lower confidence until accessed
 
-**Key Metric**: <10ms activation spreading for single-hop
+### Part 2: Discover Hidden Connections (2 minutes)
+**What Happens**: Build a small knowledge graph about cellular biology (mitochondria, ATP, respiration, DNA). Query for "mitochondria" and watch activation spread to related concepts without explicit relationships.
 
-### Act 4: Memory Consolidation (2 minutes)
-Demonstrates automatic pattern learning:
-1. Store 20 related episodes (backdated)
-2. Check consolidation scheduler status
-3. Show discovered semantic patterns
-4. Display storage compression ratio
+**Technical Details**:
+- Spreading activation completes in <10ms for single-hop
+- No schema required - semantic similarity drives connection discovery
+- Contrast shown: SQL `WHERE` clause returns zero results for same query
 
-**Key Metric**: 20:1 compression ratio (95% reduction)
+**Success Indicator**: Query for one concept returns 4-5 related concepts automatically
 
-### Act 5: The Synthesis (1 minute)
-Complex query showcasing all features working together:
-- Query: "programming" with low threshold
-- Shows: decay, spreading, and consolidated patterns
-- Demonstrates multiple retrieval pathways
+### Part 3: Let the Database Learn (2 minutes)
+**What Happens**: Store 20 episodes about "learning Rust" (backdated to make them eligible). Check consolidation scheduler status. View automatically extracted semantic patterns with storage compression metrics.
 
-### Finale: Key Metrics (1 minute)
-Summary table comparing Engram to traditional databases
+**Technical Details**:
+- Consolidation scheduler runs every 60 seconds
+- Episodes must be >1 day old (biological design - backdated timestamps bypass this)
+- 20:1 compression ratio (95% storage reduction)
+- Full citation trails maintained for explainability
+
+**Success Indicator**: Semantic patterns discovered from episodes, compression ratio displayed
+
+### Part 4: All Three Together (2 minutes)
+**What Happens**: Complex query demonstrating decay + spreading + consolidation working in concert. Query for "programming" shows vivid (recent), associated (spreading), and reconstructed (consolidated) memories simultaneously.
+
+**Technical Details**:
+- Multiple retrieval pathways active in single query
+- Confidence scores reflect age, similarity, and pattern strength
+- Response shows three memory categories with separate mechanisms
+
+**Success Indicator**: Single query returns memories from all three systems
+
+### Part 5: Metrics & Positioning (1 minute)
+Summary comparison table: Engram vs traditional databases on TTL management, relationship discovery, and pattern extraction.
 
 ## Expected Output
 
@@ -178,40 +195,65 @@ Check server logs for performance issues:
 
 ## Demo Timing
 
-| Section | Duration | Purpose |
-|---------|----------|---------|
-| Act 1 | 30s | Establish the problem |
-| Act 2 | 2min | Psychological decay |
-| Act 3 | 2min | Spreading activation |
-| Act 4 | 2min | Memory consolidation |
-| Act 5 | 1min | Synthesis |
-| Finale | 1min | Metrics & positioning |
-| **Total** | **~8min** | Complete demo |
+| Section | Duration | What Happens |
+|---------|----------|--------------|
+| Part 0: Setup | 1min | Verify environment, run preflight check |
+| Part 1: Decay | 2min | Watch memories fade over time |
+| Part 2: Spreading | 2min | Discover connections you never created |
+| Part 3: Consolidation | 2min | Let database learn patterns automatically |
+| Part 4: Synthesis | 2min | All three features working together |
+| Part 5: Metrics | 1min | Positioning vs traditional databases |
+| **Total** | **~10min** | Complete demonstration |
 
-## Customization
+## Success Criteria
 
-### Adjust Timing
-Edit pause durations in demo.sh:
+A successful demo shows:
+
+1. **Decay**: Older memories have lower confidence scores (within 5% of Ebbinghaus curve)
+2. **Spreading**: Related concepts discovered without explicit traversal (<10ms for single-hop)
+3. **Consolidation**: Scheduler active, patterns discovered, 20:1 compression ratio
+4. **Performance**: All queries complete in <100ms
+5. **Reliability**: No HTTP errors, all API calls succeed
+
+---
+
+## Appendix: For Developers
+
+### Customization Options
+
+<details>
+<summary>Adjust Demo Timing</summary>
+
+Edit pause durations in `demo.sh`:
 ```bash
 PAUSE_SHORT=2    # Default: 2 seconds
 PAUSE_MEDIUM=3   # Default: 3 seconds
 PAUSE_LONG=5     # Default: 5 seconds
 ```
+</details>
 
-### Change Server URL
+<details>
+<summary>Change Server URL</summary>
+
 ```bash
 BASE_URL="http://localhost:8080"  # Default: 7432
 ```
+</details>
 
-### Add Custom Data
-Modify the data in each act:
-- Act 2: Lines 85-110 (decay demo data)
-- Act 3: Lines 150-175 (spreading activation data)
-- Act 4: Lines 220-250 (consolidation episodes)
+<details>
+<summary>Add Custom Demo Data</summary>
 
-## Cleanup After Demo
+Modify the data in each section:
+- Part 1 (Decay): Lines 85-110 in `demo.sh`
+- Part 2 (Spreading): Lines 150-175 in `demo.sh`
+- Part 3 (Consolidation): Lines 220-250 in `demo.sh`
+</details>
 
-Remove demo data:
+### Cleanup After Demo
+
+<details>
+<summary>Remove Demo Data</summary>
+
 ```bash
 # Option 1: Restart server (clears in-memory data)
 ./target/release/engram stop
@@ -220,24 +262,37 @@ Remove demo data:
 # Option 2: Use API to delete specific memories
 curl -X DELETE http://localhost:7432/api/v1/memories/{memory_id}
 ```
+</details>
 
-## Using This Demo
+### Using This Demo
 
-### For Presentations
-1. Run in "automated mode" for smooth flow
+<details>
+<summary>For Presentations</summary>
+
+1. Run in "automated mode" for smooth flow:
+   ```bash
+   bash demo.sh < /dev/null
+   ```
 2. Record terminal with asciinema for sharing
-3. Highlight key metrics in finale section
+3. Highlight key metrics in Part 5 (finale section)
+</details>
 
-### For Sales/Marketing
-1. Focus on Act 5 (synthesis) showing all features together
-2. Emphasize practical impact statements
-3. Reference competitive positioning table
+<details>
+<summary>For Sales/Marketing</summary>
 
-### For Technical Evaluation
+1. Focus on Part 4 (synthesis) showing all features together
+2. Emphasize practical impact statements from feature descriptions
+3. Reference competitive positioning table in finale
+</details>
+
+<details>
+<summary>For Technical Evaluation</summary>
+
 1. Examine API responses in detail
 2. Compare confidence intervals across queries
-3. Verify consolidation compression ratios
-4. Test spreading activation with custom queries
+3. Verify consolidation compression ratios match claims
+4. Test spreading activation with custom queries beyond demo script
+</details>
 
 ## Related Documentation
 
@@ -247,56 +302,87 @@ curl -X DELETE http://localhost:7432/api/v1/memories/{memory_id}
 - Quickstart Guide: `quickstart.md`
 - UAT Results: `uat-results/SUMMARY.md`
 
-## Troubleshooting
+### Troubleshooting
 
-### Demo Script Won't Execute
+<details>
+<summary>Demo Script Won't Execute</summary>
+
 ```bash
 chmod +x demo.sh
 ```
+</details>
 
-### Date Command Errors
-**macOS vs Linux date syntax differs**
+<details>
+<summary>Date Command Errors (macOS vs Linux)</summary>
 
-The script handles both:
+The script handles both platforms automatically:
 ```bash
 # macOS: date -v-7d
 # Linux: date -d '7 days ago'
 ```
 
-### JSON Parsing Errors
-Check jq version:
+If you see date-related errors, check your platform's date command syntax.
+</details>
+
+<details>
+<summary>JSON Parsing Errors</summary>
+
+Check jq version (requires 1.6+):
 ```bash
-jq --version  # Should be 1.6+
+jq --version
 ```
 
-### Memory Not Found
-Ensure sufficient time between store and recall:
+Install or upgrade jq:
 ```bash
-sleep 1  # Allow indexing to complete
+# macOS
+brew install jq
+
+# Ubuntu/Debian
+apt-get install jq
+```
+</details>
+
+<details>
+<summary>Memory Not Found After Storing</summary>
+
+Allow time for indexing to complete:
+```bash
+sleep 1  # Between store and recall operations
 ```
 
-## Success Criteria
+The demo script includes appropriate delays automatically.
+</details>
 
-A successful demo shows:
+<details>
+<summary>Episodes Not Consolidating</summary>
 
-1. **Decay**: Older memories have lower confidence scores
-2. **Spreading**: Related concepts discovered without explicit traversal
-3. **Consolidation**: Scheduler active, patterns discovered (or noted as pending)
-4. **Performance**: All queries complete in <100ms
-5. **Reliability**: No HTTP errors, all API calls succeed
+**Expected behavior**: Episodes must be >1 day old before consolidation (biological design).
 
-## Contributing
+The demo uses backdated timestamps to bypass this requirement:
+```bash
+ONE_WEEK_AGO=$(date -u -v-7d +"%Y-%m-%dT%H:%M:%SZ")
+```
 
-To improve this demo:
+If consolidation still doesn't run, check:
+1. Server logs: `./target/release/engram logs`
+2. Scheduler status via API: `curl http://localhost:7432/api/v1/consolidations`
+</details>
 
-1. Add more realistic use cases
-2. Include visualization of spreading activation
-3. Create video walkthrough
-4. Add performance benchmarking
-5. Include error scenario demonstrations
+### Contributing to This Demo
 
-## Questions?
+Improvements welcome:
+
+1. Add more realistic use cases from your domain
+2. Include visualization of spreading activation (D3.js, Graphviz)
+3. Create video walkthrough with narration
+4. Add performance benchmarking against traditional databases
+5. Include error scenario demonstrations (what happens when things go wrong)
+
+Submit PRs or open issues at: https://github.com/orchard9/engram/issues
+
+### Questions?
 
 - GitHub Issues: https://github.com/orchard9/engram/issues
-- Documentation: http://localhost:7432/docs
-- Vision Document: `vision.md`
+- API Documentation: http://localhost:7432/docs
+- Vision Document: `vision.md` (architectural philosophy)
+- Full Usage Guide: `usage.md` (production deployment)
