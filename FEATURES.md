@@ -36,17 +36,17 @@ This document provides an honest assessment of feature implementation status acr
 | Feature | Status | Notes |
 |---------|--------|-------|
 | **Hot Tier (In-Memory)** | ✅ Production | DashMap-based concurrent storage |
-| **Warm/Cold Tiers** | ⚪ Planned | Trait defined, implementations missing |
-| **Persistence (Async)** | 🟢 Functional | Now properly spawns async tasks, needs WAL |
+| **Warm/Cold Tiers** | 🟢 Functional | Implemented with per-space isolation |
+| **Persistence (Async)** | ✅ Production | Per-space WAL with async recovery |
 | **Memory-Mapped Storage** | 🟡 Partial | Framework exists, not fully integrated |
-| **Three-Tier Migration** | ⚪ Planned | Designed but not implemented |
-| **WAL (Write-Ahead Log)** | 🟡 Partial | Buffering works, actual persistence incomplete |
+| **Three-Tier Migration** | 🟢 Functional | Tier backend with capacity-based eviction |
+| **WAL (Write-Ahead Log)** | ✅ Production | Per-space WAL with deterministic recovery |
 
 ## Advanced Memory Features (Milestone 1-3)
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| **Spreading Activation** | 🟡 Partial | Can be enabled, needs queue consumer |
+| **Spreading Activation** | ✅ Production | Deterministic parallel engine with adaptive batching |
 | **Pattern Completion** | 🟢 Functional | Reconstructor working when feature enabled |
 | **Probabilistic Queries** | 🟢 Functional | Confidence intervals and evidence chains work |
 | **Psychological Decay** | 🟢 Functional | Ebbinghaus forgetting curve implemented |
@@ -97,13 +97,29 @@ This document provides an honest assessment of feature implementation status acr
 | `probabilistic_queries` | Confidence intervals | 🟢 Functional | Enabled |
 | `memory_mapped_persistence` | Persistent storage | 🟡 Partial | Disabled |
 | `monitoring` | Metrics collection | ✅ Production | Enabled |
-| `spreading_api_beta` | Controls availability of the spreading activation API | 🟢 Functional (beta) | Enabled |
+| `spreading_api_beta` | Controls availability of the spreading activation API | ✅ Production | Enabled |
 
 Every new feature flag must ship with:
 
 1. Default values captured in `engram-cli/config/default.toml`
 2. Documentation updates (`docs/changelog.md`, relevant Diátaxis pages)
 3. CLI support via `engram config` commands so operators can inspect and mutate flags at runtime
+
+---
+
+## Multi-Tenancy & Isolation (Milestone 7)
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| **MemorySpaceRegistry** | ✅ Production | Thread-safe DashMap-based space management |
+| **Per-Space Persistence** | ✅ Production | Isolated WAL/tier storage per space |
+| **X-Memory-Space Routing** | 🟢 Functional | Header extraction with fallback precedence |
+| **CLI Space Commands** | ✅ Production | `space list`, `space create` implemented |
+| **Per-Space Health Metrics** | 🟢 Functional | Per-space metrics in health endpoint, actual metrics pending |
+| **WAL Recovery Isolation** | ✅ Production | Per-space recovery on startup with logging |
+| **Directory Isolation** | ✅ Production | Separate `<root>/<space_id>/` directories |
+| **Concurrent Space Creation** | ✅ Production | Thread-safe concurrent space registration |
+| **Space-Scoped Event Streaming** | 🟡 Partial | Space extraction added, full isolation deferred |
 
 ---
 
@@ -171,5 +187,6 @@ let state = ApiState::new(store, metrics, auto_tuner);
 
 ---
 
-**Last Updated**: 2025-10-05
-**Milestone Status**: 0 (✅), 1 (✅), 2 (🟡 70%), 3 (🟡 60%), 4 (⚪)
+**Last Updated**: 2025-10-23
+**Test Coverage**: 637 core tests (628 engram-core + 9 engram-cli unit), 627 passing, 10 ignored (server startup required)
+**Milestone Status**: 0 (✅), 1 (✅), 2 (✅), 3 (🟡 75%), 7 (✅ 90%)

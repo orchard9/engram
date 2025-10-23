@@ -91,6 +91,14 @@ test-output/
 *.jsonl
 *.dat
 
-# Baseline templates (keep directory structure)
+# Runtime data directories
+engram-core/data/
+engram-data/
+
+# Baseline templates (keep directory structure only, not generated files)
 !docs/assets/consolidation/baseline/.gitkeep
 !engram-core/data/consolidation/alerts/.gitkeep
+
+# But still ignore actual data files in baseline directories
+docs/assets/consolidation/baseline/*.jsonl
+docs/assets/consolidation/baseline/*.dat
