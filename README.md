@@ -101,6 +101,54 @@ cargo test --workspace
 | **Memory Consolidation** | ✅ Production | Asynchronous episodic→semantic transformation with pattern detection |
 | **SMT Verification** | ✅ Production | Correctness proofs for probability propagation |
 | **Streaming Monitoring** | ✅ Production | Real-time SSE streams of memory dynamics |
+| **Memory Spaces** | ✅ Production | Multi-tenant isolation with per-space metrics |
+
+### Memory Spaces (Multi-Tenancy)
+
+Engram supports isolated **memory spaces** for multi-tenant deployments. Each space maintains separate:
+- Memory storage and persistence
+- Spreading activation graphs
+- Health metrics and diagnostics
+- WAL (Write-Ahead Log) and tier storage
+
+#### Using Memory Spaces
+
+**HTTP API** - Use the `X-Memory-Space` header:
+
+```bash
+# Create memory in "research" space
+curl -X POST http://localhost:7432/api/v1/memories/remember \
+  -H "Content-Type: application/json" \
+  -H "X-Memory-Space: research" \
+  -d '{"content": "CRISPR gene editing", "confidence": 0.95}'
+
+# Recall from "research" space only
+curl -H "X-Memory-Space: research" \
+  http://localhost:7432/api/v1/memories/recall?query=CRISPR
+```
+
+**CLI Commands:**
+
+```bash
+# List all memory spaces
+./target/debug/engram space list
+
+# Create a new space
+./target/debug/engram space create production
+
+# Check per-space health metrics
+./target/debug/engram status --space production
+```
+
+**Default Space:** Without specifying a space, all operations use the `default` space, ensuring backward compatibility with existing deployments.
+
+**Isolation Guarantees:**
+- ✅ Storage: Each space gets dedicated directory structure
+- ✅ Persistence: Isolated WAL and tier storage per space
+- ✅ Metrics: Per-space health, pressure, and consolidation tracking
+- ✅ Concurrency: Thread-safe concurrent access across spaces
+
+For migration guidance and advanced configuration, see [docs/operations/memory-space-migration.md](docs/operations/memory-space-migration.md).
 
 ## What Makes Engram Different?
 
