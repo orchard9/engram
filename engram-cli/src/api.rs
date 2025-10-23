@@ -7,7 +7,7 @@ use axum::response::sse::{Event, KeepAlive};
 use axum::{
     Router,
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Json, Sse},
     routing::{get, post},
 };
@@ -178,15 +178,18 @@ fn parse_recall_mode(value: &str) -> Result<RecallMode, ApiError> {
 }
 
 /// Extract memory space identifier from request with priority:
-/// 1. Query parameter `?space=<id>`
-/// 2. JSON body field `memory_space_id`
-/// 3. Default space from ApiState
+/// 1. HTTP header `X-Engram-Memory-Space`
+/// 2. Query parameter `?space=<id>`
+/// 3. JSON body field `memory_space_id`
+/// 4. Default space from ApiState
 ///
 /// This establishes a clear precedence for multi-source space resolution,
-/// allowing clients to specify tenancy at multiple API layers.
+/// allowing clients to specify tenancy at multiple API layers. Headers take
+/// highest priority as they're RESTful, explicit, and work with all HTTP methods.
 ///
 /// # Arguments
 ///
+/// * `headers` - HTTP request headers (checked for X-Engram-Memory-Space)
 /// * `query_space` - Optional space ID from query string (?space=tenant_a)
 /// * `body_space` - Optional space ID from JSON request body
 /// * `default` - Fallback space when none explicitly provided
@@ -200,31 +203,43 @@ fn parse_recall_mode(value: &str) -> Result<RecallMode, ApiError> {
 /// ```ignore
 /// // In handler:
 /// let space_id = extract_memory_space_id(
-///     params.space.as_deref(),     // From ?space= query param
+///     &headers,                            // From HTTP headers
+///     params.space.as_deref(),             // From ?space= query param
 ///     request.memory_space_id.as_deref(),  // From JSON body
 ///     &state.default_space,
 /// )?;
 /// ```
 fn extract_memory_space_id(
+    headers: &axum::http::HeaderMap,
     query_space: Option<&str>,
     body_space: Option<&str>,
     default: &MemorySpaceId,
 ) -> Result<MemorySpaceId, ApiError> {
-    // Priority 1: Query parameter (most explicit, overrides everything)
+    // Priority 1: X-Engram-Memory-Space header (RESTful, explicit, works with all methods)
+    if let Some(header_value) = headers.get("x-engram-memory-space") {
+        let space_str = header_value
+            .to_str()
+            .map_err(|_| ApiError::InvalidInput("X-Engram-Memory-Space header contains invalid UTF-8".to_string()))?;
+        return MemorySpaceId::try_from(space_str).map_err(|e| {
+            ApiError::InvalidInput(format!("Invalid memory space ID in X-Engram-Memory-Space header: {e}"))
+        });
+    }
+
+    // Priority 2: Query parameter (most explicit URL-based, overrides body)
     if let Some(space_str) = query_space {
         return MemorySpaceId::try_from(space_str).map_err(|e| {
             ApiError::InvalidInput(format!("Invalid memory space ID in query parameter: {e}"))
         });
     }
 
-    // Priority 2: Request body field
+    // Priority 3: Request body field
     if let Some(space_str) = body_space {
         return MemorySpaceId::try_from(space_str).map_err(|e| {
             ApiError::InvalidInput(format!("Invalid memory space ID in request body: {e}"))
         });
     }
 
-    // Priority 3: Default space (backward compatibility)
+    // Priority 4: Default space (backward compatibility)
     Ok(default.clone())
 }
 
@@ -983,6 +998,7 @@ pub struct UncertaintyInfo {
 /// Returns `ApiError` if memory storage fails or graph operations fail
 pub async fn remember_memory(
     State(state): State<ApiState>,
+    headers: HeaderMap,
     Json(request): Json<RememberMemoryRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     info!(
@@ -1047,6 +1063,7 @@ pub async fn remember_memory(
 
     // Extract memory space ID with fallback to default
     let space_id = extract_memory_space_id(
+        &headers,
         None,
         request.memory_space_id.as_deref(),
         &state.default_space,
@@ -1153,6 +1170,7 @@ pub async fn remember_memory(
 /// Returns `ApiError` if episode storage fails or graph operations fail
 pub async fn remember_episode(
     State(state): State<ApiState>,
+    headers: HeaderMap,
     Json(request): Json<RememberEpisodeRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     info!("Processing remember episode request: {}", request.what);
@@ -1164,8 +1182,9 @@ pub async fn remember_episode(
         ));
     }
 
-    // Extract memory space from request (query > body > default)
+    // Extract memory space from request (header > query > body > default)
     let space_id = extract_memory_space_id(
+        &headers,
         None, // No query params in this handler
         request.memory_space_id.as_deref(),
         &state.default_space,
@@ -1276,14 +1295,16 @@ pub async fn remember_episode(
 /// Returns `ApiError` if memory recall fails or graph operations fail
 pub async fn recall_memories(
     State(state): State<ApiState>,
+    headers: HeaderMap,
     Query(params): Query<RecallQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
     let start_time = std::time::Instant::now();
 
     info!("Processing recall request with query: {:?}", params.query);
 
-    // Extract memory space from request (query > default)
+    // Extract memory space from request (header > query > default)
     let space_id = extract_memory_space_id(
+        &headers,
         params.space.as_deref(),
         None, // No body in GET request
         &state.default_space,
@@ -1540,6 +1561,7 @@ pub async fn recall_memories(
 /// Returns `ApiError` if probabilistic query fails
 pub async fn probabilistic_query(
     State(state): State<ApiState>,
+    headers: HeaderMap,
     Query(params): Query<ProbabilisticQueryRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let start_time = std::time::Instant::now();
@@ -1591,7 +1613,7 @@ pub async fn probabilistic_query(
     };
 
     // Extract memory space ID with fallback to default
-    let space_id = extract_memory_space_id(params.space.as_deref(), None, &state.default_space)?;
+    let space_id = extract_memory_space_id(&headers, params.space.as_deref(), None, &state.default_space)?;
 
     // Get space-specific store handle from registry
     let handle = state
@@ -1824,10 +1846,11 @@ pub async fn probabilistic_query(
 )]
 pub async fn list_consolidations(
     State(state): State<ApiState>,
+    headers: HeaderMap,
     Query(params): Query<ConsolidationQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
     // Extract memory space ID with fallback to default
-    let space_id = extract_memory_space_id(params.space.as_deref(), None, &state.default_space)?;
+    let space_id = extract_memory_space_id(&headers, params.space.as_deref(), None, &state.default_space)?;
 
     // Get space-specific store handle from registry
     let handle = state
@@ -1887,11 +1910,12 @@ pub async fn list_consolidations(
 )]
 pub async fn get_consolidation(
     State(state): State<ApiState>,
+    headers: HeaderMap,
     Path(id): Path<String>,
     Query(params): Query<ConsolidationDetailQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
     // Extract memory space ID with fallback to default
-    let space_id = extract_memory_space_id(params.space.as_deref(), None, &state.default_space)?;
+    let space_id = extract_memory_space_id(&headers, params.space.as_deref(), None, &state.default_space)?;
 
     // Get space-specific store handle from registry
     let handle = state
@@ -2001,6 +2025,7 @@ pub async fn recognize_pattern(
 /// forwarding requests to the cognitive remember_memory handler.
 pub async fn create_memory_rest(
     State(state): State<ApiState>,
+    headers: HeaderMap,
     Json(payload): Json<serde_json::Value>,
 ) -> Result<impl IntoResponse, ApiError> {
     // Extract content and optional confidence from simple CLI payload
@@ -2031,7 +2056,7 @@ pub async fn create_memory_rest(
     };
 
     // Forward to the cognitive handler
-    let response = remember_memory(State(state), Json(request)).await?;
+    let response = remember_memory(State(state), headers, Json(request)).await?;
     Ok(response)
 }
 
@@ -2039,11 +2064,13 @@ pub async fn create_memory_rest(
 #[allow(clippy::implicit_hasher)] // Simple query params, no custom hasher needed
 pub async fn get_memory_by_id(
     State(state): State<ApiState>,
+    headers: HeaderMap,
     axum::extract::Path(id): axum::extract::Path<String>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<impl IntoResponse, ApiError> {
     // Extract memory space ID with fallback to default
     let space_id = extract_memory_space_id(
+        &headers,
         params.get("space").map(String::as_str),
         None,
         &state.default_space,
@@ -2084,6 +2111,7 @@ pub async fn get_memory_by_id(
 #[allow(clippy::implicit_hasher)]
 pub async fn search_memories_rest(
     State(state): State<ApiState>,
+    headers: HeaderMap,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<impl IntoResponse, ApiError> {
     let query = params
@@ -2097,6 +2125,7 @@ pub async fn search_memories_rest(
 
     // Extract memory space ID with fallback to default
     let space_id = extract_memory_space_id(
+        &headers,
         params.get("space").map(String::as_str),
         None,
         &state.default_space,
@@ -3575,12 +3604,30 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_extract_space_prefers_header_over_query() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-engram-memory-space", "header-space".parse().unwrap());
+        let query = Some("query-space");
+        let body = Some("body-space");
+        let default = MemorySpaceId::default();
+
+        let result = extract_memory_space_id(&headers, query, body, &default).unwrap();
+
+        assert_eq!(
+            result.as_str(),
+            "header-space",
+            "Header should take priority over query and body"
+        );
+    }
+
+    #[test]
     fn test_extract_space_prefers_query_over_body() {
+        let headers = HeaderMap::new();
         let query = Some("alpha");
         let body = Some("beta");
         let default = MemorySpaceId::default();
 
-        let result = extract_memory_space_id(query, body, &default).unwrap();
+        let result = extract_memory_space_id(&headers, query, body, &default).unwrap();
 
         assert_eq!(
             result.as_str(),
@@ -3591,11 +3638,12 @@ mod tests {
 
     #[test]
     fn test_extract_space_uses_body_when_no_query() {
+        let headers = HeaderMap::new();
         let query = None;
         let body = Some("gamma");
         let default = MemorySpaceId::default();
 
-        let result = extract_memory_space_id(query, body, &default).unwrap();
+        let result = extract_memory_space_id(&headers, query, body, &default).unwrap();
 
         assert_eq!(
             result.as_str(),
@@ -3606,11 +3654,12 @@ mod tests {
 
     #[test]
     fn test_extract_space_falls_back_to_default() {
+        let headers = HeaderMap::new();
         let query = None;
         let body = None;
         let default = MemorySpaceId::try_from("custom-default").unwrap();
 
-        let result = extract_memory_space_id(query, body, &default).unwrap();
+        let result = extract_memory_space_id(&headers, query, body, &default).unwrap();
 
         assert_eq!(
             result.as_str(),
@@ -3621,11 +3670,12 @@ mod tests {
 
     #[test]
     fn test_extract_space_rejects_invalid_query_param() {
+        let headers = HeaderMap::new();
         let query = Some("INVALID SPACE!");
         let body = Some("valid-space");
         let default = MemorySpaceId::default();
 
-        let result = extract_memory_space_id(query, body, &default);
+        let result = extract_memory_space_id(&headers, query, body, &default);
 
         assert!(
             result.is_err(),
@@ -3643,11 +3693,12 @@ mod tests {
 
     #[test]
     fn test_extract_space_rejects_invalid_body_field() {
+        let headers = HeaderMap::new();
         let query = None;
         let body = Some("INVALID SPACE!");
         let default = MemorySpaceId::default();
 
-        let result = extract_memory_space_id(query, body, &default);
+        let result = extract_memory_space_id(&headers, query, body, &default);
 
         assert!(
             result.is_err(),
