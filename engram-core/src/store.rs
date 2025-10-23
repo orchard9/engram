@@ -181,6 +181,8 @@ impl Activation {
 pub enum MemoryEvent {
     /// A memory was stored with the given ID, confidence, and timestamp
     Stored {
+        /// Memory space where the memory was stored
+        memory_space_id: crate::MemorySpaceId,
         /// Unique identifier of the stored memory
         id: String,
         /// Confidence score of the memory encoding (0.0 to 1.0)
@@ -190,6 +192,8 @@ pub enum MemoryEvent {
     },
     /// A memory was recalled with the given ID and activation level
     Recalled {
+        /// Memory space from which the memory was recalled
+        memory_space_id: crate::MemorySpaceId,
         /// Unique identifier of the recalled memory
         id: String,
         /// Activation level during recall (0.0 to 1.0)
@@ -199,6 +203,8 @@ pub enum MemoryEvent {
     },
     /// Multiple memories were activated during spreading activation
     ActivationSpread {
+        /// Memory space where activation spreading occurred
+        memory_space_id: crate::MemorySpaceId,
         /// Number of memories activated
         count: usize,
         /// Average activation level across all activated memories
@@ -216,6 +222,9 @@ pub enum MemoryEvent {
 /// - Graceful degradation mirrors biological memory under stress
 /// - Concurrent stores don't block (like parallel memory formation)
 pub struct MemoryStore {
+    /// Memory space identifier for this store instance
+    memory_space_id: crate::MemorySpaceId,
+
     /// Unified memory graph with infallible backend
     graph: UnifiedMemoryGraph<InfallibleBackend>,
 
@@ -403,6 +412,12 @@ impl MemoryStore {
     /// Create a new memory store with specified capacity
     #[must_use]
     pub fn new(max_memories: usize) -> Self {
+        Self::for_space(crate::MemorySpaceId::default(), max_memories)
+    }
+
+    /// Create a memory store for a specific memory space
+    #[must_use]
+    pub fn for_space(memory_space_id: crate::MemorySpaceId, max_memories: usize) -> Self {
         let config = GraphConfig {
             max_results: 100,
             enable_spreading: true,
@@ -415,6 +430,7 @@ impl MemoryStore {
         let graph = UnifiedMemoryGraph::new(backend, config);
 
         Self {
+            memory_space_id,
             graph,
             hot_memories: DashMap::new(),
             wal_buffer: Arc::new(DashMap::new()),
@@ -493,6 +509,57 @@ impl MemoryStore {
         let (tx, rx) = tokio::sync::broadcast::channel(capacity);
         self.event_tx = Some(tx);
         rx
+    }
+
+    /// Verify this store instance belongs to the expected memory space.
+    ///
+    /// This is a runtime guard to catch bugs where handlers accidentally use
+    /// the wrong store instance. In a properly designed system using the registry
+    /// pattern, this should never fail - but it provides defense in depth.
+    ///
+    /// # Arguments
+    ///
+    /// * `expected` - The memory space ID this operation should target
+    ///
+    /// # Returns
+    ///
+    /// `Ok(())` if the space matches, `Err` with descriptive message otherwise.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // In API handler:
+    /// let space_id = extract_space_from_request(&request)?;
+    /// let handle = registry.create_or_get(&space_id).await?;
+    /// let store = handle.store();
+    ///
+    /// // Runtime guard - should never fail if using registry correctly
+    /// store.verify_space(&space_id)
+    ///     .map_err(|e| ApiError::InternalError(e))?;
+    ///
+    /// store.store(episode);
+    /// ```
+    #[inline]
+    pub fn verify_space(&self, expected: &crate::MemorySpaceId) -> Result<(), String> {
+        if &self.memory_space_id == expected {
+            Ok(())
+        } else {
+            Err(format!(
+                "Memory space mismatch: operation expects '{}' but store belongs to '{}'. \
+                 This indicates a bug in handler logic - stores must be obtained via registry.create_or_get()",
+                expected.as_str(),
+                self.memory_space_id.as_str()
+            ))
+        }
+    }
+
+    /// Get the memory space identifier for this store instance.
+    ///
+    /// Each MemoryStore is bound to a single memory space for its entire lifetime.
+    /// This ID determines which tenant/agent this store serves.
+    #[must_use]
+    pub const fn space_id(&self) -> &crate::MemorySpaceId {
+        &self.memory_space_id
     }
 
     /// Get a subscriber for memory events
@@ -1202,6 +1269,7 @@ impl MemoryStore {
         // Publish event for real-time observability
         if let Some(ref tx) = self.event_tx {
             let event = MemoryEvent::Stored {
+                memory_space_id: self.memory_space_id.clone(),
                 id: memory_id.clone(),
                 confidence: activation,
                 timestamp: memory_arc.created_at.timestamp() as f64,
@@ -1567,6 +1635,7 @@ impl MemoryStore {
             // Publish individual recall events for each memory
             for (episode, confidence) in results {
                 let event = MemoryEvent::Recalled {
+                    memory_space_id: self.memory_space_id.clone(),
                     id: episode.id.clone(),
                     activation: confidence.raw(),
                     confidence: episode.encoding_confidence.raw(),
@@ -1589,6 +1658,7 @@ impl MemoryStore {
                 let avg_activation =
                     results.iter().map(|(_, c)| c.raw()).sum::<f32>() / results.len() as f32;
                 let event = MemoryEvent::ActivationSpread {
+                    memory_space_id: self.memory_space_id.clone(),
                     count: results.len(),
                     avg_activation,
                 };

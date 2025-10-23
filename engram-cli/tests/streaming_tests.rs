@@ -15,17 +15,44 @@ use axum::{
     response::Response,
 };
 use engram_cli::api::{ApiState, create_api_routes};
+use engram_core::MemorySpaceError;
 use engram_core::activation::SpreadingAutoTuner;
+use engram_core::{MemorySpaceId, MemorySpaceRegistry, MemoryStore, metrics};
 use std::sync::Arc;
 use tower::ServiceExt;
 
 /// Create test router for streaming tests
-fn create_test_router() -> Router {
-    let store = Arc::new(engram_core::MemoryStore::new(100));
-    let metrics = engram_core::metrics::init();
+async fn create_test_router() -> Router {
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let registry = Arc::new(
+        MemorySpaceRegistry::new(temp_dir.path(), |_space_id, _directories| {
+            let mut store = MemoryStore::new(100);
+            let _ = store.enable_event_streaming(32);
+            Ok::<Arc<MemoryStore>, MemorySpaceError>(Arc::new(store))
+        })
+        .expect("registry"),
+    );
+
+    let default_space = MemorySpaceId::default();
+    let space_handle = registry.create_or_get(&default_space).await.expect("space");
+    let store = space_handle.store();
+
+    let mut keepalive_rx = store
+        .subscribe_to_events()
+        .expect("event streaming initialized");
+    tokio::spawn(async move { while keepalive_rx.recv().await.is_ok() {} });
+
+    let metrics = metrics::init();
     let auto_tuner = SpreadingAutoTuner::new(0.10, 16);
     let (shutdown_tx, _shutdown_rx) = tokio::sync::watch::channel(false);
-    let api_state = ApiState::new(store, metrics, auto_tuner, Arc::new(shutdown_tx));
+    let api_state = ApiState::new(
+        store,
+        Arc::clone(&registry),
+        default_space,
+        metrics,
+        auto_tuner,
+        Arc::new(shutdown_tx),
+    );
 
     create_api_routes().with_state(api_state)
 }
@@ -45,7 +72,7 @@ async fn make_streaming_request(app: &Router, uri: &str) -> Response<Body> {
 
 #[tokio::test]
 async fn test_stream_activities_basic() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     let response = make_streaming_request(&app, "/api/v1/stream/activities").await;
 
@@ -63,7 +90,7 @@ async fn test_stream_activities_basic() {
 
 #[tokio::test]
 async fn test_stream_activities_with_filters() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     let response = make_streaming_request(
         &app,
@@ -80,7 +107,7 @@ async fn test_stream_activities_with_filters() {
 
 #[tokio::test]
 async fn test_stream_activities_with_session() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     let response = make_streaming_request(
         &app,
@@ -94,7 +121,7 @@ async fn test_stream_activities_with_session() {
 
 #[tokio::test]
 async fn test_stream_memories_basic() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     let response = make_streaming_request(&app, "/api/v1/stream/memories").await;
 
@@ -108,7 +135,7 @@ async fn test_stream_memories_basic() {
 
 #[tokio::test]
 async fn test_stream_memories_with_filters() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     let response = make_streaming_request(
         &app,
@@ -121,7 +148,7 @@ async fn test_stream_memories_with_filters() {
 
 #[tokio::test]
 async fn test_stream_consolidation_basic() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     let response = make_streaming_request(&app, "/api/v1/stream/consolidation").await;
 
@@ -135,7 +162,7 @@ async fn test_stream_consolidation_basic() {
 
 #[tokio::test]
 async fn test_stream_consolidation_with_filters() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     let response = make_streaming_request(
         &app,
@@ -148,7 +175,7 @@ async fn test_stream_consolidation_with_filters() {
 
 #[tokio::test]
 async fn test_stream_cognitive_constraints() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     // Test working memory constraint (buffer_size should be capped at 128)
     let response = make_streaming_request(
@@ -182,7 +209,7 @@ async fn test_stream_cognitive_constraints() {
 
 #[tokio::test]
 async fn test_stream_confidence_bounds() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     // Test confidence bounds for memory streaming
     let response = make_streaming_request(
@@ -206,7 +233,7 @@ async fn test_stream_confidence_bounds() {
 
 #[tokio::test]
 async fn test_stream_novelty_bounds() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     // Test novelty bounds for consolidation streaming
     let response = make_streaming_request(
@@ -230,7 +257,7 @@ async fn test_stream_novelty_bounds() {
 
 #[tokio::test]
 async fn test_stream_event_type_parsing() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     // Test single event type
     let response =
@@ -262,7 +289,7 @@ async fn test_stream_event_type_parsing() {
 
 #[tokio::test]
 async fn test_stream_memory_type_parsing() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     // Test single memory type
     let response =
@@ -284,7 +311,7 @@ async fn test_stream_memory_type_parsing() {
 
 #[tokio::test]
 async fn test_stream_session_id_generation() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     // Without session_id - should generate one
     let response = make_streaming_request(&app, "/api/v1/stream/activities").await;
@@ -305,7 +332,7 @@ async fn test_stream_session_id_generation() {
 
 #[tokio::test]
 async fn test_stream_boolean_parameters() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     // Test boolean parsing for memory stream
     let test_cases = vec![
@@ -342,7 +369,7 @@ async fn test_stream_boolean_parameters() {
 
 #[tokio::test]
 async fn test_stream_headers_compliance() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     let endpoints = vec![
         "/api/v1/stream/activities",
@@ -373,7 +400,7 @@ async fn test_stream_headers_compliance() {
 
 #[tokio::test]
 async fn test_stream_cognitive_ergonomics() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     // Test that cognitive constraints are respected
     // Buffer sizes should respect working memory limits (3-4 streams max, reasonable buffer sizes)
@@ -421,7 +448,7 @@ async fn test_stream_cognitive_ergonomics() {
 /*
 #[tokio::test]
 async fn test_streaming_health_in_system_health_endpoint() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     // Make health check request
     let request = Request::builder()
@@ -642,14 +669,37 @@ async fn test_end_to_end_sse_event_delivery_after_remember() {
     use axum::body::to_bytes;
 
     // Create test router with enabled event streaming
-    let mut store = engram_core::MemoryStore::new(100);
-    let _keepalive_rx = store.enable_event_streaming(100);
-    let store = Arc::new(store);
-    let metrics = engram_core::metrics::init();
+    let mut store_inner = MemoryStore::new(100);
+    let _keepalive_rx = store_inner.enable_event_streaming(100);
+    let store = Arc::new(store_inner);
+
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let registry = Arc::new(
+        MemorySpaceRegistry::new(temp_dir.path(), {
+            let store = Arc::clone(&store);
+            move |_space_id, _directories| Ok(Arc::clone(&store))
+        })
+        .expect("registry"),
+    );
+
+    let default_space = MemorySpaceId::default();
+    registry
+        .create_or_get(&default_space)
+        .await
+        .expect("default space");
+
+    let metrics = metrics::init();
 
     let auto_tuner = SpreadingAutoTuner::new(0.10, 16);
     let (shutdown_tx, _shutdown_rx) = tokio::sync::watch::channel(false);
-    let api_state = ApiState::new(store.clone(), metrics, auto_tuner, Arc::new(shutdown_tx));
+    let api_state = ApiState::new(
+        Arc::clone(&store),
+        Arc::clone(&registry),
+        default_space,
+        metrics,
+        auto_tuner,
+        Arc::new(shutdown_tx),
+    );
     let app = create_api_routes().with_state(api_state);
 
     // Step 1: Verify SSE stream endpoint is available
@@ -785,6 +835,7 @@ async fn test_real_sse_consumption_after_recall() {
             id,
             activation,
             confidence,
+            ..
         } => {
             assert_eq!(
                 id, "test_recall_memory",
@@ -806,6 +857,7 @@ async fn test_real_sse_consumption_after_recall() {
         engram_core::store::MemoryEvent::ActivationSpread {
             count,
             avg_activation,
+            ..
         } => {
             assert!(count > 0, "Should have activated at least one memory");
             assert!(

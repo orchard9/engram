@@ -2,6 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
+use engram_core::MemorySpaceId;
 use serde::{Deserialize, Serialize};
 
 const DEFAULT_CONFIG: &str = include_str!("../config/default.toml");
@@ -10,6 +11,8 @@ const DEFAULT_CONFIG: &str = include_str!("../config/default.toml");
 pub struct CliConfig {
     #[serde(default)]
     pub feature_flags: FeatureFlags,
+    #[serde(default)]
+    pub memory_spaces: MemorySpacesConfig,
 }
 
 impl Default for CliConfig {
@@ -22,6 +25,7 @@ impl CliConfig {
     #[allow(clippy::missing_const_for_fn)]
     pub fn merge(&mut self, other: &Self) {
         self.feature_flags.merge(&other.feature_flags);
+        self.memory_spaces.merge(&other.memory_spaces);
     }
 }
 
@@ -44,6 +48,42 @@ impl Default for FeatureFlags {
             spreading_api_beta: default_spreading_api_beta(),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MemorySpacesConfig {
+    #[serde(default = "default_memory_space_id")]
+    pub default_space: MemorySpaceId,
+    #[serde(default = "default_bootstrap_spaces")]
+    pub bootstrap_spaces: Vec<MemorySpaceId>,
+}
+
+impl MemorySpacesConfig {
+    #[allow(clippy::missing_const_for_fn)]
+    fn merge(&mut self, other: &Self) {
+        self.default_space = other.default_space.clone();
+        if !other.bootstrap_spaces.is_empty() {
+            self.bootstrap_spaces.clone_from(&other.bootstrap_spaces);
+        }
+    }
+}
+
+impl Default for MemorySpacesConfig {
+    fn default() -> Self {
+        Self {
+            default_space: default_memory_space_id(),
+            bootstrap_spaces: default_bootstrap_spaces(),
+        }
+    }
+}
+
+fn default_memory_space_id() -> MemorySpaceId {
+    MemorySpaceId::default()
+}
+
+fn default_bootstrap_spaces() -> Vec<MemorySpaceId> {
+    vec![MemorySpaceId::default()]
 }
 
 const fn default_spreading_api_beta() -> bool {
@@ -109,6 +149,18 @@ impl ConfigManager {
             "feature_flags.spreading_api_beta" => {
                 Some(self.config.feature_flags.spreading_api_beta.to_string())
             }
+            "memory_spaces.default_space" => {
+                Some(self.config.memory_spaces.default_space.to_string())
+            }
+            "memory_spaces.bootstrap_spaces" => Some(
+                self.config
+                    .memory_spaces
+                    .bootstrap_spaces
+                    .iter()
+                    .map(std::string::ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(","),
+            ),
             _ => None,
         }
     }
@@ -118,6 +170,24 @@ impl ConfigManager {
             "feature_flags.spreading_api_beta" => {
                 let parsed = parse_bool(value)?;
                 self.config.feature_flags.spreading_api_beta = parsed;
+                Ok(())
+            }
+            "memory_spaces.default_space" => {
+                let id = MemorySpaceId::try_from(value)?;
+                self.config.memory_spaces.default_space = id;
+                Ok(())
+            }
+            "memory_spaces.bootstrap_spaces" => {
+                let spaces = value
+                    .split(',')
+                    .filter(|segment| !segment.trim().is_empty())
+                    .map(|segment| MemorySpaceId::try_from(segment.trim()))
+                    .collect::<Result<Vec<_>, _>>()?;
+                self.config.memory_spaces.bootstrap_spaces = if spaces.is_empty() {
+                    default_bootstrap_spaces()
+                } else {
+                    spaces
+                };
                 Ok(())
             }
             _ => Err(anyhow!("unknown configuration key: {key}")),
@@ -145,9 +215,26 @@ pub fn format_feature_flags(flags: &FeatureFlags) -> Vec<String> {
 }
 
 #[must_use]
+pub fn format_memory_spaces(cfg: &MemorySpacesConfig) -> Vec<String> {
+    let mut lines = Vec::new();
+    lines.push(format!("default_space=\"{}\"", cfg.default_space));
+    let bootstrap = cfg
+        .bootstrap_spaces
+        .iter()
+        .map(|id| format!("\"{id}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    lines.push(format!("bootstrap_spaces=[{bootstrap}]"));
+    lines
+}
+
+#[must_use]
 pub fn format_sections(config: &CliConfig) -> Vec<String> {
     let mut lines = Vec::new();
     lines.push("[feature_flags]".to_string());
     lines.extend(format_feature_flags(&config.feature_flags));
+    lines.push(String::new());
+    lines.push("[memory_spaces]".to_string());
+    lines.extend(format_memory_spaces(&config.memory_spaces));
     lines
 }

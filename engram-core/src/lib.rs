@@ -44,11 +44,17 @@ pub mod memory_graph;
 pub mod metrics;
 mod numeric;
 pub mod query;
+pub mod registry;
 #[cfg(feature = "memory_mapped_persistence")]
 pub mod storage;
 pub mod store;
 pub mod streaming_health;
 pub mod types;
+
+pub use registry::{
+    MemorySpaceError, MemorySpaceRegistry, SpaceDirectories, SpaceHandle, SpaceSummary,
+};
+pub use types::{MemorySpaceId, MemorySpaceIdError};
 
 use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;

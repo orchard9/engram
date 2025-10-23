@@ -24,7 +24,8 @@ use utoipa::{IntoParams, ToSchema};
 use crate::grpc::MemoryService;
 use crate::openapi::create_swagger_ui;
 use engram_core::{
-    Confidence as CoreConfidence, Cue as CoreCue, Episode, MemoryStore,
+    Confidence as CoreConfidence, Cue as CoreCue, Episode, MemorySpaceError, MemorySpaceId,
+    MemorySpaceRegistry, MemoryStore, SpaceSummary,
     activation::{AutoTuneAuditEntry, RecallMode, SpreadingAutoTuner},
     completion::{ConsolidationStats as CoreConsolidationStats, SemanticPattern},
     memory::EpisodeBuilder as CoreEpisodeBuilder,
@@ -43,6 +44,10 @@ pub struct ApiState {
     pub store: Arc<MemoryStore>,
     /// gRPC memory service for complex operations
     pub memory_service: Arc<MemoryService>,
+    /// Memory space registry managing tenant handles
+    pub registry: Arc<MemorySpaceRegistry>,
+    /// Default memory space identifier used for legacy operations
+    pub default_space: MemorySpaceId,
     /// Global metrics registry for streaming/log export
     pub metrics: Arc<MetricsRegistry>,
     /// Auto-tuning audit log
@@ -58,18 +63,62 @@ pub struct AutoTuneResponse {
     pub audit_log: Vec<AutoTuneAuditEntry>,
 }
 
+/// Summary information about a memory space.
+#[derive(Serialize, ToSchema, Clone, Debug)]
+pub struct MemorySpaceDescriptor {
+    /// Identifier assigned to the memory space.
+    pub id: String,
+    /// Persistence root directory hosting the space data.
+    pub persistence_root: String,
+    /// Timestamp when the space was first initialised on this node.
+    pub created_at: DateTime<Utc>,
+}
+
+/// Response payload for space listings.
+#[derive(Serialize, ToSchema, Debug)]
+pub struct MemorySpaceListResponse {
+    /// All spaces currently tracked by the registry.
+    pub spaces: Vec<MemorySpaceDescriptor>,
+}
+
+/// Request payload used to create or obtain a memory space reference.
+#[derive(Deserialize, ToSchema, Debug)]
+pub struct CreateMemorySpaceRequest {
+    /// Desired identifier for the memory space.
+    pub id: String,
+}
+
+impl From<SpaceSummary> for MemorySpaceDescriptor {
+    fn from(summary: SpaceSummary) -> Self {
+        Self {
+            id: summary.id.as_str().to_string(),
+            persistence_root: summary.root.display().to_string(),
+            created_at: summary.created_at,
+        }
+    }
+}
+
 impl ApiState {
     /// Create new API state with memory store
     pub fn new(
         store: Arc<MemoryStore>,
+        registry: Arc<MemorySpaceRegistry>,
+        default_space: MemorySpaceId,
         metrics: Arc<MetricsRegistry>,
         auto_tuner: Arc<SpreadingAutoTuner>,
         shutdown_tx: Arc<tokio::sync::watch::Sender<bool>>,
     ) -> Self {
-        let memory_service = Arc::new(MemoryService::new(Arc::clone(&store), Arc::clone(&metrics)));
+        let memory_service = Arc::new(MemoryService::new(
+            Arc::clone(&store),
+            Arc::clone(&metrics),
+            Arc::clone(&registry),
+            default_space.clone(),
+        ));
         Self {
             store,
             memory_service,
+            registry,
+            default_space,
             metrics,
             auto_tuner,
             shutdown_tx,
@@ -103,6 +152,57 @@ fn parse_recall_mode(value: &str) -> Result<RecallMode, ApiError> {
             "Unsupported recall mode '{other}'. Use one of: similarity, spreading, hybrid."
         ))),
     }
+}
+
+/// Extract memory space identifier from request with priority:
+/// 1. Query parameter `?space=<id>`
+/// 2. JSON body field `memory_space_id`
+/// 3. Default space from ApiState
+///
+/// This establishes a clear precedence for multi-source space resolution,
+/// allowing clients to specify tenancy at multiple API layers.
+///
+/// # Arguments
+///
+/// * `query_space` - Optional space ID from query string (?space=tenant_a)
+/// * `body_space` - Optional space ID from JSON request body
+/// * `default` - Fallback space when none explicitly provided
+///
+/// # Returns
+///
+/// Validated MemorySpaceId or error if provided ID is invalid
+///
+/// # Example
+///
+/// ```ignore
+/// // In handler:
+/// let space_id = extract_memory_space_id(
+///     params.space.as_deref(),     // From ?space= query param
+///     request.memory_space_id.as_deref(),  // From JSON body
+///     &state.default_space,
+/// )?;
+/// ```
+fn extract_memory_space_id(
+    query_space: Option<&str>,
+    body_space: Option<&str>,
+    default: &MemorySpaceId,
+) -> Result<MemorySpaceId, ApiError> {
+    // Priority 1: Query parameter (most explicit, overrides everything)
+    if let Some(space_str) = query_space {
+        return MemorySpaceId::try_from(space_str).map_err(|e| {
+            ApiError::InvalidInput(format!("Invalid memory space ID in query parameter: {e}"))
+        });
+    }
+
+    // Priority 2: Request body field
+    if let Some(space_str) = body_space {
+        return MemorySpaceId::try_from(space_str).map_err(|e| {
+            ApiError::InvalidInput(format!("Invalid memory space ID in request body: {e}"))
+        });
+    }
+
+    // Priority 3: Default space (backward compatibility)
+    Ok(default.clone())
 }
 
 const fn confidence_category(value: f32) -> &'static str {
@@ -199,6 +299,66 @@ fn pattern_to_belief(pattern: SemanticPattern, store: &MemoryStore) -> Consolida
     }
 }
 
+// ================================================================================================
+// Memory Space Administration Handlers
+// ================================================================================================
+
+/// List all registered memory spaces currently tracked by the registry.
+#[utoipa::path(
+    get,
+    path = "/api/v1/spaces",
+    tag = "memory-spaces",
+    responses(
+        (status = 200, description = "List registered memory spaces", body = MemorySpaceListResponse),
+        (status = 500, description = "Failed to enumerate memory spaces", body = ErrorResponse)
+    )
+)]
+pub async fn list_memory_spaces(
+    State(state): State<ApiState>,
+) -> Result<impl IntoResponse, ApiError> {
+    let spaces = state
+        .registry
+        .list()
+        .into_iter()
+        .map(MemorySpaceDescriptor::from)
+        .collect();
+
+    Ok(Json(MemorySpaceListResponse { spaces }))
+}
+
+/// Create (or retrieve) a memory space and return its descriptor.
+#[utoipa::path(
+    post,
+    path = "/api/v1/spaces",
+    tag = "memory-spaces",
+    request_body = CreateMemorySpaceRequest,
+    responses(
+        (status = 201, description = "Memory space created or returned", body = MemorySpaceDescriptor),
+        (status = 400, description = "Invalid memory space identifier", body = ErrorResponse),
+        (status = 500, description = "Failed to initialise memory space", body = ErrorResponse)
+    )
+)]
+pub async fn create_memory_space(
+    State(state): State<ApiState>,
+    Json(payload): Json<CreateMemorySpaceRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let space_id = MemorySpaceId::try_from(payload.id.as_str())
+        .map_err(|err| ApiError::from(MemorySpaceError::from(err)))?;
+
+    let handle = state
+        .registry
+        .create_or_get(&space_id)
+        .await
+        .map_err(ApiError::from)?;
+
+    let descriptor = MemorySpaceDescriptor::from(SpaceSummary {
+        id: handle.id().clone(),
+        root: handle.directories().root.clone(),
+        created_at: handle.created_at(),
+    });
+    Ok((StatusCode::CREATED, Json(descriptor)))
+}
+
 impl From<CoreConsolidationStats> for ConsolidationRunStats {
     fn from(stats: CoreConsolidationStats) -> Self {
         Self {
@@ -275,6 +435,8 @@ pub struct RememberMemoryRequest {
     pub auto_link: Option<bool>,
     /// Threshold for automatic linking (0.0-1.0)
     pub link_threshold: Option<f32>,
+    /// Memory space identifier for multi-tenant isolation (defaults to server default)
+    pub memory_space_id: Option<String>,
 }
 
 /// Request to remember an episode with contextual information
@@ -302,6 +464,8 @@ pub struct RememberEpisodeRequest {
     pub importance: Option<f32>,
     /// Should we automatically link to related episodes?
     pub auto_link: Option<bool>,
+    /// Memory space identifier for multi-tenant isolation (defaults to server default)
+    pub memory_space_id: Option<String>,
 }
 
 /// Query parameters for recalling memories
@@ -331,6 +495,8 @@ pub struct RecallQuery {
     pub location: Option<String>,
     /// Recall mode to apply (similarity, spreading, hybrid)
     pub mode: Option<String>,
+    /// Memory space identifier for multi-tenant isolation (defaults to server default)
+    pub space: Option<String>,
 }
 
 /// Query parameters for probabilistic recall with uncertainty tracking
@@ -949,6 +1115,24 @@ pub async fn remember_episode(
         ));
     }
 
+    // Extract memory space from request (query > body > default)
+    let space_id = extract_memory_space_id(
+        None, // No query params in this handler
+        request.memory_space_id.as_deref(),
+        &state.default_space,
+    )?;
+
+    // Get space-specific store handle from registry
+    let handle = state.registry.create_or_get(&space_id).await?;
+    let store = handle.store();
+
+    // Runtime guard: verify we got the right store (defense in depth)
+    store.verify_space(&space_id).map_err(|e| {
+        ApiError::SystemError(format!(
+            "Internal error: {e}. This indicates a registry bug - please report."
+        ))
+    })?;
+
     // Generate ID if not provided
     let episode_id = request
         .id
@@ -982,8 +1166,8 @@ pub async fn remember_episode(
 
     let core_episode = builder.build();
 
-    // Store in MemoryStore
-    let store_result = state.store.store(core_episode);
+    // Store in memory space-specific store
+    let store_result = store.store(core_episode);
 
     // Check if streaming failed - this is a critical failure that should be surfaced
     if !store_result.streaming_delivered {
@@ -1049,6 +1233,24 @@ pub async fn recall_memories(
 
     info!("Processing recall request with query: {:?}", params.query);
 
+    // Extract memory space from request (query > default)
+    let space_id = extract_memory_space_id(
+        params.space.as_deref(),
+        None, // No body in GET request
+        &state.default_space,
+    )?;
+
+    // Get space-specific store handle from registry
+    let handle = state.registry.create_or_get(&space_id).await?;
+    let store = handle.store();
+
+    // Runtime guard: verify we got the right store
+    store.verify_space(&space_id).map_err(|e| {
+        ApiError::SystemError(format!(
+            "Internal error: {e}. This indicates a registry bug - please report."
+        ))
+    })?;
+
     // Validate query
     if params.query.is_none() && params.embedding.is_none() {
         return Err(ApiError::InvalidInput(
@@ -1104,7 +1306,7 @@ pub async fn recall_memories(
 
         #[cfg(feature = "hnsw_index")]
         if matches!(parsed, RecallMode::Spreading | RecallMode::Hybrid)
-            && state.store.spreading_engine().is_none()
+            && store.spreading_engine().is_none()
         {
             return Err(ApiError::InvalidInput(
                 "Spreading recall requires the `spreading_api_beta` flag. Enable it with `engram config set feature_flags.spreading_api_beta true` and restart the server.".to_string(),
@@ -1116,12 +1318,11 @@ pub async fn recall_memories(
         None
     };
 
-    // Perform actual recall using MemoryStore and capture the effective mode
-    let (recall_result, effective_mode) = if let Some(mode) = requested_mode {
-        (state.store.recall_with_mode(&cue, mode), mode)
-    } else {
-        (state.store.recall(&cue), state.store.recall_mode())
-    };
+    // Perform actual recall using space-specific MemoryStore and capture the effective mode
+    let (recall_result, effective_mode) = requested_mode.map_or_else(
+        || (store.recall(&cue), store.recall_mode()),
+        |mode| (store.recall_with_mode(&cue, mode), mode),
+    );
 
     // Check if streaming failed
     if !recall_result.streaming_delivered {
@@ -1729,6 +1930,7 @@ pub async fn create_memory_rest(
         timestamp: None,
         auto_link: Some(false),
         link_threshold: None,
+        memory_space_id: None, // Use default space
     };
 
     // Forward to the cognitive handler
@@ -1889,6 +2091,11 @@ pub async fn simple_health(State(state): State<ApiState>) -> Result<impl IntoRes
     };
 
     Ok((status_code, Json(payload)))
+}
+
+/// Lightweight liveness probe used by CLI keepalive checks.
+pub async fn alive_health() -> impl IntoResponse {
+    StatusCode::OK
 }
 
 /// GET /health/spreading - Spreading-specific readiness probe
@@ -2199,6 +2406,28 @@ impl IntoResponse for ApiError {
     }
 }
 
+impl From<MemorySpaceError> for ApiError {
+    fn from(error: MemorySpaceError) -> Self {
+        match error {
+            MemorySpaceError::InvalidId(inner) => Self::InvalidInput(inner.to_string()),
+            MemorySpaceError::NotFound { id } => Self::InvalidInput(format!(
+                "Memory space '{id}' not found. Ensure it is created before issuing operations."
+            )),
+            MemorySpaceError::Persistence { id, path, source } => Self::SystemError(format!(
+                "Failed to prepare persistence path '{}' for memory space '{id}': {source}",
+                path.display()
+            )),
+            MemorySpaceError::DataRootUnavailable { path, source } => Self::SystemError(format!(
+                "Unable to initialise memory space data root '{}': {source}",
+                path.display()
+            )),
+            MemorySpaceError::StoreInit { id, source } => Self::SystemError(format!(
+                "Failed to initialise memory store for space '{id}': {source}"
+            )),
+        }
+    }
+}
+
 // ================================================================================================
 // Server-Sent Events (SSE) Streaming Handlers
 // ================================================================================================
@@ -2391,6 +2620,7 @@ fn create_activity_stream(
                     // Map MemoryEvent to SSE event format
                     let (event_type, _description, importance, event_data) = match memory_event {
                         MemoryEvent::Stored {
+                            memory_space_id,
                             id,
                             confidence,
                             timestamp,
@@ -2405,6 +2635,7 @@ fn create_activity_stream(
                                 json!({
                                     "event_type": "storage",
                                     "description": "New memory encoded",
+                                    "memory_space_id": memory_space_id.as_str(),
                                     "memory_id": id,
                                     "confidence": confidence,
                                     "importance": confidence,
@@ -2418,6 +2649,7 @@ fn create_activity_stream(
                             )
                         }
                         MemoryEvent::Recalled {
+                            memory_space_id,
                             id,
                             activation,
                             confidence,
@@ -2433,6 +2665,7 @@ fn create_activity_stream(
                                 json!({
                                     "event_type": "recall",
                                     "description": "Memory recalled",
+                                    "memory_space_id": memory_space_id.as_str(),
                                     "memory_id": id,
                                     "activation": activation,
                                     "confidence": confidence,
@@ -2447,6 +2680,7 @@ fn create_activity_stream(
                             )
                         }
                         MemoryEvent::ActivationSpread {
+                            memory_space_id,
                             count,
                             avg_activation,
                         } => {
@@ -2460,6 +2694,7 @@ fn create_activity_stream(
                                 json!({
                                     "event_type": "activation",
                                     "description": "Spreading activation across memory graph",
+                                    "memory_space_id": memory_space_id.as_str(),
                                     "memories_activated": count,
                                     "avg_activation": avg_activation,
                                     "importance": avg_activation,
@@ -2547,6 +2782,7 @@ fn create_memory_stream(
                     // Map MemoryEvent to memory operation events
                     let (operation, _confidence, event_data) = match memory_event {
                         MemoryEvent::Stored {
+                            memory_space_id,
                             id,
                             confidence,
                             timestamp,
@@ -2563,6 +2799,7 @@ fn create_memory_stream(
                                 json!({
                                     "operation": "formation",
                                     "description": "New memory formation with encoding confidence",
+                                    "memory_space_id": memory_space_id.as_str(),
                                     "memory_type": "episodic",
                                     "confidence": confidence,
                                     "timestamp": timestamp,
@@ -2573,6 +2810,7 @@ fn create_memory_stream(
                             )
                         }
                         MemoryEvent::Recalled {
+                            memory_space_id,
                             id,
                             activation,
                             confidence,
@@ -2590,6 +2828,7 @@ fn create_memory_stream(
                                 json!({
                                     "operation": "retrieval",
                                     "description": "Memory retrieval with activation spreading",
+                                    "memory_space_id": memory_space_id.as_str(),
                                     "memory_type": "episodic",
                                     "confidence": avg_confidence,
                                     "activation": activation,
@@ -3125,7 +3364,13 @@ pub fn create_api_routes() -> Router<ApiState> {
         .route("/shutdown", post(shutdown_server))
         // Simple health endpoint for status checks
         .route("/health", get(simple_health))
+        .route("/health/alive", get(alive_health))
         .route("/health/spreading", get(spreading_health))
+        // Memory space registry operations
+        .route(
+            "/api/v1/spaces",
+            get(list_memory_spaces).post(create_memory_space),
+        )
         // Memory operations with cognitive-friendly paths
         .route("/api/v1/memories/remember", post(remember_memory))
         .route("/api/v1/memories/recall", get(recall_memories))

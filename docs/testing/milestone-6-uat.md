@@ -33,6 +33,7 @@ Consolidation requires episodes to be >1 day old before processing.
 **Workaround**: Use backdated timestamps for testing
 
 **Example**:
+
 ```bash
 curl -X POST http://localhost:7432/api/v1/episodes/remember \
   -d '{"what": "Test", "when": "2025-10-19T10:00:00Z", "confidence": 0.9}'
@@ -41,6 +42,7 @@ curl -X POST http://localhost:7432/api/v1/episodes/remember \
 ### Finding 2: SSE Streaming Works Correctly
 
 Real-time consolidation belief updates stream via Server-Sent Events:
+
 - Keepalive heartbeats every ~10 seconds
 - Connection remains stable
 - Proper `text/event-stream` content type
@@ -48,6 +50,7 @@ Real-time consolidation belief updates stream via Server-Sent Events:
 ### Finding 3: Scheduler Runs on 60s Cadence
 
 Consolidation scheduler operational with stats showing:
+
 - `total_replays: 1`
 - `avg_replay_speed: 5.0`
 - `avg_ripple_frequency: 200.0 Hz`
@@ -57,6 +60,7 @@ Consolidation scheduler operational with stats showing:
 ## Test Results by Phase
 
 ### Phase 1: Documentation Verification
+
 **Status**: ✅ PASS (4/4 scenarios)
 
 1. Server Startup - PASS (<3 seconds, healthy status)
@@ -65,6 +69,7 @@ Consolidation scheduler operational with stats showing:
 4. Consolidation Endpoints - PASS (both endpoints responding correctly)
 
 ### Phase 2: Consolidation API Testing
+
 **Status**: ⚠️ PARTIAL (infrastructure validated)
 
 1. Automatic Consolidation Trigger - PARTIAL
@@ -74,6 +79,7 @@ Consolidation scheduler operational with stats showing:
    - No patterns extracted (EXPECTED - episodes too recent)
 
 ### Phase 3: SSE Streaming Validation
+
 **Status**: ✅ PASS (1/3 scenarios tested)
 
 1. SSE Connection and Keepalive - PASS
@@ -82,6 +88,7 @@ Consolidation scheduler operational with stats showing:
    - Connection stable for full test duration
 
 ### Phase 6: Integration Scenarios
+
 **Status**: ⚠️ PARTIAL (API validated)
 
 1. Research Assistant Use Case - PARTIAL
@@ -114,6 +121,7 @@ Consolidation scheduler operational with stats showing:
 ## Full Results
 
 Complete test outputs, logs, and detailed analysis available in:
+
 - `uat-results/SUMMARY.md` - Comprehensive report
 - `uat-results/phase1/` - Documentation verification results
 - `uat-results/phase2/` - Consolidation API test results
@@ -125,11 +133,13 @@ Complete test outputs, logs, and detailed analysis available in:
 ## Recommendations
 
 ### For Immediate Release (v0.2.0)
+
 1. ✅ System is production-ready
 2. Document age threshold prominently in API docs (DONE)
 3. Include backdated timestamp example in quickstart (DONE)
 
 ### For Future Testing
+
 1. Run overnight UAT with aged episodes to validate full pattern extraction
 2. Add integration test config with `min_episode_age: 1s` for CI/CD
 3. Validate storage compaction with real consolidation runs
@@ -140,6 +150,7 @@ Complete test outputs, logs, and detailed analysis available in:
 ## Production Readiness Assessment
 
 ### Infrastructure: ✅ READY
+
 - Server startup: Fast and stable
 - API endpoints: Discoverable and responding correctly
 - SSE streaming: Working with keepalive
@@ -147,12 +158,14 @@ Complete test outputs, logs, and detailed analysis available in:
 - Age-based filtering: Working as designed
 
 ### Documentation: ✅ ACCURATE
+
 - README.md examples work as written
 - quickstart.md complete and accurate
 - Consolidation endpoints documented
 - Age threshold now documented with examples
 
 ### Observability: ✅ VALIDATED
+
 - Consolidation stats endpoint working
 - SSE stream for real-time monitoring operational
 - Grafana dashboard ready (from Task 006)

@@ -14,7 +14,9 @@ use engram_cli::{
 };
 #[cfg(feature = "hnsw_index")]
 use engram_core::activation::{RecallConfig, RecallMode, SpreadingAutoTuner};
-use engram_core::{MemoryStore, metrics};
+use engram_core::{
+    MemorySpaceError, MemorySpaceId, MemorySpaceRegistry, MemoryStore, SpaceDirectories, metrics,
+};
 use std::fs;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -29,9 +31,9 @@ use tracing_subscriber::FmtSubscriber;
 mod cli;
 mod config;
 use cli::{
-    Cli, Commands, ConfigAction, MemoryAction, OutputFormat, create_memory, delete_memory,
-    get_memory, get_server_connection, list_memories, remove_pid_file, search_memories,
-    show_status, stop_server, write_pid_file,
+    Cli, Commands, ConfigAction, MemoryAction, OutputFormat, SpaceAction, create_memory,
+    create_space, delete_memory, get_memory, get_server_connection, list_memories, list_spaces,
+    remove_pid_file, search_memories, show_status, stop_server, write_pid_file,
 };
 use config::ConfigManager;
 
@@ -85,6 +87,8 @@ async fn main() -> Result<()> {
         }
 
         Commands::Memory { action } => handle_memory_command(action).await,
+
+        Commands::Space { action } => handle_space_command(action).await,
 
         Commands::Config { action } => handle_config_command(action, &mut config_manager),
 
@@ -168,72 +172,47 @@ async fn start_server(port: u16, grpc_port: u16, cli_config: &config::CliConfig)
         );
     }
 
-    // Initialize memory store with optional indexing and persistence
-    // mut needed for cfg-gated feature initialization below
-    #[allow(unused_mut)]
-    let mut store = MemoryStore::new(100_000);
+    let data_root = resolve_data_directory()?;
+    info!(root = %data_root.display(), "Using memory space data root");
 
-    #[cfg(feature = "hnsw_index")]
-    {
-        store = store.with_hnsw_index();
-    }
+    let feature_flags = cli_config.feature_flags.clone();
+    let registry_flags = feature_flags.clone();
 
-    #[cfg(feature = "memory_mapped_persistence")]
-    {
-        let data_dir = resolve_data_directory()?;
-        store = store.with_persistence(&data_dir).map_err(|e| {
-            anyhow::anyhow!(
-                "Failed to enable persistence at {}: {}",
-                data_dir.display(),
-                e
-            )
-        })?;
+    let registry = Arc::new(MemorySpaceRegistry::new(
+        &data_root,
+        move |space_id, directories| {
+            build_memory_space_store(space_id, directories, &registry_flags)
+        },
+    )?);
 
-        let recovered = store.recover_from_wal().map_err(|e| {
-            anyhow::anyhow!("Failed to recover WAL from {}: {}", data_dir.display(), e)
-        })?;
-        if recovered > 0 {
-            info!(recovered, "Recovered episodes from write-ahead log");
-        } else {
-            info!("No write-ahead log entries to recover");
-        }
+    registry
+        .ensure_spaces(cli_config.memory_spaces.bootstrap_spaces.clone())
+        .await?;
 
-        store
-            .initialize_persistence()
-            .map_err(|e| anyhow::anyhow!("Failed to start persistence workers: {}", e))?;
-    }
+    let default_space_id = cli_config.memory_spaces.default_space.clone();
+    let default_handle = registry.create_or_get(&default_space_id).await?;
+    info!(
+        space = %default_space_id,
+        root = %default_handle.directories().root.display(),
+        "Default memory space initialised"
+    );
 
-    #[cfg(feature = "hnsw_index")]
-    if cli_config.feature_flags.spreading_api_beta {
-        info!(" Spreading API beta flag enabled");
-    } else {
-        warn!(" Spreading API beta flag disabled — similarity-only recall will be used by default");
-        store = store.with_recall_config(RecallConfig {
-            recall_mode: RecallMode::Similarity,
-            ..RecallConfig::default()
-        });
-    }
+    let memory_store = default_handle.store();
 
-    #[cfg(not(feature = "hnsw_index"))]
-    if cli_config.feature_flags.spreading_api_beta {
-        warn!(
-            " Spreading API beta flag ignored because the CLI was built without the 'hnsw_index' feature"
-        );
-    }
+    // Enable event streaming for real-time observability. Without an active
+    // subscriber the broadcast channel drops events, so we immediately attach
+    // a keepalive receiver after enabling the stream within the registry.
+    let mut event_rx = memory_store.subscribe_to_events().ok_or_else(|| {
+        anyhow!(
+            "Event streaming not initialised for memory space {}",
+            default_space_id
+        )
+    })?;
+    info!(space = %default_space_id, " Event streaming enabled (buffer size: 1000)");
 
-    // Enable event streaming for real-time observability
-    // CRITICAL: Keep the receiver alive to maintain broadcast channel subscriptions
-    // Without an active subscriber, all events are silently dropped
-    let mut event_rx = store.enable_event_streaming(1000);
-    info!(" Event streaming enabled (buffer size: 1000)");
-
-    let memory_store = Arc::new(store);
-
-    // Spawn keepalive subscriber task to guarantee the broadcast channel
-    // always has at least one active receiver. This prevents events from
-    // being silently dropped when no SSE clients are connected.
     info!(" Keepalive subscriber started - maintaining event streaming invariant");
     let mut keepalive_shutdown = shutdown_rx.clone();
+    let keepalive_space = default_space_id.clone();
     let keepalive_handle = tokio::spawn(async move {
         let mut lagged_count = 0u64;
         let mut events_received = 0u64;
@@ -243,6 +222,7 @@ async fn start_server(port: u16, grpc_port: u16, cli_config: &config::CliConfig)
             tokio::select! {
                 _ = keepalive_shutdown.changed() => {
                     info!(
+                        space = %keepalive_space,
                         events_received,
                         lagged_count,
                         "Keepalive subscriber shutting down gracefully - {} events received, {} lagged",
@@ -259,6 +239,7 @@ async fn start_server(port: u16, grpc_port: u16, cli_config: &config::CliConfig)
                             // Periodic health reporting (every 10 seconds)
                             if last_health_log.elapsed() >= std::time::Duration::from_secs(10) {
                                 info!(
+                                    space = %keepalive_space,
                                     events_received,
                                     lagged_count,
                                     "Keepalive subscriber healthy - {} events received, {} lagged",
@@ -271,6 +252,7 @@ async fn start_server(port: u16, grpc_port: u16, cli_config: &config::CliConfig)
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
                             lagged_count += skipped;
                             warn!(
+                                space = %keepalive_space,
                                 lagged_count,
                                 skipped,
                                 "Keepalive event subscriber lagging - {} events skipped (total: {}). \
@@ -281,6 +263,7 @@ async fn start_server(port: u16, grpc_port: u16, cli_config: &config::CliConfig)
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                             error!(
+                                space = %keepalive_space,
                                 events_received,
                                 lagged_count,
                                 "CRITICAL: Event broadcast channel closed - keepalive subscriber exiting. \
@@ -294,6 +277,21 @@ async fn start_server(port: u16, grpc_port: u16, cli_config: &config::CliConfig)
             }
         }
     });
+
+    #[cfg(feature = "hnsw_index")]
+    if feature_flags.spreading_api_beta {
+        info!(" Spreading API beta flag enabled");
+    } else {
+        warn!(" Spreading API beta flag disabled — similarity-only recall will be used by default");
+    }
+
+    #[cfg(not(feature = "hnsw_index"))]
+    if feature_flags.spreading_api_beta {
+        warn!(
+            " Spreading API beta flag ignored because the CLI was built without the 'hnsw_index' feature"
+        );
+    }
+
     let metrics = metrics::init();
 
     let auto_tuner = SpreadingAutoTuner::new(0.10, 64);
@@ -351,19 +349,27 @@ async fn start_server(port: u16, grpc_port: u16, cli_config: &config::CliConfig)
     #[cfg(feature = "memory_mapped_persistence")]
     {
         memory_store.start_tier_migration();
-        info!(" Background tier migration started (5 minute interval)");
+        info!(
+            space = %default_space_id,
+            " Background tier migration started (5 minute interval)"
+        );
     }
 
     // Start HNSW update worker for async index updates
     #[cfg(feature = "hnsw_index")]
     {
         memory_store.start_hnsw_worker();
-        info!(" HNSW update worker started (batch size: 100, timeout: 50ms)");
+        info!(
+            space = %default_space_id,
+            " HNSW update worker started (batch size: 100, timeout: 50ms)"
+        );
     }
 
     // Create API state
     let api_state = ApiState::new(
         Arc::clone(&memory_store),
+        Arc::clone(&registry),
+        default_space_id.clone(),
         Arc::clone(&metrics),
         Arc::clone(&auto_tuner),
         Arc::clone(&shutdown_tx),
@@ -413,7 +419,12 @@ async fn start_server(port: u16, grpc_port: u16, cli_config: &config::CliConfig)
     write_pid_file(actual_port)?;
 
     // Start gRPC server in background task
-    let grpc_service = MemoryService::new(grpc_memory_store, grpc_metrics);
+    let grpc_service = MemoryService::new(
+        grpc_memory_store,
+        grpc_metrics,
+        Arc::clone(&registry),
+        default_space_id.clone(),
+    );
     let grpc_handle = tokio::spawn(async move {
         if let Err(e) = grpc_service.serve(actual_grpc_port).await {
             error!(" gRPC server error: {}", e);
@@ -469,7 +480,6 @@ async fn start_server(port: u16, grpc_port: u16, cli_config: &config::CliConfig)
     Ok(())
 }
 
-#[cfg(feature = "memory_mapped_persistence")]
 fn resolve_data_directory() -> Result<PathBuf> {
     let env_dir = std::env::var("ENGRAM_DATA_DIR").map(PathBuf::from).ok();
     let base_dir = if let Some(path) = env_dir {
@@ -485,6 +495,70 @@ fn resolve_data_directory() -> Result<PathBuf> {
     Ok(base_dir)
 }
 
+fn build_memory_space_store(
+    space_id: &MemorySpaceId,
+    directories: &SpaceDirectories,
+    feature_flags: &config::FeatureFlags,
+) -> Result<Arc<MemoryStore>, MemorySpaceError> {
+    #[allow(unused_mut)]
+    let mut store = MemoryStore::for_space(space_id.clone(), 100_000);
+
+    #[cfg(feature = "hnsw_index")]
+    {
+        store = store.with_hnsw_index();
+        if feature_flags.spreading_api_beta {
+            tracing::info!(space = %space_id, "Spreading API beta enabled");
+        } else {
+            tracing::warn!(
+                space = %space_id,
+                "Spreading API beta disabled — falling back to similarity recall"
+            );
+            store = store.with_recall_config(RecallConfig {
+                recall_mode: RecallMode::Similarity,
+                ..RecallConfig::default()
+            });
+        }
+    }
+
+    #[cfg(not(feature = "hnsw_index"))]
+    let _ = feature_flags;
+
+    #[cfg(feature = "memory_mapped_persistence")]
+    {
+        store = store.with_persistence(&directories.root).map_err(|err| {
+            MemorySpaceError::StoreInit {
+                id: space_id.clone(),
+                source: err,
+            }
+        })?;
+
+        let recovered = store
+            .recover_from_wal()
+            .map_err(|err| MemorySpaceError::StoreInit {
+                id: space_id.clone(),
+                source: Box::new(err),
+            })?;
+        if recovered > 0 {
+            tracing::info!(
+                space = %space_id,
+                recovered,
+                "Recovered episodes from write-ahead log"
+            );
+        }
+
+        store
+            .initialize_persistence()
+            .map_err(|err| MemorySpaceError::StoreInit {
+                id: space_id.clone(),
+                source: err,
+            })?;
+    }
+
+    let _ = store.enable_event_streaming(1000);
+
+    Ok(Arc::new(store))
+}
+
 async fn handle_memory_command(action: MemoryAction) -> Result<()> {
     let (port, _grpc_port) = get_server_connection().await?;
 
@@ -497,6 +571,13 @@ async fn handle_memory_command(action: MemoryAction) -> Result<()> {
         MemoryAction::Search { query, limit } => search_memories(port, query, limit).await,
         MemoryAction::List { limit, offset } => list_memories(port, limit, offset).await,
         MemoryAction::Delete { id } => delete_memory(port, id).await,
+    }
+}
+
+async fn handle_space_command(action: SpaceAction) -> Result<()> {
+    match action {
+        SpaceAction::List => list_spaces().await,
+        SpaceAction::Create { id } => create_space(id).await,
     }
 }
 
