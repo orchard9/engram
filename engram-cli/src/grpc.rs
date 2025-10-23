@@ -386,7 +386,10 @@ impl EngramService for MemoryService {
 
         // Get space-specific store handle from registry
         let _handle = self.registry.create_or_get(&space_id).await.map_err(|e| {
-            Status::internal(format!("Failed to access memory space '{}': {}", space_id, e))
+            Status::internal(format!(
+                "Failed to access memory space '{}': {}",
+                space_id, e
+            ))
         })?;
 
         let mode = ForgetMode::try_from(req.mode).unwrap_or(ForgetMode::Unspecified);
@@ -427,7 +430,10 @@ impl EngramService for MemoryService {
 
         // Get space-specific store handle from registry
         let _handle = self.registry.create_or_get(&space_id).await.map_err(|e| {
-            Status::internal(format!("Failed to access memory space '{}': {}", space_id, e))
+            Status::internal(format!(
+                "Failed to access memory space '{}': {}",
+                space_id, e
+            ))
         })?;
 
         // Check input presence
@@ -467,7 +473,10 @@ impl EngramService for MemoryService {
 
         // Get space-specific store handle from registry
         let _handle = self.registry.create_or_get(&space_id).await.map_err(|e| {
-            Status::internal(format!("Failed to access memory space '{}': {}", space_id, e))
+            Status::internal(format!(
+                "Failed to access memory space '{}': {}",
+                space_id, e
+            ))
         })?;
 
         let episode = req.episode.ok_or_else(|| {
@@ -506,7 +515,10 @@ impl EngramService for MemoryService {
 
         // Get space-specific store handle from registry
         let _handle = self.registry.create_or_get(&space_id).await.map_err(|e| {
-            Status::internal(format!("Failed to access memory space '{}': {}", space_id, e))
+            Status::internal(format!(
+                "Failed to access memory space '{}': {}",
+                space_id, e
+            ))
         })?;
 
         if req.cue.is_none() {
@@ -545,7 +557,10 @@ impl EngramService for MemoryService {
 
         // Get space-specific store handle from registry
         let _handle = self.registry.create_or_get(&space_id).await.map_err(|e| {
-            Status::internal(format!("Failed to access memory space '{}': {}", space_id, e))
+            Status::internal(format!(
+                "Failed to access memory space '{}': {}",
+                space_id, e
+            ))
         })?;
 
         let _mode = ConsolidationMode::try_from(req.mode).unwrap_or(ConsolidationMode::Unspecified);
@@ -578,7 +593,10 @@ impl EngramService for MemoryService {
 
         // Get space-specific store handle from registry
         let _handle = self.registry.create_or_get(&space_id).await.map_err(|e| {
-            Status::internal(format!("Failed to access memory space '{}': {}", space_id, e))
+            Status::internal(format!(
+                "Failed to access memory space '{}': {}",
+                space_id, e
+            ))
         })?;
 
         let replay_cycles = req.replay_cycles.clamp(1, 100);
@@ -650,7 +668,10 @@ impl EngramService for MemoryService {
 
         // Get space-specific store handle from registry
         let _handle = self.registry.create_or_get(&space_id).await.map_err(|e| {
-            Status::internal(format!("Failed to access memory space '{}': {}", space_id, e))
+            Status::internal(format!(
+                "Failed to access memory space '{}': {}",
+                space_id, e
+            ))
         })?;
 
         let _partial = req.partial_pattern.ok_or_else(|| {
@@ -688,7 +709,10 @@ impl EngramService for MemoryService {
 
         // Get space-specific store handle from registry
         let _handle = self.registry.create_or_get(&space_id).await.map_err(|e| {
-            Status::internal(format!("Failed to access memory space '{}': {}", space_id, e))
+            Status::internal(format!(
+                "Failed to access memory space '{}': {}",
+                space_id, e
+            ))
         })?;
 
         if req.source_memory.is_empty() || req.target_memory.is_empty() {
@@ -725,7 +749,10 @@ impl EngramService for MemoryService {
 
             // Get space-specific store handle from registry
             let _handle = self.registry.create_or_get(&space_id).await.map_err(|e| {
-                Status::internal(format!("Failed to access memory space '{}': {}", space_id, e))
+                Status::internal(format!(
+                    "Failed to access memory space '{}': {}",
+                    space_id, e
+                ))
             })?;
         }
 
@@ -788,7 +815,23 @@ impl EngramService for MemoryService {
         &self,
         request: Request<StreamRequest>,
     ) -> Result<Response<Self::StreamStream>, Status> {
-        let _req = request.into_inner();
+        let metadata = request.metadata().clone();
+        let req = request.into_inner();
+
+        // Extract memory space from request (explicit field or fallback to default)
+        let space_id = self.resolve_memory_space(&req.memory_space_id, &metadata)?;
+
+        // Get space-specific store handle from registry
+        let _handle = self.registry.create_or_get(&space_id).await.map_err(|e| {
+            Status::internal(format!("Failed to access memory space '{}': {}", space_id, e))
+        })?;
+
+        // TODO(Task 005c): Wire up per-space event filtering
+        // Currently generates mock events. For full multi-tenant isolation, need to:
+        // 1. Subscribe to store's event stream for this specific space only
+        // 2. Filter events by space_id to prevent cross-tenant leakage
+        // 3. Implement per-space backpressure management
+        // See Task 007 for comprehensive streaming isolation implementation.
 
         // Create channel for streaming responses
         let (tx, rx) = tokio::sync::mpsc::channel(32);
@@ -839,6 +882,8 @@ impl EngramService for MemoryService {
         let mut stream = request.into_inner();
         let (tx, rx) = tokio::sync::mpsc::channel(32);
         let _store = Arc::clone(&self.store);
+        let _registry = Arc::clone(&self.registry);
+        let default_space = self.default_space.clone();
 
         tokio::spawn(async move {
             let mut sequence = 0u64;
@@ -846,6 +891,23 @@ impl EngramService for MemoryService {
                 match result {
                     Ok(req) => {
                         sequence += 1;
+
+                        // TODO(Task 005c): Per-request space routing for streaming operations
+                        // Each RememberRequest has its own memory_space_id field
+                        // For full isolation, need to:
+                        // 1. Extract space_id from req.memory_space_id (or use default_space)
+                        // 2. Validate space exists via _registry.create_or_get()
+                        // 3. Route storage operation to the correct space-specific store
+                        // Currently stores to shared store regardless of space_id
+                        let _space_id = if req.memory_space_id.is_empty() {
+                            default_space.clone()
+                        } else {
+                            MemorySpaceId::try_from(req.memory_space_id.as_str())
+                                .unwrap_or_else(|_| default_space.clone())
+                        };
+
+                        // TODO: Validate space access
+                        // let _handle = _registry.create_or_get(&space_id).await?;
 
                         // Process memory storage
                         let response = match req.memory_type {
@@ -906,6 +968,8 @@ impl EngramService for MemoryService {
         let mut stream = request.into_inner();
         let (tx, rx) = tokio::sync::mpsc::channel(32);
         let _store = Arc::clone(&self.store);
+        let _registry = Arc::clone(&self.registry);
+        let default_space = self.default_space.clone();
 
         tokio::spawn(async move {
             let mut query_count = 0u64;
@@ -913,6 +977,23 @@ impl EngramService for MemoryService {
                 match result {
                     Ok(req) => {
                         query_count += 1;
+
+                        // TODO(Task 005c): Per-request space routing for streaming recall
+                        // Each RecallRequest has its own memory_space_id field
+                        // For full isolation, need to:
+                        // 1. Extract space_id from req.memory_space_id (or use default_space)
+                        // 2. Validate space exists via _registry.create_or_get()
+                        // 3. Route recall operation to the correct space-specific store
+                        // Currently queries shared store regardless of space_id
+                        let _space_id = if req.memory_space_id.is_empty() {
+                            default_space.clone()
+                        } else {
+                            MemorySpaceId::try_from(req.memory_space_id.as_str())
+                                .unwrap_or_else(|_| default_space.clone())
+                        };
+
+                        // TODO: Validate space access
+                        // let _handle = _registry.create_or_get(&space_id).await?;
 
                         // Validate cue presence
                         if req.cue.is_none() {
@@ -969,6 +1050,8 @@ impl EngramService for MemoryService {
         let mut stream = request.into_inner();
         let (tx, rx) = tokio::sync::mpsc::channel(64); // Higher buffer for bidirectional flow
         let _store = Arc::clone(&self.store);
+        let _registry = Arc::clone(&self.registry);
+        let default_space = self.default_space.clone();
 
         tokio::spawn(async move {
             #[allow(clippy::collection_is_never_read)]
@@ -980,6 +1063,25 @@ impl EngramService for MemoryService {
                     Ok(req) => {
                         global_sequence += 1;
                         let session_id = req.session_id.clone();
+
+                        // TODO(Task 005c): Per-request space routing for bidirectional memory flow
+                        // MemoryFlowRequest has memory_space_id at top level
+                        // All operations in this request should be routed to the same space
+                        // For full isolation, need to:
+                        // 1. Extract space_id from req.memory_space_id (or use default_space)
+                        // 2. Validate space exists via _registry.create_or_get()
+                        // 3. Route all remember/recall operations to correct space-specific store
+                        // 4. Ensure flow control and session state are per-space isolated
+                        // Currently operates on shared store regardless of space_id
+                        let _space_id = if req.memory_space_id.is_empty() {
+                            default_space.clone()
+                        } else {
+                            MemorySpaceId::try_from(req.memory_space_id.as_str())
+                                .unwrap_or_else(|_| default_space.clone())
+                        };
+
+                        // TODO: Validate space access
+                        // let _handle = _registry.create_or_get(&space_id).await?;
 
                         let response = match req.request {
                             Some(memory_flow_request::Request::Remember(_remember_req)) => {
