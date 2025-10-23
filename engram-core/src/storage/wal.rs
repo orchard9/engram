@@ -470,6 +470,9 @@ pub struct WalWriter {
     /// Global sequence counter
     sequence_counter: AtomicU64,
 
+    /// Timestamp (nanoseconds since epoch) of last successful write
+    last_write_timestamp_ns: Arc<AtomicU64>,
+
     /// Entry queue for batching
     entry_queue: Arc<SegQueue<WalEntry>>,
 
@@ -532,10 +535,18 @@ impl WalWriter {
 
         let buf_writer = BufWriter::with_capacity(64 * 1024, file); // 64KB buffer
 
+        // Initialize last write timestamp to current time
+        let now_ns = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let init_timestamp = u64::try_from(now_ns.min(u128::from(u64::MAX))).unwrap_or(u64::MAX);
+
         Ok(Self {
             wal_dir,
             file: Arc::new(parking_lot::Mutex::new(buf_writer)),
             sequence_counter: AtomicU64::new(0),
+            last_write_timestamp_ns: Arc::new(AtomicU64::new(init_timestamp)),
             entry_queue: Arc::new(SegQueue::new()),
             fsync_mode,
             max_batch_size: 1000,
@@ -563,6 +574,7 @@ impl WalWriter {
         let file = Arc::clone(&self.file);
         let metrics = Arc::clone(&self.metrics);
         let shutdown = Arc::clone(&self.shutdown);
+        let last_write_timestamp_ns = Arc::clone(&self.last_write_timestamp_ns);
         let fsync_mode = self.fsync_mode;
         let max_batch_size = self.max_batch_size;
         let max_batch_delay = self.max_batch_delay;
@@ -575,6 +587,7 @@ impl WalWriter {
                     &file,
                     &metrics,
                     &shutdown,
+                    &last_write_timestamp_ns,
                     fsync_mode,
                     max_batch_size,
                     max_batch_delay,
@@ -592,6 +605,30 @@ impl WalWriter {
     #[must_use]
     pub fn wal_directory(&self) -> &Path {
         &self.wal_dir
+    }
+
+    /// Calculate WAL lag in milliseconds
+    ///
+    /// Returns the time difference between the current time and the timestamp
+    /// of the last successfully written entry. A value of 0.0 indicates the WAL
+    /// is fully caught up with writes.
+    #[must_use]
+    pub fn lag_ms(&self) -> f64 {
+        let now_ns = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+
+        let last_write_ns = u128::from(self.last_write_timestamp_ns.load(Ordering::Relaxed));
+
+        if now_ns <= last_write_ns {
+            return 0.0;
+        }
+
+        let lag_ns = now_ns.saturating_sub(last_write_ns);
+
+        // Convert nanoseconds to milliseconds
+        lag_ns as f64 / 1_000_000.0
     }
 
     /// Write entry asynchronously
@@ -633,6 +670,10 @@ impl WalWriter {
             .record_write((HEADER_SIZE + entry.payload.len()) as u64);
         self.metrics.record_fsync();
 
+        // Update last write timestamp for lag tracking
+        self.last_write_timestamp_ns
+            .store(entry.header.timestamp, Ordering::Relaxed);
+
         Ok(sequence)
     }
 
@@ -642,6 +683,7 @@ impl WalWriter {
         file: &Arc<parking_lot::Mutex<BufWriter<File>>>,
         metrics: &Arc<StorageMetrics>,
         shutdown: &Arc<std::sync::atomic::AtomicBool>,
+        last_write_timestamp_ns: &Arc<AtomicU64>,
         fsync_mode: FsyncMode,
         max_batch_size: usize,
         max_batch_delay: std::time::Duration,
@@ -678,6 +720,11 @@ impl WalWriter {
             if let Err(e) = Self::write_batch(file, &batch, metrics, fsync_mode) {
                 tracing::error!("WAL batch write failed: {}", e);
                 // Could implement retry logic here
+            } else {
+                // Update last write timestamp with the latest entry in the batch
+                if let Some(last_entry) = batch.entries.last() {
+                    last_write_timestamp_ns.store(last_entry.header.timestamp, Ordering::Relaxed);
+                }
             }
 
             batch = WalBatch::new();
@@ -694,8 +741,11 @@ impl WalWriter {
             batch.add_entry(entry);
         }
 
-        if !batch.is_empty() {
-            let _ = Self::write_batch(file, &batch, metrics, fsync_mode);
+        if !batch.is_empty() && Self::write_batch(file, &batch, metrics, fsync_mode).is_ok() {
+            // Update last write timestamp with the latest entry in the final batch
+            if let Some(last_entry) = batch.entries.last() {
+                last_write_timestamp_ns.store(last_entry.header.timestamp, Ordering::Relaxed);
+            }
         }
     }
 

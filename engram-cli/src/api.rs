@@ -127,14 +127,12 @@ pub struct SpaceHealthMetrics {
     pub space: String,
     /// Total number of memories in this space
     pub memories: u64,
-    /// Capacity utilization pressure (0.0-1.0)
-    /// TODO(Task 006c): Wire up actual pressure metrics from tier backend
+    /// Hot tier capacity utilization (0.0-1.0)
     pub pressure: f64,
-    /// Write-Ahead Log lag in milliseconds
-    /// TODO(Task 006c): Wire up actual WAL lag from persistence handle
+    /// Write-Ahead Log replication lag in milliseconds
     pub wal_lag_ms: f64,
-    /// Consolidation rate (memories/sec)
-    /// TODO(Task 006c): Wire up actual consolidation throughput metrics
+    /// Consolidation throughput rate (memories/sec)
+    /// TODO(Task 006c-followup): Implement consolidation engine throughput tracking
     pub consolidation_rate: f64,
 }
 
@@ -2412,14 +2410,28 @@ pub async fn system_health(State(state): State<ApiState>) -> Result<impl IntoRes
 
         let memory_count = handle.store().count();
 
-        // Collect metrics for this space
-        // TODO(Task 006c): Wire up actual metrics from tier backend and persistence handle
+        // Get persistence handle for metrics
+        let persistence_handle = state.registry.persistence_handle(&space_id).await.ok();
+
+        // Calculate actual metrics
+        let pressure = persistence_handle
+            .as_ref()
+            .map_or(0.0, |p| p.tier_backend().utilization());
+
+        let wal_lag_ms = persistence_handle
+            .as_ref()
+            .map_or(0.0, |p| p.wal_writer().lag_ms());
+
+        // TODO(Task 006c): Wire up actual consolidation throughput metrics
+        // Consolidation rate requires consolidation engine infrastructure
+        let consolidation_rate = 0.0;
+
         space_metrics.push(SpaceHealthMetrics {
             space: space_id.as_str().to_string(),
             memories: memory_count as u64,
-            pressure: 0.0,           // Placeholder: will be actual tier utilization
-            wal_lag_ms: 0.0,         // Placeholder: will be actual WAL replication lag
-            consolidation_rate: 0.0, // Placeholder: will be actual consolidation throughput
+            pressure,
+            wal_lag_ms,
+            consolidation_rate,
         });
     }
 
