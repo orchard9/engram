@@ -62,14 +62,14 @@ async fn test_find_available_port_with_occupied_port() {
         "Should find port within reasonable range"
     );
 
+    // Release the occupied listener before validating availability.
+    drop(listener);
+
     // Verify the new port is actually available
     assert!(
         is_port_available(new_port).await,
         "Found port should be available"
     );
-
-    // Drop listener to clean up
-    drop(listener);
 }
 
 #[tokio::test]

@@ -74,7 +74,15 @@
 - Grafana dashboard deployed with Prometheus/Loki integration
 - System validated for production deployment with observability stack
 
-### Milestone 7: Pattern Completion
+### Milestone 7: Memory Space Support
+
+**Objective**: Introduce first-class "memory spaces" that isolate tenants/agents within a single Engram deployment. Provide configuration, API, and persistence boundaries so each agent maintains an autonomous memory graph while sharing infrastructure.
+
+**Critical**: All APIs (HTTP/gRPC/CLI) must require an explicit `memory_space_id` and enforce access control. Persistence must shard WAL/index data per space without cross-contamination, and spreading activation must never traverse between spaces. Operational tooling needs clear per-space metrics and lifecycle (create, migrate, delete) flows.
+
+**Validation**: Multi-tenant integration tests proving isolation across store/recall/streaming paths. Concurrency and load tests with ≥10 active spaces show no data leaks and predictable latency budgets. Migration playbook validated by promoting an agent from single-tenant to shared cluster without downtime.
+
+### Milestone 8: Pattern Completion
 
 **Objective**: Build `complete()` operation for filling gaps in partial episodes using learned patterns. Create reconstruction that generates plausible missing details.
 
@@ -82,7 +90,7 @@
 
 **Validation**: Test with deliberately corrupted episodes, measure reconstruction accuracy against ground truth. Verify reconstructed details are plausible using human evaluation.
 
-### Milestone 8: Query Language Parser
+### Milestone 9: Query Language Parser
 
 **Objective**: Implement DSL for memory operations supporting RECALL, PREDICT, IMAGINE with probabilistic semantics. Parser must provide helpful error messages with location and suggestions.
 
@@ -90,7 +98,7 @@
 
 **Validation**: Parse testing with corpus of valid/invalid queries, ensuring 100% of errors have actionable messages. Benchmark showing <100μs parse time for typical queries.
 
-### Milestone 9: Zig Performance Kernels
+### Milestone 10: Zig Performance Kernels
 
 **Objective**: Rewrite hot paths identified via profiling in Zig for maximum performance. Create specialized allocators for memory pool management.
 
@@ -98,7 +106,7 @@
 
 **Validation**: Differential testing between Rust and Zig implementations on million-operation traces. Performance regression tests ensuring improvements maintained across commits.
 
-### Milestone 10: Streaming Interface
+### Milestone 11: Streaming Interface
 
 **Objective**: Build continuous observation and real-time memory formation with incremental indexing. Support both push (observations) and pull (recall) in single stream.
 
@@ -106,7 +114,7 @@
 
 **Validation**: Chaos testing with random delays and failures, verify eventual consistency. Benchmark showing sustained 100K observations/second with concurrent recalls.
 
-### Milestone 11: GPU Acceleration
+### Milestone 12: GPU Acceleration
 
 **Objective**: Add CUDA kernels for parallel batch operations and embedding similarity. Implement unified memory for zero-copy CPU-GPU transfers.
 
@@ -114,7 +122,7 @@
 
 **Validation**: Test on various GPU configurations (consumer/datacenter), verify linear speedup with GPU cores. Ensure CPU-only tests pass identically to prevent GPU-only dependencies.
 
-### Milestone 12: Cognitive Patterns and Observability
+### Milestone 13: Cognitive Patterns and Observability
 
 **Objective**: Implement priming, interference detection, and reconsolidation matching cognitive psychology. Build metrics and tracing for memory dynamics visualization.
 
@@ -122,7 +130,7 @@
 
 **Validation**: Replicate classic psychology experiments (DRM paradigm, interference patterns). Verify metrics overhead using production-like workloads with/without instrumentation.
 
-### Milestone 13: Distributed Architecture
+### Milestone 14: Distributed Architecture
 
 **Objective**: Design partitioned memory across nodes with gossip-based consolidation sync. Enable transparent distribution without changing API semantics.
 
@@ -130,7 +138,7 @@
 
 **Validation**: Jepsen-style testing for distributed consistency properties. Verify single-node and distributed APIs return equivalent results on same data.
 
-### Milestone 14: Multi-Interface Layer
+### Milestone 15: Multi-Interface Layer
 
 **Objective**: Implement gRPC service with streaming and HTTP REST API for web clients. Both must expose identical functionality with interface-appropriate patterns.
 
@@ -138,7 +146,7 @@
 
 **Validation**: Contract testing ensuring gRPC and HTTP return equivalent results. Load testing showing gRPC handles 100K ops/sec, HTTP handles 10K ops/sec.
 
-### Milestone 15: Production Deployment
+### Milestone 16: Production Deployment
 
 **Objective**: Create single-binary deployment with embedded web UI for monitoring. Package as Docker image with automatic clustering and health checks.
 

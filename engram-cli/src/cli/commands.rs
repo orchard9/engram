@@ -45,6 +45,10 @@ pub enum Commands {
         /// Watch status continuously
         #[arg(long)]
         watch: bool,
+
+        /// Memory space to query (overrides ENGRAM_MEMORY_SPACE)
+        #[arg(long)]
+        space: Option<String>,
     },
 
     /// Memory operations
@@ -52,6 +56,13 @@ pub enum Commands {
         /// Memory operation to perform
         #[command(subcommand)]
         action: MemoryAction,
+    },
+
+    /// Memory space registry operations
+    Space {
+        /// Memory space action to perform
+        #[command(subcommand)]
+        action: SpaceAction,
     },
 
     /// Configuration management
@@ -110,6 +121,10 @@ pub enum Commands {
         /// Output format (json, table, compact)
         #[arg(short, long, default_value = "table")]
         format: OutputFormat,
+
+        /// Memory space to query (overrides ENGRAM_MEMORY_SPACE)
+        #[arg(long)]
+        space: Option<String>,
     },
 }
 
@@ -150,12 +165,20 @@ pub enum MemoryAction {
         /// Confidence level (0.0 to 1.0)
         #[arg(short, long)]
         confidence: Option<f64>,
+
+        /// Memory space to store in (overrides ENGRAM_MEMORY_SPACE)
+        #[arg(long)]
+        space: Option<String>,
     },
 
     /// Get a memory by ID
     Get {
         /// Memory ID
         id: String,
+
+        /// Memory space to query (overrides ENGRAM_MEMORY_SPACE)
+        #[arg(long)]
+        space: Option<String>,
     },
 
     /// Search for memories
@@ -166,6 +189,10 @@ pub enum MemoryAction {
         /// Maximum number of results
         #[arg(short, long)]
         limit: Option<usize>,
+
+        /// Memory space to query (overrides ENGRAM_MEMORY_SPACE)
+        #[arg(long)]
+        space: Option<String>,
     },
 
     /// List all memories
@@ -182,6 +209,19 @@ pub enum MemoryAction {
     /// Delete a memory by ID
     Delete {
         /// Memory ID
+        id: String,
+    },
+}
+
+/// Memory space operations
+#[derive(Subcommand)]
+pub enum SpaceAction {
+    /// List all registered memory spaces
+    List,
+
+    /// Create (or retrieve) a memory space by identifier
+    Create {
+        /// Identifier for the memory space
         id: String,
     },
 }

@@ -1,6 +1,7 @@
 //! Memory operations for the CLI
 
 use anyhow::Result;
+use engram_core::MemorySpaceId;
 use serde_json::{Value, json};
 use std::time::Instant;
 use tracing::{error, info};
@@ -64,7 +65,7 @@ pub fn print_memory_result(memory: &Value) {
 /// # Errors
 ///
 /// Returns error if HTTP request fails or server returns an error
-pub async fn create_memory(port: u16, content: String, confidence: Option<f64>) -> Result<()> {
+pub async fn create_memory(port: u16, content: String, confidence: Option<f64>, space_id: &MemorySpaceId) -> Result<()> {
     let client = reqwest::Client::new();
     let url = format!("http://127.0.0.1:{port}/api/v1/memories");
 
@@ -76,10 +77,15 @@ pub async fn create_memory(port: u16, content: String, confidence: Option<f64>) 
         payload["confidence"] = json!(conf);
     }
 
-    info!("🔄 Creating memory...");
+    info!("🔄 Creating memory in space '{}'...", space_id.as_str());
     let start_time = Instant::now();
 
-    let response = client.post(&url).json(&payload).send().await?;
+    let response = client
+        .post(&url)
+        .header("X-Engram-Memory-Space", space_id.as_str())
+        .json(&payload)
+        .send()
+        .await?;
 
     let elapsed = start_time.elapsed();
 
@@ -104,14 +110,18 @@ pub async fn create_memory(port: u16, content: String, confidence: Option<f64>) 
 /// # Errors
 ///
 /// Returns error if HTTP request fails or memory not found
-pub async fn get_memory(port: u16, id: String) -> Result<()> {
+pub async fn get_memory(port: u16, id: String, space_id: &MemorySpaceId) -> Result<()> {
     let client = reqwest::Client::new();
     let url = format!("http://127.0.0.1:{port}/api/v1/memories/{id}");
 
-    info!("🔍 Retrieving memory...");
+    info!("🔍 Retrieving memory from space '{}'...", space_id.as_str());
     let start_time = Instant::now();
 
-    let response = client.get(&url).send().await?;
+    let response = client
+        .get(&url)
+        .header("X-Engram-Memory-Space", space_id.as_str())
+        .send()
+        .await?;
     let elapsed = start_time.elapsed();
 
     if response.status().is_success() {
@@ -137,7 +147,7 @@ pub async fn get_memory(port: u16, id: String) -> Result<()> {
 /// # Errors
 ///
 /// Returns error if HTTP request fails or search fails
-pub async fn search_memories(port: u16, query: String, limit: Option<usize>) -> Result<()> {
+pub async fn search_memories(port: u16, query: String, limit: Option<usize>, space_id: &MemorySpaceId) -> Result<()> {
     let client = reqwest::Client::new();
     let mut url = format!(
         "http://127.0.0.1:{}/api/v1/memories/search?query={}",
@@ -150,10 +160,14 @@ pub async fn search_memories(port: u16, query: String, limit: Option<usize>) -> 
         let _ = write!(&mut url, "&limit={lim}");
     }
 
-    info!("🔍 Searching memories...");
+    info!("🔍 Searching memories in space '{}'...", space_id.as_str());
     let start_time = Instant::now();
 
-    let response = client.get(&url).send().await?;
+    let response = client
+        .get(&url)
+        .header("X-Engram-Memory-Space", space_id.as_str())
+        .send()
+        .await?;
     let elapsed = start_time.elapsed();
 
     if response.status().is_success() {

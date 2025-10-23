@@ -2,6 +2,7 @@
 
 // Clippy configuration: Only allow specific patterns with justification
 #![allow(clippy::multiple_crate_versions)] // Dependencies control their own versions
+#![allow(clippy::uninlined_format_args)] // TODO: Update format strings in future cleanup
 
 pub mod api;
 pub mod benchmark_simple;

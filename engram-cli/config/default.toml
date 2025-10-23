@@ -1,2 +1,6 @@
 [feature_flags]
 spreading_api_beta = true
+
+[memory_spaces]
+default_space = "default"
+bootstrap_spaces = ["default"]

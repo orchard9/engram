@@ -18,16 +18,42 @@ use axum::{
 };
 use engram_cli::api::{ApiState, create_api_routes};
 use engram_core::activation::SpreadingAutoTuner;
+use engram_core::{MemorySpaceError, MemorySpaceId, MemorySpaceRegistry, MemoryStore, metrics};
 use std::sync::Arc;
 use tower::ServiceExt;
 
 /// Create test router for monitoring tests
-fn create_test_router() -> Router {
-    let store = Arc::new(engram_core::MemoryStore::new(100));
-    let metrics = engram_core::metrics::init();
+async fn create_test_router() -> Router {
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let registry = Arc::new(
+        MemorySpaceRegistry::new(temp_dir.path(), |_space_id, _directories| {
+            let mut store = MemoryStore::new(100);
+            let _ = store.enable_event_streaming(32);
+            Ok::<Arc<MemoryStore>, MemorySpaceError>(Arc::new(store))
+        })
+        .expect("registry"),
+    );
+
+    let default_space = MemorySpaceId::default();
+    let space_handle = registry.create_or_get(&default_space).await.expect("space");
+    let store = space_handle.store();
+
+    let mut keepalive_rx = store
+        .subscribe_to_events()
+        .expect("event streaming initialized");
+    tokio::spawn(async move { while keepalive_rx.recv().await.is_ok() {} });
+
+    let metrics = metrics::init();
     let auto_tuner = SpreadingAutoTuner::new(0.10, 16);
     let (shutdown_tx, _shutdown_rx) = tokio::sync::watch::channel(false);
-    let api_state = ApiState::new(store, metrics, auto_tuner, Arc::new(shutdown_tx));
+    let api_state = ApiState::new(
+        store,
+        Arc::clone(&registry),
+        default_space,
+        metrics,
+        auto_tuner,
+        Arc::new(shutdown_tx),
+    );
 
     create_api_routes().with_state(api_state)
 }
@@ -47,7 +73,7 @@ async fn make_monitoring_request(app: &Router, uri: &str) -> Response<Body> {
 
 #[tokio::test]
 async fn test_monitor_events_basic() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     let response = make_monitoring_request(&app, "/api/v1/monitor/events").await;
 
@@ -64,7 +90,7 @@ async fn test_monitor_events_basic() {
 
 #[tokio::test]
 async fn test_monitor_events_with_level_filtering() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     // Test each hierarchical level
     let levels = vec!["global", "region", "node", "edge"];
@@ -86,7 +112,7 @@ async fn test_monitor_events_with_level_filtering() {
 
 #[tokio::test]
 async fn test_monitor_events_with_focus_filtering() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     let response =
         make_monitoring_request(&app, "/api/v1/monitor/events?level=node&focus_id=node_123").await;
@@ -106,7 +132,7 @@ async fn test_monitor_events_with_focus_filtering() {
 
 #[tokio::test]
 async fn test_monitor_events_frequency_bounds() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     // Test frequency clamping
     let test_cases = vec![
@@ -126,7 +152,7 @@ async fn test_monitor_events_frequency_bounds() {
 
 #[tokio::test]
 async fn test_monitor_events_with_causality() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     let response =
         make_monitoring_request(&app, "/api/v1/monitor/events?include_causality=true").await;
@@ -143,7 +169,7 @@ async fn test_monitor_events_with_causality() {
 
 #[tokio::test]
 async fn test_monitor_events_event_type_filtering() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     // Single event type
     let response =
@@ -175,7 +201,7 @@ async fn test_monitor_events_event_type_filtering() {
 
 #[tokio::test]
 async fn test_monitor_activations_basic() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     let response = make_monitoring_request(&app, "/api/v1/monitor/activations").await;
 
@@ -189,7 +215,7 @@ async fn test_monitor_activations_basic() {
 
 #[tokio::test]
 async fn test_monitor_activations_with_thresholds() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     // Test activation threshold bounds
     let test_cases = vec![
@@ -211,7 +237,7 @@ async fn test_monitor_activations_with_thresholds() {
 
 #[tokio::test]
 async fn test_monitor_activations_hierarchical_focus() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     // Test hierarchical focusing
     let response = make_monitoring_request(
@@ -235,7 +261,7 @@ async fn test_monitor_activations_hierarchical_focus() {
 
 #[tokio::test]
 async fn test_monitor_causality_basic() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     let response = make_monitoring_request(&app, "/api/v1/monitor/causality").await;
 
@@ -249,7 +275,7 @@ async fn test_monitor_causality_basic() {
 
 #[tokio::test]
 async fn test_monitor_causality_with_focus() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     let response =
         make_monitoring_request(&app, "/api/v1/monitor/causality?focus_id=operation_456").await;
@@ -270,7 +296,7 @@ async fn test_monitor_causality_with_focus() {
 
 #[tokio::test]
 async fn test_session_management() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     // Without session_id - should generate UUID
     let response = make_monitoring_request(&app, "/api/v1/monitor/events").await;
@@ -301,7 +327,7 @@ async fn test_session_management() {
 
 #[tokio::test]
 async fn test_cognitive_constraints() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     // Test working memory constraint enforcement
     // Max frequency should respect cognitive limits
@@ -337,7 +363,7 @@ async fn test_cognitive_constraints() {
 
 #[tokio::test]
 async fn test_hierarchical_event_organization() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     // Test that hierarchical levels are supported
     let hierarchical_levels = vec![
@@ -364,7 +390,7 @@ async fn test_hierarchical_event_organization() {
 
 #[tokio::test]
 async fn test_sse_headers_compliance() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     let endpoints = vec![
         "/api/v1/monitor/events",
@@ -395,7 +421,7 @@ async fn test_sse_headers_compliance() {
 
 #[tokio::test]
 async fn test_latency_requirements() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     // Test that monitoring endpoints respond quickly (simulating <100ms requirement)
     let start = std::time::Instant::now();
@@ -412,7 +438,7 @@ async fn test_latency_requirements() {
 
 #[tokio::test]
 async fn test_parameter_parsing_edge_cases() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     // Empty event_types - should handle gracefully
     let response = make_monitoring_request(&app, "/api/v1/monitor/events?event_types=").await;
@@ -439,7 +465,7 @@ async fn test_parameter_parsing_edge_cases() {
 
 #[tokio::test]
 async fn test_concurrent_monitoring_capability() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     // Test that multiple monitoring sessions can be distinguished and handled
     // Uses a rapid create-test-drop pattern to avoid resource buildup
@@ -475,7 +501,7 @@ async fn test_concurrent_monitoring_capability() {
 
 #[tokio::test]
 async fn test_monitoring_with_complex_queries() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     // Complex monitoring query with multiple parameters
     let complex_query = "/api/v1/monitor/events?level=node&focus_id=ca1_123&max_frequency=25.0&include_causality=true&event_types=activation,consolidation&min_activation=0.7&session_id=complex_test&last_sequence=100";

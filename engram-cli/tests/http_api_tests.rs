@@ -12,18 +12,46 @@ use chrono::Utc;
 use engram_cli::api::{ApiState, create_api_routes};
 use engram_core::activation::SpreadingAutoTuner;
 use engram_core::activation::{ActivationRecordPoolStats, SpreadingMetrics};
-use engram_core::metrics;
+use engram_core::{MemorySpaceError, MemorySpaceId, MemorySpaceRegistry, MemoryStore, metrics};
 use serde_json::{Value, json};
 use std::sync::Arc;
 use tower::ServiceExt; // for `oneshot`
 
 /// Create test router with API routes
-fn create_test_router() -> Router {
-    let store = Arc::new(engram_core::MemoryStore::new(100));
-    let metrics = engram_core::metrics::init();
+async fn create_test_router() -> Router {
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let registry = Arc::new(
+        MemorySpaceRegistry::new(temp_dir.path(), |_space_id, _directories| {
+            let mut store = MemoryStore::new(100);
+            let _ = store.enable_event_streaming(32);
+            Ok::<Arc<MemoryStore>, MemorySpaceError>(Arc::new(store))
+        })
+        .expect("registry"),
+    );
+
+    let default_space = MemorySpaceId::default();
+    let space_handle = registry
+        .create_or_get(&default_space)
+        .await
+        .expect("default space");
+    let store = space_handle.store();
+
+    let mut keepalive_rx = store
+        .subscribe_to_events()
+        .expect("event streaming initialized");
+    tokio::spawn(async move { while keepalive_rx.recv().await.is_ok() {} });
+
+    let metrics = metrics::init();
     let auto_tuner = SpreadingAutoTuner::new(0.10, 16);
     let (shutdown_tx, _shutdown_rx) = tokio::sync::watch::channel(false);
-    let api_state = ApiState::new(store, metrics, auto_tuner, Arc::new(shutdown_tx));
+    let api_state = ApiState::new(
+        store,
+        Arc::clone(&registry),
+        default_space,
+        metrics,
+        auto_tuner,
+        Arc::new(shutdown_tx),
+    );
 
     create_api_routes().with_state(api_state)
 }
@@ -66,7 +94,7 @@ async fn make_request(
 
 #[tokio::test]
 async fn test_remember_memory_success() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     let request_body = json!({
         "id": "test_memory_001",
@@ -104,7 +132,7 @@ async fn test_remember_memory_success() {
 
 #[tokio::test]
 async fn test_metrics_endpoint_snapshot() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     let (status, response) = make_request(&app, Method::GET, "/metrics", None).await;
 
@@ -123,7 +151,7 @@ async fn test_metrics_endpoint_snapshot() {
 async fn test_metrics_endpoint_matches_streaming_snapshot_after_reset() {
     drain_streaming_queue();
 
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     let metrics = metrics::init();
     let spreading_metrics = SpreadingMetrics::default();
@@ -181,7 +209,7 @@ async fn test_metrics_endpoint_matches_streaming_snapshot_after_reset() {
 
 #[tokio::test]
 async fn test_remember_memory_validation_errors() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     // Test empty content
     let request_body = json!({
@@ -235,7 +263,7 @@ async fn test_remember_memory_validation_errors() {
 
 #[tokio::test]
 async fn test_remember_episode_success() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     let when = Utc::now();
     let request_body = json!({
@@ -278,7 +306,7 @@ async fn test_remember_episode_success() {
 
 #[tokio::test]
 async fn test_recall_memories_with_query() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     // First store a memory to recall
     let store_request = json!({
@@ -331,7 +359,7 @@ async fn test_recall_memories_with_query() {
 
 #[tokio::test]
 async fn test_recall_validation_errors() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     // Test recall without query or embedding
     let (status, response) = make_request(&app, Method::GET, "/api/v1/memories/recall", None).await;
@@ -352,7 +380,7 @@ async fn test_recall_validation_errors() {
 
 #[tokio::test]
 async fn test_recall_with_embedding() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     let embedding_vec = vec![0.5; 768]; // Valid 768-dimensional embedding
     let embedding_json = serde_json::to_string(&embedding_vec).unwrap();
@@ -375,7 +403,7 @@ async fn test_recall_with_embedding() {
 
 #[tokio::test]
 async fn test_recognize_pattern_success() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     let request_body = json!({
         "input": "This is a recognizable pattern with sufficient length",
@@ -401,7 +429,7 @@ async fn test_recognize_pattern_success() {
 
 #[tokio::test]
 async fn test_spreading_health_endpoint() {
-    let app = create_test_router();
+    let app = create_test_router().await;
     let (status, payload) = make_request(&app, Method::GET, "/health/spreading", None).await;
     assert_eq!(status, StatusCode::OK);
     assert!(payload.get("status").is_some());
@@ -409,7 +437,7 @@ async fn test_spreading_health_endpoint() {
 
 #[tokio::test]
 async fn test_system_health_endpoint() {
-    let app = create_test_router();
+    let app = create_test_router().await;
     let (status, payload) = make_request(&app, Method::GET, "/api/v1/system/health", None).await;
     assert_eq!(status, StatusCode::OK);
     assert!(payload.get("checks").is_some());
@@ -417,7 +445,7 @@ async fn test_system_health_endpoint() {
 
 #[tokio::test]
 async fn test_spreading_config_endpoint() {
-    let app = create_test_router();
+    let app = create_test_router().await;
     let (status, payload) =
         make_request(&app, Method::GET, "/api/v1/system/spreading/config", None).await;
     assert_eq!(status, StatusCode::OK);
@@ -426,7 +454,7 @@ async fn test_spreading_config_endpoint() {
 
 #[tokio::test]
 async fn test_recognize_pattern_validation() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     let request_body = json!({
         "input": ""
@@ -451,7 +479,7 @@ async fn test_recognize_pattern_validation() {
 
 #[tokio::test]
 async fn test_system_health() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     let (status, response) = make_request(&app, Method::GET, "/api/v1/system/health", None).await;
 
@@ -465,7 +493,7 @@ async fn test_system_health() {
 
 #[tokio::test]
 async fn test_system_introspect() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     let (status, response) =
         make_request(&app, Method::GET, "/api/v1/system/introspect", None).await;
@@ -479,7 +507,7 @@ async fn test_system_introspect() {
 
 #[tokio::test]
 async fn test_episodes_replay() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     let (status, response) = make_request(
         &app,
@@ -497,7 +525,7 @@ async fn test_episodes_replay() {
 
 #[tokio::test]
 async fn test_memory_types_and_tags() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     // Test different memory types
     let memory_types = ["semantic", "episodic", "procedural"];
@@ -525,7 +553,7 @@ async fn test_memory_types_and_tags() {
 
 #[tokio::test]
 async fn test_confidence_levels_and_reasoning() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     let confidence_levels = [
         (0.1, "Low confidence test"),
@@ -565,7 +593,7 @@ async fn test_confidence_levels_and_reasoning() {
 
 #[tokio::test]
 async fn test_auto_linking_behavior() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     // Test with auto-linking enabled
     let request_body = json!({
@@ -617,7 +645,7 @@ async fn test_auto_linking_behavior() {
 
 #[tokio::test]
 async fn test_recall_query_parameters() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     // Test with various query parameters
     let test_cases = [
@@ -639,7 +667,7 @@ async fn test_recall_query_parameters() {
 
 #[tokio::test]
 async fn test_error_response_structure() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     // Test malformed JSON
     let request = Request::builder()
@@ -658,7 +686,7 @@ async fn test_error_response_structure() {
 
 #[tokio::test]
 async fn test_cors_headers_present() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     // Make a preflight CORS request
     let request = Request::builder()

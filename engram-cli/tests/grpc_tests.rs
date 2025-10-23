@@ -6,6 +6,7 @@
 #![allow(clippy::cast_sign_loss)]
 
 use engram_cli::grpc::MemoryService;
+use engram_core::{MemorySpaceId, MemorySpaceRegistry, MemoryStore, metrics};
 use engram_proto::engram_service_client::EngramServiceClient;
 use engram_proto::*;
 use std::sync::Arc;
@@ -13,9 +14,31 @@ use tonic::Request;
 
 /// Start a test gRPC server and return the port
 async fn start_test_grpc_server() -> u16 {
-    let store = Arc::new(engram_core::MemoryStore::new(100));
-    let metrics = engram_core::metrics::init();
-    let service = MemoryService::new(store, metrics);
+    let mut store_inner = MemoryStore::new(100);
+    let _ = store_inner.enable_event_streaming(100);
+    let store = Arc::new(store_inner);
+
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let registry = Arc::new(
+        MemorySpaceRegistry::new(temp_dir.path(), {
+            let store = Arc::clone(&store);
+            move |_space_id, _directories| Ok(Arc::clone(&store))
+        })
+        .expect("registry"),
+    );
+
+    let default_space = MemorySpaceId::default();
+    tokio::runtime::Handle::current()
+        .block_on(registry.create_or_get(&default_space))
+        .expect("default space");
+
+    let metrics = metrics::init();
+    let service = MemoryService::new(
+        Arc::clone(&store),
+        metrics,
+        Arc::clone(&registry),
+        default_space,
+    );
 
     // Find an available port
     let port = portpicker::pick_unused_port().expect("No available ports");

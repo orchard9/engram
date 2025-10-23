@@ -18,7 +18,7 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio_stream::{Stream, wrappers::ReceiverStream};
-use tracing::info;
+use tracing::{info, Span};
 use utoipa::{IntoParams, ToSchema};
 
 use crate::grpc::MemoryService;
@@ -1068,6 +1068,7 @@ pub async fn remember_memory(
         request.memory_space_id.as_deref(),
         &state.default_space,
     )?;
+    Span::current().record("memory_space_id", space_id.as_str());
 
     // Get space-specific store handle from registry
     let handle = state
@@ -1189,6 +1190,7 @@ pub async fn remember_episode(
         request.memory_space_id.as_deref(),
         &state.default_space,
     )?;
+    Span::current().record("memory_space_id", space_id.as_str());
 
     // Get space-specific store handle from registry
     let handle = state.registry.create_or_get(&space_id).await?;
@@ -1309,6 +1311,7 @@ pub async fn recall_memories(
         None, // No body in GET request
         &state.default_space,
     )?;
+    Span::current().record("memory_space_id", space_id.as_str());
 
     // Get space-specific store handle from registry
     let handle = state.registry.create_or_get(&space_id).await?;
@@ -1614,6 +1617,7 @@ pub async fn probabilistic_query(
 
     // Extract memory space ID with fallback to default
     let space_id = extract_memory_space_id(&headers, params.space.as_deref(), None, &state.default_space)?;
+    Span::current().record("memory_space_id", space_id.as_str());
 
     // Get space-specific store handle from registry
     let handle = state
@@ -1851,6 +1855,7 @@ pub async fn list_consolidations(
 ) -> Result<impl IntoResponse, ApiError> {
     // Extract memory space ID with fallback to default
     let space_id = extract_memory_space_id(&headers, params.space.as_deref(), None, &state.default_space)?;
+    Span::current().record("memory_space_id", space_id.as_str());
 
     // Get space-specific store handle from registry
     let handle = state
@@ -1916,6 +1921,7 @@ pub async fn get_consolidation(
 ) -> Result<impl IntoResponse, ApiError> {
     // Extract memory space ID with fallback to default
     let space_id = extract_memory_space_id(&headers, params.space.as_deref(), None, &state.default_space)?;
+    Span::current().record("memory_space_id", space_id.as_str());
 
     // Get space-specific store handle from registry
     let handle = state
@@ -2075,6 +2081,7 @@ pub async fn get_memory_by_id(
         None,
         &state.default_space,
     )?;
+    Span::current().record("memory_space_id", space_id.as_str());
 
     // Get space-specific store handle from registry
     let handle = state
@@ -2130,6 +2137,7 @@ pub async fn search_memories_rest(
         None,
         &state.default_space,
     )?;
+    Span::current().record("memory_space_id", space_id.as_str());
 
     // Get space-specific store handle from registry
     let handle = state

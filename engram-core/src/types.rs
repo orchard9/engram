@@ -5,6 +5,11 @@
 
 use crate::Confidence;
 use crate::{cognitive_error, error::CognitiveError};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::fmt::{self, Display};
+use std::result::Result as StdResult;
+use std::str::FromStr;
+use std::sync::Arc;
 use thiserror::Error;
 
 /// Core error types for the engram system (legacy compatibility)
@@ -101,6 +106,142 @@ pub enum CoreError {
         /// The underlying IO error
         source: std::io::Error,
     },
+}
+
+/// Memory space identifier parsing errors.
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+pub enum MemorySpaceIdError {
+    /// Provided identifier was empty or whitespace.
+    #[error(
+        "Memory space identifier is empty\n  Expected: 3-64 characters using [a-z0-9_-]\n  Suggestion: Use lowercase tenant slugs like 'tenant_alpha'\n  Example: MemorySpaceId::try_from(\"tenant_alpha\")"
+    )]
+    Empty,
+
+    /// Identifier length outside allowed bounds.
+    #[error(
+        "Memory space identifier '{value}' has invalid length {length}\n  Expected: length between 3 and 64 characters\n  Suggestion: Shorten or extend to meet bounds\n  Example: MemorySpaceId::try_from(\"alpha_team\")"
+    )]
+    InvalidLength {
+        /// Provided value.
+        value: String,
+        /// Observed length.
+        length: usize,
+    },
+
+    /// Identifier contained unsupported characters.
+    #[error(
+        "Memory space identifier '{value}' contains unsupported characters\n  Expected: Only lowercase letters, digits, '-', '_'\n  Suggestion: Convert to lowercase slug (e.g., 'tenant-42')\n  Example: MemorySpaceId::try_from(\"tenant_42\")"
+    )]
+    InvalidCharacters {
+        /// Provided value.
+        value: String,
+    },
+}
+
+const MEMORY_SPACE_ID_MIN_LEN: usize = 3;
+const MEMORY_SPACE_ID_MAX_LEN: usize = 64;
+
+/// Unique identifier for a memory space/tenant.
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct MemorySpaceId(Arc<str>);
+
+impl MemorySpaceId {
+    /// Canonical default memory space identifier used for migrated single-tenant deployments.
+    pub const DEFAULT_STR: &'static str = "default";
+
+    /// Construct a [`MemorySpaceId`], validating the provided string.
+    pub fn new<S: AsRef<str>>(value: S) -> StdResult<Self, MemorySpaceIdError> {
+        Self::validate_and_intern(value.as_ref())
+    }
+
+    fn validate_and_intern(raw: &str) -> StdResult<Self, MemorySpaceIdError> {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return Err(MemorySpaceIdError::Empty);
+        }
+
+        let len = trimmed.len();
+        if !(MEMORY_SPACE_ID_MIN_LEN..=MEMORY_SPACE_ID_MAX_LEN).contains(&len) {
+            return Err(MemorySpaceIdError::InvalidLength {
+                value: trimmed.to_owned(),
+                length: len,
+            });
+        }
+
+        if !trimmed
+            .chars()
+            .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || matches!(ch, '-' | '_'))
+        {
+            return Err(MemorySpaceIdError::InvalidCharacters {
+                value: trimmed.to_owned(),
+            });
+        }
+
+        Ok(Self(Arc::from(trimmed)))
+    }
+
+    /// Borrow the identifier as `str`.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Default for MemorySpaceId {
+    fn default() -> Self {
+        // Safe unwrap: DEFAULT_STR is guaranteed valid.
+        Self::validate_and_intern(Self::DEFAULT_STR).unwrap_or_else(|_| {
+            // SAFETY: DEFAULT_STR ("default") is hardcoded and always valid
+            unreachable!("DEFAULT_STR must be valid")
+        })
+    }
+}
+
+impl AsRef<str> for MemorySpaceId {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl Display for MemorySpaceId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        Display::fmt(self.as_str(), f)
+    }
+}
+
+impl FromStr for MemorySpaceId {
+    type Err = MemorySpaceIdError;
+
+    fn from_str(s: &str) -> StdResult<Self, Self::Err> {
+        Self::new(s)
+    }
+}
+
+impl TryFrom<&str> for MemorySpaceId {
+    type Error = MemorySpaceIdError;
+
+    fn try_from(value: &str) -> StdResult<Self, Self::Error> {
+        Self::new(value)
+    }
+}
+
+impl Serialize for MemorySpaceId {
+    fn serialize<S>(&self, serializer: S) -> StdResult<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for MemorySpaceId {
+    fn deserialize<D>(deserializer: D) -> StdResult<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::new(value).map_err(serde::de::Error::custom)
+    }
 }
 
 impl CoreError {
@@ -256,5 +397,46 @@ impl From<CognitiveError> for CoreError {
             suggestion: err.suggestion.clone(),
             example: err.example,
         }
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod memory_space_id_tests {
+    use super::{MemorySpaceId, MemorySpaceIdError};
+
+    #[test]
+    fn accepts_valid_identifier() {
+        let id = MemorySpaceId::try_from("tenant_alpha").unwrap();
+        assert_eq!(id.as_str(), "tenant_alpha");
+    }
+
+    #[test]
+    fn rejects_empty_identifier() {
+        let err = MemorySpaceId::try_from("").unwrap_err();
+        assert!(matches!(err, MemorySpaceIdError::Empty));
+    }
+
+    #[test]
+    fn rejects_uppercase_characters() {
+        let err = MemorySpaceId::try_from("Tenant").unwrap_err();
+        assert!(matches!(err, MemorySpaceIdError::InvalidCharacters { .. }));
+    }
+
+    #[test]
+    fn rejects_short_identifier() {
+        let err = MemorySpaceId::try_from("ab").unwrap_err();
+        assert!(matches!(
+            err,
+            MemorySpaceIdError::InvalidLength { length: 2, .. }
+        ));
+    }
+
+    #[test]
+    fn serde_round_trips() {
+        let original = MemorySpaceId::try_from("tenant_123").unwrap();
+        let serialized = serde_json::to_string(&original).unwrap();
+        let deserialized: MemorySpaceId = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(original, deserialized);
     }
 }

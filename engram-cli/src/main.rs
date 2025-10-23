@@ -68,7 +68,9 @@ async fn main() -> Result<()> {
             stop_server().await
         }
 
-        Commands::Status { json, watch } => {
+        Commands::Status { json, watch, space: _ } => {
+            // Note: space parameter currently unused - status shows server-wide health
+            // TODO: Add per-space metrics in future milestone
             if watch {
                 println!("  Watching status (press Ctrl+C to exit)...");
                 loop {
@@ -86,7 +88,7 @@ async fn main() -> Result<()> {
             }
         }
 
-        Commands::Memory { action } => handle_memory_command(action).await,
+        Commands::Memory { action } => handle_memory_command(action, config_manager.config()).await,
 
         Commands::Space { action } => handle_space_command(action).await,
 
@@ -111,8 +113,41 @@ async fn main() -> Result<()> {
             query,
             limit,
             format,
-        } => handle_query_command(query, limit, format).await,
+            space,
+        } => handle_query_command(query, limit, format, space, config_manager.config()).await,
     }
+}
+
+/// Resolve memory space ID from CLI flag, environment variable, or config default
+///
+/// Priority order:
+/// 1. CLI --space flag (explicit, highest priority)
+/// 2. ENGRAM_MEMORY_SPACE environment variable
+/// 3. Config default_space (fallback)
+///
+/// # Errors
+///
+/// Returns error if memory space ID validation fails
+fn resolve_memory_space(
+    cli_space: Option<String>,
+    config_default: &MemorySpaceId,
+) -> Result<MemorySpaceId> {
+    // Priority 1: CLI flag
+    if let Some(space_str) = cli_space {
+        return MemorySpaceId::try_from(space_str.as_str())
+            .map_err(|e| anyhow::anyhow!("Invalid memory space ID: {e}"));
+    }
+
+    // Priority 2: Environment variable
+    if let Ok(env_space) = std::env::var("ENGRAM_MEMORY_SPACE") {
+        if !env_space.trim().is_empty() {
+            return MemorySpaceId::try_from(env_space.as_str())
+                .map_err(|e| anyhow::anyhow!("Invalid ENGRAM_MEMORY_SPACE: {e}"));
+        }
+    }
+
+    // Priority 3: Config default
+    Ok(config_default.clone())
 }
 
 /// Wait for gRPC server to be ready to accept connections
@@ -560,16 +595,26 @@ fn build_memory_space_store(
     Ok(Arc::new(store))
 }
 
-async fn handle_memory_command(action: MemoryAction) -> Result<()> {
+async fn handle_memory_command(action: MemoryAction, config: &config::CliConfig) -> Result<()> {
     let (port, _grpc_port) = get_server_connection().await?;
 
     match action {
         MemoryAction::Create {
             content,
             confidence,
-        } => create_memory(port, content, confidence).await,
-        MemoryAction::Get { id } => get_memory(port, id).await,
-        MemoryAction::Search { query, limit } => search_memories(port, query, limit).await,
+            space,
+        } => {
+            let space_id = resolve_memory_space(space, &config.memory_spaces.default_space)?;
+            create_memory(port, content, confidence, &space_id).await
+        }
+        MemoryAction::Get { id, space } => {
+            let space_id = resolve_memory_space(space, &config.memory_spaces.default_space)?;
+            get_memory(port, id, &space_id).await
+        }
+        MemoryAction::Search { query, limit, space } => {
+            let space_id = resolve_memory_space(space, &config.memory_spaces.default_space)?;
+            search_memories(port, query, limit, &space_id).await
+        }
         MemoryAction::List { limit, offset } => list_memories(port, limit, offset).await,
         MemoryAction::Delete { id } => delete_memory(port, id).await,
     }
@@ -690,7 +735,8 @@ async fn execute_shell_command(cmd: &str) -> Result<()> {
             }
             let content = parts[1..].join(" ");
             let (port, _) = get_server_connection().await?;
-            create_memory(port, content, None).await
+            let default_space = MemorySpaceId::default();
+            create_memory(port, content, None, &default_space).await
         }
         Some("get") => {
             if parts.len() != 2 {
@@ -698,7 +744,8 @@ async fn execute_shell_command(cmd: &str) -> Result<()> {
                 return Ok(());
             }
             let (port, _) = get_server_connection().await?;
-            get_memory(port, parts[1].to_string()).await
+            let default_space = MemorySpaceId::default();
+            get_memory(port, parts[1].to_string(), &default_space).await
         }
         Some("search") => {
             if parts.len() < 2 {
@@ -707,7 +754,8 @@ async fn execute_shell_command(cmd: &str) -> Result<()> {
             }
             let query = parts[1..].join(" ");
             let (port, _) = get_server_connection().await?;
-            search_memories(port, query, None).await
+            let default_space = MemorySpaceId::default();
+            search_memories(port, query, None, &default_space).await
         }
         Some("list") => {
             let (port, _) = get_server_connection().await?;
@@ -886,8 +934,15 @@ async fn show_status_json() -> Result<()> {
     Ok(())
 }
 
-async fn handle_query_command(query: String, limit: usize, format: OutputFormat) -> Result<()> {
+async fn handle_query_command(
+    query: String,
+    limit: usize,
+    format: OutputFormat,
+    space: Option<String>,
+    config: &config::CliConfig,
+) -> Result<()> {
     let (port, _grpc_port) = get_server_connection().await?;
+    let space_id = resolve_memory_space(space, &config.memory_spaces.default_space)?;
 
     // Make HTTP request
     let client = reqwest::Client::builder()
@@ -899,6 +954,7 @@ async fn handle_query_command(query: String, limit: usize, format: OutputFormat)
     let response = client
         .get(&url)
         .query(&[("query", &query), ("limit", &limit.to_string())])
+        .header("X-Engram-Memory-Space", space_id.as_str())
         .send()
         .await
         .context("Failed to send request to server")?;

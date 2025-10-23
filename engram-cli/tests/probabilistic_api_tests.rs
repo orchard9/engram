@@ -10,18 +10,45 @@ use axum::{
 };
 use chrono::Utc;
 use engram_cli::api::{ApiState, create_api_routes};
+use engram_core::MemorySpaceError;
 use engram_core::activation::SpreadingAutoTuner;
+use engram_core::{MemorySpaceId, MemorySpaceRegistry, MemoryStore, metrics};
 use serde_json::{Value, json};
 use std::sync::Arc;
 use tower::ServiceExt;
 
 /// Create test router with API routes
-fn create_test_router() -> Router {
-    let store = Arc::new(engram_core::MemoryStore::new(100));
-    let metrics = engram_core::metrics::init();
+async fn create_test_router() -> Router {
+    let temp_dir = tempfile::tempdir().expect("temp dir");
+    let registry = Arc::new(
+        MemorySpaceRegistry::new(temp_dir.path(), |_space_id, _directories| {
+            let mut store = MemoryStore::new(100);
+            let _ = store.enable_event_streaming(32);
+            Ok::<Arc<MemoryStore>, MemorySpaceError>(Arc::new(store))
+        })
+        .expect("registry"),
+    );
+
+    let default_space = MemorySpaceId::default();
+    let space_handle = registry.create_or_get(&default_space).await.expect("space");
+    let store = space_handle.store();
+
+    let mut keepalive_rx = store
+        .subscribe_to_events()
+        .expect("event streaming initialized");
+    tokio::spawn(async move { while keepalive_rx.recv().await.is_ok() {} });
+
+    let metrics = metrics::init();
     let auto_tuner = SpreadingAutoTuner::new(0.10, 16);
     let (shutdown_tx, _shutdown_rx) = tokio::sync::watch::channel(false);
-    let api_state = ApiState::new(store, metrics, auto_tuner, Arc::new(shutdown_tx));
+    let api_state = ApiState::new(
+        store,
+        Arc::clone(&registry),
+        default_space,
+        metrics,
+        auto_tuner,
+        Arc::new(shutdown_tx),
+    );
 
     create_api_routes().with_state(api_state)
 }
@@ -83,7 +110,7 @@ async fn store_test_episodes(app: &Router, count: usize) {
 
 #[tokio::test]
 async fn test_probabilistic_query_endpoint() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     // Store test episodes
     store_test_episodes(&app, 10).await;
@@ -185,7 +212,7 @@ async fn test_probabilistic_query_endpoint() {
 
 #[tokio::test]
 async fn test_probabilistic_query_with_embedding() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     // Store test episodes
     store_test_episodes(&app, 5).await;
@@ -208,7 +235,7 @@ async fn test_probabilistic_query_with_embedding() {
 
 #[tokio::test]
 async fn test_probabilistic_query_empty_results() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     // Query without storing any episodes
     let (status, response) = make_request(
@@ -236,7 +263,7 @@ async fn test_probabilistic_query_empty_results() {
 
 #[tokio::test]
 async fn test_probabilistic_query_validation() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     // Test without query or embedding
     let (status, response) =
@@ -248,7 +275,7 @@ async fn test_probabilistic_query_validation() {
 
 #[tokio::test]
 async fn test_probabilistic_query_evidence_chain() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     // Store test episodes with high importance
     for i in 0..3 {
@@ -310,7 +337,7 @@ async fn test_probabilistic_query_evidence_chain() {
 
 #[tokio::test]
 async fn test_probabilistic_query_limit_parameter() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     // Store 10 test episodes
     store_test_episodes(&app, 10).await;
@@ -346,7 +373,7 @@ async fn test_probabilistic_query_limit_parameter() {
 
 #[tokio::test]
 async fn test_probabilistic_query_confidence_ordering() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     // Store test episodes with varying importance
     for i in 0..5 {
@@ -397,7 +424,7 @@ async fn test_probabilistic_query_confidence_ordering() {
 
 #[tokio::test]
 async fn test_probabilistic_query_uncertainty_sources() {
-    let app = create_test_router();
+    let app = create_test_router().await;
 
     // Store test episodes
     store_test_episodes(&app, 5).await;
