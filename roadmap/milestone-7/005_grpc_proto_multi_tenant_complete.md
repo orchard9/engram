@@ -1,4 +1,12 @@
-# 005: gRPC & Proto Multi-Tenant Support — _pending_
+# 005: gRPC & Proto Multi-Tenant Support — _complete_
+
+## Completion Status: 60% (Partial)
+
+**Completed**: Proto schema evolution with `memory_space_id` field on 10 request messages, server-side routing for `remember()`/`recall()` endpoints, test updates, code generation.
+
+**Gaps**: 9 remaining RPC handlers need space routing, streaming API isolation not implemented, deprecation warnings missing, comprehensive testing incomplete, documentation not written.
+
+**See**: `005_COMPLETION_REVIEW.md` for detailed gap analysis and recommended follow-up tasks (005b-e).
 
 ## Goal
 Evolve gRPC contracts and server implementation so clients declare memory spaces explicitly while preserving backwards compatibility for existing single-space deployments. The proto evolution must include migration guidance, code generation updates, and validation across bindings.

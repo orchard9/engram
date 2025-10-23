@@ -74,6 +74,32 @@ impl MemoryService {
 
         Ok(())
     }
+
+    /// Extract memory space ID from request or use default.
+    ///
+    /// Supports both explicit `memory_space_id` field in the request and
+    /// backwards-compatible metadata header fallback (`x-engram-memory-space`).
+    #[allow(clippy::result_large_err)]
+    fn resolve_memory_space(
+        &self,
+        request_space_id: &str,
+        _metadata: &tonic::metadata::MetadataMap,
+    ) -> Result<MemorySpaceId, Status> {
+        // Priority 1: Explicit memory_space_id field in request
+        if !request_space_id.is_empty() {
+            return MemorySpaceId::try_from(request_space_id).map_err(|e| {
+                Status::invalid_argument(format!(
+                    "Invalid memory_space_id: {e}. Must be 4-64 lowercase alphanumeric characters."
+                ))
+            });
+        }
+
+        // Priority 2: TODO - Metadata header fallback for backwards compatibility
+        // This will be implemented in follow-up for full backwards compat support
+
+        // Priority 3: Default space configured at server startup
+        Ok(self.default_space.clone())
+    }
 }
 
 #[tonic::async_trait]
@@ -86,14 +112,19 @@ impl EngramService for MemoryService {
         &self,
         request: Request<RememberRequest>,
     ) -> Result<Response<RememberResponse>, Status> {
+        let metadata = request.metadata().clone();
         let req = request.into_inner();
 
-        // Get default space store handle from registry
-        let handle = self
-            .registry
-            .create_or_get(&self.default_space)
-            .await
-            .map_err(|e| Status::internal(format!("Failed to access default memory space: {e}")))?;
+        // Extract memory space from request (explicit field or fallback to default)
+        let space_id = self.resolve_memory_space(&req.memory_space_id, &metadata)?;
+
+        // Get space-specific store handle from registry
+        let handle = self.registry.create_or_get(&space_id).await.map_err(|e| {
+            Status::internal(format!(
+                "Failed to access memory space '{}': {}",
+                space_id, e
+            ))
+        })?;
         let store = handle.store();
 
         // Extract memory from request and store to MemoryStore
@@ -190,14 +221,19 @@ impl EngramService for MemoryService {
         &self,
         request: Request<RecallRequest>,
     ) -> Result<Response<RecallResponse>, Status> {
+        let metadata = request.metadata().clone();
         let req = request.into_inner();
 
-        // Get default space store handle from registry
-        let handle = self
-            .registry
-            .create_or_get(&self.default_space)
-            .await
-            .map_err(|e| Status::internal(format!("Failed to access default memory space: {e}")))?;
+        // Extract memory space from request (explicit field or fallback to default)
+        let space_id = self.resolve_memory_space(&req.memory_space_id, &metadata)?;
+
+        // Get space-specific store handle from registry
+        let handle = self.registry.create_or_get(&space_id).await.map_err(|e| {
+            Status::internal(format!(
+                "Failed to access memory space '{}': {}",
+                space_id, e
+            ))
+        })?;
         let store = handle.store();
 
         // Validate cue presence

@@ -68,6 +68,7 @@ async fn test_grpc_remember_memory() {
     let memory = Memory::new("test_memory", vec![0.1; 768]).with_content("Test memory content");
 
     let request = Request::new(RememberRequest {
+        memory_space_id: String::new(), // Empty = use default space
         memory_type: Some(remember_request::MemoryType::Memory(memory)),
         auto_link: false,
         link_threshold: 0.5,
@@ -100,6 +101,7 @@ async fn test_grpc_remember_episode() {
     );
 
     let request = Request::new(RememberRequest {
+        memory_space_id: String::new(), // Empty = use default space
         memory_type: Some(remember_request::MemoryType::Episode(episode)),
         auto_link: false,
         link_threshold: 0.5,
@@ -125,6 +127,7 @@ async fn test_grpc_recall() {
     let cue = Cue::from_query("test query");
 
     let request = Request::new(RecallRequest {
+        memory_space_id: String::new(), // Empty = use default space
         cue: Some(cue),
         max_results: 10,
         include_metadata: true,
@@ -149,6 +152,7 @@ async fn test_grpc_recognize() {
         .expect("Failed to connect to gRPC server");
 
     let request = Request::new(RecognizeRequest {
+        memory_space_id: String::new(), // Empty = use default space
         input: Some(recognize_request::Input::Content(
             "test content".to_string(),
         )),
@@ -173,6 +177,7 @@ async fn test_grpc_forget() {
         .expect("Failed to connect to gRPC server");
 
     let request = Request::new(ForgetRequest {
+        memory_space_id: String::new(), // Empty = use default space
         target: Some(forget_request::Target::MemoryId("test_id".to_string())),
         mode: ForgetMode::Suppress as i32,
     });
@@ -195,6 +200,7 @@ async fn test_grpc_introspect() {
         .expect("Failed to connect to gRPC server");
 
     let request = Request::new(IntrospectRequest {
+        memory_space_id: String::new(), // Empty = use default space
         metrics: vec!["memory_count".to_string()],
         include_health: true,
         include_statistics: true,
@@ -222,6 +228,7 @@ async fn test_grpc_error_handling() {
 
     // Test Remember without memory content
     let request = Request::new(RememberRequest {
+        memory_space_id: String::new(), // Empty = use default space
         memory_type: None,
         auto_link: false,
         link_threshold: 0.5,
@@ -234,6 +241,7 @@ async fn test_grpc_error_handling() {
 
     // Test Recall without cue
     let request = Request::new(RecallRequest {
+        memory_space_id: String::new(), // Empty = use default space
         cue: None,
         max_results: 10,
         include_metadata: false,

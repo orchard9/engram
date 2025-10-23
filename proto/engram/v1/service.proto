@@ -78,11 +78,16 @@ service EngramService {
 // ---------- Remember (Store) ----------
 
 message RememberRequest {
+  // Memory space identifier for multi-tenant isolation.
+  // If empty, routes to default space configured at server startup.
+  // For production multi-tenant deployments, explicit space required.
+  string memory_space_id = 1;
+
   oneof memory_type {
-    Memory memory = 1;                 // Generic memory
-    Episode episode = 2;               // Episodic memory
+    Memory memory = 2;                 // Generic memory
+    Episode episode = 3;               // Episodic memory
   }
-  
+
   bool auto_link = 10;                 // Auto-link to related memories
   float link_threshold = 11;           // Threshold for auto-linking
 }
@@ -97,8 +102,12 @@ message RememberResponse {
 // ---------- Recall (Retrieve) ----------
 
 message RecallRequest {
-  Cue cue = 1;                         // Retrieval cue (various types)
-  
+  // Memory space identifier for multi-tenant isolation.
+  // If empty, routes to default space configured at server startup.
+  string memory_space_id = 1;
+
+  Cue cue = 2;                         // Retrieval cue (various types)
+
   // Retrieval parameters
   int32 max_results = 10;
   bool include_metadata = 11;
@@ -122,11 +131,15 @@ message ActivationTrace {
 // ---------- Forget (Remove/Suppress) ----------
 
 message ForgetRequest {
+  // Memory space identifier for multi-tenant isolation.
+  // If empty, routes to default space configured at server startup.
+  string memory_space_id = 1;
+
   oneof target {
-    string memory_id = 1;              // Specific memory
-    Cue pattern = 2;                   // Pattern of memories
+    string memory_id = 2;              // Specific memory
+    Cue pattern = 3;                   // Pattern of memories
   }
-  
+
   ForgetMode mode = 10;
 }
 
@@ -146,12 +159,16 @@ message ForgetResponse {
 // ---------- Recognize (Familiarity Check) ----------
 
 message RecognizeRequest {
+  // Memory space identifier for multi-tenant isolation.
+  // If empty, routes to default space configured at server startup.
+  string memory_space_id = 1;
+
   oneof input {
-    Memory memory = 1;
-    Embedding embedding = 2;
-    string content = 3;
+    Memory memory = 2;
+    Embedding embedding = 3;
+    string content = 4;
   }
-  
+
   float recognition_threshold = 10;
 }
 
@@ -165,9 +182,13 @@ message RecognizeResponse {
 // ---------- Experience (Episodic Storage) ----------
 
 message ExperienceRequest {
-  Episode episode = 1;
-  bool immediate_consolidation = 2;
-  repeated string context_links = 3;   // Link to context memories
+  // Memory space identifier for multi-tenant isolation.
+  // If empty, routes to default space configured at server startup.
+  string memory_space_id = 1;
+
+  Episode episode = 2;
+  bool immediate_consolidation = 3;
+  repeated string context_links = 4;   // Link to context memories
 }
 
 message ExperienceResponse {
@@ -180,13 +201,17 @@ message ExperienceResponse {
 // ---------- Reminisce (Episodic Recall) ----------
 
 message ReminisceRequest {
+  // Memory space identifier for multi-tenant isolation.
+  // If empty, routes to default space configured at server startup.
+  string memory_space_id = 1;
+
   oneof cue {
-    google.protobuf.Timestamp around_time = 1;
-    string at_location = 2;
-    PeopleList with_people = 3;
-    string about_topic = 4;
+    google.protobuf.Timestamp around_time = 2;
+    string at_location = 3;
+    PeopleList with_people = 4;
+    string about_topic = 5;
   }
-  
+
   google.protobuf.Timestamp time_window_start = 10;
   google.protobuf.Timestamp time_window_end = 11;
   bool include_emotional = 12;
@@ -202,12 +227,16 @@ message ReminisceResponse {
 // ---------- Consolidate (Memory Consolidation) ----------
 
 message ConsolidateRequest {
+  // Memory space identifier for multi-tenant isolation.
+  // If empty, routes to default space configured at server startup.
+  string memory_space_id = 1;
+
   oneof target {
-    google.protobuf.Empty all = 1;     // Consolidate all pending
-    MemoryIdList memory_ids = 2;       // Specific memories
-    ConsolidationCriteria criteria = 3; // Selective consolidation
+    google.protobuf.Empty all = 2;     // Consolidate all pending
+    MemoryIdList memory_ids = 3;       // Specific memories
+    ConsolidationCriteria criteria = 4; // Selective consolidation
   }
-  
+
   ConsolidationMode mode = 10;
 }
 
@@ -308,9 +337,13 @@ message AssociateResponse {
 // ---------- Introspect (Self-Awareness) ----------
 
 message IntrospectRequest {
-  repeated string metrics = 1;         // Specific metrics to return
-  bool include_health = 2;
-  bool include_statistics = 3;
+  // Memory space identifier for multi-tenant isolation.
+  // If empty, returns system-wide metrics across all spaces.
+  string memory_space_id = 1;
+
+  repeated string metrics = 2;         // Specific metrics to return
+  bool include_health = 3;
+  bool include_statistics = 4;
 }
 
 message IntrospectResponse {
@@ -346,8 +379,12 @@ message MemoryStatistics {
 // ---------- Stream (Activity Monitoring) ----------
 
 message StreamRequest {
-  repeated StreamEventType event_types = 1;
-  float min_importance = 2;            // Minimum importance to stream
+  // Memory space identifier for multi-tenant isolation.
+  // If empty, streams events from default space only.
+  string memory_space_id = 1;
+
+  repeated StreamEventType event_types = 2;
+  float min_importance = 3;            // Minimum importance to stream
 }
 
 enum StreamEventType {
@@ -384,13 +421,17 @@ message MemoryIdList {
 
 // Bidirectional memory flow for interactive sessions
 message MemoryFlowRequest {
+  // Memory space identifier for multi-tenant isolation.
+  // Applied to all operations in this flow. If empty, uses default space.
+  string memory_space_id = 1;
+
   oneof request {
-    RememberRequest remember = 1;       // Store a memory
-    RecallRequest recall = 2;           // Retrieve memories
-    StreamSubscription subscribe = 3;    // Subscribe to events
-    FlowControl control = 4;            // Flow control message
+    RememberRequest remember = 2;       // Store a memory
+    RecallRequest recall = 3;           // Retrieve memories
+    StreamSubscription subscribe = 4;    // Subscribe to events
+    FlowControl control = 5;            // Flow control message
   }
-  
+
   string session_id = 10;               // Session identifier
   int64 sequence_number = 11;           // For ordering
 }
