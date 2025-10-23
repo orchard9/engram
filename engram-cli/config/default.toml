@@ -4,3 +4,13 @@ spreading_api_beta = true
 [memory_spaces]
 default_space = "default"
 bootstrap_spaces = ["default"]
+
+[persistence]
+# Data root directory for all memory spaces (each space gets a subdirectory)
+# Supports tilde expansion for home directory
+data_root = "~/.local/share/engram"
+
+# Per-space tier capacity limits (number of memories)
+hot_capacity = 100_000
+warm_capacity = 1_000_000
+cold_capacity = 10_000_000

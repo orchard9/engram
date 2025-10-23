@@ -13,6 +13,8 @@ pub struct CliConfig {
     pub feature_flags: FeatureFlags,
     #[serde(default)]
     pub memory_spaces: MemorySpacesConfig,
+    #[serde(default)]
+    pub persistence: PersistenceConfig,
 }
 
 impl Default for CliConfig {
@@ -26,6 +28,7 @@ impl CliConfig {
     pub fn merge(&mut self, other: &Self) {
         self.feature_flags.merge(&other.feature_flags);
         self.memory_spaces.merge(&other.memory_spaces);
+        self.persistence.merge(&other.persistence);
     }
 }
 
@@ -88,6 +91,44 @@ fn default_bootstrap_spaces() -> Vec<MemorySpaceId> {
 
 const fn default_spreading_api_beta() -> bool {
     true
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PersistenceConfig {
+    pub data_root: String,
+    pub hot_capacity: usize,
+    pub warm_capacity: usize,
+    pub cold_capacity: usize,
+}
+
+impl PersistenceConfig {
+    #[allow(clippy::missing_const_for_fn)]
+    fn merge(&mut self, other: &Self) {
+        if !other.data_root.is_empty() {
+            self.data_root.clone_from(&other.data_root);
+        }
+        if other.hot_capacity > 0 {
+            self.hot_capacity = other.hot_capacity;
+        }
+        if other.warm_capacity > 0 {
+            self.warm_capacity = other.warm_capacity;
+        }
+        if other.cold_capacity > 0 {
+            self.cold_capacity = other.cold_capacity;
+        }
+    }
+}
+
+impl Default for PersistenceConfig {
+    fn default() -> Self {
+        Self {
+            data_root: "~/.local/share/engram".to_string(),
+            hot_capacity: 100_000,
+            warm_capacity: 1_000_000,
+            cold_capacity: 10_000_000,
+        }
+    }
 }
 
 pub struct ConfigManager {

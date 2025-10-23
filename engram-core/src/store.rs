@@ -641,6 +641,23 @@ impl MemoryStore {
         Ok(self)
     }
 
+    /// Attach a pre-configured persistence handle from the registry.
+    ///
+    /// This method allows the registry to manage persistence lifecycle
+    /// while the store uses the provided resources. This ensures proper
+    /// per-space isolation of WAL, tier storage, and workers.
+    #[cfg(feature = "memory_mapped_persistence")]
+    #[must_use]
+    pub fn with_persistence_handle(
+        mut self,
+        persistence: &Arc<crate::storage::MemorySpacePersistence>,
+    ) -> Self {
+        self.persistent_backend = Some(persistence.tier_backend());
+        self.wal_writer = Some(persistence.wal_writer());
+        self.storage_metrics = persistence.storage_metrics();
+        self
+    }
+
     /// Initialize the persistent backend (start background workers)
     #[cfg(feature = "memory_mapped_persistence")]
     ///

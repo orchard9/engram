@@ -32,6 +32,8 @@ pub mod index;
 #[cfg(feature = "memory_mapped_persistence")]
 pub mod mapped;
 #[cfg(feature = "memory_mapped_persistence")]
+pub mod persistence;
+#[cfg(feature = "memory_mapped_persistence")]
 pub mod recovery;
 #[cfg(feature = "memory_mapped_persistence")]
 pub mod tiers;
@@ -62,6 +64,8 @@ pub use deduplication::{
 pub use hot_tier::HotTier;
 #[cfg(feature = "memory_mapped_persistence")]
 pub use mapped::MappedWarmStorage;
+#[cfg(feature = "memory_mapped_persistence")]
+pub use persistence::{MemorySpacePersistence, PersistenceConfig, PersistenceError};
 #[cfg(feature = "memory_mapped_persistence")]
 pub use tiers::{
     CognitiveTierArchitecture, MemoryPressure, MigrationCandidate, MigrationReport,

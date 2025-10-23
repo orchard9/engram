@@ -224,6 +224,35 @@ async fn start_server(port: u16, grpc_port: u16, cli_config: &config::CliConfig)
         },
     )?);
 
+    // Recover all existing memory spaces from WAL logs
+    #[cfg(feature = "memory_mapped_persistence")]
+    {
+        info!("Scanning persistence root for existing memory spaces");
+        match registry.recover_all().await {
+            Ok(reports) => {
+                if reports.is_empty() {
+                    info!("No existing memory spaces found - starting with clean slate");
+                } else {
+                    info!(
+                        spaces_recovered = reports.len(),
+                        "Completed WAL recovery for all memory spaces"
+                    );
+                    for report in reports {
+                        info!(
+                            recovered = report.recovered_entries,
+                            corrupted = report.corrupted_entries,
+                            duration_ms = report.recovery_duration.as_millis(),
+                            "Recovery report"
+                        );
+                    }
+                }
+            }
+            Err(e) => {
+                error!(error = ?e, "Failed to recover memory spaces - continuing with bootstrap");
+            }
+        }
+    }
+
     registry
         .ensure_spaces(cli_config.memory_spaces.bootstrap_spaces.clone())
         .await?;
@@ -565,6 +594,9 @@ fn build_memory_space_store(
 
     #[cfg(feature = "memory_mapped_persistence")]
     {
+        // NOTE: Using legacy with_persistence for now.
+        // TODO: Migrate to with_persistence_handle() from registry in future milestone.
+        // Each space still gets isolated directories (wal/, hot/, warm/, cold/).
         store = store.with_persistence(&directories.root).map_err(|err| {
             MemorySpaceError::StoreInit {
                 id: space_id.clone(),
