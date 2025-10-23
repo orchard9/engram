@@ -263,9 +263,14 @@ message ConsolidateResponse {
 // ---------- Dream (Replay Simulation) ----------
 
 message DreamRequest {
-  int32 replay_cycles = 1;
-  float creativity_factor = 2;         // How much to vary replay
-  bool generate_insights = 3;          // Look for novel connections
+  // Memory space identifier for multi-tenant isolation.
+  // If empty, routes to default space configured at server startup.
+  // For production multi-tenant deployments, explicit space required.
+  string memory_space_id = 1;
+
+  int32 replay_cycles = 2;
+  float creativity_factor = 3;         // How much to vary replay
+  bool generate_insights = 4;          // Look for novel connections
 }
 
 message DreamResponse {
@@ -298,9 +303,14 @@ message ConsolidationProgress {
 // ---------- Complete (Pattern Completion) ----------
 
 message CompleteRequest {
-  PatternCue partial_pattern = 1;
-  float creativity = 2;                // How creative vs accurate
-  int32 max_completions = 3;
+  // Memory space identifier for multi-tenant isolation.
+  // If empty, routes to default space configured at server startup.
+  // For production multi-tenant deployments, explicit space required.
+  string memory_space_id = 1;
+
+  PatternCue partial_pattern = 2;
+  float creativity = 3;                // How creative vs accurate
+  int32 max_completions = 4;
 }
 
 message CompleteResponse {
@@ -312,11 +322,16 @@ message CompleteResponse {
 // ---------- Associate (Create Associations) ----------
 
 message AssociateRequest {
-  string source_memory = 1;
-  string target_memory = 2;
-  AssociationType association_type = 3;
-  float strength = 4;
-  string reason = 5;                   // Why this association
+  // Memory space identifier for multi-tenant isolation.
+  // If empty, routes to default space configured at server startup.
+  // For production multi-tenant deployments, explicit space required.
+  string memory_space_id = 1;
+
+  string source_memory = 2;
+  string target_memory = 3;
+  AssociationType association_type = 4;
+  float strength = 5;
+  string reason = 6;                   // Why this association
 }
 
 enum AssociationType {

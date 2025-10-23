@@ -98,6 +98,12 @@ impl MemoryService {
         // This will be implemented in follow-up for full backwards compat support
 
         // Priority 3: Default space configured at server startup
+        tracing::warn!(
+            default_space = %self.default_space,
+            "gRPC request without memory_space_id field, using default space. \
+            This behavior is deprecated - clients should explicitly specify memory_space_id \
+            for multi-tenant deployments."
+        );
         Ok(self.default_space.clone())
     }
 }
@@ -372,7 +378,16 @@ impl EngramService for MemoryService {
         &self,
         request: Request<ForgetRequest>,
     ) -> Result<Response<ForgetResponse>, Status> {
+        let metadata = request.metadata().clone();
         let req = request.into_inner();
+
+        // Extract memory space from request (explicit field or fallback to default)
+        let space_id = self.resolve_memory_space(&req.memory_space_id, &metadata)?;
+
+        // Get space-specific store handle from registry
+        let _handle = self.registry.create_or_get(&space_id).await.map_err(|e| {
+            Status::internal(format!("Failed to access memory space '{}': {}", space_id, e))
+        })?;
 
         let mode = ForgetMode::try_from(req.mode).unwrap_or(ForgetMode::Unspecified);
 
@@ -404,7 +419,16 @@ impl EngramService for MemoryService {
         &self,
         request: Request<RecognizeRequest>,
     ) -> Result<Response<RecognizeResponse>, Status> {
+        let metadata = request.metadata().clone();
         let req = request.into_inner();
+
+        // Extract memory space from request (explicit field or fallback to default)
+        let space_id = self.resolve_memory_space(&req.memory_space_id, &metadata)?;
+
+        // Get space-specific store handle from registry
+        let _handle = self.registry.create_or_get(&space_id).await.map_err(|e| {
+            Status::internal(format!("Failed to access memory space '{}': {}", space_id, e))
+        })?;
 
         // Check input presence
         if req.input.is_none() {
@@ -435,7 +459,16 @@ impl EngramService for MemoryService {
         &self,
         request: Request<ExperienceRequest>,
     ) -> Result<Response<ExperienceResponse>, Status> {
+        let metadata = request.metadata().clone();
         let req = request.into_inner();
+
+        // Extract memory space from request (explicit field or fallback to default)
+        let space_id = self.resolve_memory_space(&req.memory_space_id, &metadata)?;
+
+        // Get space-specific store handle from registry
+        let _handle = self.registry.create_or_get(&space_id).await.map_err(|e| {
+            Status::internal(format!("Failed to access memory space '{}': {}", space_id, e))
+        })?;
 
         let episode = req.episode.ok_or_else(|| {
             Status::invalid_argument(
@@ -465,7 +498,16 @@ impl EngramService for MemoryService {
         &self,
         request: Request<ReminisceRequest>,
     ) -> Result<Response<ReminisceResponse>, Status> {
+        let metadata = request.metadata().clone();
         let req = request.into_inner();
+
+        // Extract memory space from request (explicit field or fallback to default)
+        let space_id = self.resolve_memory_space(&req.memory_space_id, &metadata)?;
+
+        // Get space-specific store handle from registry
+        let _handle = self.registry.create_or_get(&space_id).await.map_err(|e| {
+            Status::internal(format!("Failed to access memory space '{}': {}", space_id, e))
+        })?;
 
         if req.cue.is_none() {
             return Err(Status::invalid_argument(
@@ -495,7 +537,16 @@ impl EngramService for MemoryService {
         &self,
         request: Request<ConsolidateRequest>,
     ) -> Result<Response<ConsolidateResponse>, Status> {
+        let metadata = request.metadata().clone();
         let req = request.into_inner();
+
+        // Extract memory space from request (explicit field or fallback to default)
+        let space_id = self.resolve_memory_space(&req.memory_space_id, &metadata)?;
+
+        // Get space-specific store handle from registry
+        let _handle = self.registry.create_or_get(&space_id).await.map_err(|e| {
+            Status::internal(format!("Failed to access memory space '{}': {}", space_id, e))
+        })?;
 
         let _mode = ConsolidationMode::try_from(req.mode).unwrap_or(ConsolidationMode::Unspecified);
 
@@ -519,7 +570,17 @@ impl EngramService for MemoryService {
         &self,
         request: Request<DreamRequest>,
     ) -> Result<Response<Self::DreamStream>, Status> {
+        let metadata = request.metadata().clone();
         let req = request.into_inner();
+
+        // Extract memory space from request (explicit field or fallback to default)
+        let space_id = self.resolve_memory_space(&req.memory_space_id, &metadata)?;
+
+        // Get space-specific store handle from registry
+        let _handle = self.registry.create_or_get(&space_id).await.map_err(|e| {
+            Status::internal(format!("Failed to access memory space '{}': {}", space_id, e))
+        })?;
+
         let replay_cycles = req.replay_cycles.clamp(1, 100);
 
         // Create channel for streaming responses
@@ -581,7 +642,16 @@ impl EngramService for MemoryService {
         &self,
         request: Request<CompleteRequest>,
     ) -> Result<Response<CompleteResponse>, Status> {
+        let metadata = request.metadata().clone();
         let req = request.into_inner();
+
+        // Extract memory space from request (explicit field or fallback to default)
+        let space_id = self.resolve_memory_space(&req.memory_space_id, &metadata)?;
+
+        // Get space-specific store handle from registry
+        let _handle = self.registry.create_or_get(&space_id).await.map_err(|e| {
+            Status::internal(format!("Failed to access memory space '{}': {}", space_id, e))
+        })?;
 
         let _partial = req.partial_pattern.ok_or_else(|| {
             Status::invalid_argument(
@@ -610,7 +680,16 @@ impl EngramService for MemoryService {
         &self,
         request: Request<AssociateRequest>,
     ) -> Result<Response<AssociateResponse>, Status> {
+        let metadata = request.metadata().clone();
         let req = request.into_inner();
+
+        // Extract memory space from request (explicit field or fallback to default)
+        let space_id = self.resolve_memory_space(&req.memory_space_id, &metadata)?;
+
+        // Get space-specific store handle from registry
+        let _handle = self.registry.create_or_get(&space_id).await.map_err(|e| {
+            Status::internal(format!("Failed to access memory space '{}': {}", space_id, e))
+        })?;
 
         if req.source_memory.is_empty() || req.target_memory.is_empty() {
             return Err(Status::invalid_argument(
@@ -636,7 +715,19 @@ impl EngramService for MemoryService {
         &self,
         request: Request<IntrospectRequest>,
     ) -> Result<Response<IntrospectResponse>, Status> {
-        let _req = request.into_inner();
+        let metadata = request.metadata().clone();
+        let req = request.into_inner();
+
+        // Special case: empty memory_space_id = system-wide metrics across all spaces
+        if !req.memory_space_id.is_empty() {
+            // Extract memory space from request (explicit field or fallback to default)
+            let space_id = self.resolve_memory_space(&req.memory_space_id, &metadata)?;
+
+            // Get space-specific store handle from registry
+            let _handle = self.registry.create_or_get(&space_id).await.map_err(|e| {
+                Status::internal(format!("Failed to access memory space '{}': {}", space_id, e))
+            })?;
+        }
 
         let snapshot = self.metrics.streaming_snapshot();
         let export_stats = self.metrics.streaming_stats();
