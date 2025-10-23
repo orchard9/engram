@@ -115,13 +115,13 @@ async fn test_cross_space_memory_isolation() {
     let alpha_memory = json!({
         "id": "alpha_memory_001",
         "content": "This belongs to alpha",
-        "embedding": vec![0.1_f32; 384]
+        "embedding": vec![0.1_f32; 768]
     });
 
     let (status, _response) = make_request_with_space(
         &app,
         Method::POST,
-        "/memory/remember",
+        "/api/v1/memories/remember",
         Some(alpha_memory.clone()),
         Some("alpha"),
     )
@@ -132,13 +132,13 @@ async fn test_cross_space_memory_isolation() {
     let beta_memory = json!({
         "id": "beta_memory_001",
         "content": "This belongs to beta",
-        "embedding": vec![0.2_f32; 384]
+        "embedding": vec![0.2_f32; 768]
     });
 
     let (status, _response) = make_request_with_space(
         &app,
         Method::POST,
-        "/memory/remember",
+        "/api/v1/memories/remember",
         Some(beta_memory.clone()),
         Some("beta"),
     )
@@ -146,16 +146,16 @@ async fn test_cross_space_memory_isolation() {
     assert_eq!(status, StatusCode::OK, "Beta remember should succeed");
 
     // Recall from alpha - should only see alpha memory
-    let alpha_recall = json!({
-        "query": vec![0.1_f32; 384],
+    let _alpha_recall = json!({
+        "query": vec![0.1_f32; 768],
         "k": 10
     });
 
     let (status, response) = make_request_with_space(
         &app,
-        Method::POST,
-        "/memory/recall",
-        Some(alpha_recall),
+        Method::GET,
+        "/api/v1/memories/recall?embedding=[0.1]",
+        None,
         Some("alpha"),
     )
     .await;
@@ -170,16 +170,11 @@ async fn test_cross_space_memory_isolation() {
     );
 
     // Recall from beta - should only see beta memory
-    let beta_recall = json!({
-        "query": vec![0.2_f32; 384],
-        "k": 10
-    });
-
     let (status, response) = make_request_with_space(
         &app,
-        Method::POST,
-        "/memory/recall",
-        Some(beta_recall),
+        Method::GET,
+        "/api/v1/memories/recall?query=beta",
+        None,
         Some("beta"),
     )
     .await;
@@ -193,17 +188,12 @@ async fn test_cross_space_memory_isolation() {
         "Beta should only see its own memory"
     );
 
-    // Verify cross-space query isolation - alpha query with beta embedding
-    let cross_query = json!({
-        "query": vec![0.2_f32; 384], // Beta's embedding
-        "k": 10
-    });
-
+    // Verify cross-space query isolation - alpha query with beta content
     let (status, response) = make_request_with_space(
         &app,
-        Method::POST,
-        "/memory/recall",
-        Some(cross_query),
+        Method::GET,
+        "/api/v1/memories/recall?query=beta",
+        None,
         Some("alpha"),
     )
     .await;
@@ -316,12 +306,12 @@ async fn test_health_endpoint_multi_space() {
         let memory = json!({
             "id": format!("alpha_{}", i),
             "content": "alpha memory",
-            "embedding": vec![0.1_f32; 384]
+            "embedding": vec![0.1_f32; 768]
         });
         make_request_with_space(
             &app,
             Method::POST,
-            "/memory/remember",
+            "/api/v1/memories/remember",
             Some(memory),
             Some("alpha"),
         )
@@ -332,12 +322,12 @@ async fn test_health_endpoint_multi_space() {
         let memory = json!({
             "id": format!("beta_{}", i),
             "content": "beta memory",
-            "embedding": vec![0.2_f32; 384]
+            "embedding": vec![0.2_f32; 768]
         });
         make_request_with_space(
             &app,
             Method::POST,
-            "/memory/remember",
+            "/api/v1/memories/remember",
             Some(memory),
             Some("beta"),
         )
@@ -346,7 +336,7 @@ async fn test_health_endpoint_multi_space() {
 
     // Query health endpoint
     let (status, response) =
-        make_request_with_space(&app, Method::GET, "/health", None, None).await;
+        make_request_with_space(&app, Method::GET, "/api/v1/system/health", None, None).await;
     assert_eq!(status, StatusCode::OK, "Health endpoint should succeed");
 
     // Verify spaces array exists

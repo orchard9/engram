@@ -246,16 +246,14 @@ fn extract_memory_space_id(
     body_space: Option<&str>,
     default: &MemorySpaceId,
 ) -> Result<MemorySpaceId, ApiError> {
-    // Priority 1: X-Engram-Memory-Space header (RESTful, explicit, works with all methods)
-    if let Some(header_value) = headers.get("x-engram-memory-space") {
+    // Priority 1: X-Memory-Space header (RESTful, explicit, works with all methods)
+    if let Some(header_value) = headers.get("x-memory-space") {
         let space_str = header_value.to_str().map_err(|_| {
-            ApiError::InvalidInput(
-                "X-Engram-Memory-Space header contains invalid UTF-8".to_string(),
-            )
+            ApiError::InvalidInput("X-Memory-Space header contains invalid UTF-8".to_string())
         })?;
         return MemorySpaceId::try_from(space_str).map_err(|e| {
             ApiError::InvalidInput(format!(
-                "Invalid memory space ID in X-Engram-Memory-Space header: {e}"
+                "Invalid memory space ID in X-Memory-Space header: {e}"
             ))
         });
     }
@@ -3680,7 +3678,7 @@ mod tests {
     #[test]
     fn test_extract_space_prefers_header_over_query() {
         let mut headers = HeaderMap::new();
-        headers.insert("x-engram-memory-space", "header-space".parse().unwrap());
+        headers.insert("x-memory-space", "header-space".parse().unwrap());
         let query = Some("query-space");
         let body = Some("body-space");
         let default = MemorySpaceId::default();
