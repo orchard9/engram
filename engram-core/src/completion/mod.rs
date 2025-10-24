@@ -20,6 +20,8 @@ pub mod hippocampal;
 pub mod hypothesis;
 pub mod local_context;
 pub mod numeric;
+pub mod pattern_cache;
+pub mod pattern_retrieval;
 pub mod reconstruction;
 pub mod scheduler;
 
@@ -36,6 +38,8 @@ pub use hypothesis::{Hypothesis, System2Reasoner};
 pub use local_context::{
     ContextEvidence, LocalContextExtractor, SpatialNeighbor, TemporalNeighbor,
 };
+pub use pattern_cache::{CacheStats, PatternCache};
+pub use pattern_retrieval::{MatchSource, PatternRetriever, RankedPattern};
 pub use reconstruction::PatternReconstructor;
 pub use scheduler::{
     ConsolidationScheduler, ConsolidationStats as SchedulerStats, SchedulerConfig, SchedulerState,

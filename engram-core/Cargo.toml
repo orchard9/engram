@@ -92,6 +92,9 @@ ort = { version = "2.0.0-rc.10", optional = true }
 unicode-segmentation = { version = "1.11", optional = true }
 fst = { version = "0.4", optional = true }
 
+# Pattern completion dependencies (Milestone 8 Task 003)
+lru = { version = "0.12", optional = true }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 perf-event = { version = "0.4", optional = true }
 
@@ -158,7 +161,8 @@ probabilistic_queries = [
 pattern_completion = [
     "nalgebra",
     "statrs",
-    "rayon"
+    "rayon",
+    "lru"
 ]
 
 # SMT-based formal verification (experimental)
