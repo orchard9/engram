@@ -10,6 +10,7 @@ use crate::activation::{ActivationResult, NodeId};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use super::MemoryGraph;
 
@@ -231,6 +232,11 @@ pub fn run_spreading(
 /// race conditions that can cause test timeouts. Multi-threaded determinism introduces
 /// barrier synchronization overhead that can lead to deadlocks under buffer contention.
 /// Sequential execution provides the strongest determinism guarantees for test validation.
+///
+/// TIMEOUT: Sets 5-minute completion timeout to handle resource contention during parallel
+/// test execution. Tests complete in <0.1s when run in isolation, but the full test suite
+/// can cause extreme CPU contention on systems with many cores. The extended timeout prevents
+/// false failures while maintaining a safety net for actual hangs.
 #[must_use]
 pub fn deterministic_config(seed: u64) -> ParallelSpreadingConfig {
     let mut config = ParallelSpreadingConfig::deterministic(seed);
@@ -240,5 +246,7 @@ pub fn deterministic_config(seed: u64) -> ParallelSpreadingConfig {
     config.max_concurrent_per_tier = 1; // Single task at a time
     config.enable_metrics = true;
     config.trace_activation_flow = true;
+    // Set extended timeout for parallel test execution resource contention
+    config.completion_timeout = Some(Duration::from_secs(300)); // 5 minutes
     config
 }
