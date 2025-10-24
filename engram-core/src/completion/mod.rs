@@ -10,6 +10,8 @@ use thiserror::Error;
 #[cfg(feature = "pattern_completion")]
 use nalgebra::DVector;
 
+pub mod attractor_dynamics;
+pub mod ca1_gating;
 pub mod confidence;
 pub mod consolidation;
 pub mod context;
@@ -21,6 +23,8 @@ pub mod numeric;
 pub mod reconstruction;
 pub mod scheduler;
 
+pub use attractor_dynamics::{CA3Attractor, ConvergenceStats, ThetaRhythmMonitor};
+pub use ca1_gating::{CA1Gate, PlausibilityChecker};
 pub use confidence::MetacognitiveConfidence;
 pub use consolidation::{
     ConsolidationEngine, ConsolidationSnapshot, ConsolidationStats, SemanticPattern,
