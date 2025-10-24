@@ -13,8 +13,10 @@ use nalgebra::DVector;
 pub mod confidence;
 pub mod consolidation;
 pub mod context;
+pub mod field_reconstruction;
 pub mod hippocampal;
 pub mod hypothesis;
+pub mod local_context;
 pub mod numeric;
 pub mod reconstruction;
 pub mod scheduler;
@@ -24,8 +26,12 @@ pub use consolidation::{
     ConsolidationEngine, ConsolidationSnapshot, ConsolidationStats, SemanticPattern,
 };
 pub use context::{EntorhinalContext, GridModule};
+pub use field_reconstruction::{FieldReconstructor, NeighborEvidence, ReconstructedField};
 pub use hippocampal::HippocampalCompletion;
 pub use hypothesis::{Hypothesis, System2Reasoner};
+pub use local_context::{
+    ContextEvidence, LocalContextExtractor, SpatialNeighbor, TemporalNeighbor,
+};
 pub use reconstruction::PatternReconstructor;
 pub use scheduler::{
     ConsolidationScheduler, ConsolidationStats as SchedulerStats, SchedulerConfig, SchedulerState,
