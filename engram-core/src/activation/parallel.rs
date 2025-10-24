@@ -685,10 +685,10 @@ impl ParallelSpreadingEngine {
                 // Scheduler is idle - no work to do
                 thread::sleep(Duration::from_micros(100));
             } else {
-                // Scheduler has work but we didn't get a task - sync and retry
-                if context.config().deterministic {
-                    context.phase_barrier.wait();
-                }
+                // Scheduler has work but we didn't get a task
+                // Another worker likely grabbed it - just yield and retry
+                // Don't wait at barrier here to prevent live-lock when workers
+                // are waiting for tasks that are still in-flight
                 thread::yield_now();
             }
         }
