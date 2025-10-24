@@ -15,7 +15,9 @@ pub mod ca1_gating;
 pub mod confidence;
 pub mod consolidation;
 pub mod context;
+pub mod evidence_integration;
 pub mod field_reconstruction;
+pub mod global_patterns;
 pub mod hippocampal;
 pub mod hypothesis;
 pub mod local_context;
@@ -32,7 +34,9 @@ pub use consolidation::{
     ConsolidationEngine, ConsolidationSnapshot, ConsolidationStats, SemanticPattern,
 };
 pub use context::{EntorhinalContext, GridModule};
+pub use evidence_integration::{HierarchicalEvidenceAggregator, IntegratedField};
 pub use field_reconstruction::{FieldReconstructor, NeighborEvidence, ReconstructedField};
+pub use global_patterns::{GlobalFieldReconstruction, GlobalPatternApplicator};
 pub use hippocampal::HippocampalCompletion;
 pub use hypothesis::{Hypothesis, System2Reasoner};
 pub use local_context::{
