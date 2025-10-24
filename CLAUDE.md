@@ -86,6 +86,10 @@ Content writing process:
 6. Include specific citations from research in all content pieces
 7. Update the relevant task file with any new insights gained
 
+## Documentation Strategy
+
+Public documentation (docs/) follows the Diátaxis framework: tutorials/ (learning), howto/ (problem-solving), explanation/ (understanding), reference/ (information). Production operations questions ("how to run in production", "backups", "slow queries", "scaling") live in operations/ with direct, actionable guides. Internal planning documents (RFCs, architecture WIPs, milestone UAT) stay in docs/internal/ or roadmap/, never mixed with public VitePress site content.
+
 ## Coding Guidelines
 
 Based on our codebase quality standards and recent fixes:
