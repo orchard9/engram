@@ -10,6 +10,7 @@ use thiserror::Error;
 #[cfg(feature = "pattern_completion")]
 use nalgebra::DVector;
 
+pub mod alternative_hypotheses;
 pub mod attractor_dynamics;
 pub mod ca1_gating;
 pub mod confidence;
@@ -26,7 +27,9 @@ pub mod pattern_cache;
 pub mod pattern_retrieval;
 pub mod reconstruction;
 pub mod scheduler;
+pub mod source_monitor;
 
+pub use alternative_hypotheses::AlternativeHypothesisGenerator;
 pub use attractor_dynamics::{CA3Attractor, ConvergenceStats, ThetaRhythmMonitor};
 pub use ca1_gating::{CA1Gate, PlausibilityChecker};
 pub use confidence::MetacognitiveConfidence;
@@ -48,6 +51,7 @@ pub use reconstruction::PatternReconstructor;
 pub use scheduler::{
     ConsolidationScheduler, ConsolidationStats as SchedulerStats, SchedulerConfig, SchedulerState,
 };
+pub use source_monitor::SourceMonitor;
 
 /// Error types for pattern completion operations
 #[derive(Debug, Error)]
