@@ -1,10 +1,27 @@
-//! Probabilistic Query Executor
+//! Query Executor Infrastructure
 //!
-//! Core query execution engine that transforms recall results into probabilistic
-//! query results with evidence tracking, uncertainty propagation, and confidence
-//! calibration.
+//! This module provides two complementary query execution systems:
+//!
+//! 1. **QueryExecutor** (Task 005) - AST query routing and multi-tenant isolation
+//!    - Routes parsed queries to appropriate handlers
+//!    - Validates memory space access
+//!    - Enforces timeouts and complexity limits
+//!    - Constructs evidence chains from query AST
+//!
+//! 2. **ProbabilisticQueryExecutor** (Task 001) - Evidence aggregation
+//!    - Transforms recall results into probabilistic results
+//!    - Aggregates evidence from multiple sources
+//!    - Tracks uncertainty propagation
+//!    - Calibrates confidence intervals
 //!
 //! # Architecture
+//!
+//! ```text
+//! Parser → AST → QueryExecutor → Engine Ops → ProbabilisticQueryExecutor → Results
+//!                     ↓                               ↓
+//!                 Registry                    Evidence Aggregation
+//!              (multi-tenant)                 (uncertainty tracking)
+//! ```
 //!
 //! The executor integrates multiple sources of uncertainty:
 //! - Spreading activation paths with hop-dependent decay
@@ -15,7 +32,43 @@
 //! All evidence is combined using mathematically sound probability aggregation
 //! from `ConfidenceAggregator`, ensuring results respect probability axioms.
 //!
-//! # Example
+//! # Example: AST Query Execution
+//!
+//! ```rust,no_run
+//! use engram_core::query::executor::{QueryExecutor, QueryExecutorConfig, QueryContext};
+//! use engram_core::query::parser::ast::{Query, Pattern, RecallQuery, NodeIdentifier};
+//! use engram_core::registry::MemorySpaceRegistry;
+//! use engram_core::MemorySpaceId;
+//! use std::sync::Arc;
+//! use std::time::Duration;
+//!
+//! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+//! let registry = Arc::new(MemorySpaceRegistry::new(
+//!     "/tmp/engram",
+//!     |_id, _dirs| Err(engram_core::registry::MemorySpaceError::NotFound { id: _id.clone() })
+//! )?);
+//!
+//! let executor = QueryExecutor::new(registry, QueryExecutorConfig::default());
+//!
+//! let query = Query::Recall(RecallQuery {
+//!     pattern: Pattern::NodeId(NodeIdentifier::from("episode_123")),
+//!     constraints: vec![],
+//!     confidence_threshold: None,
+//!     base_rate: None,
+//!     limit: Some(10),
+//! });
+//!
+//! let context = QueryContext::with_timeout(
+//!     MemorySpaceId::from("user_123"),
+//!     Duration::from_secs(5),
+//! );
+//!
+//! let result = executor.execute(query, context).await?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! # Example: Probabilistic Evidence Aggregation
 //!
 //! ```
 //! use engram_core::query::executor::{ProbabilisticQueryExecutor, QueryExecutorConfig};
@@ -39,6 +92,18 @@
 //! let result = executor.execute(episodes, &[], vec![]);
 //! assert!(!result.is_empty());
 //! ```
+
+// Sub-modules
+pub mod context;
+pub mod query_executor;
+pub mod recall;
+pub mod spread;
+
+// Re-exports from sub-modules
+pub use context::QueryContext;
+pub use query_executor::{AstQueryExecutorConfig, QueryExecutionError, QueryExecutor};
+pub use recall::{RecallExecutionError, RecallExecutor};
+pub use spread::{SpreadExecutionError, execute_spread};
 
 use crate::activation::confidence_aggregation::{
     ConfidenceAggregationOutcome, ConfidenceAggregator, ConfidencePath,
