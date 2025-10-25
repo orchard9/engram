@@ -102,3 +102,7 @@ engram-data/
 # But still ignore actual data files in baseline directories
 docs/assets/consolidation/baseline/*.jsonl
 docs/assets/consolidation/baseline/*.dat
+
+# Zig build artifacts (Milestone 10)
+/zig/zig-cache/
+/zig/zig-out/

@@ -210,6 +210,9 @@ force_scalar_compute = []
 single_threaded = []
 disable_persistence = []
 
+# Zig performance kernels (Milestone 10)
+zig-kernels = []
+
 # Experimental features
 # numa_aware = ["numa-rs"]
 

@@ -50,6 +50,8 @@ pub mod storage;
 pub mod store;
 pub mod streaming_health;
 pub mod types;
+#[cfg(feature = "zig-kernels")]
+pub mod zig_kernels;
 
 pub use registry::{
     MemorySpaceError, MemorySpaceRegistry, SpaceDirectories, SpaceHandle, SpaceSummary,
@@ -60,6 +62,19 @@ use serde::{Deserialize, Serialize};
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::time::SystemTime;
+
+// ============================================================================
+// System Constants
+// ============================================================================
+
+/// Standard embedding dimension for all memory vectors in the system.
+///
+/// This matches the output dimension of text-embedding-ada-002 and similar
+/// embedding models. All embeddings stored in memory, patterns, and queries
+/// must use this dimension.
+///
+/// Changing this value requires rebuilding the entire memory graph.
+pub const EMBEDDING_DIM: usize = 768;
 
 /// Cognitive confidence type with human-centered design for probabilistic reasoning.
 ///
