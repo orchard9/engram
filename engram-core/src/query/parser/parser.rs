@@ -715,6 +715,7 @@ impl<'a> Parser<'a> {
     // ========================================================================
 
     /// Get current token or error if EOF
+    #[inline]
     fn current_token(&self) -> ParseResult<&Token<'a>> {
         self.current
             .as_ref()
@@ -723,6 +724,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Advance to next token
+    #[inline]
     fn advance(&mut self) -> ParseResult<Spanned<Token<'a>>> {
         let current = self
             .current
@@ -739,6 +741,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Expect specific token and consume it
+    #[inline]
     fn expect(&mut self, expected: &Token<'a>) -> ParseResult<Spanned<Token<'a>>> {
         if self.current_token()? == expected {
             self.advance()
@@ -753,11 +756,13 @@ impl<'a> Parser<'a> {
     }
 
     /// Check if current token matches (without consuming)
+    #[inline]
     fn check(&self, token: &Token<'a>) -> bool {
         self.current_token().ok() == Some(token)
     }
 
     /// Check if at end of input
+    #[inline]
     fn is_at_end(&self) -> bool {
         matches!(
             self.current.as_ref().map(|s| &s.value),
@@ -766,6 +771,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Get current position for error reporting
+    #[inline]
     fn position(&self) -> Position {
         self.current
             .as_ref()

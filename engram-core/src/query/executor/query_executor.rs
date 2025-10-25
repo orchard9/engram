@@ -209,8 +209,8 @@ impl QueryExecutor {
 
     /// Execute RECALL query - retrieve memories matching pattern.
     fn execute_recall(
-    #[allow(clippy::needless_pass_by_value)]
-    #[allow(clippy::unused_self)]
+        #[allow(clippy::needless_pass_by_value)]
+        #[allow(clippy::unused_self)]
         &self,
         query: RecallQuery<'_>,
         _context: &QueryContext,
@@ -258,10 +258,10 @@ impl QueryExecutor {
 
         Ok(result)
     }
-    #[allow(clippy::needless_pass_by_value)]
-    #[allow(clippy::unused_self)]
 
     /// Execute SPREAD query - activation spreading from source.
+    #[allow(clippy::needless_pass_by_value)]
+    #[allow(clippy::unused_self)]
     fn execute_spread(
         &self,
         query: SpreadQuery<'_>,
@@ -278,8 +278,6 @@ impl QueryExecutor {
         Err(QueryExecutionError::NotImplemented {
             query_type: "SPREAD".to_string(),
             reason: "Activation spreading integration pending (Milestone 11)".to_string(),
-    #[allow(clippy::needless_pass_by_value)]
-    #[allow(clippy::unused_self)]
         })
     }
 
@@ -296,8 +294,8 @@ impl QueryExecutor {
         let _ = query;
 
         Err(QueryExecutionError::NotImplemented {
-    #[allow(clippy::needless_pass_by_value)]
-    #[allow(clippy::unused_self)]
+            #[allow(clippy::needless_pass_by_value)]
+            #[allow(clippy::unused_self)]
             query_type: "PREDICT".to_string(),
             reason: "Prediction requires System 2 reasoning (Milestone 15)".to_string(),
         })
@@ -314,9 +312,8 @@ impl QueryExecutor {
         // This uses the completion engine from Milestone 8.
 
         let _ = query;
-    #[allow(clippy::needless_pass_by_value)]
-    #[allow(clippy::unused_self)]
-
+        #[allow(clippy::needless_pass_by_value)]
+        #[allow(clippy::unused_self)]
         Err(QueryExecutionError::NotImplemented {
             query_type: "IMAGINE".to_string(),
             reason: "Pattern completion integration pending (Milestone 10)".to_string(),
@@ -331,9 +328,8 @@ impl QueryExecutor {
         _space_handle: Arc<crate::registry::SpaceHandle>,
     ) -> Result<ProbabilisticQueryResult, QueryExecutionError> {
         // TODO: Implement consolidation integration
-    #[allow(clippy::unused_self)]
+        #[allow(clippy::unused_self)]
         // This requires the consolidation scheduler from future milestones.
-
         let _ = query;
 
         Err(QueryExecutionError::NotImplemented {

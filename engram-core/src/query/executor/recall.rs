@@ -35,14 +35,14 @@ pub enum RecallExecutionError {
     #[error("Failed to convert pattern to cue: {reason}")]
     PatternConversionFailed {
         /// Reason for conversion failure
-        reason: String
+        reason: String,
     },
 
     /// Constraint application failed
     #[error("Failed to apply constraint: {reason}")]
     ConstraintApplicationFailed {
         /// Reason for constraint failure
-        reason: String
+        reason: String,
     },
 
     /// Invalid embedding dimension
@@ -51,14 +51,14 @@ pub enum RecallExecutionError {
         /// Expected dimension
         expected: usize,
         /// Actual dimension provided
-        actual: usize
+        actual: usize,
     },
 
     /// Memory store operation failed
     #[error("Memory store operation failed: {reason}")]
     MemoryStoreFailed {
         /// Reason for memory store failure
-        reason: String
+        reason: String,
     },
 }
 
@@ -551,16 +551,13 @@ mod tests {
         let mut ep2 = create_test_episode("ep2", Confidence::HIGH, "future");
         ep2.when = future;
 
-        let episodes = vec![
-            (ep1.clone(), Confidence::HIGH),
-            (ep2.clone(), Confidence::HIGH),
-        ];
+        let episodes = vec![(ep1, Confidence::HIGH), (ep2, Confidence::HIGH)];
 
         // Test CreatedBefore
         let constraint = Constraint::CreatedBefore(now.into());
         let filtered = executor
             .apply_single_constraint(episodes.clone(), &constraint)
-            .unwrap();
+            .expect("Failed to apply CreatedBefore constraint");
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].0.id, "ep1");
 
@@ -568,7 +565,7 @@ mod tests {
         let constraint = Constraint::CreatedAfter(now.into());
         let filtered = executor
             .apply_single_constraint(episodes, &constraint)
-            .unwrap();
+            .expect("Failed to apply CreatedAfter constraint");
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].0.id, "ep2");
     }
@@ -674,7 +671,9 @@ mod tests {
             Constraint::ContentContains(std::borrow::Cow::Borrowed("cat")),
         ];
 
-        let filtered = executor.apply_constraints(episodes, &constraints).unwrap();
+        let filtered = executor
+            .apply_constraints(episodes, &constraints)
+            .expect("Failed to apply multiple constraints");
 
         // Should keep only HIGH confidence episodes containing "cat"
         assert_eq!(filtered.len(), 1);
