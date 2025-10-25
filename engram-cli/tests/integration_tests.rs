@@ -62,14 +62,13 @@ async fn test_find_available_port_with_occupied_port() {
         "Should find port within reasonable range"
     );
 
-    // Release the occupied listener before validating availability.
-    drop(listener);
+    // Verify the new port is actually available by binding to it
+    // This eliminates the TOCTOU race condition that could occur if we just check availability
+    let _new_listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{}", new_port))
+        .await
+        .expect("Found port should be available for binding");
 
-    // Verify the new port is actually available
-    assert!(
-        is_port_available(new_port).await,
-        "Found port should be available"
-    );
+    // Both listeners will be dropped at end of test, releasing the ports
 }
 
 #[tokio::test]
