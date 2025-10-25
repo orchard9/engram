@@ -11,14 +11,15 @@ use engram_proto::cue::CueType;
 use engram_proto::engram_service_server::{EngramService, EngramServiceServer};
 use engram_proto::{
     AssociateRequest, AssociateResponse, CompleteRequest, CompleteResponse, Confidence,
-    ConsolidateRequest, ConsolidateResponse, ConsolidationMode, ConsolidationProgress,
-    ConsolidationState, DreamRequest, DreamResponse, ExperienceRequest, ExperienceResponse,
-    FlowStatus, ForgetMode, ForgetRequest, ForgetResponse, HealthStatus, Insight,
-    IntrospectRequest, IntrospectResponse, MemoryFlowRequest, MemoryFlowResponse, MemoryStatistics,
-    RecallMetadata, RecallRequest, RecallResponse, RecognizeRequest, RecognizeResponse,
-    RememberRequest, RememberResponse, ReminisceRequest, ReminisceResponse, ReplaySequence,
-    StreamEventType, StreamRequest, StreamResponse, dream_response, flow_control, flow_status,
-    memory_flow_request, memory_flow_response, remember_request,
+    ConfidenceInterval, ConsolidateRequest, ConsolidateResponse, ConsolidationMode,
+    ConsolidationProgress, ConsolidationState, DreamRequest, DreamResponse, ExperienceRequest,
+    ExperienceResponse, FlowStatus, ForgetMode, ForgetRequest, ForgetResponse, HealthStatus,
+    Insight, IntrospectRequest, IntrospectResponse, MemoryFlowRequest, MemoryFlowResponse,
+    MemoryStatistics, QueryRequest, QueryResponse, RecallMetadata, RecallRequest, RecallResponse,
+    RecognizeRequest, RecognizeResponse, RememberRequest, RememberResponse, ReminisceRequest,
+    ReminisceResponse, ReplaySequence, StreamEventType, StreamRequest, StreamResponse,
+    dream_response, flow_control, flow_status, memory_flow_request, memory_flow_response,
+    remember_request,
 };
 use serde_json::json;
 use std::collections::HashMap;
@@ -810,6 +811,143 @@ impl EngramService for MemoryService {
         Ok(Response::new(response))
     }
 
+    /// ExecuteQuery executes a query string against the memory graph.
+    ///
+    /// Cognitive design: Natural query language execution with comprehensive
+    /// error guidance and probabilistic result representation.
+    async fn execute_query(
+        &self,
+        request: Request<QueryRequest>,
+    ) -> Result<Response<QueryResponse>, Status> {
+        use engram_core::query::{
+            executor::{AstQueryExecutorConfig, QueryExecutor, context::QueryContext},
+            parser::Parser,
+        };
+
+        let metadata = request.metadata().clone();
+        let req = request.into_inner();
+
+        // Extract memory space from request (explicit field or fallback to default)
+        let space_id = self.resolve_memory_space(&req.memory_space_id, &metadata)?;
+
+        // Validate query text is not empty
+        if req.query_text.is_empty() {
+            return Err(Status::invalid_argument(
+                "Query execution requires a query string - like asking a question \
+                to retrieve memories. Provide a query in Engram query language format. \
+                Example: 'RECALL episode_123'",
+            ));
+        }
+
+        // Parse query string
+        let query = Parser::parse(&req.query_text).map_err(|e| {
+            Status::invalid_argument(format!(
+                "Invalid query syntax: {}. Query must follow Engram query language format. \
+                Examples: 'RECALL episode_123', 'SPREAD FROM node_456 HOPS 3'",
+                e
+            ))
+        })?;
+
+        // Create query executor
+        let executor = QueryExecutor::new(self.registry.clone(), AstQueryExecutorConfig::default());
+
+        // Create query context
+        let context = QueryContext::without_timeout(space_id.clone());
+
+        // Execute query and measure time
+        let start = std::time::Instant::now();
+        let result = executor.execute(query, context).await.map_err(|e| {
+            match e {
+                engram_core::query::executor::query_executor::QueryExecutionError::MemorySpaceNotFound { .. } => {
+                    Status::not_found(format!(
+                        "Memory space '{}' not found. Verify the memory space exists or create it first.",
+                        space_id
+                    ))
+                }
+                engram_core::query::executor::query_executor::QueryExecutionError::Timeout { .. } => {
+                    Status::deadline_exceeded(
+                        "Query execution timed out. Try simplifying the query or adding LIMIT clause."
+                    )
+                }
+                engram_core::query::executor::query_executor::QueryExecutionError::QueryTooComplex { cost, limit } => {
+                    Status::invalid_argument(format!(
+                        "Query too complex (cost={}, limit={}). Simplify query by reducing HOPS or adding constraints.",
+                        cost, limit
+                    ))
+                }
+                engram_core::query::executor::query_executor::QueryExecutionError::NotImplemented { query_type, reason } => {
+                    Status::unimplemented(format!(
+                        "{} query not yet implemented: {}. Try RECALL for basic retrieval.",
+                        query_type, reason
+                    ))
+                }
+                _ => Status::internal(format!("Query execution failed: {}", e)),
+            }
+        })?;
+
+        let execution_time = start.elapsed();
+
+        // Convert to protobuf response
+        let total_count = result.episodes.len();
+
+        #[allow(clippy::cast_possible_truncation)]
+        let episodes: Vec<engram_proto::Episode> = result
+            .episodes
+            .into_iter()
+            .map(|(episode, _confidence)| {
+                let timestamp_seconds = episode.when.timestamp();
+                let timestamp_nanos = episode.when.timestamp_subsec_nanos() as i32;
+
+                engram_proto::Episode {
+                id: episode.id,
+                when: Some(::prost_types::Timestamp {
+                    seconds: timestamp_seconds,
+                    nanos: timestamp_nanos,
+                }),
+                what: episode.what,
+                embedding: episode.embedding.to_vec(),
+                encoding_confidence: Some(Confidence {
+                    value: episode.encoding_confidence.raw(),
+                    category: confidence_to_category(episode.encoding_confidence.raw()) as i32,
+                    reasoning: String::new(),
+                }),
+                where_location: episode.where_location.unwrap_or_default(),
+                who: episode.who.unwrap_or_default(),
+                why: String::new(),
+                how: String::new(),
+                decay_rate: episode.decay_rate,
+                emotional_valence: 0.0,
+                importance: 0.0,
+                consolidation_state: ConsolidationState::Recent as i32,
+                last_replay: None,
+            }
+            })
+            .collect();
+
+        let confidences: Vec<f32> = episodes
+            .iter()
+            .map(|ep| ep.encoding_confidence.as_ref().map_or(0.5, |c| c.value))
+            .collect();
+
+        let aggregate_confidence = Some(ConfidenceInterval {
+            lower_bound: result.confidence_interval.lower.raw(),
+            mean: result.confidence_interval.point.raw(),
+            upper_bound: result.confidence_interval.upper.raw(),
+            confidence_level: 0.95, // 95% confidence interval
+        });
+
+        #[allow(clippy::cast_possible_truncation)]
+        let response = QueryResponse {
+            episodes,
+            confidences,
+            aggregate_confidence,
+            total_count: total_count as i32,
+            execution_time_ms: execution_time.as_millis() as i64,
+        };
+
+        Ok(Response::new(response))
+    }
+
     /// Introspect provides system self-awareness and statistics.
     ///
     /// Cognitive design: System introspection as "self-awareness",
@@ -1295,4 +1433,18 @@ impl EngramService for MemoryService {
         Ok(Response::new(Box::pin(response_stream)))
     }
 }
+
 use chrono::Utc;
+
+/// Convert confidence value to protobuf ConfidenceCategory enum
+fn confidence_to_category(value: f32) -> engram_proto::ConfidenceCategory {
+    use engram_proto::ConfidenceCategory;
+
+    match value {
+        v if v <= 0.0 => ConfidenceCategory::None,
+        v if v < 0.3 => ConfidenceCategory::Low,
+        v if v < 0.7 => ConfidenceCategory::Medium,
+        v if v < 1.0 => ConfidenceCategory::High,
+        _ => ConfidenceCategory::Certain,
+    }
+}

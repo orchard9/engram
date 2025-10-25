@@ -2603,6 +2603,98 @@ pub enum ApiError {
     SystemError(String),
     /// Data validation failed
     ValidationError(String),
+    /// Request timeout
+    Timeout {
+        message: String,
+        suggestion: String,
+        example: String,
+    },
+    /// Resource not found with context
+    NotFound {
+        message: String,
+        suggestion: String,
+        example: String,
+    },
+    /// Bad request with context
+    BadRequest {
+        message: String,
+        suggestion: String,
+        example: String,
+    },
+    /// Not implemented
+    NotImplemented {
+        message: String,
+        suggestion: String,
+        example: String,
+    },
+}
+
+impl ApiError {
+    /// Create a timeout error with context
+    pub fn timeout(
+        message: impl Into<String>,
+        suggestion: impl Into<String>,
+        example: impl Into<String>,
+    ) -> Self {
+        Self::Timeout {
+            message: message.into(),
+            suggestion: suggestion.into(),
+            example: example.into(),
+        }
+    }
+
+    /// Create a not found error with context
+    pub fn not_found(
+        message: impl Into<String>,
+        suggestion: impl Into<String>,
+        example: impl Into<String>,
+    ) -> Self {
+        Self::NotFound {
+            message: message.into(),
+            suggestion: suggestion.into(),
+            example: example.into(),
+        }
+    }
+
+    /// Create a bad request error with context
+    pub fn bad_request(
+        message: impl Into<String>,
+        suggestion: impl Into<String>,
+        example: impl Into<String>,
+    ) -> Self {
+        Self::BadRequest {
+            message: message.into(),
+            suggestion: suggestion.into(),
+            example: example.into(),
+        }
+    }
+
+    /// Create a not implemented error with context
+    pub fn not_implemented(
+        message: impl Into<String>,
+        suggestion: impl Into<String>,
+        example: impl Into<String>,
+    ) -> Self {
+        Self::NotImplemented {
+            message: message.into(),
+            suggestion: suggestion.into(),
+            example: example.into(),
+        }
+    }
+
+    /// Create an internal error with context
+    pub fn internal_error(
+        message: impl Into<String>,
+        suggestion: impl Into<String>,
+        example: impl Into<String>,
+    ) -> Self {
+        Self::SystemError(format!(
+            "{}\nSuggestion: {}\nExample: {}",
+            message.into(),
+            suggestion.into(),
+            example.into()
+        ))
+    }
 }
 
 impl IntoResponse for ApiError {
@@ -2635,9 +2727,33 @@ impl IntoResponse for ApiError {
             ),
             Self::ValidationError(msg) => (
                 StatusCode::UNPROCESSABLE_ENTITY,
-                "MEMORY_VALIDATION_ERROR", 
+                "MEMORY_VALIDATION_ERROR",
                 msg,
                 "Memory content validation failed. Ensure your input follows cognitive encoding principles.".to_string()
+            ),
+            Self::Timeout { message, suggestion, example } => (
+                StatusCode::REQUEST_TIMEOUT,
+                "QUERY_TIMEOUT",
+                message,
+                format!("Suggestion: {}\nExample: {}", suggestion, example)
+            ),
+            Self::NotFound { message, suggestion, example } => (
+                StatusCode::NOT_FOUND,
+                "RESOURCE_NOT_FOUND",
+                message,
+                format!("Suggestion: {}\nExample: {}", suggestion, example)
+            ),
+            Self::BadRequest { message, suggestion, example } => (
+                StatusCode::BAD_REQUEST,
+                "BAD_REQUEST",
+                message,
+                format!("Suggestion: {}\nExample: {}", suggestion, example)
+            ),
+            Self::NotImplemented { message, suggestion, example } => (
+                StatusCode::NOT_IMPLEMENTED,
+                "NOT_IMPLEMENTED",
+                message,
+                format!("Suggestion: {}\nExample: {}", suggestion, example)
             ),
         };
 
@@ -3644,6 +3760,8 @@ pub fn create_api_routes() -> Router<ApiState> {
             "/api/v1/complete",
             post(crate::handlers::complete::complete_handler),
         )
+        // Query execution operations
+        .route("/api/v1/query", post(crate::handlers::query::query_handler))
         // REST-style endpoints for CLI compatibility
         .route("/api/v1/memories", post(create_memory_rest))
         .route("/api/v1/memories/{id}", get(get_memory_by_id))

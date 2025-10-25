@@ -47,9 +47,14 @@ service EngramService {
   
   // Complete performs pattern completion from partial cues
   rpc Complete(CompleteRequest) returns (CompleteResponse);
-  
+
   // Associate creates or strengthens associations between memories
   rpc Associate(AssociateRequest) returns (AssociateResponse);
+
+  // ========== Query Operations (Advanced) ==========
+
+  // ExecuteQuery executes a query string and returns probabilistic results
+  rpc ExecuteQuery(QueryRequest) returns (QueryResponse);
   
   // ========== Monitoring Operations ==========
   
@@ -347,6 +352,51 @@ message AssociateResponse {
   bool created = 1;
   float final_strength = 2;
   repeated string affected_paths = 3;  // Activation paths affected
+}
+
+// ---------- ExecuteQuery (Query Execution) ----------
+
+message QueryRequest {
+  // Memory space identifier for multi-tenant isolation.
+  // If empty, routes to default space configured at server startup.
+  // For production multi-tenant deployments, explicit space required.
+  string memory_space_id = 1;
+
+  // Query text in Engram query language format
+  // Examples: "RECALL episode_123", "SPREAD FROM node_456 HOPS 3"
+  string query_text = 2;
+}
+
+message QueryResponse {
+  // Retrieved episodes matching the query
+  repeated Episode episodes = 1;
+
+  // Per-episode confidence scores in same order as episodes
+  repeated float confidences = 2;
+
+  // Aggregate confidence interval across all results
+  ConfidenceInterval aggregate_confidence = 3;
+
+  // Total number of results before pagination/limits
+  int32 total_count = 4;
+
+  // Query execution time in milliseconds
+  int64 execution_time_ms = 5;
+}
+
+// Confidence interval for aggregate query results
+message ConfidenceInterval {
+  // Lower bound of confidence interval [0.0, 1.0]
+  float lower_bound = 1;
+
+  // Point estimate (mean) confidence [0.0, 1.0]
+  float mean = 2;
+
+  // Upper bound of confidence interval [0.0, 1.0]
+  float upper_bound = 3;
+
+  // Confidence level of the interval (e.g., 0.95 for 95% CI)
+  float confidence_level = 4;
 }
 
 // ---------- Introspect (Self-Awareness) ----------

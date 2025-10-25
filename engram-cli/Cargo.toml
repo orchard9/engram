@@ -42,6 +42,7 @@ engram-core = { path = "../engram-core", features = ["hnsw_index", "memory_mappe
 engram-storage = { path = "../engram-storage" }
 engram-proto = { path = "../engram-proto" }
 tonic = "0.13"
+prost-types = "0.13"
 tokio-stream = "0.1"
 clap = { workspace = true }
 thiserror = { workspace = true }
