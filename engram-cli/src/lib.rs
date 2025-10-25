@@ -11,6 +11,7 @@ pub mod cli;
 pub mod config;
 pub mod docs;
 pub mod grpc;
+pub mod handlers;
 pub mod openapi;
 
 use anyhow::Result;

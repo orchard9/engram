@@ -3639,6 +3639,8 @@ pub fn create_api_routes() -> Router<ApiState> {
         .route("/api/v1/consolidations/{id}", get(get_consolidation))
         // Probabilistic query operations
         .route("/api/v1/query/probabilistic", get(probabilistic_query))
+        // Pattern completion operations
+        .route("/api/v1/complete", post(crate::handlers::complete::complete_handler))
         // REST-style endpoints for CLI compatibility
         .route("/api/v1/memories", post(create_memory_rest))
         .route("/api/v1/memories/{id}", get(get_memory_by_id))

@@ -101,6 +101,7 @@ Headers:
         crate::api::monitor_events,
         crate::api::monitor_activations,
         crate::api::monitor_causality,
+        crate::handlers::complete::complete_handler,
     ),
     components(
         schemas(
@@ -136,12 +137,23 @@ Headers:
             HealthResponse,
             MemorySummary,
             IntrospectionResponse,
+            crate::handlers::complete::CompleteRequest,
+            crate::handlers::complete::CompleteResponse,
+            crate::handlers::complete::PartialEpisodeRequest,
+            crate::handlers::complete::CompletionConfigRequest,
+            crate::handlers::complete::EpisodeResponse,
+            crate::handlers::complete::ConfidenceResponse,
+            crate::handlers::complete::SourceAttributionResponse,
+            crate::handlers::complete::AlternativeHypothesisResponse,
+            crate::handlers::complete::ReconstructionStatsResponse,
+            crate::handlers::complete::CompletionErrorResponse,
         )
     ),
     tags(
         (name = "memories", description = "Core memory operations"),
         (name = "episodes", description = "Episodic memory with rich context"),
         (name = "queries", description = "Probabilistic query operations with confidence intervals"),
+        (name = "completion", description = "Pattern completion and memory reconstruction"),
         (name = "system", description = "System health and introspection"),
         (name = "streaming", description = "Server-Sent Events for real-time updates"),
         (name = "monitoring", description = "Debugging and performance monitoring")

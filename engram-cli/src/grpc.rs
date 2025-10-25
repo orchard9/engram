@@ -660,6 +660,11 @@ impl EngramService for MemoryService {
         &self,
         request: Request<CompleteRequest>,
     ) -> Result<Response<CompleteResponse>, Status> {
+        use engram_core::completion::{
+            CompletionConfig, HippocampalCompletion, PartialEpisode, PatternCompleter,
+            CompletionError,
+        };
+
         let metadata = request.metadata().clone();
         let req = request.into_inner();
 
@@ -674,7 +679,7 @@ impl EngramService for MemoryService {
             ))
         })?;
 
-        let _partial = req.partial_pattern.ok_or_else(|| {
+        let pattern_cue = req.partial_pattern.ok_or_else(|| {
             Status::invalid_argument(
                 "Pattern completion needs a partial pattern - fragments to \
                 complete. Like trying to finish a sentence without the beginning. \
@@ -682,15 +687,95 @@ impl EngramService for MemoryService {
             )
         })?;
 
-        let response = CompleteResponse {
-            completions: vec![],
-            completion_confidence: Some(
-                Confidence::new(0.4).with_reasoning("No patterns match the partial cue"),
-            ),
-            field_confidences: HashMap::default(),
+        // Convert proto PatternCue to internal PartialEpisode
+        let partial = if pattern_cue.fragments.is_empty() {
+            return Err(Status::invalid_argument(
+                "Pattern completion requires at least one fragment. \
+                 Provide partial memory information to reconstruct missing fields.",
+            ));
+        } else {
+            let fragment = &pattern_cue.fragments[0];
+            PartialEpisode {
+                known_fields: fragment.known_fields.clone(),
+                partial_embedding: vec![None; 768], // TODO: Extract from fragment if available
+                cue_strength: fragment
+                    .fragment_confidence
+                    .as_ref()
+                    .map_or(CoreConfidence::exact(0.7), |c| CoreConfidence::exact(c.value)),
+                temporal_context: vec![],
+            }
         };
 
-        Ok(Response::new(response))
+        // Build completion configuration
+        let config = CompletionConfig {
+            ca1_threshold: CoreConfidence::exact(pattern_cue.completion_threshold.max(0.1)),
+            num_hypotheses: req.max_completions.clamp(1, 10) as usize,
+            ..Default::default()
+        };
+
+        // Create completion engine
+        let completion = HippocampalCompletion::new(config);
+
+        // Perform pattern completion
+        match completion.complete(&partial) {
+            Ok(completed) => {
+                // Convert completed episode to Memory proto
+                let memory = engram_proto::Memory::new(
+                    completed.episode.id.clone(),
+                    completed.episode.embedding.to_vec(),
+                )
+                .with_content(&completed.episode.what)
+                .with_confidence(
+                    Confidence::new(completed.completion_confidence.raw())
+                        .with_reasoning("Pattern completion via CA3 attractor dynamics"),
+                );
+
+                // Build field confidences from source attribution
+                let field_confidences = completed
+                    .source_attribution
+                    .source_confidence
+                    .iter()
+                    .map(|(field, conf)| (field.clone(), conf.raw()))
+                    .collect();
+
+                let response = CompleteResponse {
+                    completions: vec![memory],
+                    completion_confidence: Some(
+                        Confidence::new(completed.completion_confidence.raw())
+                            .with_reasoning("CA1 gating output confidence"),
+                    ),
+                    field_confidences,
+                };
+
+                Ok(Response::new(response))
+            }
+            Err(CompletionError::InsufficientPattern) => {
+                Err(Status::failed_precondition(
+                    "Pattern completion requires minimum 30% cue overlap. \
+                     The provided fragments lack sufficient information for reconstruction. \
+                     Add more known fields or increase cue strength.",
+                ))
+            }
+            Err(CompletionError::ConvergenceFailed(iters)) => {
+                Err(Status::deadline_exceeded(format!(
+                    "Pattern completion failed to converge after {iters} iterations. \
+                     The CA3 attractor dynamics did not stabilize. \
+                     Try simplifying the partial pattern or adjusting parameters."
+                )))
+            }
+            Err(CompletionError::LowConfidence(conf)) => {
+                Err(Status::failed_precondition(format!(
+                    "Completion confidence {conf:.2} below CA1 threshold. \
+                     The reconstructed pattern did not meet quality standards. \
+                     Provide more evidence or adjust the completion threshold."
+                )))
+            }
+            Err(e) => {
+                Err(Status::internal(format!(
+                    "Pattern completion failed: {e}"
+                )))
+            }
+        }
     }
 
     /// Associate creates or strengthens associations between memories.
