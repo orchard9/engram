@@ -35,12 +35,12 @@ use std::time::Duration;
 ///
 /// // Create context for specific memory space with timeout
 /// let context = QueryContext::new(
-///     MemorySpaceId::from("user_123"),
+///     MemorySpaceId::new("user_123".to_string()).unwrap(),
 ///     Some(Duration::from_secs(5)),
 /// );
 ///
 /// // Create context without timeout (for fast queries)
-/// let context = QueryContext::without_timeout(MemorySpaceId::from("user_123"));
+/// let context = QueryContext::without_timeout(MemorySpaceId::new("user_123".to_string()).unwrap());
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QueryContext {
@@ -80,7 +80,7 @@ impl QueryContext {
     /// use std::time::Duration;
     ///
     /// let context = QueryContext::new(
-    ///     MemorySpaceId::from("user_123"),
+    ///     MemorySpaceId::new("user_123".to_string()).unwrap(),
     ///     Some(Duration::from_secs(5)),
     /// );
     /// ```
@@ -103,7 +103,7 @@ impl QueryContext {
     /// use engram_core::query::executor::QueryContext;
     /// use engram_core::MemorySpaceId;
     ///
-    /// let context = QueryContext::without_timeout(MemorySpaceId::from("user_123"));
+    /// let context = QueryContext::without_timeout(MemorySpaceId::new("user_123".to_string()).unwrap());
     /// ```
     #[must_use]
     pub const fn without_timeout(memory_space_id: MemorySpaceId) -> Self {
@@ -122,7 +122,7 @@ impl QueryContext {
     /// use std::time::Duration;
     ///
     /// let context = QueryContext::with_timeout(
-    ///     MemorySpaceId::from("user_123"),
+    ///     MemorySpaceId::new("user_123".to_string()).unwrap(),
     ///     Duration::from_secs(5),
     /// );
     /// ```
@@ -168,7 +168,7 @@ mod tests {
 
     #[test]
     fn test_context_creation() {
-        let space_id = MemorySpaceId::from("test_space");
+        let space_id = MemorySpaceId::new("test_space".to_string()).unwrap();
         let timeout = Duration::from_secs(5);
 
         let context = QueryContext::new(space_id.clone(), Some(timeout));
@@ -180,7 +180,7 @@ mod tests {
 
     #[test]
     fn test_context_without_timeout() {
-        let space_id = MemorySpaceId::from("test_space");
+        let space_id = MemorySpaceId::new("test_space".to_string()).unwrap();
         let context = QueryContext::without_timeout(space_id.clone());
 
         assert_eq!(context.memory_space_id, space_id);
@@ -190,7 +190,7 @@ mod tests {
 
     #[test]
     fn test_context_with_timeout() {
-        let space_id = MemorySpaceId::from("test_space");
+        let space_id = MemorySpaceId::new("test_space".to_string()).unwrap();
         let timeout = Duration::from_millis(500);
         let context = QueryContext::with_timeout(space_id.clone(), timeout);
 
@@ -202,8 +202,8 @@ mod tests {
 
     #[test]
     fn test_context_modification() {
-        let space_id_1 = MemorySpaceId::from("space_1");
-        let space_id_2 = MemorySpaceId::from("space_2");
+        let space_id_1 = MemorySpaceId::new("space_1".to_string()).unwrap();
+        let space_id_2 = MemorySpaceId::new("space_2".to_string()).unwrap();
         let timeout = Duration::from_secs(10);
 
         let context = QueryContext::without_timeout(space_id_1);
@@ -216,8 +216,10 @@ mod tests {
 
     #[test]
     fn test_context_clone() {
-        let context =
-            QueryContext::with_timeout(MemorySpaceId::from("test"), Duration::from_secs(1));
+        let context = QueryContext::with_timeout(
+            MemorySpaceId::new("test".to_string()).unwrap(),
+            Duration::from_secs(1),
+        );
 
         let cloned = context.clone();
         assert_eq!(context, cloned);
