@@ -9,6 +9,34 @@
 
 Implement SWIM (Scalable Weakly-consistent Infection-style Process Group Membership) protocol for cluster membership, failure detection, and gossip dissemination. This provides the foundation for all distributed coordination without requiring external services like ZooKeeper.
 
+## Research Foundation
+
+Traditional heartbeat-based failure detection scales poorly: O(N^2) network traffic. A 100-node cluster generates 10,000 messages per heartbeat interval - unsustainable. SWIM (Das, Gupta, Aberer 2002) solves this with randomized ping + indirect probing.
+
+**SWIM's brilliant insight:** you don't need perfect information about every node. Know if your neighbors are alive, let information spread through gossip.
+
+**Three key components:**
+1. **Failure Detection via Indirect Probing:** Each node selects random target, sends PING, waits for ACK. If timeout, requests K random nodes to indirect-PING the target. Only mark dead if all indirect probes fail. This gives constant O(1) network load per node regardless of cluster size.
+
+2. **Dissemination via Infection-Style Gossip:** When node detects failure/recovery/join, piggyback update on next few PING/ACK messages (not broadcast). Guarantees updates propagate to all nodes in O(log N) protocol periods with high probability (100-node cluster: 7 seconds with 1-second periods).
+
+3. **Suspicion Mechanism:** Instead of immediately declaring dead, mark as "suspected" for 1-2 protocol periods. Reduces false positives from transient network hiccups.
+
+**Proven guarantees (Das et al. 2002):**
+- **Completeness:** If a process fails, all non-faulty processes detect it with probability 1 (eventually)
+- **Detection Time:** Expected time to first detection is O(1) protocol periods, all nodes know in O(log N) periods
+- **Message Complexity:** O(1) messages per node per protocol period (independent of cluster size)
+- **Scalability:** Sub-second failure detection in 100-node clusters, zero single points of failure
+
+**Tuning parameters:**
+- Protocol period (T): 1 second typical (faster = quicker detection but higher network load)
+- Indirect probe count (K): 3-5 typical (higher = more reliable detection but more messages)
+- Suspicion timeout: 1-2 protocol periods typical
+- Gossip fanout: 3 nodes per interval (balances convergence speed vs network overhead)
+
+**Biological alignment:**
+Like neural networks, SWIM is fully decentralized, gracefully degrades on partial failures, provides probabilistic correctness (eventual consistency, not perfect synchrony). Perfect for Engram's cognitive graph architecture.
+
 ## Technical Specification
 
 ### SWIM Protocol Overview

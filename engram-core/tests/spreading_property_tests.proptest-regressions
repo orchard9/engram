@@ -17,3 +17,5 @@ cc 6a35f6f851844acff9c824dcfe4214c20d3cfc6bcf724c7b3e17b9f7d01acc0b # shrinks to
 cc 02307c9082508a9e622910af03abe9023c6c658575dc947974d188bbdff420c5 # shrinks to scenario = ErdosRenyi { node_count: 12, edge_probability: 0.5, seed: 14299128437222111623 }
 cc 14aecd2ec862b1dd31ee982cbb882ead951ae6f7bfaeb1888c4e6a43231892b5 # shrinks to scenario = BarabasiAlbert { node_count: 15, attachment_count: 1, seed: 7034636039148106895 }
 cc 2c025cd0a4b6b6a17a14027181462eaf224e941ac067d82362dec3d71ad74ede # shrinks to scenario = ErdosRenyi { node_count: 8, edge_probability: 0.5, seed: 3053427867789868029 }
+cc 289e370406ef2fd28a23a8cf8f041afd6342fb849b9dc3bec43fa0f7e0402c68 # shrinks to scenario = BarabasiAlbert { node_count: 20, attachment_count: 1, seed: 15363959392108944517 }
+cc fa85e52c7c86b328f7c11f8128edd51db1df018dd9c1633494e1c8f9a9cc5417 # shrinks to scenario = ErdosRenyi { node_count: 11, edge_probability: 0.2, seed: 2562220992764588397 }

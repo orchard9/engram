@@ -661,8 +661,8 @@ impl EngramService for MemoryService {
         request: Request<CompleteRequest>,
     ) -> Result<Response<CompleteResponse>, Status> {
         use engram_core::completion::{
-            CompletionConfig, HippocampalCompletion, PartialEpisode, PatternCompleter,
-            CompletionError,
+            CompletionConfig, CompletionError, HippocampalCompletion, PartialEpisode,
+            PatternCompleter,
         };
 
         let metadata = request.metadata().clone();
@@ -701,7 +701,9 @@ impl EngramService for MemoryService {
                 cue_strength: fragment
                     .fragment_confidence
                     .as_ref()
-                    .map_or(CoreConfidence::exact(0.7), |c| CoreConfidence::exact(c.value)),
+                    .map_or(CoreConfidence::exact(0.7), |c| {
+                        CoreConfidence::exact(c.value)
+                    }),
                 temporal_context: vec![],
             }
         };
@@ -749,13 +751,11 @@ impl EngramService for MemoryService {
 
                 Ok(Response::new(response))
             }
-            Err(CompletionError::InsufficientPattern) => {
-                Err(Status::failed_precondition(
-                    "Pattern completion requires minimum 30% cue overlap. \
+            Err(CompletionError::InsufficientPattern) => Err(Status::failed_precondition(
+                "Pattern completion requires minimum 30% cue overlap. \
                      The provided fragments lack sufficient information for reconstruction. \
                      Add more known fields or increase cue strength.",
-                ))
-            }
+            )),
             Err(CompletionError::ConvergenceFailed(iters)) => {
                 Err(Status::deadline_exceeded(format!(
                     "Pattern completion failed to converge after {iters} iterations. \
@@ -763,18 +763,12 @@ impl EngramService for MemoryService {
                      Try simplifying the partial pattern or adjusting parameters."
                 )))
             }
-            Err(CompletionError::LowConfidence(conf)) => {
-                Err(Status::failed_precondition(format!(
-                    "Completion confidence {conf:.2} below CA1 threshold. \
+            Err(CompletionError::LowConfidence(conf)) => Err(Status::failed_precondition(format!(
+                "Completion confidence {conf:.2} below CA1 threshold. \
                      The reconstructed pattern did not meet quality standards. \
                      Provide more evidence or adjust the completion threshold."
-                )))
-            }
-            Err(e) => {
-                Err(Status::internal(format!(
-                    "Pattern completion failed: {e}"
-                )))
-            }
+            ))),
+            Err(e) => Err(Status::internal(format!("Pattern completion failed: {e}"))),
         }
     }
 

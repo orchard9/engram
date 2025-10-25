@@ -1,0 +1,201 @@
+groups:
+  - name: pattern_completion_alerts
+    interval: 30s
+    rules:
+      # Latency Alerts
+      - alert: CompletionLatencyHigh
+        expr: histogram_quantile(0.95, sum(rate(engram_completion_duration_seconds_bucket[5m])) by (le, memory_space)) > 0.025
+        for: 5m
+        labels:
+          severity: warning
+          component: pattern_completion
+        annotations:
+          summary: "Pattern completion P95 latency >25ms for {{ $labels.memory_space }}"
+          description: "The 95th percentile latency for pattern completions in memory space {{ $labels.memory_space }} is {{ $value | humanizeDuration }}, exceeding the 25ms threshold."
+          runbook: "https://docs.engram.io/operations/completion_monitoring.md#high-latency-troubleshooting"
+
+      - alert: CompletionLatencyCritical
+        expr: histogram_quantile(0.99, sum(rate(engram_completion_duration_seconds_bucket[5m])) by (le, memory_space)) > 0.050
+        for: 5m
+        labels:
+          severity: critical
+          component: pattern_completion
+        annotations:
+          summary: "Pattern completion P99 latency >50ms for {{ $labels.memory_space }}"
+          description: "The 99th percentile latency for pattern completions in memory space {{ $labels.memory_space }} is {{ $value | humanizeDuration }}, exceeding the 50ms threshold."
+          runbook: "https://docs.engram.io/operations/completion_monitoring.md#high-latency-troubleshooting"
+
+      # Error Rate Alerts
+      - alert: CompletionErrorRateHigh
+        expr: |
+          (
+            sum(rate(engram_completion_convergence_failures_total[5m])) by (memory_space) /
+            sum(rate(engram_completion_operations_total[5m])) by (memory_space)
+          ) > 0.01
+        for: 10m
+        labels:
+          severity: critical
+          component: pattern_completion
+        annotations:
+          summary: "Pattern completion error rate >1% for {{ $labels.memory_space }}"
+          description: "The error rate for pattern completions in memory space {{ $labels.memory_space }} is {{ $value | humanizePercentage }}, exceeding the 1% threshold."
+          runbook: "https://docs.engram.io/operations/completion_monitoring.md#error-rate-troubleshooting"
+
+      - alert: ConvergenceFailuresHigh
+        expr: sum(rate(engram_completion_convergence_failures_total[5m])) by (memory_space) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          component: ca3_convergence
+        annotations:
+          summary: "High rate of CA3 convergence failures for {{ $labels.memory_space }}"
+          description: "CA3 convergence is failing at {{ $value }} failures/second in memory space {{ $labels.memory_space }}."
+          runbook: "https://docs.engram.io/operations/completion_monitoring.md#error-rate-troubleshooting"
+
+      # Calibration Alerts
+      - alert: CalibrationDriftHigh
+        expr: avg(engram_completion_confidence_calibration_error) by (memory_space) > 0.1
+        for: 3h
+        labels:
+          severity: warning
+          component: confidence_calibration
+        annotations:
+          summary: "Confidence calibration error >10% for {{ $labels.memory_space }}"
+          description: "The calibration error for confidence scores in memory space {{ $labels.memory_space }} is {{ $value | humanizePercentage }}, indicating drift in prediction accuracy."
+          action: "Trigger recalibration pipeline for memory space {{ $labels.memory_space }}"
+          runbook: "https://docs.engram.io/operations/completion_monitoring.md#recalibration-process"
+
+      - alert: CalibrationDriftCritical
+        expr: avg(engram_completion_confidence_calibration_error) by (memory_space) > 0.15
+        for: 1h
+        labels:
+          severity: critical
+          component: confidence_calibration
+        annotations:
+          summary: "Confidence calibration error >15% for {{ $labels.memory_space }}"
+          description: "The calibration error for confidence scores in memory space {{ $labels.memory_space }} is {{ $value | humanizePercentage }}, indicating severe drift."
+          action: "IMMEDIATELY trigger recalibration pipeline for memory space {{ $labels.memory_space }}"
+          runbook: "https://docs.engram.io/operations/completion_monitoring.md#recalibration-process"
+
+      # Resource Saturation Alerts
+      - alert: CompletionMemoryHigh
+        expr: |
+          (
+            sum(engram_completion_memory_bytes) by (memory_space) /
+            (100 * 1024 * 1024)
+          ) > 0.8
+        for: 10m
+        labels:
+          severity: warning
+          component: memory_management
+        annotations:
+          summary: "Pattern completion memory usage >80% for {{ $labels.memory_space }}"
+          description: "Memory usage for pattern completion in {{ $labels.memory_space }} is {{ $value | humanizePercentage }} of the 100MB limit."
+          runbook: "https://docs.engram.io/operations/completion_monitoring.md#memory-management"
+
+      - alert: PatternCacheHitRateLow
+        expr: avg(engram_pattern_cache_hit_ratio) by (memory_space) < 0.7
+        for: 15m
+        labels:
+          severity: warning
+          component: pattern_cache
+        annotations:
+          summary: "Pattern cache hit ratio <70% for {{ $labels.memory_space }}"
+          description: "The pattern cache hit ratio for {{ $labels.memory_space }} is {{ $value | humanizePercentage }}, indicating poor cache effectiveness."
+          action: "Consider increasing cache size or reviewing cache eviction policy"
+          runbook: "https://docs.engram.io/operations/completion_monitoring.md#pattern-cache-tuning"
+
+      # CA3 Performance Alerts
+      - alert: CA3ConvergenceIterationsHigh
+        expr: histogram_quantile(0.95, sum(rate(engram_ca3_convergence_iterations_bucket[5m])) by (le, memory_space)) > 7
+        for: 10m
+        labels:
+          severity: warning
+          component: ca3_convergence
+        annotations:
+          summary: "CA3 requiring >7 iterations for convergence in {{ $labels.memory_space }}"
+          description: "The 95th percentile of CA3 convergence iterations for {{ $labels.memory_space }} is {{ $value }}, indicating slow convergence."
+          action: "Review CA3 configuration parameters and input pattern quality"
+          runbook: "https://docs.engram.io/operations/completion_monitoring.md#ca3-optimization"
+
+      - alert: CA3AttractorEnergyHigh
+        expr: histogram_quantile(0.95, sum(rate(engram_ca3_attractor_energy_bucket[5m])) by (le, memory_space)) > 1.0
+        for: 15m
+        labels:
+          severity: warning
+          component: ca3_dynamics
+        annotations:
+          summary: "CA3 attractor energy >1.0 for {{ $labels.memory_space }}"
+          description: "The 95th percentile of CA3 attractor energy for {{ $labels.memory_space }} is {{ $value }}, indicating potential instability."
+          action: "Reduce learning rate or increase weight decay"
+          runbook: "https://docs.engram.io/operations/completion_monitoring.md#error-rate-troubleshooting"
+
+      # Evidence Accumulation Alerts
+      - alert: InsufficientEvidenceRateHigh
+        expr: |
+          (
+            sum(rate(engram_completion_insufficient_evidence_total[5m])) by (memory_space) /
+            sum(rate(engram_completion_operations_total[5m])) by (memory_space)
+          ) > 0.2
+        for: 30m
+        labels:
+          severity: warning
+          component: evidence_integration
+        annotations:
+          summary: "High rate of insufficient evidence responses for {{ $labels.memory_space }}"
+          description: "{{ $value | humanizePercentage }} of completions in {{ $labels.memory_space }} are returning insufficient evidence."
+          action: "Review pattern coverage and evidence thresholds"
+          runbook: "https://docs.engram.io/operations/completion_monitoring.md#insufficient-evidence-issues"
+
+      # Source Attribution Alerts
+      - alert: SourceAttributionPrecisionLow
+        expr: avg(engram_source_attribution_precision) by (memory_space, source_type) < 0.7
+        for: 1h
+        labels:
+          severity: info
+          component: source_attribution
+        annotations:
+          summary: "Source attribution precision <70% for {{ $labels.source_type }} in {{ $labels.memory_space }}"
+          description: "The precision of source attribution for {{ $labels.source_type }} sources in {{ $labels.memory_space }} is {{ $value | humanizePercentage }}."
+          action: "Review source attribution algorithm parameters"
+
+      # Metacognitive Monitoring Alert
+      - alert: MetacognitiveCorrelationLow
+        expr: engram_metacognitive_correlation < 0.5
+        for: 2h
+        labels:
+          severity: warning
+          component: metacognition
+        annotations:
+          summary: "Low metacognitive correlation ({{ $value }}) indicating poor confidence awareness"
+          description: "The correlation between predicted and actual accuracy is {{ $value }}, indicating the system has poor awareness of its own confidence."
+          action: "Review confidence computation and calibration models"
+
+      # Service Health Alerts
+      - alert: CompletionServiceDown
+        expr: up{job="engram-completion"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: pattern_completion
+        annotations:
+          summary: "Pattern completion service is down"
+          description: "The pattern completion service has been unreachable for more than 2 minutes."
+          action: "Check service health and logs immediately"
+          runbook: "https://docs.engram.io/operations/completion_monitoring.md#critical-alerts"
+
+      # Traffic Anomaly Alerts
+      - alert: CompletionTrafficSpike
+        expr: |
+          (
+            sum(rate(engram_completion_operations_total[5m])) by (memory_space) /
+            sum(rate(engram_completion_operations_total[1h] offset 5m)) by (memory_space)
+          ) > 3
+        for: 5m
+        labels:
+          severity: info
+          component: pattern_completion
+        annotations:
+          summary: "3x traffic spike detected for {{ $labels.memory_space }}"
+          description: "Pattern completion traffic for {{ $labels.memory_space }} has increased by {{ $value }}x compared to the hourly average."
+          action: "Monitor for potential scaling needs"

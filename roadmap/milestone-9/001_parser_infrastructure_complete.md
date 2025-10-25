@@ -1158,6 +1158,82 @@ const _: () = assert!(std::mem::size_of::<Spanned<Token>>() == 72);
 const _: () = assert!(std::mem::size_of::<Tokenizer>() <= 64);
 ```
 
+### Zero-Allocation Verification
+
+Add custom allocator test to verify hot path allocations:
+
+```rust
+#[cfg(test)]
+mod allocation_tests {
+    use std::alloc::{GlobalAlloc, System, Layout};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct CountingAllocator;
+
+    static ALLOCATION_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+    unsafe impl GlobalAlloc for CountingAllocator {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            ALLOCATION_COUNT.fetch_add(1, Ordering::SeqCst);
+            System.alloc(layout)
+        }
+
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            System.dealloc(ptr, layout)
+        }
+    }
+
+    #[test]
+    fn test_zero_allocations_hot_path() {
+        let count_before = ALLOCATION_COUNT.load(Ordering::SeqCst);
+
+        // Parse query with only identifiers and keywords (no string literals)
+        let query = "RECALL episode WHERE confidence > 0.7";
+        let mut tokenizer = Tokenizer::new(query);
+        while let Ok(token) = tokenizer.next_token() {
+            if token.value == Token::Eof { break; }
+        }
+
+        let count_after = ALLOCATION_COUNT.load(Ordering::SeqCst);
+        assert_eq!(count_before, count_after,
+            "Unexpected {} allocations on hot path",
+            count_after - count_before);
+    }
+}
+```
+
+Reference: Rust custom allocators - https://doc.rust-lang.org/std/alloc/trait.GlobalAlloc.html
+
+### Regression Detection
+
+Add to acceptance criteria enforcement:
+
+```yaml
+# .github/workflows/parser-benchmarks.yml
+name: Parser Performance Regression
+
+on: [pull_request]
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Run benchmarks
+        run: cargo bench --bench tokenizer -- --save-baseline pr
+
+      - name: Compare against main
+        run: |
+          git checkout main
+          cargo bench --bench tokenizer -- --save-baseline main
+          git checkout -
+
+          # Criterion will fail if regression >10%
+          cargo bench --bench tokenizer -- --baseline main
+```
+
+Reference: "Site Reliability Engineering: Measuring and Operating Services" - Google (2016)
+
 ---
 
 ## References

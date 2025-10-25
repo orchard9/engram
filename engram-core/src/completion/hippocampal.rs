@@ -46,10 +46,28 @@ impl HippocampalCompletion {
         #[cfg(feature = "pattern_completion")]
         let size = 768;
 
+        #[cfg(feature = "pattern_completion")]
+        let ca3_weights = {
+            // Initialize with small deterministic weights for better convergence
+            let mut weights = DMatrix::zeros(size, size);
+
+            for i in 0..size {
+                for j in 0..size {
+                    // Deterministic pseudo-random weights using sine function
+                    #[allow(clippy::cast_precision_loss)]
+                    let seed = (i * size + j) as f32;
+                    // Small weights in [-0.01, 0.01] for initialization
+                    weights[(i, j)] = (seed * 0.1).sin() * 0.01;
+                }
+            }
+
+            weights
+        };
+
         Self {
             config,
             #[cfg(feature = "pattern_completion")]
-            ca3_weights: DMatrix::zeros(size, size),
+            ca3_weights,
             #[cfg(feature = "pattern_completion")]
             current_state: DVector::zeros(size),
             #[cfg(feature = "pattern_completion")]
@@ -325,8 +343,9 @@ impl HippocampalCompletion {
             }
         }
 
-        // Validate we have sufficient information
-        if known_count < 100 {
+        // Validate we have sufficient information (need at least 1/3 of embedding)
+        // With 256 dims per field (what/where/who), 256 dims = 1 field intact
+        if known_count < 256 {
             return Err(CompletionError::InsufficientPattern);
         }
 
@@ -367,20 +386,101 @@ impl HippocampalCompletion {
         )
     }
 
+    /// Reconstruct "what" field from stored patterns using partial embedding
+    fn reconstruct_what_from_patterns_partial(&self, partial: &PartialEpisode) -> Option<String> {
+        // Use uncorrupted dimensions (where/who) to find best match via cosine similarity
+        let mut best_match = None;
+        let mut best_similarity = -1.0; // Start at -1 since cosine is in [-1, 1]
+
+        // Extract uncorrupted dimensions from partial
+        let mut partial_vec = Vec::new();
+        let mut partial_indices = Vec::new();
+
+        for (i, opt_val) in partial.partial_embedding.iter().enumerate() {
+            if let Some(val) = opt_val
+                && i >= 256
+            {
+                // Only use where/who dimensions (not what which is 0-255)
+                partial_vec.push(*val);
+                partial_indices.push(i);
+            }
+        }
+
+        if partial_vec.is_empty() {
+            return None;
+        }
+
+        // Compute norm of partial vector
+        let partial_norm: f32 = partial_vec.iter().map(|x| x * x).sum::<f32>().sqrt();
+        if partial_norm < 1e-10 {
+            return None;
+        }
+
+        for episode in &self.stored_patterns {
+            // Extract matching dimensions from stored episode
+            let mut dot_product = 0.0;
+            let mut episode_norm_sq = 0.0;
+
+            for (idx, &partial_val) in partial_indices.iter().zip(&partial_vec) {
+                let episode_val = episode.embedding[*idx];
+                dot_product += partial_val * episode_val;
+                episode_norm_sq += episode_val * episode_val;
+            }
+
+            let episode_norm = episode_norm_sq.sqrt();
+            if episode_norm < 1e-10 {
+                continue;
+            }
+
+            // Cosine similarity
+            let similarity = dot_product / (partial_norm * episode_norm);
+            if similarity > best_similarity {
+                best_similarity = similarity;
+                best_match = Some(episode.what.clone());
+            }
+        }
+
+        best_match
+    }
+
+    /// Reconstruct "what" field from stored patterns using completed embedding (fallback)
+    fn reconstruct_what_from_patterns(&self, completed_embedding: &[f32; 768]) -> Option<String> {
+        // Find most similar episode by embedding (use nearest neighbor)
+        let mut best_match = None;
+        let mut best_similarity = 0.3; // Lower threshold to allow reconstruction
+
+        for episode in &self.stored_patterns {
+            let similarity = Self::cosine_similarity(&episode.embedding, completed_embedding);
+            if similarity > best_similarity {
+                best_similarity = similarity;
+                best_match = Some(episode.what.clone());
+            }
+        }
+
+        best_match
+    }
+
     /// Create a new episode from completed pattern
     fn create_new_episode_from_pattern(
         &self,
         partial: &PartialEpisode,
         completed_embedding: &[f32; 768],
     ) -> Episode {
+        // Determine the "what" field: use known field if present, otherwise reconstruct
+        let what = partial.known_fields.get("what").map_or_else(
+            || {
+                // Try partial-based reconstruction first (uses uncorrupted dimensions)
+                self.reconstruct_what_from_patterns_partial(partial)
+                    .or_else(|| self.reconstruct_what_from_patterns(completed_embedding))
+                    .unwrap_or_else(|| "Reconstructed memory".to_string())
+            },
+            std::clone::Clone::clone,
+        );
+
         let mut episode = Episode::new(
             format!("completed_{}", chrono::Utc::now().timestamp()),
             Utc::now(),
-            partial
-                .known_fields
-                .get("what")
-                .cloned()
-                .unwrap_or_else(|| "Reconstructed memory".to_string()),
+            what,
             *completed_embedding,
             partial.cue_strength,
         );

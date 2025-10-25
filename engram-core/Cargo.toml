@@ -25,6 +25,7 @@ atomic_float = { workspace = true }
 async-trait = "0.1"
 syn = { version = "2.0", features = ["full", "visit"] }
 utoipa = { workspace = true }
+phf = { version = "0.11", features = ["macros"] }
 
 # Lock-free concurrent data structures for HNSW
 crossbeam-epoch = "0.9"
@@ -105,6 +106,7 @@ quickcheck = { workspace = true }
 insta = { version = "1.39", features = ["yaml"] }
 bincode = { workspace = true }
 rand = { workspace = true }
+rand_chacha = "0.3"
 approx = { workspace = true }
 trybuild = "1.0"
 tempfile = "3.0"
@@ -115,6 +117,10 @@ tokio = { version = "1.0", features = ["test-util", "rt", "time", "sync", "macro
 
 [[bench]]
 name = "pattern_detection"
+harness = false
+
+[[bench]]
+name = "tokenizer"
 harness = false
 
 [features]

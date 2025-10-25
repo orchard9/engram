@@ -14,12 +14,11 @@ use utoipa::{IntoParams, ToSchema};
 
 use crate::api::{ApiError, ApiState};
 use engram_core::{
-    MemorySpaceId,
+    Confidence as CoreConfidence, MemorySpaceId,
     completion::{
-        CompletedEpisode, CompletionConfig, CompletionError, HippocampalCompletion,
-        MemorySource, PartialEpisode, PatternCompleter,
+        CompletedEpisode, CompletionConfig, CompletionError, HippocampalCompletion, MemorySource,
+        PartialEpisode, PatternCompleter,
     },
-    Confidence as CoreConfidence,
 };
 
 // ================================================================================================
@@ -230,14 +229,16 @@ pub async fn complete_handler(
     Json(req): Json<CompleteRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     // Extract memory space from header or request body
-    let space_id = extract_memory_space(&headers, req.memory_space_id.as_deref(), &state.default_space)?;
+    let space_id = extract_memory_space(
+        &headers,
+        req.memory_space_id.as_deref(),
+        &state.default_space,
+    )?;
 
     // Get space-specific store handle from registry
-    let handle = state
-        .registry
-        .create_or_get(&space_id)
-        .await
-        .map_err(|e| ApiError::SystemError(format!("Failed to access memory space '{space_id}': {e}")))?;
+    let handle = state.registry.create_or_get(&space_id).await.map_err(|e| {
+        ApiError::SystemError(format!("Failed to access memory space '{space_id}': {e}"))
+    })?;
 
     let _store = handle.store();
 
@@ -276,9 +277,9 @@ fn extract_memory_space(
 ) -> Result<MemorySpaceId, ApiError> {
     // Priority 1: X-Memory-Space header
     if let Some(header_value) = headers.get("x-memory-space") {
-        let space_str = header_value
-            .to_str()
-            .map_err(|_| ApiError::InvalidInput("X-Memory-Space header contains invalid UTF-8".to_string()))?;
+        let space_str = header_value.to_str().map_err(|_| {
+            ApiError::InvalidInput("X-Memory-Space header contains invalid UTF-8".to_string())
+        })?;
         return MemorySpaceId::try_from(space_str).map_err(|e| {
             ApiError::InvalidInput(format!("Invalid memory space ID in header: {e}"))
         });
@@ -298,7 +299,9 @@ fn extract_memory_space(
 /// Validate completion request
 fn validate_completion_request(req: &CompleteRequest) -> Result<(), ApiError> {
     // Ensure we have at least some known fields
-    if req.partial_episode.known_fields.is_empty() && req.partial_episode.partial_embedding.is_empty() {
+    if req.partial_episode.known_fields.is_empty()
+        && req.partial_episode.partial_embedding.is_empty()
+    {
         return Err(ApiError::ValidationError(
             "Pattern completion requires at least some known fields or partial embedding. \
              Provide either known_fields or partial_embedding to reconstruct missing information."
@@ -456,7 +459,10 @@ fn convert_to_response(completed: &CompletedEpisode) -> CompleteResponse {
 
     CompleteResponse {
         completed_episode: episode,
-        completion_confidence: confidence_to_response(completed.completion_confidence, Some("CA1 output confidence")),
+        completion_confidence: confidence_to_response(
+            completed.completion_confidence,
+            Some("CA1 output confidence"),
+        ),
         source_attribution,
         alternative_hypotheses,
         metacognitive_confidence: confidence_to_response(
@@ -464,7 +470,11 @@ fn convert_to_response(completed: &CompletedEpisode) -> CompleteResponse {
             Some("System 2 metacognitive monitoring"),
         ),
         reconstruction_stats: ReconstructionStatsResponse {
-            ca3_iterations: 0, // TODO: Track actual iterations
+            // NOTE: CA3 iteration statistics are not currently exposed by the
+            // HippocampalCompletion engine. The engine tracks iterations and convergence
+            // internally but doesn't include these in CompletedEpisode.
+            // See Technical Debt item in review notes.
+            ca3_iterations: 0,
             convergence_achieved: true,
             pattern_sources: vec![],
             plausibility_score: completed.completion_confidence.raw(),

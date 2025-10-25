@@ -9,6 +9,29 @@
 
 Implement conditional compilation infrastructure for cognitive pattern metrics with provably zero overhead when disabled and <1% overhead when enabled. Create lock-free atomic collection with cache-line alignment.
 
+## Research Foundation
+
+Traditional observability tools add 5-15% latency overhead even when metrics aren't being collected. For a memory system processing 10K recalls/sec with sub-millisecond latency requirements, this is unacceptable. We need instrumentation that costs literally zero when disabled and <1% when enabled.
+
+**Conditional compilation solution:**
+Unlike runtime feature flags that branch at every instrumentation point, `#[cfg(feature = "monitoring")]` removes code entirely during compilation. When metrics disabled, compiler optimizes away not just metric recording calls, but entire surrounding code path - assembly output identical to un-instrumented code.
+
+**Lock-free atomic metrics (Vyukov 2007):**
+Each thread maintains own histogram buckets using atomic integers. During spreading activation, threads update local buckets with atomic fetch-add (15-20ns on modern x86_64). Background thread periodically aggregates per-thread buckets into global metrics without blocking workers. This achieves constant-time metric recording with minimal cache coherence traffic.
+
+**Performance budget:**
+- Metric recording: <50ns per event (vs 2-5μs for traditional metrics libraries)
+- Zero overhead when disabled: 0ns (proven via assembly inspection)
+- <1% overhead when enabled: measured via microbenchmarks
+- Lock-free guarantee: no contention, scales linearly with thread count
+
+**Statistical validation requirements:**
+- Large sample sizes: N > 1000 trials per condition
+- Proper randomization of study lists
+- Controlled retention intervals
+- Automatic statistical tests (t-tests, ANOVAs) for effect detection
+- For DRM: 55-65% false recall within 10% tolerance (Roediger & McDermott 1995)
+
 ## Integration Points
 
 **Extends:**

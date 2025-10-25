@@ -8,8 +8,8 @@ use axum::{
     http::{Request, StatusCode},
 };
 use engram_cli::api::{ApiState, create_api_routes};
-use engram_core::{MemorySpaceId, MemorySpaceRegistry, MemoryStore, metrics::MetricsRegistry};
 use engram_core::activation::SpreadingAutoTuner;
+use engram_core::{MemorySpaceId, MemorySpaceRegistry, MemoryStore, metrics::MetricsRegistry};
 use serde_json::json;
 use std::sync::Arc;
 use tempfile::tempdir;
@@ -104,13 +104,8 @@ async fn test_complete_endpoint_exists() {
         }
     });
 
-    let (status, response) = make_request(
-        state,
-        "POST",
-        "/api/v1/complete",
-        Some(request_body),
-    )
-    .await;
+    let (status, response) =
+        make_request(state, "POST", "/api/v1/complete", Some(request_body)).await;
 
     // Should return either 200 (success) or 422 (insufficient pattern)
     // but NOT 404 (endpoint not found)
@@ -130,13 +125,8 @@ async fn test_complete_requires_partial_episode() {
         }
     });
 
-    let (status, response) = make_request(
-        state,
-        "POST",
-        "/api/v1/complete",
-        Some(request_body),
-    )
-    .await;
+    let (status, response) =
+        make_request(state, "POST", "/api/v1/complete", Some(request_body)).await;
 
     // Should return 400 Bad Request or 422 Unprocessable Entity for missing partial_episode
     assert!(
@@ -158,13 +148,8 @@ async fn test_complete_validates_cue_strength() {
         }
     });
 
-    let (status, response) = make_request(
-        state,
-        "POST",
-        "/api/v1/complete",
-        Some(request_body),
-    )
-    .await;
+    let (status, response) =
+        make_request(state, "POST", "/api/v1/complete", Some(request_body)).await;
 
     assert!(
         status.is_client_error(),
@@ -190,13 +175,8 @@ async fn test_complete_validates_embedding_dimensions() {
         }
     });
 
-    let (status, response) = make_request(
-        state,
-        "POST",
-        "/api/v1/complete",
-        Some(request_body),
-    )
-    .await;
+    let (status, response) =
+        make_request(state, "POST", "/api/v1/complete", Some(request_body)).await;
 
     assert!(
         status.is_client_error(),
@@ -217,13 +197,8 @@ async fn test_complete_insufficient_pattern_returns_422() {
         }
     });
 
-    let (status, response) = make_request(
-        state,
-        "POST",
-        "/api/v1/complete",
-        Some(request_body),
-    )
-    .await;
+    let (status, response) =
+        make_request(state, "POST", "/api/v1/complete", Some(request_body)).await;
 
     assert!(
         status == StatusCode::UNPROCESSABLE_ENTITY || status.is_client_error(),
@@ -245,13 +220,8 @@ async fn test_complete_with_minimal_valid_request() {
         }
     });
 
-    let (status, response) = make_request(
-        state,
-        "POST",
-        "/api/v1/complete",
-        Some(request_body),
-    )
-    .await;
+    let (status, response) =
+        make_request(state, "POST", "/api/v1/complete", Some(request_body)).await;
 
     // Pattern completion may fail with insufficient pattern (422)
     // or succeed (200), both are valid for minimal request
@@ -262,9 +232,18 @@ async fn test_complete_with_minimal_valid_request() {
 
     // If successful, verify response structure
     if status == StatusCode::OK {
-        assert!(response.get("completed_episode").is_some(), "Response should include completed_episode");
-        assert!(response.get("completion_confidence").is_some(), "Response should include completion_confidence");
-        assert!(response.get("source_attribution").is_some(), "Response should include source_attribution");
+        assert!(
+            response.get("completed_episode").is_some(),
+            "Response should include completed_episode"
+        );
+        assert!(
+            response.get("completion_confidence").is_some(),
+            "Response should include completion_confidence"
+        );
+        assert!(
+            response.get("source_attribution").is_some(),
+            "Response should include source_attribution"
+        );
     }
 }
 
@@ -286,17 +265,15 @@ async fn test_complete_with_config_parameters() {
         }
     });
 
-    let (status, _response) = make_request(
-        state,
-        "POST",
-        "/api/v1/complete",
-        Some(request_body),
-    )
-    .await;
+    let (status, _response) =
+        make_request(state, "POST", "/api/v1/complete", Some(request_body)).await;
 
     // Should accept valid configuration
     assert!(
-        !matches!(status, StatusCode::NOT_FOUND | StatusCode::METHOD_NOT_ALLOWED),
+        !matches!(
+            status,
+            StatusCode::NOT_FOUND | StatusCode::METHOD_NOT_ALLOWED
+        ),
         "Should accept request with config parameters. Status: {status}"
     );
 }
@@ -367,13 +344,8 @@ async fn test_complete_actionable_error_messages() {
         }
     });
 
-    let (status, response) = make_request(
-        state,
-        "POST",
-        "/api/v1/complete",
-        Some(request_body),
-    )
-    .await;
+    let (status, response) =
+        make_request(state, "POST", "/api/v1/complete", Some(request_body)).await;
 
     if status.is_client_error() {
         // Verify error follows Nielsen's guidelines: diagnosis, context, action
@@ -386,7 +358,9 @@ async fn test_complete_actionable_error_messages() {
         // Error message should contain actionable guidance
         let error_str = response.to_string().to_lowercase();
         assert!(
-            error_str.contains("provide") || error_str.contains("add") || error_str.contains("ensure"),
+            error_str.contains("provide")
+                || error_str.contains("add")
+                || error_str.contains("ensure"),
             "Error should include actionable suggestion. Response: {response}"
         );
     }
@@ -407,26 +381,42 @@ async fn test_complete_response_includes_all_fields() {
         }
     });
 
-    let (status, response) = make_request(
-        state,
-        "POST",
-        "/api/v1/complete",
-        Some(request_body),
-    )
-    .await;
+    let (status, response) =
+        make_request(state, "POST", "/api/v1/complete", Some(request_body)).await;
 
     if status == StatusCode::OK {
         // Verify all required response fields are present
-        assert!(response.get("completed_episode").is_some(), "Missing completed_episode");
-        assert!(response.get("completion_confidence").is_some(), "Missing completion_confidence");
-        assert!(response.get("source_attribution").is_some(), "Missing source_attribution");
-        assert!(response.get("metacognitive_confidence").is_some(), "Missing metacognitive_confidence");
-        assert!(response.get("reconstruction_stats").is_some(), "Missing reconstruction_stats");
+        assert!(
+            response.get("completed_episode").is_some(),
+            "Missing completed_episode"
+        );
+        assert!(
+            response.get("completion_confidence").is_some(),
+            "Missing completion_confidence"
+        );
+        assert!(
+            response.get("source_attribution").is_some(),
+            "Missing source_attribution"
+        );
+        assert!(
+            response.get("metacognitive_confidence").is_some(),
+            "Missing metacognitive_confidence"
+        );
+        assert!(
+            response.get("reconstruction_stats").is_some(),
+            "Missing reconstruction_stats"
+        );
 
         // Verify confidence structure
         let completion_conf = &response["completion_confidence"];
-        assert!(completion_conf.get("value").is_some(), "Confidence should have value");
-        assert!(completion_conf.get("category").is_some(), "Confidence should have category");
+        assert!(
+            completion_conf.get("value").is_some(),
+            "Confidence should have value"
+        );
+        assert!(
+            completion_conf.get("category").is_some(),
+            "Confidence should have category"
+        );
     }
 }
 
@@ -445,13 +435,8 @@ async fn test_complete_api_overhead_performance() {
 
     let start = std::time::Instant::now();
 
-    let (_status, _response) = make_request(
-        state,
-        "POST",
-        "/api/v1/complete",
-        Some(request_body),
-    )
-    .await;
+    let (_status, _response) =
+        make_request(state, "POST", "/api/v1/complete", Some(request_body)).await;
 
     let duration = start.elapsed();
 

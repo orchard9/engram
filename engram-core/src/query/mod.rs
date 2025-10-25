@@ -28,6 +28,9 @@ pub(crate) const fn clamp_probability_to_f32(value: f64) -> f32 {
     }
 }
 
+// Parser infrastructure (Milestone 9 Task 001)
+pub mod parser;
+
 // Query expansion modules (Milestone 3.6 Task 003)
 pub mod expansion;
 pub mod lexicon;

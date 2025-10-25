@@ -11,6 +11,34 @@ Replicate the Deese-Roediger-McDermott (DRM) false memory paradigm to validate t
 
 This is the acid test for biological plausibility. If we can't replicate DRM, our cognitive mechanisms are wrong.
 
+## Research Foundation
+
+Roediger & McDermott (1995) revived Deese's (1959) paradigm, creating one of the most reliable false memory phenomena in psychology. Participants study word lists of 15 semantically-related words (e.g., "bed, rest, awake, tired, dream..."). The critical lure ("sleep") is NEVER presented, yet 55-65% falsely recall or recognize it as having been studied. Effect remarkably robust across hundreds of replications.
+
+**Dual theoretical mechanisms:**
+1. **Spreading Activation Theory (Collins & Loftus 1975):** Each studied word activates critical lure through semantic associations. Cumulative activation from 15 related words makes lure feel familiar, creating false memory.
+2. **Fuzzy Trace Theory (Brainerd & Reyna 2002):** People encode verbatim traces (exact words) and gist traces (general theme). Gist trace captures "sleep-related words," matching critical lure perfectly.
+
+Both theories predict same outcome. Our implementation uses spreading activation (maps directly to our graph architecture).
+
+**Quantitative characteristics (Roediger & McDermott 1995):**
+- False recall: 55-65% for critical lures (target: 60% ± 10%)
+- Veridical recall: 60-70% for studied words
+- False recognition: 75-85% (higher than recall)
+- Confidence: false memories often rated as confident as true memories (paradoxical)
+
+**Modulating factors:**
+- List length: 15 words optimal, shorter lists reduce effect
+- Semantic strength: high backward associative strength (BAS) essential (>0.3 threshold)
+- Study time: 1-2 seconds per word optimal
+- Retention interval: effect persists for at least 24 hours
+
+**Statistical validation:**
+- N > 50 virtual participants (simulated memory spaces)
+- Multiple randomized study lists per participant
+- Chi-square test comparing false recall rate to expected 60%
+- Effect size (Cohen's d) > 0.8 for true vs false recall difference
+
 ## Theoretical Foundation
 
 **DRM Paradigm (Roediger & McDermott 1995):**

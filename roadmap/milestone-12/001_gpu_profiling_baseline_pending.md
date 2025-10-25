@@ -13,6 +13,28 @@ Quantify current CPU SIMD performance and identify GPU-suitable workloads throug
 
 Before writing any GPU code, we must understand where CPU time is actually spent. Premature GPU optimization wastes engineering effort on operations that aren't bottlenecks. This task establishes data-driven priorities for GPU acceleration.
 
+## Research Foundation
+
+GPU acceleration is NOT free - every kernel launch incurs 5-20μs overhead, memory transfers cost bandwidth, and synchronization delays compound. Research principle: measure first, optimize second. Profile-guided GPU acceleration focuses engineering effort where it matters most.
+
+**Memory vs Compute Bound Classification:**
+- **Memory-bound** (cosine similarity): 768-dim vectors = 3KB per vector, arithmetic intensity 0.13 FLOPS/byte, speedup limited by bandwidth ratio (GPU 360 GB/s vs CPU 50 GB/s = 7.2x theoretical)
+- **Compute-bound** (sparse matrix multiply): higher arithmetic intensity, benefits more from GPU parallelism (13 TFLOPS GPU vs 2 TFLOPS CPU = 6.5x theoretical)
+
+**Break-even equation:**
+```
+Total_CPU_Time = Per_Item_CPU_Latency × Batch_Size
+Total_GPU_Time = Kernel_Launch_Overhead + Per_Item_GPU_Latency × Batch_Size
+Break_Even_Size = Launch_Overhead / (Per_Item_CPU - Per_Item_GPU)
+```
+
+**Known baseline targets from SIMD profiling:**
+- Cosine similarity: CPU 2.1 μs/vector (AVX-512), GPU target 0.3 μs/vector, break-even 64 vectors
+- Activation spreading: CPU 850 μs, GPU target 120 μs, break-even 512 nodes
+- HNSW kNN search: CPU 1.2 ms, GPU target 180 μs, break-even 1024 candidates
+
+Statistical rigor requirements: minimum 100 samples, report P50/P90/P99 (not just mean), coefficient of variation < 5%, warm cache measurements (representative of production).
+
 ## Deliverables
 
 1. **Flamegraph Profiling Data**

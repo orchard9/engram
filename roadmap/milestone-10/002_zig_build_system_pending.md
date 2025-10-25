@@ -62,13 +62,119 @@ Establish Zig build system integrated with cargo workflow, providing C-compatibl
    /zig/zig-out/
    ```
 
+## Research-Based Design Principles
+
+From "build.zig Meets cargo build - FFI Without the Pain":
+
+### Zero-Copy FFI Design
+
+**Anti-Pattern (BAD):**
+```rust
+// Serialize to JSON, parse in Zig, return JSON - adds latency!
+let json_input = serde_json::to_string(&data)?;
+let json_output = unsafe { zig_function(json_input.as_ptr()) };
+let result: Vec<f32> = serde_json::from_str(json_output)?;
+```
+
+**Best Practice (GOOD):**
+```rust
+// Pass pointers, Zig writes directly to Rust's buffer - zero-copy
+let mut scores = vec![0.0_f32; num_candidates];
+unsafe {
+    engram_vector_similarity(
+        query.as_ptr(),
+        candidates.as_ptr(),
+        scores.as_mut_ptr(),
+        query.len(),
+        num_candidates,
+    );
+}
+// scores now contains results, no copy needed
+```
+
+**Key Principle:** Caller allocates, callee populates. Zero serialization overhead.
+
+### Memory Safety at FFI Boundary
+
+FFI is inherently unsafe - we must maintain invariants the compiler can't check:
+
+**Unsafe Invariants We Must Uphold:**
+1. Pointers valid for entire call duration
+2. Slices have correct length (no buffer overruns)
+3. No aliasing between input and output pointers
+4. Returned pointers (if any) have defined lifetime
+
+**Safety Strategy:**
+- Validate dimensions in safe Rust layer
+- Minimize unsafe blocks
+- Clear documentation of invariants
+- Defensive assertions in debug builds
+
+### C ABI as Common Ground
+
+**Why C ABI:**
+- Both Rust and Zig export C-compatible functions
+- No custom serialization needed
+- Just pointers and primitive types
+- Industry-standard calling conventions
+
+**Zig Side:**
+- Use `export fn` for C ABI compatibility
+- No Zig-specific types at boundary
+- Explicit parameter passing
+
+**Rust Side:**
+- Use `extern "C"` declarations
+- Match Zig signatures exactly
+- Safe wrappers validate inputs
+
+### Static vs Dynamic Linking
+
+**Static Linking (Chosen):**
+- Single binary, no runtime dependencies
+- Link-time optimization across language boundary
+- Simpler deployment
+- Con: Larger binary size (acceptable for server deployments)
+
+**Dynamic Linking (Rejected):**
+- Pro: Smaller binaries
+- Con: Runtime dependency management
+- Con: Versioning complexity
+
+---
+
 ## Acceptance Criteria
 
-1. `cargo build --features zig-kernels` successfully builds with Zig library
-2. `cargo build` (without feature) compiles without Zig dependency
-3. `./scripts/build_with_zig.sh` produces binary with Zig kernels linked
-4. FFI smoke test calls Zig function from Rust and verifies return value
-5. Build fails gracefully with clear error if Zig not installed
+### Build System
+- [ ] `cargo build --features zig-kernels` successfully builds with Zig library
+- [ ] `cargo build` (without feature) compiles without Zig dependency
+- [ ] `./scripts/build_with_zig.sh` produces binary with Zig kernels linked
+- [ ] Build fails gracefully with clear error if Zig not installed (not segfault)
+- [ ] Static library (libengram_kernels.a) created in zig/zig-out/lib/
+
+### FFI Correctness
+- [ ] FFI smoke test calls Zig function from Rust and verifies return value
+- [ ] Zero-copy design: no serialization at FFI boundary
+- [ ] Safe wrapper validates dimensions before calling unsafe FFI
+- [ ] All exported functions use C-compatible types only
+
+### Feature Flags
+- [ ] `cfg!(feature = "zig-kernels")` correctly gates Zig paths
+- [ ] Without feature: Rust fallback implementations used
+- [ ] With feature: Zig kernels linked and called
+- [ ] CI tests both with and without feature flag
+
+### Memory Safety
+- [ ] Unsafe blocks minimized and well-documented
+- [ ] Invariants documented for each FFI function
+- [ ] No buffer overruns (validated with Miri or Valgrind)
+- [ ] Debug builds include assertions for safety invariants
+
+### Performance
+- [ ] Zero-copy design: caller allocates, callee populates
+- [ ] No hidden allocations in Zig kernels
+- [ ] Static linking enables cross-language LTO
+- [ ] FFI overhead <10ns per call (measured)
 
 ## Implementation Guidance
 
@@ -305,3 +411,24 @@ pub fn vector_similarity(query: &[f32], candidates: &[f32], num_candidates: usiz
 - Use -Doptimize=ReleaseFast for production kernels
 - Consider adding zig fmt check to CI for code style
 - Document Zig installation in README.md
+
+---
+
+## References
+
+### Zig Documentation
+- Zig Build System: https://ziglang.org/documentation/master/#Build-System
+- Zig FFI Guide: https://ziglang.org/learn/overview/
+- C ABI compatibility: https://ziglang.org/documentation/master/#extern
+
+### Rust FFI
+- Rust Nomicon FFI chapter: https://doc.rust-lang.org/nomicon/ffi.html
+- build.rs documentation: https://doc.rust-lang.org/cargo/reference/build-scripts.html
+- Unsafe Rust guidelines: https://doc.rust-lang.org/book/ch19-01-unsafe-rust.html
+
+### Cross-Language Integration
+- "Linking Rust and Zig" by Andrew Kelley
+- C ABI as lingua franca for FFI
+- Static linking for deployment simplicity
+
+---

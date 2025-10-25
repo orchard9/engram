@@ -13,6 +13,29 @@ Implement and optimize the first production CUDA kernel for batch cosine similar
 
 Cosine similarity batch computation is the hottest operation in Engram's recall path, consuming ~60% of CPU time in production workloads (per Task 001 profiling). This is the ideal first GPU kernel: purely compute-bound, embarrassingly parallel, and well-understood.
 
+## Research Foundation
+
+Cosine similarity is embarrassingly parallel - each similarity(Q, Ti) computation is independent. This is archetypal memory-bound: 768-dim vectors = 3KB per vector (768 floats × 4 bytes), computation is 768 multiplies + 767 adds + 1 division + 2 square roots, arithmetic intensity only 0.13 FLOPS/byte.
+
+**Warp-level optimization rationale:**
+CUDA thread hierarchy: Thread (1 CUDA core) → Warp (32 threads, SIMT execution) → Block (128-1024 threads) → Grid (unlimited blocks). The warp is the fundamental unit - all 32 threads execute the same instruction simultaneously.
+
+Naive approach: each thread computes entire dot product sequentially (no parallelism within dot product). Warp-optimized: distribute 768 dimensions across 32 threads (each computes 768/32 = 24 multiplications), then cooperate via warp shuffle to sum results - NO shared memory needed, threads exchange data directly.
+
+**Warp shuffle instructions** (`__shfl_down_sync`) are faster than shared memory (no memory access latency). Traditional reduction requires shared memory writes/reads; shuffle uses register-to-register transfers within warp.
+
+**Numerical stability:**
+- GPU reduction order must match CPU to ensure confidence score equivalence
+- Force IEEE 754 rounding (no fast-math) to prevent divergence
+- Use Kahan summation for dot products >1024 dimensions (prevent accumulation drift)
+
+**Performance model:**
+- CPU AVX-512: 2.1 μs/vector
+- GPU target: 0.3 μs/vector (7x speedup)
+- Break-even: 64 vectors (accounting for 10μs kernel launch overhead)
+- Block size: 256 threads (8 warps for memory coalescing)
+- Memory access: query cached in constant memory, targets coalesced 128-byte aligned reads
+
 ## Deliverables
 
 1. CUDA kernel implementation with warp-level optimization
