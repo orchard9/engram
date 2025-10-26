@@ -22,6 +22,7 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 pub mod activation;
 pub mod batch;
+pub mod cognitive;
 #[cfg(feature = "pattern_completion")]
 pub mod completion;
 pub mod compute;

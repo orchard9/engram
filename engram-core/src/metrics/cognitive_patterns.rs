@@ -14,6 +14,7 @@
 
 use crate::metrics::lockfree::LockFreeHistogram;
 use crossbeam_utils::CachePadded;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Zero-overhead cognitive pattern metrics
@@ -207,6 +208,28 @@ impl CognitivePatternMetrics {
         {
             self.reconsolidation_modifications
                 .fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Record reconsolidation rejection with reason
+    ///
+    /// # Performance
+    /// - Monitoring disabled: 0ns
+    /// - Monitoring enabled: ~25ns
+    #[inline(always)]
+    #[allow(clippy::inline_always)]
+    pub fn record_reconsolidation_rejection(&self, _reason: &str) {
+        #[cfg(feature = "monitoring")]
+        {
+            // Count rejections as window misses
+            self.reconsolidation_window_misses
+                .fetch_add(1, Ordering::Relaxed);
+            // TODO: Consider adding structured rejection reason tracking
+        }
+
+        #[cfg(not(feature = "monitoring"))]
+        {
+            let _ = _reason;
         }
     }
 
@@ -498,6 +521,21 @@ impl Default for CognitivePatternMetrics {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Global cognitive patterns metrics instance (lazy-initialized)
+static COGNITIVE_PATTERNS: std::sync::OnceLock<Arc<CognitivePatternMetrics>> =
+    std::sync::OnceLock::new();
+
+/// Get the global cognitive patterns metrics registry
+#[must_use]
+pub fn cognitive_patterns() -> Option<Arc<CognitivePatternMetrics>> {
+    COGNITIVE_PATTERNS.get().cloned()
+}
+
+/// Initialize the global cognitive patterns metrics registry
+pub fn init_cognitive_patterns() -> Arc<CognitivePatternMetrics> {
+    Arc::clone(COGNITIVE_PATTERNS.get_or_init(|| Arc::new(CognitivePatternMetrics::new())))
 }
 
 #[cfg(test)]
