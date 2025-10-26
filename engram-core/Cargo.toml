@@ -115,6 +115,7 @@ serial_test = "3.2.0"
 loom = "0.7"
 tokio = { version = "1.0", features = ["test-util", "rt", "time", "sync", "macros", "rt-multi-thread"] }
 chrono = { workspace = true }
+pprof = { version = "0.13", features = ["flamegraph", "criterion"] }
 
 [[bench]]
 name = "pattern_detection"
@@ -148,10 +149,22 @@ harness = false
 name = "concurrent_hnsw_validation"
 harness = false
 
+[[bench]]
+name = "gpu_candidate_profiling"
+harness = false
+
+[[bench]]
+name = "gpu_cosine_similarity"
+harness = false
+required-features = ["gpu"]
+
 [features]
 default = ["hnsw_index", "memory_mapped_persistence", "psychological_decay", "probabilistic_queries", "pattern_completion", "monitoring"]
 # For systems where Z3 is available
 full = ["default", "smt_verification"]
+
+# GPU acceleration with CUDA (requires CUDA toolkit 11.0+)
+gpu = []
 
 # Core HNSW features
 hnsw_index = [

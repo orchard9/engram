@@ -15,11 +15,12 @@ use engram_proto::{
     ConsolidationProgress, ConsolidationState, DreamRequest, DreamResponse, ExperienceRequest,
     ExperienceResponse, FlowStatus, ForgetMode, ForgetRequest, ForgetResponse, HealthStatus,
     Insight, IntrospectRequest, IntrospectResponse, MemoryFlowRequest, MemoryFlowResponse,
-    MemoryStatistics, QueryRequest, QueryResponse, RecallMetadata, RecallRequest, RecallResponse,
-    RecognizeRequest, RecognizeResponse, RememberRequest, RememberResponse, ReminisceRequest,
-    ReminisceResponse, ReplaySequence, StreamEventType, StreamRequest, StreamResponse,
-    dream_response, flow_control, flow_status, memory_flow_request, memory_flow_response,
-    remember_request,
+    MemoryStatistics, ObservationRequest, ObservationResponse, QueryRequest, QueryResponse,
+    RecallMetadata, RecallRequest, RecallResponse, RecognizeRequest, RecognizeResponse,
+    RememberRequest, RememberResponse, ReminisceRequest, ReminisceResponse, ReplaySequence,
+    StreamEventType, StreamRequest, StreamResponse, StreamingRecallRequest,
+    StreamingRecallResponse, dream_response, flow_control, flow_status, memory_flow_request,
+    memory_flow_response, remember_request,
 };
 use serde_json::json;
 use std::collections::HashMap;
@@ -1431,6 +1432,49 @@ impl EngramService for MemoryService {
 
         let response_stream = ReceiverStream::new(rx);
         Ok(Response::new(Box::pin(response_stream)))
+    }
+
+    // ========================================================================
+    // Streaming APIs (Milestone 11 - In Progress)
+    // ========================================================================
+
+    type ObserveStreamStream =
+        std::pin::Pin<Box<dyn Stream<Item = Result<ObservationResponse, Status>> + Send>>;
+
+    /// Bidirectional streaming for observations
+    ///
+    /// TODO(milestone-11): Implement streaming observation protocol
+    async fn observe_stream(
+        &self,
+        _request: Request<tonic::Streaming<ObservationRequest>>,
+    ) -> Result<Response<Self::ObserveStreamStream>, Status> {
+        todo!("Milestone 11: Streaming observation not yet implemented")
+    }
+
+    type RecallStreamStream =
+        std::pin::Pin<Box<dyn Stream<Item = Result<StreamingRecallResponse, Status>> + Send>>;
+
+    /// Server streaming for recall results
+    ///
+    /// TODO(milestone-11): Implement streaming recall protocol
+    async fn recall_stream(
+        &self,
+        _request: Request<StreamingRecallRequest>,
+    ) -> Result<Response<Self::RecallStreamStream>, Status> {
+        todo!("Milestone 11: Streaming recall not yet implemented")
+    }
+
+    type MemoryStreamStream =
+        std::pin::Pin<Box<dyn Stream<Item = Result<ObservationResponse, Status>> + Send>>;
+
+    /// Bidirectional streaming for memory operations
+    ///
+    /// TODO(milestone-11): Implement streaming memory protocol
+    async fn memory_stream(
+        &self,
+        _request: Request<tonic::Streaming<ObservationRequest>>,
+    ) -> Result<Response<Self::MemoryStreamStream>, Status> {
+        todo!("Milestone 11: Streaming memory not yet implemented")
     }
 }
 

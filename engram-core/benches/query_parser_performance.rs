@@ -24,6 +24,8 @@
 //! cargo bench --bench query_parser_performance -- --baseline current
 //! ```
 
+#![allow(missing_docs)] // Benchmark file - documented via function names
+
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use engram_core::query::parser::Parser;
 use std::time::Duration;
@@ -134,10 +136,10 @@ fn benchmark_large_queries(c: &mut Criterion) {
 
 /// Regression guard: fail if simple queries exceed 100μs
 fn regression_guard_simple_queries(c: &mut Criterion) {
+    const MAX_TIME: Duration = Duration::from_micros(100);
+
     let mut group = c.benchmark_group("regression_simple");
     group.significance_level(0.01).sample_size(1000);
-
-    const MAX_TIME: Duration = Duration::from_micros(100);
 
     for (name, query) in SIMPLE_QUERIES {
         group.bench_with_input(BenchmarkId::from_parameter(name), query, |b, q| {
@@ -150,14 +152,13 @@ fn regression_guard_simple_queries(c: &mut Criterion) {
 
                 // Check per-iteration time
                 let per_iter = elapsed / iters.try_into().unwrap_or(1);
-                if per_iter > MAX_TIME {
-                    panic!(
-                        "REGRESSION: {} exceeded {}μs baseline (took {}μs)",
-                        name,
-                        MAX_TIME.as_micros(),
-                        per_iter.as_micros()
-                    );
-                }
+                assert!(
+                    per_iter <= MAX_TIME,
+                    "REGRESSION: {} exceeded {}μs baseline (took {}μs)",
+                    name,
+                    MAX_TIME.as_micros(),
+                    per_iter.as_micros()
+                );
 
                 elapsed
             });
@@ -169,10 +170,10 @@ fn regression_guard_simple_queries(c: &mut Criterion) {
 
 /// Regression guard: fail if complex queries exceed 200μs
 fn regression_guard_complex_queries(c: &mut Criterion) {
+    const MAX_TIME: Duration = Duration::from_micros(200);
+
     let mut group = c.benchmark_group("regression_complex");
     group.significance_level(0.01).sample_size(1000);
-
-    const MAX_TIME: Duration = Duration::from_micros(200);
 
     for (name, query) in COMPLEX_QUERIES {
         group.bench_with_input(BenchmarkId::from_parameter(name), query, |b, q| {
@@ -185,14 +186,13 @@ fn regression_guard_complex_queries(c: &mut Criterion) {
 
                 // Check per-iteration time
                 let per_iter = elapsed / iters.try_into().unwrap_or(1);
-                if per_iter > MAX_TIME {
-                    panic!(
-                        "REGRESSION: {} exceeded {}μs baseline (took {}μs)",
-                        name,
-                        MAX_TIME.as_micros(),
-                        per_iter.as_micros()
-                    );
-                }
+                assert!(
+                    per_iter <= MAX_TIME,
+                    "REGRESSION: {} exceeded {}μs baseline (took {}μs)",
+                    name,
+                    MAX_TIME.as_micros(),
+                    per_iter.as_micros()
+                );
 
                 elapsed
             });
@@ -204,10 +204,10 @@ fn regression_guard_complex_queries(c: &mut Criterion) {
 
 /// Regression guard: fail if large queries exceed 500μs
 fn regression_guard_large_queries(c: &mut Criterion) {
+    const MAX_TIME: Duration = Duration::from_micros(500);
+
     let mut group = c.benchmark_group("regression_large");
     group.significance_level(0.01).sample_size(500);
-
-    const MAX_TIME: Duration = Duration::from_micros(500);
 
     for (name, query) in LARGE_QUERIES {
         group.bench_with_input(BenchmarkId::from_parameter(name), query, |b, q| {
@@ -220,14 +220,13 @@ fn regression_guard_large_queries(c: &mut Criterion) {
 
                 // Check per-iteration time
                 let per_iter = elapsed / iters.try_into().unwrap_or(1);
-                if per_iter > MAX_TIME {
-                    panic!(
-                        "REGRESSION: {} exceeded {}μs baseline (took {}μs)",
-                        name,
-                        MAX_TIME.as_micros(),
-                        per_iter.as_micros()
-                    );
-                }
+                assert!(
+                    per_iter <= MAX_TIME,
+                    "REGRESSION: {} exceeded {}μs baseline (took {}μs)",
+                    name,
+                    MAX_TIME.as_micros(),
+                    per_iter.as_micros()
+                );
 
                 elapsed
             });

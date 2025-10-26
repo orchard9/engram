@@ -6,6 +6,11 @@
 //! Decision threshold: If < 60K ops/sec with 8 threads, implement fallback
 //! (per-layer locks or space partitioning) before proceeding with worker pool.
 
+#![allow(missing_docs)] // Benchmark file - documented via function names
+#![allow(clippy::uninlined_format_args)] // Benchmark output - prioritize clarity
+#![allow(clippy::needless_range_loop)] // Benchmark code - index access clearer
+#![allow(clippy::unit_arg)] // Benchmark code - black_box usage pattern
+
 use chrono::Utc;
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use engram_core::index::CognitiveHnswIndex;

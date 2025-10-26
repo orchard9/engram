@@ -6,6 +6,9 @@
 //!
 //! Run with: `cargo run --example query_examples`
 
+#![allow(clippy::uninlined_format_args)] // Example code - prioritize clarity
+#![allow(clippy::ignored_unit_patterns)] // Example code - _ is clearer in match arms
+
 use engram_core::Confidence;
 use engram_core::query::parser::Parser;
 use engram_core::query::parser::ast::{

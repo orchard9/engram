@@ -18,7 +18,10 @@ pub mod avx512;
 #[cfg(target_arch = "aarch64")]
 pub mod neon;
 
-/// CPU capability detection for optimal implementation selection
+#[cfg(feature = "gpu")]
+pub mod cuda;
+
+/// Compute capability detection for optimal implementation selection
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CpuCapability {
     #[cfg(target_arch = "x86_64")]
@@ -32,6 +35,9 @@ pub enum CpuCapability {
     #[cfg(target_arch = "aarch64")]
     /// ARM NEON SIMD instruction set
     Neon,
+    #[cfg(feature = "gpu")]
+    /// CUDA GPU acceleration
+    Gpu,
     /// Fallback scalar operations without SIMD
     Scalar,
 }

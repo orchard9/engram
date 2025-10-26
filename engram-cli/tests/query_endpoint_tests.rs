@@ -22,7 +22,7 @@ async fn create_test_state() -> ApiState {
         .expect("Failed to create registry"),
     );
 
-    let default_space = MemorySpaceId::new("default".to_string()).unwrap();
+    let default_space = MemorySpaceId::new("default").unwrap();
     registry
         .create_or_get(&default_space)
         .await
@@ -108,7 +108,7 @@ async fn test_http_query_endpoint_with_header_memory_space() {
     let state = create_test_state().await;
 
     // Create a test space
-    let test_space = MemorySpaceId::new("test_space".to_string()).unwrap();
+    let test_space = MemorySpaceId::new("test_space").unwrap();
     state
         .registry
         .create_or_get(&test_space)
