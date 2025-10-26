@@ -71,14 +71,28 @@ pub const ArenaConfig = struct {
     /// - Experimental: .fallback (best-effort allocation)
     overflow_strategy: OverflowStrategy,
 
+    /// Zero memory on reset to prevent information disclosure
+    ///
+    /// Recommended settings:
+    /// - Development/Testing: true (safer, catches bugs)
+    /// - Production: true (prevent information disclosure)
+    /// - Performance-critical: false (after validation, ~1% overhead)
+    ///
+    /// Trade-offs:
+    /// - true: Prevents uninitialized memory bugs, ~1% overhead
+    /// - false: Maximum performance, requires careful validation
+    zero_on_reset: bool,
+
     /// Default configuration for development
     ///
     /// Conservative settings optimized for typical development workloads:
     /// - 1MB pool: Sufficient for ~262K f32 elements or ~1300 768-dim embeddings
     /// - error_return: Safe default for development and testing
+    /// - zero_on_reset: true for safety and deterministic behavior
     pub const DEFAULT = ArenaConfig{
         .pool_size = 1024 * 1024, // 1MB
         .overflow_strategy = .error_return,
+        .zero_on_reset = true,
     };
 
     /// Load configuration from environment variables or use defaults
@@ -86,6 +100,7 @@ pub const ArenaConfig = struct {
     /// Environment variables:
     /// - ENGRAM_ARENA_SIZE: Pool size in bytes (e.g., "2097152" for 2MB)
     /// - ENGRAM_ARENA_OVERFLOW: Strategy as string ("panic", "error_return", "fallback")
+    /// - ENGRAM_ARENA_ZERO: Zero on reset ("true", "false", "1", "0")
     ///
     /// Invalid values are ignored and defaults are used instead.
     ///
@@ -95,6 +110,9 @@ pub const ArenaConfig = struct {
     ///
     ///   ENGRAM_ARENA_SIZE=invalid ./engram
     ///   # Uses default 1MB pool (invalid value ignored)
+    ///
+    ///   ENGRAM_ARENA_ZERO=false ./engram
+    ///   # Disables memory zeroing for maximum performance
     pub fn fromEnv() ArenaConfig {
         var config = DEFAULT;
 
@@ -119,19 +137,34 @@ pub const ArenaConfig = struct {
             // Invalid values are silently ignored (use default)
         }
 
+        // Load zero-on-reset flag from ENGRAM_ARENA_ZERO
+        if (std.posix.getenv("ENGRAM_ARENA_ZERO")) |zero_str| {
+            if (std.mem.eql(u8, zero_str, "true") or std.mem.eql(u8, zero_str, "1")) {
+                config.zero_on_reset = true;
+            } else if (std.mem.eql(u8, zero_str, "false") or std.mem.eql(u8, zero_str, "0")) {
+                config.zero_on_reset = false;
+            }
+            // Invalid values are silently ignored (use default)
+        }
+
         return config;
     }
 };
 
-// Global configuration (thread-safe via initialization once)
+// Global configuration (thread-safe via atomic initialization)
 //
-// Design: Configuration is loaded once at first use and then remains constant.
-// This avoids the need for synchronization on every access.
+// Design: Configuration is loaded once at first use via atomic state machine.
+// This ensures thread-safe initialization without data races.
 //
-// Thread safety: Multiple threads may race to initialize, but they'll all
-// produce the same result (idempotent fromEnv()). No mutex needed.
+// State machine:
+// - 0 (uninitialized): Config not yet loaded
+// - 1 (initializing): One thread is loading config
+// - 2 (initialized): Config loaded and ready
+//
+// Thread safety: Uses atomic operations with proper memory ordering.
+// Multiple threads can safely call getConfig() concurrently.
 var global_config: ArenaConfig = ArenaConfig.DEFAULT;
-var config_initialized: bool = false;
+var config_state: std.atomic.Value(u8) = std.atomic.Value(u8).init(0);
 
 /// Set global configuration explicitly
 ///
@@ -147,7 +180,7 @@ var config_initialized: bool = false;
 ///   });
 pub fn setConfig(config: ArenaConfig) void {
     global_config = config;
-    config_initialized = true;
+    config_state.store(2, .release);
 }
 
 /// Get current global configuration
@@ -156,16 +189,37 @@ pub fn setConfig(config: ArenaConfig) void {
 /// Subsequent calls return cached value.
 ///
 /// Thread safety: Safe to call from multiple threads.
-/// First call may race, but produces identical results.
+/// Uses atomic operations to ensure proper initialization.
 ///
 /// Example:
 ///   const config = arena_config.getConfig();
 ///   const pool_size = config.pool_size;
 pub fn getConfig() ArenaConfig {
-    if (!config_initialized) {
-        global_config = ArenaConfig.fromEnv();
-        config_initialized = true;
+    // Fast path: already initialized
+    if (config_state.load(.acquire) == 2) {
+        return global_config;
     }
+
+    // Slow path: need to initialize
+    // Try to transition from uninitialized (0) to initializing (1)
+    const prev_state = config_state.cmpxchgWeak(0, 1, .acquire, .acquire);
+
+    if (prev_state == null) {
+        // We won the race - perform initialization
+        const temp_config = ArenaConfig.fromEnv();
+
+        // Store config before marking as initialized
+        global_config = temp_config;
+
+        // Mark as initialized with release semantics to publish config writes
+        config_state.store(2, .release);
+    } else {
+        // Lost the race - wait for initialization to complete
+        while (config_state.load(.acquire) != 2) {
+            std.atomic.spinLoopHint();
+        }
+    }
+
     return global_config;
 }
 
@@ -177,7 +231,7 @@ pub fn getConfig() ArenaConfig {
 /// Thread safety: Not thread-safe. Use only in single-threaded tests.
 pub fn resetConfig() void {
     global_config = ArenaConfig.DEFAULT;
-    config_initialized = false;
+    config_state.store(0, .release);
 }
 
 // Unit tests

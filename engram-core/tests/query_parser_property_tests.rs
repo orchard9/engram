@@ -34,7 +34,7 @@ use proptest::test_runner::Config as ProptestConfig;
 ///
 /// This ensures the parser and AST-to-string conversion are consistent.
 #[test]
-#[ignore] // This test requires implementing to_string() on Query
+#[ignore = "This test requires implementing to_string() on Query"]
 fn prop_parse_unparse_roundtrip() {
     proptest!(ProptestConfig::with_cases(1000), |(query in valid_query_generator())| {
         // Parse the original query
@@ -174,11 +174,7 @@ proptest! {
 
         // Error position should be within ±10 chars of injected error
         // (parser might detect error before or after the exact character)
-        let distance = if error_position > error_offset {
-            error_position - error_offset
-        } else {
-            error_offset - error_position
-        };
+        let distance = error_position.abs_diff(error_offset);
 
         prop_assert!(
             distance <= 10,
@@ -199,8 +195,8 @@ proptest! {
 // should never panic - it must always return Ok or Err gracefully.
 proptest! {
     #![proptest_config(ProptestConfig {
-        cases: 10000,
-        max_shrink_iters: 100000,
+        cases: 10_000,
+        max_shrink_iters: 100_000,
         .. ProptestConfig::default()
     })]
 
@@ -223,8 +219,8 @@ proptest! {
 // Property 6: Keywords are Case Insensitive
 // ============================================================================
 
-/// Property: For all valid queries Q, parsing Q in lowercase, uppercase,
-/// or mixed case should produce equivalent ASTs.
+// Property: For all valid queries Q, parsing Q in lowercase, uppercase,
+// or mixed case should produce equivalent ASTs.
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(500))]
 
@@ -272,8 +268,8 @@ proptest! {
 // Property 7: Whitespace is Normalized
 // ============================================================================
 
-/// Property: For all valid queries Q, extra whitespace (spaces, tabs, newlines)
-/// should not affect parsing result.
+// Property: For all valid queries Q, extra whitespace (spaces, tabs, newlines)
+// should not affect parsing result.
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(500))]
 

@@ -58,12 +58,35 @@ pub const ArenaAllocator = struct {
     /// Time complexity: O(1)
     /// Space overhead: Only alignment padding (at most alignment-1 bytes)
     pub fn alloc(self: *ArenaAllocator, size: usize, alignment: usize) ![]u8 {
+        // Validate alignment is power of 2 (required by alignForward)
+        if (alignment == 0 or !std.math.isPowerOfTwo(alignment)) {
+            return error.OutOfMemory;
+        }
+
         // Align offset to requested alignment
         // alignForward rounds up to next multiple of alignment
         const aligned_offset = std.mem.alignForward(usize, self.offset, alignment);
 
+        // Check for alignment calculation overflow
+        // If aligned_offset wrapped around, it will be less than the original offset
+        if (aligned_offset < self.offset) {
+            self.overflow_count += 1;
+            const config = arena_config.getConfig();
+            switch (config.overflow_strategy) {
+                .panic => @panic("Arena allocator alignment overflow"),
+                .error_return => return error.OutOfMemory,
+                .fallback => {
+                    std.log.warn("Arena alignment overflow detected (offset={}, alignment={})", .{ self.offset, alignment });
+                    return error.OutOfMemory;
+                },
+            }
+        }
+
         // Check if allocation fits in remaining space
-        if (aligned_offset + size > self.buffer.len) {
+        // Use safe arithmetic to prevent overflow in size addition
+        // aligned_offset > buffer.len - size is equivalent to aligned_offset + size > buffer.len
+        // but prevents overflow when aligned_offset + size > usize::MAX
+        if (aligned_offset > self.buffer.len or size > self.buffer.len - aligned_offset) {
             // Record overflow event
             self.overflow_count += 1;
 
@@ -74,7 +97,7 @@ pub const ArenaAllocator = struct {
                 .error_return => return error.OutOfMemory,
                 .fallback => {
                     // Log warning (future: could fall back to system allocator)
-                    std.log.warn("Arena overflow detected (size={}, remaining={})", .{ size, self.buffer.len - self.offset });
+                    std.log.warn("Arena overflow detected (size={}, remaining={})", .{ size, self.buffer.len -| self.offset });
                     return error.OutOfMemory;
                 },
             }
@@ -108,18 +131,24 @@ pub const ArenaAllocator = struct {
     /// Reset arena to beginning (bulk deallocation)
     ///
     /// Invalidates all previous allocations from this arena.
-    /// Does not zero memory - callers should not rely on cleared state.
+    /// Optionally zeros memory based on configuration (prevents information disclosure).
     ///
     /// Records metrics before reset for global aggregation.
     ///
-    /// Time complexity: O(1)
+    /// Time complexity: O(1) if zero_on_reset=false, O(n) if zero_on_reset=true
     pub fn reset(self: *ArenaAllocator) void {
         // Record metrics before reset
         arena_metrics.recordReset(self.high_water_mark, self.overflow_count);
 
+        // Zero memory if configured (prevent information disclosure and non-deterministic bugs)
+        const config = arena_config.getConfig();
+        if (config.zero_on_reset) {
+            @memset(self.buffer[0..self.offset], 0);
+        }
+
         // Reset allocation state
         self.offset = 0;
-        // Keep high_water_mark for local diagnostics
+        // Keep high_water_mark for local diagnostics across resets
         self.overflow_count = 0;
     }
 
@@ -183,6 +212,7 @@ pub const ArenaStats = struct {
 // - Windows: Zig maps threadlocal to platform-specific TLS
 threadlocal var kernel_arena_buffer: ?[]u8 = null;
 threadlocal var kernel_arena: ?ArenaAllocator = null;
+threadlocal var arena_initializing: bool = false;
 
 /// Initialize thread-local arena with configured pool size
 ///
@@ -190,14 +220,34 @@ threadlocal var kernel_arena: ?ArenaAllocator = null;
 /// Subsequent calls are no-op.
 ///
 /// Thread safety: Thread-local - safe to call from multiple threads.
+/// Protected against re-entrant initialization (will panic if detected).
 ///
 /// Returns error.OutOfMemory if page allocation fails.
 fn initThreadArena() !void {
-    if (kernel_arena != null) return; // Already initialized
+    // Fast path: already initialized
+    if (kernel_arena != null) return;
+
+    // Detect re-entrant initialization (allocator recursion)
+    if (arena_initializing) {
+        @panic("Thread arena initialization re-entered - allocator recursion detected");
+    }
+
+    // Mark initialization in progress
+    arena_initializing = true;
+    defer arena_initializing = false;
+
+    // Double-check after setting guard (handle potential race)
+    if (kernel_arena != null) return;
 
     const config = arena_config.getConfig();
     const buffer = try std.heap.page_allocator.alloc(u8, config.pool_size);
+
+    // Assign buffer first, then arena (order matters for visibility)
     kernel_arena_buffer = buffer;
+
+    // Ensure buffer assignment visible before arena becomes visible
+    @fence(.seq_cst);
+
     kernel_arena = ArenaAllocator.init(buffer);
 }
 
@@ -260,6 +310,25 @@ pub fn getThreadArenaUtilization() f32 {
     return 0.0;
 }
 
+/// Deinitialize thread-local arena and free backing buffer
+///
+/// Should be called before thread exit to prevent memory leaks.
+/// Safe to call multiple times (subsequent calls are no-op).
+///
+/// Thread safety: Thread-local - only affects calling thread's arena.
+///
+/// Example:
+///   // In thread cleanup
+///   defer allocator.deinitThreadArena();
+pub fn deinitThreadArena() void {
+    if (kernel_arena_buffer) |buffer| {
+        std.heap.page_allocator.free(buffer);
+        kernel_arena_buffer = null;
+        kernel_arena = null;
+        arena_initializing = false;
+    }
+}
+
 // Unit tests
 test "ArenaAllocator basic allocation" {
     var buffer: [1024]u8 = undefined;
@@ -294,6 +363,7 @@ test "ArenaAllocator overflow detection" {
     arena_config.setConfig(.{
         .pool_size = 100,
         .overflow_strategy = .error_return,
+        .zero_on_reset = false,
     });
     defer arena_config.resetConfig();
 
@@ -390,6 +460,7 @@ test "thread-local arena initialization" {
     arena_config.setConfig(.{
         .pool_size = 1024,
         .overflow_strategy = .error_return,
+        .zero_on_reset = false,
     });
     defer arena_config.resetConfig();
 
@@ -412,6 +483,7 @@ test "thread-local arena isolation" {
     arena_config.setConfig(.{
         .pool_size = 1024 * 1024, // 1MB
         .overflow_strategy = .error_return,
+        .zero_on_reset = true,
     });
     defer arena_config.resetConfig();
 
@@ -439,4 +511,206 @@ test "thread-local arena isolation" {
     }
 
     resetThreadArena();
+}
+
+// CRITICAL FIX #1: Alignment overflow protection tests
+test "alignment overflow protection - offset near maximum" {
+    arena_config.setConfig(.{
+        .pool_size = 1024,
+        .overflow_strategy = .error_return,
+        .zero_on_reset = false,
+    });
+    defer arena_config.resetConfig();
+
+    var buffer: [1024]u8 = undefined;
+    var arena = ArenaAllocator.init(&buffer);
+
+    // Force offset near maximum value
+    arena.offset = std.math.maxInt(usize) - 100;
+
+    // Attempt allocation with alignment - should detect overflow
+    const result = arena.alloc(8, 8);
+    try std.testing.expectError(error.OutOfMemory, result);
+
+    // Offset should be unchanged after failed allocation
+    try std.testing.expectEqual(std.math.maxInt(usize) - 100, arena.offset);
+
+    // Overflow count should be incremented
+    try std.testing.expectEqual(@as(usize, 1), arena.overflow_count);
+}
+
+test "size overflow protection - extremely large size" {
+    arena_config.setConfig(.{
+        .pool_size = 1024,
+        .overflow_strategy = .error_return,
+        .zero_on_reset = false,
+    });
+    defer arena_config.resetConfig();
+
+    var buffer: [1024]u8 = undefined;
+    var arena = ArenaAllocator.init(&buffer);
+
+    // Attempt allocation that would overflow when added to offset
+    const result = arena.alloc(std.math.maxInt(usize), 1);
+    try std.testing.expectError(error.OutOfMemory, result);
+
+    // Offset should remain at zero
+    try std.testing.expectEqual(@as(usize, 0), arena.offset);
+    try std.testing.expectEqual(@as(usize, 1), arena.overflow_count);
+}
+
+test "invalid alignment - zero alignment" {
+    var buffer: [1024]u8 = undefined;
+    var arena = ArenaAllocator.init(&buffer);
+
+    // Zero alignment is invalid
+    const result = arena.alloc(100, 0);
+    try std.testing.expectError(error.OutOfMemory, result);
+}
+
+test "invalid alignment - non-power-of-two" {
+    var buffer: [1024]u8 = undefined;
+    var arena = ArenaAllocator.init(&buffer);
+
+    // 3 is not a power of 2
+    const result = arena.alloc(100, 3);
+    try std.testing.expectError(error.OutOfMemory, result);
+
+    // 6 is not a power of 2
+    const result2 = arena.alloc(100, 6);
+    try std.testing.expectError(error.OutOfMemory, result2);
+}
+
+test "large alignment values - 64, 128, 256 bytes" {
+    var buffer: [2048]u8 = undefined;
+    var arena = ArenaAllocator.init(&buffer);
+
+    // Test 64-byte alignment
+    const aligned64 = try arena.alloc(1, 64);
+    try std.testing.expectEqual(@as(usize, 0), @intFromPtr(aligned64.ptr) % 64);
+
+    // Test 128-byte alignment
+    const aligned128 = try arena.alloc(1, 128);
+    try std.testing.expectEqual(@as(usize, 0), @intFromPtr(aligned128.ptr) % 128);
+
+    // Test 256-byte alignment
+    const aligned256 = try arena.alloc(1, 256);
+    try std.testing.expectEqual(@as(usize, 0), @intFromPtr(aligned256.ptr) % 256);
+}
+
+test "alignment exceeds remaining space" {
+    var buffer: [100]u8 = undefined;
+    var arena = ArenaAllocator.init(&buffer);
+
+    // Allocate to position 90
+    _ = try arena.alloc(90, 1);
+    try std.testing.expectEqual(@as(usize, 90), arena.offset);
+
+    // Next 64-byte alignment would be at 128, which exceeds buffer
+    const result = arena.alloc(1, 64);
+    try std.testing.expectError(error.OutOfMemory, result);
+
+    // Offset should remain at 90
+    try std.testing.expectEqual(@as(usize, 90), arena.offset);
+}
+
+// CRITICAL FIX #4: Memory zeroing tests
+test "memory zeroing on reset - enabled" {
+    arena_config.setConfig(.{
+        .pool_size = 1024,
+        .overflow_strategy = .error_return,
+        .zero_on_reset = true,
+    });
+    defer arena_config.resetConfig();
+
+    var buffer: [1024]u8 = undefined;
+    var arena = ArenaAllocator.init(&buffer);
+
+    // Allocate and write data
+    const buf1 = try arena.alloc(100, 1);
+    @memset(buf1, 0xFF); // Fill with non-zero values
+
+    // Reset should zero the memory
+    arena.reset();
+
+    // Allocate same region again
+    const buf2 = try arena.alloc(100, 1);
+
+    // Memory should be zeroed
+    for (buf2) |byte| {
+        try std.testing.expectEqual(@as(u8, 0), byte);
+    }
+}
+
+test "memory zeroing on reset - disabled" {
+    arena_config.setConfig(.{
+        .pool_size = 1024,
+        .overflow_strategy = .error_return,
+        .zero_on_reset = false,
+    });
+    defer arena_config.resetConfig();
+
+    var buffer: [1024]u8 = undefined;
+    var arena = ArenaAllocator.init(&buffer);
+
+    // Allocate and write data
+    const buf1 = try arena.alloc(100, 1);
+    @memset(buf1, 0xFF); // Fill with non-zero values
+
+    // Reset should NOT zero the memory
+    arena.reset();
+
+    // Allocate same region again
+    const buf2 = try arena.alloc(100, 1);
+
+    // Memory should still contain old values (not zeroed)
+    for (buf2) |byte| {
+        try std.testing.expectEqual(@as(u8, 0xFF), byte);
+    }
+}
+
+test "thread arena cleanup - deinitThreadArena" {
+    arena_config.setConfig(.{
+        .pool_size = 1024,
+        .overflow_strategy = .error_return,
+        .zero_on_reset = true,
+    });
+    defer arena_config.resetConfig();
+
+    // Initialize arena
+    const arena = getThreadArena();
+    _ = try arena.alloc(100, 1);
+
+    // Deinitialize
+    deinitThreadArena();
+
+    // Arena should be null after deinit
+    // (We can't directly test this since kernel_arena is private,
+    // but we can verify it reinitializes correctly)
+
+    // Get arena again - should reinitialize
+    const arena2 = getThreadArena();
+    try std.testing.expectEqual(@as(usize, 0), arena2.offset);
+
+    // Cleanup
+    deinitThreadArena();
+}
+
+test "alignment padding calculation - validate offset accounting" {
+    var buffer: [1024]u8 = undefined;
+    var arena = ArenaAllocator.init(&buffer);
+
+    // Allocate 1 byte (offset = 1)
+    _ = try arena.alloc(1, 1);
+    try std.testing.expectEqual(@as(usize, 1), arena.offset);
+
+    // Allocate 1 byte with 8-byte alignment (should align to 8)
+    const aligned = try arena.alloc(1, 8);
+    try std.testing.expectEqual(@as(usize, 0), @intFromPtr(aligned.ptr) % 8);
+    try std.testing.expectEqual(@as(usize, 9), arena.offset); // 8 (aligned) + 1 (size)
+
+    // Allocate 1 byte with 16-byte alignment
+    const aligned16 = try arena.alloc(1, 16);
+    try std.testing.expectEqual(@as(usize, 0), @intFromPtr(aligned16.ptr) % 16);
+    try std.testing.expectEqual(@as(usize, 17), arena.offset); // 16 (aligned) + 1 (size)
 }

@@ -308,6 +308,20 @@ export fn engram_reset_arena_metrics() void {
     arena_metrics.resetGlobalMetrics();
 }
 
+/// Deinitialize thread-local arena and free backing buffer
+///
+/// Should be called before thread exit to prevent memory leaks.
+/// Safe to call multiple times (subsequent calls are no-op).
+///
+/// Thread safety: Thread-local - only affects calling thread
+///
+/// Example (from Rust):
+///   // In thread cleanup or before thread exit
+///   engram_deinit_thread_arena();
+export fn engram_deinit_thread_arena() void {
+    allocator_mod.deinitThreadArena();
+}
+
 // Unit tests for arena control functions
 test "configure_arena" {
     engram_configure_arena(2, 1); // 2MB, error_return
