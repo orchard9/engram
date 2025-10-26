@@ -19,14 +19,22 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(lib);
 
     // Unit tests for Zig kernels
-    const tests = b.addTest(.{
+    const ffi_tests = b.addTest(.{
         .root_source_file = b.path("src/ffi.zig"),
         .target = target,
         .optimize = optimize,
     });
 
-    const run_tests = b.addRunArtifact(tests);
+    const allocator_tests = b.addTest(.{
+        .root_source_file = b.path("src/allocator_test.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const run_ffi_tests = b.addRunArtifact(ffi_tests);
+    const run_allocator_tests = b.addRunArtifact(allocator_tests);
 
     const test_step = b.step("test", "Run Zig kernel unit tests");
-    test_step.dependOn(&run_tests.step);
+    test_step.dependOn(&run_ffi_tests.step);
+    test_step.dependOn(&run_allocator_tests.step);
 }

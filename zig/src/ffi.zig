@@ -8,6 +8,29 @@
 // - Memory safety: Rust validates dimensions before calling
 
 const std = @import("std");
+const allocator_mod = @import("allocator.zig");
+
+// Arena allocator integration notes:
+//
+// Future kernel implementations (Tasks 005-007) will use the arena allocator
+// for temporary scratch space. The pattern is:
+//
+//   const arena = allocator_mod.getThreadArena();
+//   defer allocator_mod.resetThreadArena();
+//
+//   const temp_buffer = try arena.allocArray(f32, size);
+//   // ... use temp_buffer for computation ...
+//   // Automatic cleanup via defer - no manual deallocation needed
+//
+// Benefits:
+// - O(1) allocation: Bump pointer increment
+// - O(1) bulk deallocation: Single offset reset
+// - Zero fragmentation: Linear allocation pattern
+// - Thread-local: No contention across threads
+// - Predictable: Fixed 1MB pool per thread
+//
+// Current stub implementations don't require temporary allocations,
+// so arena integration is demonstrated but not yet actively used.
 
 /// Vector similarity kernel (cosine similarity with SIMD)
 ///
