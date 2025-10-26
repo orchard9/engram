@@ -43,14 +43,22 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const decay_functions_tests = b.addTest(.{
+        .root_source_file = b.path("src/decay_functions.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     const run_ffi_tests = b.addRunArtifact(ffi_tests);
     const run_allocator_tests = b.addRunArtifact(allocator_tests);
     const run_vector_similarity_tests = b.addRunArtifact(vector_similarity_tests);
     const run_spreading_activation_tests = b.addRunArtifact(spreading_activation_tests);
+    const run_decay_functions_tests = b.addRunArtifact(decay_functions_tests);
 
     const test_step = b.step("test", "Run Zig kernel unit tests");
     test_step.dependOn(&run_ffi_tests.step);
     test_step.dependOn(&run_allocator_tests.step);
     test_step.dependOn(&run_vector_similarity_tests.step);
     test_step.dependOn(&run_spreading_activation_tests.step);
+    test_step.dependOn(&run_decay_functions_tests.step);
 }
