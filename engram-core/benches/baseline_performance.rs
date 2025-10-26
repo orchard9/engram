@@ -1,4 +1,5 @@
 #![allow(missing_docs)]
+#![allow(clippy::match_wildcard_for_single_variants)]
 //! Baseline performance benchmarks for critical hot paths.
 //!
 //! These micro-benchmarks establish performance baselines for:
@@ -8,12 +9,12 @@
 //!
 //! Baselines are used for regression detection and tracking optimization progress.
 
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use engram_core::activation::test_support::run_spreading;
 use engram_core::activation::{
     ActivationGraphExt, DecayFunction, EdgeType, MemoryGraph, ParallelSpreadingConfig,
     create_activation_graph,
 };
-use engram_core::activation::test_support::run_spreading;
 use engram_core::{Confidence, Memory};
 use rand::{Rng, SeedableRng, rngs::StdRng};
 use std::sync::Arc;
@@ -100,9 +101,7 @@ fn create_test_graph(node_count: usize, edge_count: usize, seed: u64) -> Arc<Mem
     let graph = Arc::new(create_activation_graph());
     let mut rng = StdRng::seed_from_u64(seed);
 
-    let nodes: Vec<String> = (0..node_count)
-        .map(|i| format!("node_{i:04}"))
-        .collect();
+    let nodes: Vec<String> = (0..node_count).map(|i| format!("node_{i:04}")).collect();
 
     // Add edges randomly
     for _ in 0..edge_count {
@@ -313,11 +312,7 @@ fn memory_allocation_baseline(c: &mut Criterion) {
     group.bench_function("allocate_memory_struct", |b| {
         b.iter(|| {
             let embedding = generate_embedding(&mut rng);
-            let memory = Memory::new(
-                "test_memory".to_string(),
-                embedding,
-                Confidence::HIGH,
-            );
+            let memory = Memory::new("test_memory".to_string(), embedding, Confidence::HIGH);
             black_box(memory)
         });
     });

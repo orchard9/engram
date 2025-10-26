@@ -163,6 +163,8 @@ impl QueryContext {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)] // Tests are allowed to use unwrap
+#[allow(clippy::unnecessary_to_owned)] // Test readability is more important
 mod tests {
     use super::*;
 

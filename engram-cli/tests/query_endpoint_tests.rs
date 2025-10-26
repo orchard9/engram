@@ -1,5 +1,7 @@
 //! Integration tests for query execution endpoints (HTTP and gRPC).
 
+#![allow(clippy::float_cmp)]
+
 use engram_cli::api::ApiState;
 use engram_core::{MemorySpaceId, MemorySpaceRegistry, MemoryStore, metrics::MetricsRegistry};
 use engram_proto::engram_service_server::EngramService;

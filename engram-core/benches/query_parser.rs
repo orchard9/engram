@@ -11,6 +11,9 @@
 //! - Complex multi-constraint: <100μs P90
 //! - Large embedding (1536 floats): <200μs P90
 
+#![allow(clippy::uninlined_format_args)]
+#![allow(missing_docs)]
+
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
 use engram_core::query::parser::{Parser, Query};
 

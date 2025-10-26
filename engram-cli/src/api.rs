@@ -2605,26 +2605,38 @@ pub enum ApiError {
     ValidationError(String),
     /// Request timeout
     Timeout {
+        /// Error message
         message: String,
+        /// Suggestion for resolution
         suggestion: String,
+        /// Example of correct usage
         example: String,
     },
     /// Resource not found with context
     NotFound {
+        /// Error message
         message: String,
+        /// Suggestion for resolution
         suggestion: String,
+        /// Example of correct usage
         example: String,
     },
     /// Bad request with context
     BadRequest {
+        /// Error message
         message: String,
+        /// Suggestion for resolution
         suggestion: String,
+        /// Example of correct usage
         example: String,
     },
     /// Not implemented
     NotImplemented {
+        /// Error message
         message: String,
+        /// Suggestion for resolution
         suggestion: String,
+        /// Example of correct usage
         example: String,
     },
 }

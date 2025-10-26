@@ -176,7 +176,7 @@ impl QueryExecutor {
             Ok(Ok(mut result)) => {
                 // Add query AST to evidence chain if tracking enabled
                 if self.config.track_evidence {
-                    let query_evidence = self.create_query_evidence(&query);
+                    let query_evidence = Self::create_query_evidence(&query);
                     result.evidence_chain.insert(0, query_evidence);
                 }
                 Ok(result)
@@ -192,6 +192,11 @@ impl QueryExecutor {
     /// Internal execution without timeout wrapper.
     ///
     /// Routes query to appropriate handler based on type.
+    ///
+    /// This function is async to support timeout enforcement via tokio::time::timeout,
+    /// even though the underlying handlers are currently synchronous. This allows
+    /// for future async implementations without changing the public API.
+    #[allow(clippy::unused_async)]
     async fn execute_inner(
         &self,
         query: Query<'_>,
@@ -199,25 +204,23 @@ impl QueryExecutor {
         space_handle: Arc<crate::registry::SpaceHandle>,
     ) -> Result<ProbabilisticQueryResult, QueryExecutionError> {
         match query {
-            Query::Recall(q) => self.execute_recall(q, context, space_handle),
-            Query::Spread(q) => self.execute_spread(q, context, space_handle),
-            Query::Predict(q) => self.execute_predict(q, context, space_handle),
-            Query::Imagine(q) => self.execute_imagine(q, context, space_handle),
-            Query::Consolidate(q) => self.execute_consolidate(q, context, space_handle),
+            Query::Recall(q) => self.execute_recall(&q, context, &space_handle),
+            Query::Spread(q) => Self::execute_spread(&q, context, &space_handle),
+            Query::Predict(q) => Self::execute_predict(&q, context, &space_handle),
+            Query::Imagine(q) => Self::execute_imagine(&q, context, &space_handle),
+            Query::Consolidate(q) => Self::execute_consolidate(&q, context, &space_handle),
         }
     }
 
     /// Execute RECALL query - retrieve memories matching pattern.
     fn execute_recall(
-        #[allow(clippy::needless_pass_by_value)]
-        #[allow(clippy::unused_self)]
         &self,
-        query: RecallQuery<'_>,
+        query: &RecallQuery<'_>,
         _context: &QueryContext,
-        space_handle: Arc<crate::registry::SpaceHandle>,
+        space_handle: &Arc<crate::registry::SpaceHandle>,
     ) -> Result<ProbabilisticQueryResult, QueryExecutionError> {
         // Convert pattern to cue
-        let cue = self.pattern_to_cue(&query.pattern)?;
+        let cue = Self::pattern_to_cue(&query.pattern)?;
 
         // Execute recall through memory store
         let recall_result = space_handle.store().recall(&cue);
@@ -260,33 +263,23 @@ impl QueryExecutor {
     }
 
     /// Execute SPREAD query - activation spreading from source.
-    #[allow(clippy::needless_pass_by_value)]
-    #[allow(clippy::unused_self)]
     fn execute_spread(
-        &self,
-        query: SpreadQuery<'_>,
-        _context: &QueryContext,
-        _space_handle: Arc<crate::registry::SpaceHandle>,
+        query: &SpreadQuery<'_>,
+        context: &QueryContext,
+        space_handle: &Arc<crate::registry::SpaceHandle>,
     ) -> Result<ProbabilisticQueryResult, QueryExecutionError> {
-        // TODO: Implement activation spreading integration
-        // This will be completed in future milestone when spreading activation
-        // is fully integrated with the query executor.
-
-        let _ = query; // Avoid unused variable warning
-
-        // For now, return empty result indicating spreading not yet implemented
-        Err(QueryExecutionError::NotImplemented {
-            query_type: "SPREAD".to_string(),
-            reason: "Activation spreading integration pending (Milestone 11)".to_string(),
-        })
+        // Use the spread executor module for SPREAD query execution
+        crate::query::executor::spread::execute_spread(query, context, &space_handle.store())
+            .map_err(|e| QueryExecutionError::ExecutionFailed {
+                message: e.to_string(),
+            })
     }
 
     /// Execute PREDICT query - predict future states.
     fn execute_predict(
-        &self,
-        query: PredictQuery<'_>,
+        query: &PredictQuery<'_>,
         _context: &QueryContext,
-        _space_handle: Arc<crate::registry::SpaceHandle>,
+        _space_handle: &Arc<crate::registry::SpaceHandle>,
     ) -> Result<ProbabilisticQueryResult, QueryExecutionError> {
         // TODO: Implement prediction integration
         // This requires System 2 reasoning capabilities from future milestones.
@@ -294,8 +287,6 @@ impl QueryExecutor {
         let _ = query;
 
         Err(QueryExecutionError::NotImplemented {
-            #[allow(clippy::needless_pass_by_value)]
-            #[allow(clippy::unused_self)]
             query_type: "PREDICT".to_string(),
             reason: "Prediction requires System 2 reasoning (Milestone 15)".to_string(),
         })
@@ -303,17 +294,14 @@ impl QueryExecutor {
 
     /// Execute IMAGINE query - pattern completion.
     fn execute_imagine(
-        &self,
-        query: ImagineQuery<'_>,
+        query: &ImagineQuery<'_>,
         _context: &QueryContext,
-        _space_handle: Arc<crate::registry::SpaceHandle>,
+        _space_handle: &Arc<crate::registry::SpaceHandle>,
     ) -> Result<ProbabilisticQueryResult, QueryExecutionError> {
         // TODO: Implement pattern completion integration
         // This uses the completion engine from Milestone 8.
 
         let _ = query;
-        #[allow(clippy::needless_pass_by_value)]
-        #[allow(clippy::unused_self)]
         Err(QueryExecutionError::NotImplemented {
             query_type: "IMAGINE".to_string(),
             reason: "Pattern completion integration pending (Milestone 10)".to_string(),
@@ -322,13 +310,11 @@ impl QueryExecutor {
 
     /// Execute CONSOLIDATE query - memory consolidation.
     fn execute_consolidate(
-        &self,
-        query: ConsolidateQuery<'_>,
+        query: &ConsolidateQuery<'_>,
         _context: &QueryContext,
-        _space_handle: Arc<crate::registry::SpaceHandle>,
+        _space_handle: &Arc<crate::registry::SpaceHandle>,
     ) -> Result<ProbabilisticQueryResult, QueryExecutionError> {
         // TODO: Implement consolidation integration
-        #[allow(clippy::unused_self)]
         // This requires the consolidation scheduler from future milestones.
         let _ = query;
 
@@ -339,7 +325,7 @@ impl QueryExecutor {
     }
 
     /// Convert AST pattern to Cue for memory store recall.
-    fn pattern_to_cue(&self, pattern: &Pattern<'_>) -> Result<Cue, QueryExecutionError> {
+    fn pattern_to_cue(pattern: &Pattern<'_>) -> Result<Cue, QueryExecutionError> {
         match pattern {
             Pattern::NodeId(id) => {
                 // Create a semantic cue using the node ID
@@ -389,7 +375,7 @@ impl QueryExecutor {
     /// Create evidence entry for the query AST itself.
     ///
     /// This enables tracing query execution back to the original query.
-    fn create_query_evidence(&self, query: &Query<'_>) -> Evidence {
+    fn create_query_evidence(query: &Query<'_>) -> Evidence {
         Evidence {
             source: EvidenceSource::DirectMatch {
                 cue_id: format!("query_ast_{}", query.category().as_str()),
@@ -461,7 +447,7 @@ pub enum QueryExecutionError {
 impl crate::query::parser::ast::QueryCategory {
     /// Convert category to string for logging/metrics.
     #[must_use]
-    pub const fn as_str(&self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Recall => "RECALL",
             Self::Spread => "SPREAD",
@@ -474,6 +460,11 @@ impl crate::query::parser::ast::QueryCategory {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
+    #![allow(clippy::expect_used)]
+    #![allow(clippy::field_reassign_with_default)]
+    #![allow(clippy::unnecessary_to_owned)]
+
     use super::*;
     use crate::query::parser::ast::NodeIdentifier;
     use crate::registry::MemorySpaceRegistry;
@@ -584,43 +575,31 @@ mod tests {
 
     #[tokio::test]
     async fn test_pattern_to_cue_conversion() {
-        let registry = create_test_registry();
-        let executor = QueryExecutor::new(registry, AstQueryExecutorConfig::default());
-
         // Test NodeId pattern
         let pattern = Pattern::NodeId(NodeIdentifier::from("episode_123"));
-        let cue = executor
-            .pattern_to_cue(&pattern)
-            .expect("Failed to convert");
+        let cue = QueryExecutor::pattern_to_cue(&pattern).expect("Failed to convert");
         assert_eq!(cue.id, "episode_123");
 
         // Test ContentMatch pattern
         let pattern = Pattern::ContentMatch("test content".into());
-        let cue = executor
-            .pattern_to_cue(&pattern)
-            .expect("Failed to convert");
+        let cue = QueryExecutor::pattern_to_cue(&pattern).expect("Failed to convert");
         assert_eq!(cue.id, "content_match");
 
         // Test Any pattern
         let pattern = Pattern::Any;
-        let cue = executor
-            .pattern_to_cue(&pattern)
-            .expect("Failed to convert");
+        let cue = QueryExecutor::pattern_to_cue(&pattern).expect("Failed to convert");
         assert_eq!(cue.id, "any_pattern");
     }
 
     #[tokio::test]
     async fn test_invalid_embedding_dimension() {
-        let registry = create_test_registry();
-        let executor = QueryExecutor::new(registry, AstQueryExecutorConfig::default());
-
         // Wrong dimension (not 768)
         let pattern = Pattern::Embedding {
             vector: vec![0.5; 128], // Wrong size
             threshold: 0.8,
         };
 
-        let result = executor.pattern_to_cue(&pattern);
+        let result = QueryExecutor::pattern_to_cue(&pattern);
         assert!(matches!(
             result,
             Err(QueryExecutionError::InvalidPattern { .. })

@@ -413,10 +413,19 @@ fn test_error_clarity_tiredness_test() {
             err.example
         );
 
-        // 4. No jargon
+        // 4. No jargon (check for whole words to avoid false positives like "least")
         let msg_lower = msg.to_lowercase();
+
+        // Check for jargon as whole words, not substrings
+        let has_ast_jargon = msg_lower
+            .split_whitespace()
+            .any(|word| word.trim_matches(|c: char| !c.is_alphanumeric()) == "ast");
+        let has_token_jargon = msg_lower
+            .split(|c: char| !c.is_alphanumeric())
+            .any(|word| word == "token");
+
         assert!(
-            !msg_lower.contains("ast") && !msg_lower.contains("token"),
+            !has_ast_jargon && !has_token_jargon,
             "{description}: Contains jargon: {msg}"
         );
     }

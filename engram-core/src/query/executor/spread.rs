@@ -152,7 +152,7 @@ pub fn execute_spread(
 
     // Transform spreading results into ProbabilisticQueryResult
     let result = transform_spreading_results(
-        spreading_results,
+        &spreading_results,
         source_id,
         max_hops,
         decay_rate,
@@ -175,12 +175,11 @@ fn update_spreading_config_if_needed(
     let mut config = engine.config_snapshot();
 
     // Track if we need to update
-    let mut updated = false;
+    let mut updated = config.max_depth != max_hops;
 
     // Update max_depth if different from max_hops
     if config.max_depth != max_hops {
         config.max_depth = max_hops;
-        updated = true;
     }
 
     // Update activation threshold if different
@@ -190,16 +189,41 @@ fn update_spreading_config_if_needed(
     }
 
     // Update decay rate in decay function if different
-    // Note: For exponential decay, apply(1) = exp(-rate)
-    // We want exp(-rate) = 1 - decay_rate approximately
-    // So rate = -ln(1 - decay_rate)
+    //
+    // ## Biological Grounding
+    //
+    // In spreading activation models (Collins & Loftus, 1975; Anderson, 1983),
+    // activation decays with distance following exponential dynamics:
+    //   A(d) = A₀ × exp(-λ × d)
+    // where λ is the spatial decay constant.
+    //
+    // The query `decay_rate` parameter represents the **proportion** of activation
+    // lost per hop. For decay_rate = 0.1, we want activation to drop to 90% at
+    // each step:
+    //   A(1) = A₀ × 0.9
+    //   A(2) = A₀ × 0.81
+    //   A(3) = A₀ × 0.729
+    //
+    // The exponential decay function is: exp(-rate × depth)
+    // We want: exp(-rate × 1) = (1 - decay_rate)
+    // Therefore: rate = -ln(1 - decay_rate)
+    //
+    // ## Example
+    // decay_rate = 0.1 → rate = -ln(0.9) ≈ 0.105
+    //   depth=1: exp(-0.105) ≈ 0.900 ✓
+    //   depth=2: exp(-0.210) ≈ 0.810 ✓
+    //   depth=3: exp(-0.315) ≈ 0.730 ✓
     if let DecayFunction::Exponential { rate } = &config.decay_function {
-        let target_rate = if decay_rate < 1.0 {
+        let target_rate = if decay_rate > 0.0 && decay_rate < 1.0 {
             -(1.0 - decay_rate).ln()
+        } else if decay_rate >= 1.0 {
+            // Full decay (no propagation beyond source)
+            f32::INFINITY
         } else {
+            // No decay (perfect propagation)
             0.0
         };
-        if (rate - target_rate).abs() > 1e-6 {
+        if (rate - target_rate).abs() > 1e-6 && target_rate.is_finite() {
             config.decay_function = DecayFunction::Exponential { rate: target_rate };
             updated = true;
         }
@@ -218,7 +242,7 @@ fn update_spreading_config_if_needed(
 /// - Confidence intervals from activation strengths
 /// - Uncertainty sources from spreading dynamics
 fn transform_spreading_results(
-    results: SpreadingResults,
+    results: &SpreadingResults,
     source_id: &str,
     _max_hops: u16,
     decay_rate: f32,
@@ -324,6 +348,7 @@ mod tests {
     use std::time::Duration;
 
     #[test]
+    #[allow(clippy::float_cmp)] // Testing exact constant values
     fn test_spread_query_parameter_defaults() {
         let query = SpreadQuery {
             source: NodeIdentifier::from("test_node"),
@@ -341,6 +366,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::float_cmp)] // Testing exact constant values
     fn test_spread_query_custom_parameters() {
         let query = SpreadQuery {
             source: NodeIdentifier::from("test_node"),

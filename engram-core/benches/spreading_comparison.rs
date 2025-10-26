@@ -13,7 +13,11 @@ use rand::{Rng, SeedableRng, rngs::StdRng};
 use std::time::Duration;
 
 /// Generate random graph in edge-list format
-fn generate_random_graph(num_nodes: usize, edge_probability: f64, seed: u64) -> (Vec<u32>, Vec<f32>) {
+fn generate_random_graph(
+    num_nodes: usize,
+    edge_probability: f64,
+    seed: u64,
+) -> (Vec<u32>, Vec<f32>) {
     let mut rng = StdRng::seed_from_u64(seed);
     let mut adjacency = Vec::new();
     let mut weights = Vec::new();

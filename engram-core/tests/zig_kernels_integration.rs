@@ -7,6 +7,21 @@
 
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::expect_used)]
+#![allow(unused_variables)]
+#![allow(clippy::ref_patterns)]
+#![allow(clippy::useless_vec)]
+#![allow(clippy::cast_precision_loss)]
+#![allow(clippy::uninlined_format_args)]
+#![allow(clippy::similar_names)]
+#![allow(clippy::needless_pass_by_value)]
+#![allow(clippy::match_wildcard_for_single_variants)]
+#![allow(clippy::needless_range_loop)]
+#![allow(clippy::redundant_clone)]
+#![allow(clippy::items_after_statements)]
+#![allow(clippy::manual_range_contains)]
+#![allow(clippy::collection_is_never_read)]
+#![allow(clippy::iter_with_drain)]
+#![allow(clippy::iter_cloned_collect)]
 
 #[path = "common/mod.rs"]
 mod common;

@@ -26,8 +26,14 @@ fn test_vector_similarity_stub_returns_zeros() {
     let scores = vector_similarity(&query, &candidates, 2);
 
     assert_eq!(scores.len(), 2);
-    assert_eq!(scores[0], 0.0, "Stub should return zero");
-    assert_eq!(scores[1], 0.0, "Stub should return zero");
+    assert!(
+        (scores[0] - 0.0).abs() < f32::EPSILON,
+        "Stub should return zero"
+    );
+    assert!(
+        (scores[1] - 0.0).abs() < f32::EPSILON,
+        "Stub should return zero"
+    );
 }
 
 #[test]
@@ -43,7 +49,10 @@ fn test_vector_similarity_batch_processing() {
 
     assert_eq!(scores.len(), num_candidates);
     for score in scores {
-        assert_eq!(score, 0.0, "Stub should return zeros for all candidates");
+        assert!(
+            (score - 0.0).abs() < f32::EPSILON,
+            "Stub should return zeros for all candidates"
+        );
     }
 }
 

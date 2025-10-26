@@ -27,3 +27,9 @@ Guides for running Engram in production environments.
 - [Spreading Validation](./spreading-validation) - Validate spreading behavior
 - [Consolidation Dashboard](./consolidation-dashboard) - Monitor consolidation
 - [Consolidation Observability](./consolidation-observability) - Deep consolidation metrics
+- [Pattern Completion Monitoring](./completion-monitoring) - Monitor pattern completion operations
+
+## Performance Optimization
+
+- [Zig Performance Kernels](./zig-performance-kernels) - Deploy SIMD-accelerated kernels (15-35% faster)
+- [Zig Rollback Procedures](./zig-rollback-procedures) - Emergency and gradual rollback strategies

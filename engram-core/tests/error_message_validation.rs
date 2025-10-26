@@ -16,10 +16,12 @@
 //! 4. Clear, jargon-free description
 //! 5. Context-aware guidance based on parser state
 
-use engram_core::query::parser::{ParseError, Parser};
+#![allow(clippy::uninlined_format_args)]
+
+use engram_core::query::parser::Parser;
 
 // Corpus module declared at bottom of file with #[path] attribute
-use query_language_corpus::{ErrorType, QueryCorpus};
+use query_language_corpus::QueryCorpus;
 
 // ============================================================================
 // Error Message Quality Validation

@@ -74,7 +74,7 @@ fn test_memory_recall_scenario() {
     let relevant_indices: Vec<usize> = similarities
         .iter()
         .enumerate()
-        .filter(|(_, &sim)| sim > threshold)
+        .filter(|(_, sim)| **sim > threshold)
         .map(|(i, _)| i)
         .collect();
 

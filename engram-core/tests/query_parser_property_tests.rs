@@ -16,6 +16,11 @@
 //! 6. **Case insensitivity**: Keywords work in any case
 //! 7. **Whitespace normalization**: Extra whitespace doesn't affect parsing
 
+#![allow(clippy::uninlined_format_args)]
+#![allow(clippy::format_push_string)]
+#![allow(rustdoc::invalid_rust_codeblocks)]
+#![allow(rustdoc::broken_intra_doc_links)]
+
 use engram_core::query::parser::Parser;
 use proptest::prelude::*;
 use proptest::test_runner::Config as ProptestConfig;
@@ -33,14 +38,13 @@ use proptest::test_runner::Config as ProptestConfig;
 fn prop_parse_unparse_roundtrip() {
     proptest!(ProptestConfig::with_cases(1000), |(query in valid_query_generator())| {
         // Parse the original query
-        let ast1 = Parser::parse(&query);
+        let _ast1 = Parser::parse(&query);
 
+        // TODO: Implement Display/to_string on Query to enable full round-trip testing
         // If it fails to parse, that's fine for this test
-        if ast1.is_err() {
-            return Ok(());
-        }
-
-        let ast1 = ast1.unwrap();
+        // let Ok(ast1) = ast1 else {
+        //     return Ok(());
+        // };
 
         // Convert AST back to string (requires implementing Display/to_string)
         // let unparsed = ast1.to_string();
@@ -50,8 +54,6 @@ fn prop_parse_unparse_roundtrip() {
 
         // ASTs should be equal
         // prop_assert_eq!(ast1, ast2, "Round-trip failed for: {}", query);
-
-        Ok(())
     });
 }
 
@@ -59,10 +61,10 @@ fn prop_parse_unparse_roundtrip() {
 // Property 2: All Invalid Queries Produce Actionable Errors
 // ============================================================================
 
-/// Property: For all invalid queries, the parser must return an error with:
-/// - Non-empty suggestion field
-/// - Non-empty example field
-/// - Valid position information
+// Property: For all invalid queries, the parser must return an error with:
+// - Non-empty suggestion field
+// - Non-empty example field
+// - Valid position information
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(500))]
 
@@ -111,8 +113,8 @@ proptest! {
 // Property 3: Parser is Deterministic
 // ============================================================================
 
-/// Property: For all queries Q, parsing Q multiple times should always
-/// return the same result (either same AST or same error).
+// Property: For all queries Q, parsing Q multiple times should always
+// return the same result (either same AST or same error).
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(500))]
 
@@ -155,8 +157,8 @@ proptest! {
 // Property 4: Position Tracking is Accurate
 // ============================================================================
 
-/// Property: For queries with injected errors, the error position should
-/// point near the actual error location (within ±5 characters).
+// Property: For queries with injected errors, the error position should
+// point near the actual error location (within ±5 characters).
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(300))]
 
@@ -193,8 +195,8 @@ proptest! {
 // Property 5: Parser Never Panics
 // ============================================================================
 
-/// Property: For all strings S (including random garbage), the parser
-/// should never panic - it must always return Ok or Err gracefully.
+// Property: For all strings S (including random garbage), the parser
+// should never panic - it must always return Ok or Err gracefully.
 proptest! {
     #![proptest_config(ProptestConfig {
         cases: 10000,
@@ -329,8 +331,8 @@ fn valid_query_generator() -> impl Strategy<Value = String> {
 fn recall_query_generator() -> impl Strategy<Value = String> {
     (
         identifier_generator(),
-        option::of(confidence_constraint_generator()),
-        option::of(1usize..=100), // limit
+        prop::option::of(confidence_constraint_generator()),
+        prop::option::of(1usize..=100), // limit
     )
         .prop_map(|(pattern, confidence_constraint, limit)| {
             let mut query = format!("RECALL {pattern}");
@@ -348,9 +350,9 @@ fn recall_query_generator() -> impl Strategy<Value = String> {
 fn spread_query_generator() -> impl Strategy<Value = String> {
     (
         identifier_generator(),
-        option::of(1u16..=100u16),   // max_hops
-        option::of(0.0f32..=1.0f32), // decay
-        option::of(0.0f32..=1.0f32), // threshold
+        prop::option::of(1u16..=100u16),   // max_hops
+        prop::option::of(0.0f32..=1.0f32), // decay
+        prop::option::of(0.0f32..=1.0f32), // threshold
     )
         .prop_map(|(source, hops, decay, threshold)| {
             let mut query = format!("SPREAD FROM {source}");
@@ -372,7 +374,7 @@ fn predict_query_generator() -> impl Strategy<Value = String> {
     (
         identifier_generator(),
         prop::collection::vec(identifier_generator(), 1..=3), // context nodes
-        option::of(0u64..=86400u64),                          // horizon in seconds
+        prop::option::of(0u64..=86400u64),                    // horizon in seconds
     )
         .prop_map(|(pattern, context, horizon)| {
             let context_str = context.join(", ");
@@ -389,7 +391,7 @@ fn imagine_query_generator() -> impl Strategy<Value = String> {
     (
         identifier_generator(),
         prop::collection::vec(identifier_generator(), 1..=3), // seed nodes
-        option::of(0.0f32..=1.0f32),                          // novelty
+        prop::option::of(0.0f32..=1.0f32),                    // novelty
     )
         .prop_map(|(pattern, seeds, novelty)| {
             let seeds_str = seeds.join(", ");

@@ -4,12 +4,12 @@
 //! This benchmark creates a realistic workload with 10k nodes, 50k edges, and 1000 queries
 //! to exercise all major hot paths: vector similarity, activation spreading, and memory decay.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use engram_core::activation::test_support::run_spreading;
 use engram_core::activation::{
     ActivationGraphExt, DecayFunction, EdgeType, MemoryGraph, ParallelSpreadingConfig,
     create_activation_graph,
 };
-use engram_core::activation::test_support::run_spreading;
 use rand::{Rng, SeedableRng, rngs::StdRng};
 use std::sync::Arc;
 use std::time::Duration;
@@ -23,9 +23,7 @@ fn create_realistic_graph(seed: u64) -> Arc<MemoryGraph> {
     let edge_count = 50_000;
 
     // Create nodes with realistic IDs
-    let nodes: Vec<String> = (0..node_count)
-        .map(|i| format!("memory_{i:06}"))
-        .collect();
+    let nodes: Vec<String> = (0..node_count).map(|i| format!("memory_{i:06}")).collect();
 
     // Add edges using preferential attachment to create realistic degree distribution
     // This creates a scale-free graph similar to real memory networks
@@ -127,10 +125,7 @@ fn run_similarity_queries(seed: u64) {
         // Compute cosine similarity against all candidates
         let mut best_score = -1.0f32;
         for candidate in &candidates {
-            let dot_product: f32 = query.iter()
-                .zip(candidate.iter())
-                .map(|(a, b)| a * b)
-                .sum();
+            let dot_product: f32 = query.iter().zip(candidate.iter()).map(|(a, b)| a * b).sum();
             best_score = best_score.max(dot_product);
         }
         black_box(best_score);
@@ -153,9 +148,9 @@ fn run_decay_simulation(graph: &Arc<MemoryGraph>) {
 /// Complete profiling workload that exercises all hot paths
 fn profiling_workload(c: &mut Criterion) {
     let mut group = c.benchmark_group("profiling_workload");
-    group.sample_size(10);  // Small sample size for profiling, not precise timing
+    group.sample_size(10); // Small sample size for profiling, not precise timing
     group.warm_up_time(Duration::from_secs(2));
-    group.measurement_time(Duration::from_secs(30));  // Long measurement for stable profiling
+    group.measurement_time(Duration::from_secs(30)); // Long measurement for stable profiling
 
     group.bench_function("complete_workload", |b| {
         let graph = create_realistic_graph(0xDEAD_BEEF);
@@ -254,7 +249,7 @@ fn configure_criterion() -> Criterion {
     Criterion::default()
         .output_directory(std::path::Path::new("tmp/profiling"))
         .confidence_level(0.95)
-        .noise_threshold(0.05)  // Higher noise threshold acceptable for profiling
+        .noise_threshold(0.05) // Higher noise threshold acceptable for profiling
 }
 
 criterion_group! {

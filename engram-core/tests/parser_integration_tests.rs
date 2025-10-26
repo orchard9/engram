@@ -217,13 +217,23 @@ fn test_pattern_string_match() {
 
 #[test]
 fn test_embedding_with_default_threshold() {
+    // Small embeddings should now fail validation
     let query = "RECALL [0.1, 0.2, 0.3]";
-    let ast = Parser::parse(query).unwrap();
+    let result = Parser::parse(query);
+    assert!(result.is_err(), "Small embedding should fail validation");
+
+    // Valid 768-dimensional embedding with default threshold
+    let mut values = Vec::new();
+    for i in 0..768 {
+        values.push(format!("{:.3}", i as f32 / 768.0));
+    }
+    let query = format!("RECALL [{}]", values.join(", "));
+    let ast = Parser::parse(&query).unwrap();
 
     match ast {
         Query::Recall(recall) => {
             if let Pattern::Embedding { vector, threshold } = recall.pattern {
-                assert_eq!(vector.len(), 3);
+                assert_eq!(vector.len(), 768);
                 assert!((threshold - 0.8).abs() < 1e-6); // Default threshold
             } else {
                 panic!("Expected embedding pattern");
@@ -235,13 +245,18 @@ fn test_embedding_with_default_threshold() {
 
 #[test]
 fn test_embedding_with_explicit_threshold() {
-    let query = "RECALL [0.5, 0.5, 0.5] THRESHOLD 0.95";
-    let ast = Parser::parse(query).unwrap();
+    // Create 768-dimensional embedding
+    let mut values = Vec::new();
+    for _ in 0..768 {
+        values.push("0.5".to_string());
+    }
+    let query = format!("RECALL [{}] THRESHOLD 0.95", values.join(", "));
+    let ast = Parser::parse(&query).unwrap();
 
     match ast {
         Query::Recall(recall) => {
             if let Pattern::Embedding { vector, threshold } = recall.pattern {
-                assert_eq!(vector.len(), 3);
+                assert_eq!(vector.len(), 768);
                 assert!((threshold - 0.95).abs() < 1e-6);
             } else {
                 panic!("Expected embedding pattern");
@@ -318,30 +333,24 @@ fn test_error_unexpected_keyword() {
 
 #[test]
 fn test_single_element_embedding() {
+    // Single-element embedding should fail validation (expected 768)
     let query = "RECALL [1.0]";
-    let ast = Parser::parse(query).unwrap();
-
-    match ast {
-        Query::Recall(recall) => {
-            if let Pattern::Embedding { vector, .. } = recall.pattern {
-                assert_eq!(vector.len(), 1);
-            } else {
-                panic!("Expected embedding pattern");
-            }
-        }
-        _ => panic!("Expected Recall query"),
-    }
+    let result = Parser::parse(query);
+    assert!(
+        result.is_err(),
+        "Single-element embedding should fail validation"
+    );
 }
 
 #[test]
 fn test_large_embedding() {
-    // Test with a reasonably large embedding (100 dimensions)
+    // Test with exact system dimension (768)
     let mut parts = vec!["RECALL [".to_string()];
-    for i in 0..100 {
+    for i in 0..768 {
         if i > 0 {
-            parts.push(format!(", {:.3}", i as f32 / 100.0));
+            parts.push(format!(", {:.3}", i as f32 / 768.0));
         } else {
-            parts.push(format!("{:.3}", i as f32 / 100.0));
+            parts.push(format!("{:.3}", i as f32 / 768.0));
         }
     }
     parts.push("]".to_string());
@@ -352,7 +361,7 @@ fn test_large_embedding() {
     match ast {
         Query::Recall(recall) => {
             if let Pattern::Embedding { vector, .. } = recall.pattern {
-                assert_eq!(vector.len(), 100);
+                assert_eq!(vector.len(), 768);
             } else {
                 panic!("Expected embedding pattern");
             }

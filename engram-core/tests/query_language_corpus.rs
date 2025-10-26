@@ -21,6 +21,8 @@
 //! - Semantic errors (25 tests)
 //! - Stress tests (25 tests)
 
+#![allow(clippy::missing_const_for_fn)]
+
 use engram_core::query::parser::Parser;
 
 // ============================================================================
@@ -93,6 +95,7 @@ pub enum QueryCategory {
     Spread,
     Constraints,
     ConfidenceSpecification,
+    #[allow(dead_code)] // Reserved for future embedding literal tests
     EmbeddingLiterals,
     TemporalOperations,
     EdgeCases,

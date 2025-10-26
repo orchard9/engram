@@ -3,12 +3,14 @@
 //! Tests the complete RECALL operation from AST query through constraint
 //! application to probabilistic result generation.
 
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use chrono::Utc;
-use engram_core::query::executor::{QueryExecutorConfig, RecallExecutor};
+use engram_core::query::executor::RecallExecutor;
 use engram_core::query::parser::ast::{
     ConfidenceThreshold, Constraint, NodeIdentifier, Pattern, RecallQuery,
 };
-use engram_core::{Confidence, Cue, Episode, MemoryStore};
+use engram_core::{Confidence, Episode, MemoryStore};
 
 /// Create a test memory store with sample episodes
 fn create_test_store() -> MemoryStore {
@@ -50,7 +52,7 @@ fn create_test_store() -> MemoryStore {
             embedding,
             confidence,
         );
-        let _ = store.store_episode(episode);
+        let _ = store.store(episode);
     }
 
     store
@@ -69,7 +71,7 @@ fn test_recall_with_content_pattern() {
         limit: None,
     };
 
-    let result = executor.execute(query, &store).unwrap();
+    let result = executor.execute(&query, &store).unwrap();
 
     // Should retrieve episodes containing "cat"
     assert!(!result.is_empty());
@@ -98,7 +100,7 @@ fn test_recall_with_confidence_constraint() {
         limit: None,
     };
 
-    let result = executor.execute(query, &store).unwrap();
+    let result = executor.execute(&query, &store).unwrap();
 
     // Should only return HIGH confidence episodes
     assert!(!result.is_empty());
@@ -126,7 +128,7 @@ fn test_recall_with_multiple_constraints() {
         limit: None,
     };
 
-    let result = executor.execute(query, &store).unwrap();
+    let result = executor.execute(&query, &store).unwrap();
 
     // Should return only HIGH confidence episodes containing "mat"
     assert!(!result.is_empty());
@@ -155,7 +157,7 @@ fn test_recall_with_limit() {
         limit: Some(2),
     };
 
-    let result = executor.execute(query, &store).unwrap();
+    let result = executor.execute(&query, &store).unwrap();
 
     // Should return at most 2 results
     assert!(result.len() <= 2, "Should respect limit of 2");
@@ -174,7 +176,7 @@ fn test_recall_with_confidence_threshold() {
         limit: None,
     };
 
-    let result = executor.execute(query, &store).unwrap();
+    let result = executor.execute(&query, &store).unwrap();
 
     // All results should have confidence above MEDIUM
     for (_, confidence) in &result.episodes {
@@ -204,7 +206,7 @@ fn test_recall_with_embedding_pattern() {
         limit: None,
     };
 
-    let result = executor.execute(query, &store).unwrap();
+    let result = executor.execute(&query, &store).unwrap();
 
     // Should retrieve episodes with similar embeddings
     assert!(!result.is_empty());
@@ -224,7 +226,7 @@ fn test_recall_empty_results() {
         limit: None,
     };
 
-    let result = executor.execute(query, &store).unwrap();
+    let result = executor.execute(&query, &store).unwrap();
 
     // Should return empty result, not an error
     assert!(
@@ -251,7 +253,7 @@ fn test_recall_probabilistic_properties() {
         limit: None,
     };
 
-    let result = executor.execute(query, &store).unwrap();
+    let result = executor.execute(&query, &store).unwrap();
 
     // Verify probabilistic result properties
     assert!(result.confidence_interval.lower.raw() >= 0.0);
@@ -289,8 +291,8 @@ fn test_recall_with_temporal_constraints() {
     );
     ep2.when = recent;
 
-    let _ = store.store_episode(ep1);
-    let _ = store.store_episode(ep2);
+    let _ = store.store(ep1);
+    let _ = store.store(ep2);
 
     let executor = RecallExecutor::default();
 
@@ -298,13 +300,13 @@ fn test_recall_with_temporal_constraints() {
     let cutoff = now - Duration::minutes(90);
     let query = RecallQuery {
         pattern: Pattern::Any,
-        constraints: vec![Constraint::CreatedBefore(cutoff)],
+        constraints: vec![Constraint::CreatedBefore(cutoff.into())],
         confidence_threshold: None,
         base_rate: None,
         limit: None,
     };
 
-    let result = executor.execute(query, &store).unwrap();
+    let result = executor.execute(&query, &store).unwrap();
 
     assert!(!result.is_empty());
     // Should only return the older episode
@@ -331,7 +333,7 @@ fn test_recall_with_embedding_similarity_constraint() {
         limit: None,
     };
 
-    let result = executor.execute(query, &store).unwrap();
+    let result = executor.execute(&query, &store).unwrap();
 
     // Should filter to only similar episodes
     // Note: With our cosine similarity mapping to [0,1], we expect matches
@@ -351,7 +353,7 @@ fn test_recall_node_id_pattern() {
         limit: None,
     };
 
-    let result = executor.execute(query, &store).unwrap();
+    let result = executor.execute(&query, &store).unwrap();
 
     // Should find the episode (via semantic matching on ID)
     assert!(!result.is_empty());
@@ -371,7 +373,7 @@ fn test_recall_confidence_interval_width() {
         limit: None,
     };
 
-    let result1 = executor.execute(query1, &store).unwrap();
+    let result1 = executor.execute(&query1, &store).unwrap();
 
     // Query with specific constraint should have narrower confidence interval
     let query2 = RecallQuery {
@@ -382,7 +384,7 @@ fn test_recall_confidence_interval_width() {
         limit: None,
     };
 
-    let result2 = executor.execute(query2, &store).unwrap();
+    let result2 = executor.execute(&query2, &store).unwrap();
 
     // Verify both have valid confidence intervals
     assert!(result1.confidence_interval.width >= 0.0);

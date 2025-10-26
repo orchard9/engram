@@ -5,7 +5,7 @@
 
 use axum::{
     extract::State,
-    http::{HeaderMap, StatusCode},
+    http::HeaderMap,
     response::{IntoResponse, Json},
 };
 use serde::{Deserialize, Serialize};
@@ -241,7 +241,7 @@ fn extract_memory_space_id(
 ) -> Result<MemorySpaceId, ApiError> {
     // Priority: request body > header > default
     if let Some(space_id) = request_space {
-        return MemorySpaceId::new(space_id.to_string()).map_err(|e| {
+        return MemorySpaceId::new(space_id).map_err(|e| {
             ApiError::bad_request(
                 format!("Invalid memory_space_id: {}", e),
                 "Use a valid memory space identifier",
@@ -259,7 +259,7 @@ fn extract_memory_space_id(
             )
         })?;
 
-        return MemorySpaceId::new(space_str.to_string()).map_err(|e| {
+        return MemorySpaceId::new(space_str).map_err(|e| {
             ApiError::bad_request(
                 format!("Invalid X-Memory-Space header: {}", e),
                 "Use a valid memory space identifier",
@@ -322,6 +322,9 @@ fn confidence_value_to_category(value: f32) -> String {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
+    #![allow(clippy::unnecessary_to_owned)]
+
     use super::*;
 
     #[test]
@@ -331,7 +334,7 @@ mod tests {
 
         let result = extract_memory_space_id(Some("user_123"), &headers, &default_space);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap().id(), "user_123");
+        assert_eq!(result.unwrap().as_str(), "user_123");
     }
 
     #[test]
@@ -342,7 +345,7 @@ mod tests {
 
         let result = extract_memory_space_id(None, &headers, &default_space);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap().id(), "user_456");
+        assert_eq!(result.unwrap().as_str(), "user_456");
     }
 
     #[test]
@@ -352,7 +355,7 @@ mod tests {
 
         let result = extract_memory_space_id(None, &headers, &default_space);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap().id(), "default");
+        assert_eq!(result.unwrap().as_str(), "default");
     }
 
     #[test]
@@ -363,6 +366,6 @@ mod tests {
 
         let result = extract_memory_space_id(Some("body_space"), &headers, &default_space);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap().id(), "body_space");
+        assert_eq!(result.unwrap().as_str(), "body_space");
     }
 }

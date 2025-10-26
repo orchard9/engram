@@ -56,6 +56,7 @@ See [demos/novelty-showcase/README.md](demos/novelty-showcase/README.md) for det
 
 - Rust 1.75+ (Edition 2024)
 - For SMT verification features: Z3 SMT Solver
+- Optional: Zig 0.13.0 for performance kernels (15-35% faster operations)
 
 ### macOS Setup (Z3)
 
@@ -81,6 +82,24 @@ cargo build --release
 cargo test --workspace
 ```
 
+### Building with Zig Performance Kernels (Optional)
+
+For 15-35% performance improvements on compute-intensive operations:
+
+```bash
+# Install Zig 0.13.0
+brew install zig  # macOS
+# Or download from https://ziglang.org/download/
+
+# Build with performance kernels
+./scripts/build_with_zig.sh release
+
+# Verify Zig kernels are active
+nm target/release/engram-cli | grep engram_vector_similarity
+```
+
+See [Zig Performance Kernels Operations Guide](docs/operations/zig_performance_kernels.md) for deployment instructions.
+
 ## Architecture
 
 ### Core Components
@@ -102,6 +121,7 @@ cargo test --workspace
 | **SMT Verification** | ✅ Production | Correctness proofs for probability propagation |
 | **Streaming Monitoring** | ✅ Production | Real-time SSE streams of memory dynamics |
 | **Memory Spaces** | ✅ Production | Multi-tenant isolation with per-space metrics |
+| **Zig Performance Kernels** | ✅ Production | SIMD-accelerated operations (15-35% faster) |
 
 ### Memory Spaces (Multi-Tenancy)
 
@@ -161,15 +181,67 @@ SELECT * FROM memories WHERE content LIKE '%mitochondria%';
 ```
 
 ### Engram
+
 ```bash
 curl http://localhost:7432/api/v1/memories/recall?query=mitochondria
 ```
+
 Returns:
+
 - **Direct matches** with confidence scores
 - **Associated memories** via spreading activation (e.g., "cellular respiration")
 - **Reconstructed memories** from partial information
 - **Confidence intervals** showing uncertainty
 - **Activation paths** explaining how memories were found
+
+### Pattern Completion Example
+
+Reconstruct missing memory details from partial information:
+
+```bash
+# Complete a partial memory
+curl -X POST http://localhost:7432/api/v1/complete \
+  -H "Content-Type: application/json" \
+  -d '{
+    "partial": {
+      "what": "Einstein published theory",
+      "when": null,
+      "where": "Physics lecture"
+    },
+    "params": {
+      "ca3_sparsity": 0.05,
+      "ca1_threshold": 0.7,
+      "num_hypotheses": 3
+    }
+  }'
+```
+
+Returns:
+
+```json
+{
+  "completed": {
+    "what": "Einstein published theory of relativity in 1915",
+    "when": "2024-01-05T10:00:00Z",
+    "where": "Physics lecture",
+    "confidence": 0.87
+  },
+  "source": "Reconstructed",
+  "completion_confidence": 0.82,
+  "alternatives": [
+    {
+      "what": "Einstein published theory of relativity",
+      "confidence": 0.79
+    }
+  ]
+}
+```
+
+**Key features:**
+
+- `source: "Reconstructed"` - CA3 attractor dynamics filled in missing details
+- `completion_confidence: 0.82` - Multi-factor confidence (convergence speed, energy reduction, field consensus)
+- `alternatives` - System 2 reasoning provides alternative hypotheses for metacognitive checking
 
 ## Development
 
@@ -341,10 +413,22 @@ For comprehensive multi-tenant troubleshooting, see [docs/operations/memory-spac
 ### Performance Tuning
 
 For optimal performance:
+
 - Use `--release` builds in production
 - Enable appropriate features for your use case
 - Consider NUMA topology for large deployments
 - Monitor with `curl http://localhost:7432/metrics`
+
+**Zig Performance Kernels:**
+
+- [Operations Guide](docs/operations/zig_performance_kernels.md) - Deployment, configuration, and troubleshooting
+- [Rollback Procedures](docs/operations/zig_rollback_procedures.md) - Emergency and gradual rollback strategies
+- [Architecture Documentation](docs/internal/zig_architecture.md) - Internal design for contributors
+
+**Pattern Completion Tuning:**
+
+- [Pattern Completion Parameter Tuning Guide](docs/tuning/completion_parameters.md) - Optimize CA3 sparsity, CA1 thresholds, and pattern weights
+- [Pattern Completion Monitoring Operations](docs/operations/completion_monitoring.md) - Production monitoring, troubleshooting, and capacity planning
 
 ## License
 
