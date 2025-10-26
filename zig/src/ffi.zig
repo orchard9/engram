@@ -9,6 +9,8 @@
 
 const std = @import("std");
 const allocator_mod = @import("allocator.zig");
+const arena_config = @import("arena_config.zig");
+const arena_metrics = @import("arena_metrics.zig");
 const vector_similarity = @import("vector_similarity.zig");
 
 // Arena allocator integration notes:
@@ -206,4 +208,153 @@ test "apply_decay_correctness" {
     try std.testing.expect(strengths[1] < 1.0 and strengths[1] > 0.95);
     // Age 86400 (1 day half-life): ~e^-1 ≈ 0.3679
     try std.testing.expectApproxEqAbs(0.3679, strengths[2], 0.01);
+}
+
+// Arena allocator control functions (Task 008)
+
+/// Configure arena allocator pool size and overflow strategy
+///
+/// Sets global configuration for all thread-local arenas.
+/// Must be called before any arena allocation occurs.
+///
+/// Memory Layout:
+/// - pool_size_mb: Pool size in megabytes (1-1024)
+/// - overflow_strategy: 0=panic, 1=error_return, 2=fallback
+///
+/// Safety Invariants:
+/// - Call from single thread before spawning workers
+/// - Do not call while arenas are in use
+///
+/// Thread safety: Not thread-safe - call during initialization only
+///
+/// Example (from Rust):
+///   engram_configure_arena(2, 1);  // 2MB pool, error_return strategy
+export fn engram_configure_arena(
+    pool_size_mb: u32,
+    overflow_strategy: u8,
+) void {
+    const pool_size = @as(usize, pool_size_mb) * 1024 * 1024;
+    const strategy: arena_config.OverflowStrategy = switch (overflow_strategy) {
+        0 => .panic,
+        1 => .error_return,
+        2 => .fallback,
+        else => .error_return, // Default to safe option
+    };
+
+    arena_config.setConfig(.{
+        .pool_size = pool_size,
+        .overflow_strategy = strategy,
+    });
+}
+
+/// Get global arena usage statistics
+///
+/// Returns aggregated metrics from all thread-local arenas.
+/// Metrics are cumulative since process start or last reset.
+///
+/// Memory Layout:
+/// - total_resets: Output pointer for reset count
+/// - total_overflows: Output pointer for overflow count
+/// - max_high_water_mark: Output pointer for peak usage (bytes)
+///
+/// Safety Invariants:
+/// - Pointers must be valid and non-null
+/// - Pointers must point to writable usize locations
+///
+/// Thread safety: Thread-safe via internal mutex
+///
+/// Example (from Rust):
+///   let mut resets = 0usize;
+///   let mut overflows = 0usize;
+///   let mut peak = 0usize;
+///   engram_arena_stats(&mut resets, &mut overflows, &mut peak);
+export fn engram_arena_stats(
+    total_resets: *usize,
+    total_overflows: *usize,
+    max_high_water_mark: *usize,
+) void {
+    const stats = arena_metrics.getGlobalMetrics();
+    total_resets.* = stats.total_resets;
+    total_overflows.* = stats.total_overflows;
+    max_high_water_mark.* = stats.max_high_water_mark;
+}
+
+/// Reset thread-local arena allocator
+///
+/// Manually resets the calling thread's arena.
+/// Useful for testing or explicit memory reclamation.
+///
+/// Normally arenas are reset automatically at kernel exit,
+/// but this provides explicit control when needed.
+///
+/// Thread safety: Thread-local - only affects calling thread
+///
+/// Example (from Rust):
+///   engram_reset_arenas();  // Reset current thread's arena
+export fn engram_reset_arenas() void {
+    allocator_mod.resetThreadArena();
+}
+
+/// Reset global arena metrics
+///
+/// Clears all accumulated metrics counters.
+/// Useful for starting fresh measurement periods in testing.
+///
+/// Thread safety: Thread-safe via internal mutex
+///
+/// Example (from Rust):
+///   engram_reset_arena_metrics();  // Clear all metrics
+export fn engram_reset_arena_metrics() void {
+    arena_metrics.resetGlobalMetrics();
+}
+
+// Unit tests for arena control functions
+test "configure_arena" {
+    engram_configure_arena(2, 1); // 2MB, error_return
+    const config = arena_config.getConfig();
+    try std.testing.expectEqual(@as(usize, 2 * 1024 * 1024), config.pool_size);
+    try std.testing.expectEqual(arena_config.OverflowStrategy.error_return, config.overflow_strategy);
+
+    // Reset for other tests
+    arena_config.resetConfig();
+}
+
+test "arena_stats" {
+    arena_metrics.resetGlobalMetrics();
+
+    // Record some metrics
+    arena_metrics.recordReset(1000, 2);
+    arena_metrics.recordReset(2000, 1);
+
+    // Query via FFI
+    var resets: usize = 0;
+    var overflows: usize = 0;
+    var peak: usize = 0;
+
+    engram_arena_stats(&resets, &overflows, &peak);
+
+    try std.testing.expectEqual(@as(usize, 2), resets);
+    try std.testing.expectEqual(@as(usize, 3), overflows);
+    try std.testing.expectEqual(@as(usize, 2000), peak);
+}
+
+test "reset_arena_metrics" {
+    arena_metrics.resetGlobalMetrics();
+    arena_metrics.recordReset(1000, 1);
+
+    // Verify metrics are non-zero
+    var resets: usize = 0;
+    var overflows: usize = 0;
+    var peak: usize = 0;
+    engram_arena_stats(&resets, &overflows, &peak);
+    try std.testing.expect(resets > 0);
+
+    // Reset via FFI
+    engram_reset_arena_metrics();
+
+    // Verify metrics are zero
+    engram_arena_stats(&resets, &overflows, &peak);
+    try std.testing.expectEqual(@as(usize, 0), resets);
+    try std.testing.expectEqual(@as(usize, 0), overflows);
+    try std.testing.expectEqual(@as(usize, 0), peak);
 }

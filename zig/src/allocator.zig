@@ -14,6 +14,8 @@
 // returns the arena to empty state. No per-allocation metadata overhead.
 
 const std = @import("std");
+const arena_config = @import("arena_config.zig");
+const arena_metrics = @import("arena_metrics.zig");
 
 /// Fixed-size arena allocator for kernel scratch space
 ///
@@ -30,6 +32,8 @@ const std = @import("std");
 pub const ArenaAllocator = struct {
     buffer: []u8,
     offset: usize,
+    high_water_mark: usize,
+    overflow_count: usize,
 
     /// Initialize arena with backing buffer
     ///
@@ -39,6 +43,8 @@ pub const ArenaAllocator = struct {
         return .{
             .buffer = buffer,
             .offset = 0,
+            .high_water_mark = 0,
+            .overflow_count = 0,
         };
     }
 
@@ -58,12 +64,28 @@ pub const ArenaAllocator = struct {
 
         // Check if allocation fits in remaining space
         if (aligned_offset + size > self.buffer.len) {
-            return error.OutOfMemory;
+            // Record overflow event
+            self.overflow_count += 1;
+
+            // Handle according to configured strategy
+            const config = arena_config.getConfig();
+            switch (config.overflow_strategy) {
+                .panic => @panic("Arena allocator overflow"),
+                .error_return => return error.OutOfMemory,
+                .fallback => {
+                    // Log warning (future: could fall back to system allocator)
+                    std.log.warn("Arena overflow detected (size={}, remaining={})", .{ size, self.buffer.len - self.offset });
+                    return error.OutOfMemory;
+                },
+            }
         }
 
         // Bump pointer and return slice
         const ptr = self.buffer[aligned_offset..][0..size];
         self.offset = aligned_offset + size;
+
+        // Track high-water mark
+        self.high_water_mark = @max(self.high_water_mark, self.offset);
 
         return ptr;
     }
@@ -88,9 +110,17 @@ pub const ArenaAllocator = struct {
     /// Invalidates all previous allocations from this arena.
     /// Does not zero memory - callers should not rely on cleared state.
     ///
+    /// Records metrics before reset for global aggregation.
+    ///
     /// Time complexity: O(1)
     pub fn reset(self: *ArenaAllocator) void {
+        // Record metrics before reset
+        arena_metrics.recordReset(self.high_water_mark, self.overflow_count);
+
+        // Reset allocation state
         self.offset = 0;
+        // Keep high_water_mark for local diagnostics
+        self.overflow_count = 0;
     }
 
     /// Get remaining capacity in arena
@@ -107,19 +137,69 @@ pub const ArenaAllocator = struct {
     pub fn utilization(self: *ArenaAllocator) f32 {
         return @as(f32, @floatFromInt(self.offset)) / @as(f32, @floatFromInt(self.buffer.len));
     }
+
+    /// Get current arena statistics
+    ///
+    /// Returns snapshot of arena state including capacity, usage, and overflow counts.
+    pub fn getStats(self: *const ArenaAllocator) ArenaStats {
+        return .{
+            .capacity = self.buffer.len,
+            .current_usage = self.offset,
+            .high_water_mark = self.high_water_mark,
+            .overflow_count = self.overflow_count,
+        };
+    }
 };
 
-// Thread-local arena pools (1MB per thread)
+/// Arena statistics snapshot
+///
+/// Provides diagnostic view of arena state for monitoring and capacity planning.
+pub const ArenaStats = struct {
+    /// Total arena capacity in bytes
+    capacity: usize,
+
+    /// Current offset (bytes allocated since last reset)
+    current_usage: usize,
+
+    /// Peak usage since arena creation
+    high_water_mark: usize,
+
+    /// Number of overflow events since last reset
+    overflow_count: usize,
+};
+
+// Thread-local arena pools (configurable size per thread)
 //
 // Each thread gets its own arena to eliminate contention.
 // The arena persists across kernel invocations - reset between calls.
 //
+// Configuration:
+// - Pool size determined by arena_config.getConfig().pool_size
+// - Allocated from page allocator on first use
+// - Persists for lifetime of thread
+//
 // Platform notes:
 // - Linux/macOS: __thread TLS (fast, direct CPU register access)
 // - Windows: Zig maps threadlocal to platform-specific TLS
-threadlocal var kernel_arena_buffer: [1024 * 1024]u8 = undefined; // 1MB per thread
-threadlocal var kernel_arena: ArenaAllocator = undefined;
-threadlocal var arena_initialized: bool = false;
+threadlocal var kernel_arena_buffer: ?[]u8 = null;
+threadlocal var kernel_arena: ?ArenaAllocator = null;
+
+/// Initialize thread-local arena with configured pool size
+///
+/// Allocates backing buffer from page allocator on first call per thread.
+/// Subsequent calls are no-op.
+///
+/// Thread safety: Thread-local - safe to call from multiple threads.
+///
+/// Returns error.OutOfMemory if page allocation fails.
+fn initThreadArena() !void {
+    if (kernel_arena != null) return; // Already initialized
+
+    const config = arena_config.getConfig();
+    const buffer = try std.heap.page_allocator.alloc(u8, config.pool_size);
+    kernel_arena_buffer = buffer;
+    kernel_arena = ArenaAllocator.init(buffer);
+}
 
 /// Get thread-local arena allocator
 ///
@@ -134,11 +214,10 @@ threadlocal var arena_initialized: bool = false;
 ///   const buffer = try arena.allocArray(f32, 768);
 ///   defer allocator.resetThreadArena();
 pub fn getThreadArena() *ArenaAllocator {
-    if (!arena_initialized) {
-        kernel_arena = ArenaAllocator.init(&kernel_arena_buffer);
-        arena_initialized = true;
+    if (kernel_arena == null) {
+        initThreadArena() catch @panic("Failed to initialize thread arena");
     }
-    return &kernel_arena;
+    return &kernel_arena.?;
 }
 
 /// Reset thread-local arena (call at kernel exit)
@@ -150,9 +229,22 @@ pub fn getThreadArena() *ArenaAllocator {
 ///
 /// Thread safety: Thread-local - only affects calling thread's arena.
 pub fn resetThreadArena() void {
-    if (arena_initialized) {
-        kernel_arena.reset();
+    if (kernel_arena) |*arena| {
+        arena.reset();
     }
+}
+
+/// Get thread-local arena statistics
+///
+/// Returns snapshot of current arena state.
+/// Useful for diagnostics and capacity planning.
+///
+/// Returns null if arena never initialized.
+pub fn getThreadArenaStats() ?ArenaStats {
+    if (kernel_arena) |*arena| {
+        return arena.getStats();
+    }
+    return null;
 }
 
 /// Get thread-local arena high-water mark
@@ -162,10 +254,10 @@ pub fn resetThreadArena() void {
 ///
 /// Returns 0.0 if arena never initialized.
 pub fn getThreadArenaUtilization() f32 {
-    if (!arena_initialized) {
-        return 0.0;
+    if (kernel_arena) |*arena| {
+        return arena.utilization();
     }
-    return kernel_arena.utilization();
+    return 0.0;
 }
 
 // Unit tests
@@ -176,6 +268,8 @@ test "ArenaAllocator basic allocation" {
     const bytes = try arena.alloc(100, 1);
     try std.testing.expectEqual(@as(usize, 100), bytes.len);
     try std.testing.expectEqual(@as(usize, 100), arena.offset);
+    try std.testing.expectEqual(@as(usize, 100), arena.high_water_mark);
+    try std.testing.expectEqual(@as(usize, 0), arena.overflow_count);
 }
 
 test "ArenaAllocator alignment" {
@@ -196,12 +290,20 @@ test "ArenaAllocator alignment" {
 }
 
 test "ArenaAllocator overflow detection" {
+    // Set error_return strategy for this test
+    arena_config.setConfig(.{
+        .pool_size = 100,
+        .overflow_strategy = .error_return,
+    });
+    defer arena_config.resetConfig();
+
     var buffer: [100]u8 = undefined;
     var arena = ArenaAllocator.init(&buffer);
 
     // Fill arena almost to capacity
     _ = try arena.alloc(90, 1);
     try std.testing.expectEqual(@as(usize, 90), arena.offset);
+    try std.testing.expectEqual(@as(usize, 0), arena.overflow_count);
 
     // Attempt allocation that would overflow
     const result = arena.alloc(20, 1);
@@ -209,19 +311,31 @@ test "ArenaAllocator overflow detection" {
 
     // Offset should be unchanged after failed allocation
     try std.testing.expectEqual(@as(usize, 90), arena.offset);
+    // Overflow should be recorded
+    try std.testing.expectEqual(@as(usize, 1), arena.overflow_count);
 }
 
 test "ArenaAllocator reset" {
+    arena_metrics.resetGlobalMetrics();
+
     var buffer: [1024]u8 = undefined;
     var arena = ArenaAllocator.init(&buffer);
 
     // Allocate some memory
     _ = try arena.alloc(500, 1);
     try std.testing.expectEqual(@as(usize, 500), arena.offset);
+    try std.testing.expectEqual(@as(usize, 500), arena.high_water_mark);
 
-    // Reset should clear offset
+    // Reset should clear offset but record metrics
     arena.reset();
     try std.testing.expectEqual(@as(usize, 0), arena.offset);
+    try std.testing.expectEqual(@as(usize, 500), arena.high_water_mark); // Preserved
+    try std.testing.expectEqual(@as(usize, 0), arena.overflow_count); // Cleared
+
+    // Metrics should be recorded
+    const metrics = arena_metrics.getGlobalMetrics();
+    try std.testing.expectEqual(@as(usize, 1), metrics.total_resets);
+    try std.testing.expectEqual(@as(usize, 500), metrics.max_high_water_mark);
 
     // Can allocate again after reset
     const bytes = try arena.alloc(500, 1);
@@ -273,6 +387,12 @@ test "ArenaAllocator utilization" {
 }
 
 test "thread-local arena initialization" {
+    arena_config.setConfig(.{
+        .pool_size = 1024,
+        .overflow_strategy = .error_return,
+    });
+    defer arena_config.resetConfig();
+
     const arena1 = getThreadArena();
     const arena2 = getThreadArena();
 
@@ -289,6 +409,12 @@ test "thread-local arena initialization" {
 }
 
 test "thread-local arena isolation" {
+    arena_config.setConfig(.{
+        .pool_size = 1024 * 1024, // 1MB
+        .overflow_strategy = .error_return,
+    });
+    defer arena_config.resetConfig();
+
     // This test verifies thread-local isolation conceptually
     // Actual multi-threading test would require spawning threads
     const arena = getThreadArena();
@@ -303,6 +429,14 @@ test "thread-local arena isolation" {
     _ = try arena.alloc(512 * 1024, 1); // 512KB of 1MB
     const util = getThreadArenaUtilization();
     try std.testing.expect(util > 0.49 and util < 0.51); // ~0.5
+
+    // Stats tracking
+    const stats = getThreadArenaStats();
+    try std.testing.expect(stats != null);
+    if (stats) |s| {
+        try std.testing.expectEqual(@as(usize, 1024 * 1024), s.capacity);
+        try std.testing.expect(s.current_usage >= 512 * 1024);
+    }
 
     resetThreadArena();
 }

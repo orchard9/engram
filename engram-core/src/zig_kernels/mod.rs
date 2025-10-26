@@ -87,6 +87,31 @@ mod ffi {
             ages_seconds: *const u64,
             num_memories: usize,
         );
+
+        /// FFI: Configure arena allocator pool size and overflow strategy
+        ///
+        /// # Safety
+        ///
+        /// Call from single thread before spawning workers.
+        /// Do not call while arenas are in use.
+        pub fn engram_configure_arena(pool_size_mb: u32, overflow_strategy: u8);
+
+        /// FFI: Get global arena usage statistics
+        ///
+        /// # Safety
+        ///
+        /// Pointers must be valid and point to writable usize locations.
+        pub fn engram_arena_stats(
+            total_resets: *mut usize,
+            total_overflows: *mut usize,
+            max_high_water_mark: *mut usize,
+        );
+
+        /// FFI: Reset thread-local arena allocator
+        pub fn engram_reset_arenas();
+
+        /// FFI: Reset global arena metrics
+        pub fn engram_reset_arena_metrics();
     }
 }
 
@@ -393,5 +418,171 @@ mod tests {
         let ages = vec![0, 3600, 86400]; // Wrong size
 
         apply_decay(&mut strengths, &ages);
+    }
+}
+
+// Arena allocator configuration and monitoring (Task 008)
+
+/// Arena allocator overflow strategy
+///
+/// Determines behavior when arena capacity is exhausted.
+#[cfg(feature = "zig-kernels")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum OverflowStrategy {
+    /// Panic immediately on overflow (development mode)
+    Panic = 0,
+
+    /// Return error on overflow (production mode)
+    ErrorReturn = 1,
+
+    /// Attempt fallback allocation (experimental)
+    Fallback = 2,
+}
+
+/// Arena allocator statistics
+///
+/// Aggregated metrics from all thread-local arenas.
+#[cfg(feature = "zig-kernels")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ArenaStats {
+    /// Total number of arena resets across all threads
+    pub total_resets: usize,
+
+    /// Total overflow events across all threads
+    pub total_overflows: usize,
+
+    /// Maximum high-water mark across all thread arenas (bytes)
+    pub max_high_water_mark: usize,
+}
+
+/// Configure arena allocator pool size and overflow strategy
+///
+/// Sets global configuration for all thread-local arenas.
+/// Must be called before any arena allocation occurs.
+///
+/// # Arguments
+///
+/// * `pool_size_mb` - Pool size in megabytes (1-1024)
+/// * `overflow_strategy` - Behavior on overflow
+///
+/// # Thread Safety
+///
+/// Not thread-safe. Call from main thread before spawning workers.
+///
+/// # Examples
+///
+/// ```no_run
+/// # #[cfg(feature = "zig-kernels")]
+/// # {
+/// use engram_core::zig_kernels::{configure_arena, OverflowStrategy};
+///
+/// // Configure 2MB arenas with error return on overflow
+/// configure_arena(2, OverflowStrategy::ErrorReturn);
+/// # }
+/// ```
+#[cfg(feature = "zig-kernels")]
+pub fn configure_arena(pool_size_mb: u32, overflow_strategy: OverflowStrategy) {
+    unsafe {
+        ffi::engram_configure_arena(pool_size_mb, overflow_strategy as u8);
+    }
+}
+
+/// Get global arena usage statistics
+///
+/// Returns aggregated metrics from all thread-local arenas.
+/// Metrics are cumulative since process start or last reset.
+///
+/// # Thread Safety
+///
+/// Thread-safe via internal mutex in Zig implementation.
+///
+/// # Examples
+///
+/// ```no_run
+/// # #[cfg(feature = "zig-kernels")]
+/// # {
+/// use engram_core::zig_kernels::get_arena_stats;
+///
+/// let stats = get_arena_stats();
+/// println!("Resets: {}", stats.total_resets);
+/// println!("Overflows: {}", stats.total_overflows);
+/// println!("Peak usage: {} bytes", stats.max_high_water_mark);
+/// # }
+/// ```
+#[cfg(feature = "zig-kernels")]
+#[must_use]
+pub fn get_arena_stats() -> ArenaStats {
+    let mut stats = ArenaStats {
+        total_resets: 0,
+        total_overflows: 0,
+        max_high_water_mark: 0,
+    };
+
+    unsafe {
+        ffi::engram_arena_stats(
+            &raw mut stats.total_resets,
+            &raw mut stats.total_overflows,
+            &raw mut stats.max_high_water_mark,
+        );
+    }
+
+    stats
+}
+
+/// Reset thread-local arena allocator
+///
+/// Manually resets the calling thread's arena.
+/// Useful for testing or explicit memory reclamation.
+///
+/// Normally arenas are reset automatically at kernel exit,
+/// but this provides explicit control when needed.
+///
+/// # Thread Safety
+///
+/// Thread-local - only affects calling thread's arena.
+///
+/// # Examples
+///
+/// ```no_run
+/// # #[cfg(feature = "zig-kernels")]
+/// # {
+/// use engram_core::zig_kernels::reset_arenas;
+///
+/// // Manually reset current thread's arena
+/// reset_arenas();
+/// # }
+/// ```
+#[cfg(feature = "zig-kernels")]
+pub fn reset_arenas() {
+    unsafe {
+        ffi::engram_reset_arenas();
+    }
+}
+
+/// Reset global arena metrics
+///
+/// Clears all accumulated metrics counters.
+/// Useful for starting fresh measurement periods in testing.
+///
+/// # Thread Safety
+///
+/// Thread-safe via internal mutex in Zig implementation.
+///
+/// # Examples
+///
+/// ```no_run
+/// # #[cfg(feature = "zig-kernels")]
+/// # {
+/// use engram_core::zig_kernels::reset_arena_metrics;
+///
+/// // Clear all metrics
+/// reset_arena_metrics();
+/// # }
+/// ```
+#[cfg(feature = "zig-kernels")]
+pub fn reset_arena_metrics() {
+    unsafe {
+        ffi::engram_reset_arena_metrics();
     }
 }
