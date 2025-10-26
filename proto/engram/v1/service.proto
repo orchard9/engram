@@ -74,6 +74,17 @@ service EngramService {
   
   // MemoryFlow provides bidirectional streaming for interactive sessions
   rpc MemoryFlow(stream MemoryFlowRequest) returns (stream MemoryFlowResponse);
+
+  // ========== Milestone 11: High-Performance Streaming Operations ==========
+
+  // ObserveStream for continuous memory observation (client → server streaming)
+  rpc ObserveStream(stream ObservationRequest) returns (stream ObservationResponse);
+
+  // RecallStream for streaming memory retrieval (server → client streaming)
+  rpc RecallStream(StreamingRecallRequest) returns (stream StreamingRecallResponse);
+
+  // MemoryStream for bidirectional observe + recall
+  rpc MemoryStream(stream ObservationRequest) returns (stream ObservationResponse);
 }
 
 // ============================================================================
@@ -549,9 +560,117 @@ message FlowStatus {
     STATE_RECONNECTING = 4;   // Reconnection in progress
     STATE_ERROR = 5;          // Error state
   }
-  
+
   State state = 1;
   string message = 2;
   map<string, string> metrics = 3;     // Performance metrics
   google.protobuf.Timestamp last_activity = 4;
+}
+
+// ============================================================================
+// Milestone 11: Streaming Protocol Foundation (150 lines)
+// ============================================================================
+
+// Observation stream: continuous memory formation with monotonic sequence numbers
+message ObservationRequest {
+  string memory_space_id = 1;
+
+  oneof operation {
+    StreamInit init = 2;            // Initialize stream session
+    Episode observation = 3;        // Store observation
+    FlowControl flow = 4;           // Flow control signal
+    StreamClose close = 5;          // Graceful shutdown
+  }
+
+  string session_id = 10;           // Client-generated session ID
+  uint64 sequence_number = 11;      // Monotonic sequence per session
+}
+
+message ObservationResponse {
+  oneof result {
+    StreamInitAck init_ack = 1;     // Session established
+    ObservationAck ack = 2;         // Observation accepted
+    StreamStatus status = 3;        // Flow control or error
+  }
+
+  string session_id = 10;
+  uint64 sequence_number = 11;      // Echo client sequence
+  google.protobuf.Timestamp server_timestamp = 12;
+}
+
+// Stream initialization with client capabilities
+message StreamInit {
+  uint32 client_buffer_size = 1;   // Client buffer capacity
+  bool enable_backpressure = 2;    // Request flow control
+  uint32 max_batch_size = 3;       // Max observations per batch
+}
+
+message StreamInitAck {
+  string session_id = 1;           // Server-assigned session ID
+  uint64 initial_sequence = 2;     // Starting sequence number (always 0)
+  StreamCapabilities capabilities = 3;
+}
+
+message StreamCapabilities {
+  uint32 max_observations_per_second = 1;
+  uint32 queue_capacity = 2;
+  bool supports_backpressure = 3;
+  bool supports_snapshot_isolation = 4;
+}
+
+// Observation acknowledgment with indexing status
+message ObservationAck {
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    STATUS_ACCEPTED = 1;          // Queued for indexing
+    STATUS_INDEXED = 2;           // Visible in HNSW index
+    STATUS_REJECTED = 3;          // Admission control reject
+  }
+
+  Status status = 1;
+  string memory_id = 2;           // Assigned memory ID
+  google.protobuf.Timestamp committed_at = 3;
+}
+
+// Stream status and flow control
+message StreamStatus {
+  enum State {
+    STATE_UNSPECIFIED = 0;
+    STATE_ACTIVE = 1;
+    STATE_PAUSED = 2;             // Client requested pause
+    STATE_BACKPRESSURE = 3;       // Server backpressure active
+    STATE_OVERLOADED = 4;         // Admission control active
+    STATE_ERROR = 5;
+    STATE_CLOSED = 6;             // Stream gracefully closed
+  }
+
+  State state = 1;
+  string message = 2;
+  uint32 queue_depth = 3;         // Current queue depth
+  uint32 queue_capacity = 4;      // Maximum capacity
+  float pressure = 5;             // 0.0 to 1.0
+}
+
+// Graceful stream close
+message StreamClose {
+  bool drain_queue = 1;           // Wait for queue to drain before closing
+  uint64 last_sequence = 2;       // Last sequence number sent by client
+}
+
+// Streaming recall: pull memories while observing
+message StreamingRecallRequest {
+  string memory_space_id = 1;
+  string session_id = 2;          // Link to observation session
+
+  Cue cue = 3;
+  uint32 max_results = 4;
+  bool snapshot_isolation = 5;    // See only committed observations
+  google.protobuf.Timestamp snapshot_time = 6; // For snapshot isolation
+}
+
+message StreamingRecallResponse {
+  repeated Memory results = 1;    // Incremental result batch
+  bool more_results = 2;          // More results pending
+  RecallMetadata metadata = 3;
+  uint64 snapshot_sequence = 4;   // Last visible observation sequence
 }

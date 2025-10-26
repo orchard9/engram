@@ -48,6 +48,7 @@ pub mod registry;
 #[cfg(feature = "memory_mapped_persistence")]
 pub mod storage;
 pub mod store;
+pub mod streaming;
 pub mod streaming_health;
 pub mod types;
 #[cfg(feature = "zig-kernels")]
