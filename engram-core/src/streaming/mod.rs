@@ -26,6 +26,13 @@
 //! - Marr, D. (1971). Simple memory: a theory for archicortex
 //! - Lamport, L. (1978). Time, clocks, and the ordering of events
 
+pub mod observation_queue;
+pub mod queue_metrics;
 pub mod session;
 
+pub use observation_queue::{
+    ObservationPriority, ObservationQueue, QueueConfig, QueueDepths, QueueError, QueueMetrics,
+    QueuedObservation,
+};
+pub use queue_metrics::{QueueMetricsTracker, QueueStatistics};
 pub use session::{SessionError, SessionManager, SessionState, StreamSession};
