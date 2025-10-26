@@ -1,0 +1,741 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "cognitive-patterns",
+    "title": "Engram Cognitive Patterns",
+    "tags": ["engram", "cognitive", "memory", "psychology"],
+    "timezone": "utc",
+    "schemaVersion": 36,
+    "version": 1,
+    "refresh": "30s",
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "Priming Event Rate by Type",
+        "type": "timeseries",
+        "gridPos": {
+          "x": 0,
+          "y": 0,
+          "w": 8,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "rate(engram_priming_events_total{priming_type=\"semantic\"}[5m])",
+            "legendFormat": "Semantic",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(engram_priming_events_total{priming_type=\"associative\"}[5m])",
+            "legendFormat": "Associative",
+            "refId": "B"
+          },
+          {
+            "expr": "rate(engram_priming_events_total{priming_type=\"repetition\"}[5m])",
+            "legendFormat": "Repetition",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ops",
+            "custom": {
+              "drawStyle": "line",
+              "lineInterpolation": "smooth",
+              "fillOpacity": 10,
+              "stacking": {
+                "mode": "normal"
+              }
+            }
+          }
+        },
+        "options": {
+          "legend": {
+            "displayMode": "list",
+            "placement": "bottom"
+          },
+          "tooltip": {
+            "mode": "multi"
+          }
+        }
+      },
+      {
+        "id": 2,
+        "title": "Priming Strength Distribution",
+        "type": "heatmap",
+        "gridPos": {
+          "x": 8,
+          "y": 0,
+          "w": 8,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, engram_priming_strength_bucket)",
+            "legendFormat": "P50",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.95, engram_priming_strength_bucket)",
+            "legendFormat": "P95",
+            "refId": "B"
+          },
+          {
+            "expr": "histogram_quantile(0.99, engram_priming_strength_bucket)",
+            "legendFormat": "P99",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "min": 0,
+            "max": 1,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "value": 0,
+                  "color": "green"
+                },
+                {
+                  "value": 0.9,
+                  "color": "red"
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "Top Primed Node Pairs",
+        "type": "table",
+        "gridPos": {
+          "x": 16,
+          "y": 0,
+          "w": 8,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "topk(10, engram_priming_node_pairs_total)",
+            "format": "table",
+            "instant": true,
+            "refId": "A"
+          }
+        ],
+        "transformations": [
+          {
+            "id": "organize",
+            "options": {
+              "excludeByName": {
+                "Time": true
+              },
+              "indexByName": {
+                "source_node": 0,
+                "target_node": 1,
+                "Value": 2
+              },
+              "renameByName": {
+                "source_node": "Source Node",
+                "target_node": "Target Node",
+                "Value": "Count"
+              }
+            }
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "align": "left",
+              "displayMode": "auto"
+            }
+          }
+        }
+      },
+      {
+        "id": 4,
+        "title": "Interference Event Rates Over Time",
+        "type": "timeseries",
+        "gridPos": {
+          "x": 0,
+          "y": 8,
+          "w": 8,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "rate(engram_proactive_interference_total[5m])",
+            "legendFormat": "Proactive",
+            "refId": "A"
+          },
+          {
+            "expr": "rate(engram_retroactive_interference_total[5m])",
+            "legendFormat": "Retroactive",
+            "refId": "B"
+          },
+          {
+            "expr": "rate(engram_fan_effect_interference_total[5m])",
+            "legendFormat": "Fan Effect",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ops",
+            "custom": {
+              "drawStyle": "line",
+              "lineInterpolation": "smooth",
+              "fillOpacity": 0
+            }
+          }
+        },
+        "options": {
+          "legend": {
+            "displayMode": "list",
+            "placement": "bottom"
+          },
+          "tooltip": {
+            "mode": "multi"
+          }
+        }
+      },
+      {
+        "id": 5,
+        "title": "Interference Magnitude Histograms",
+        "type": "barchart",
+        "gridPos": {
+          "x": 8,
+          "y": 8,
+          "w": 8,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, engram_proactive_interference_magnitude_bucket)",
+            "legendFormat": "Proactive P50",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.95, engram_proactive_interference_magnitude_bucket)",
+            "legendFormat": "Proactive P95",
+            "refId": "B"
+          },
+          {
+            "expr": "histogram_quantile(0.99, engram_proactive_interference_magnitude_bucket)",
+            "legendFormat": "Proactive P99",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "min": 0,
+            "max": 1,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "value": 0,
+                  "color": "green"
+                },
+                {
+                  "value": 0.8,
+                  "color": "red"
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 6,
+        "title": "Most Interfering Episode Pairs",
+        "type": "table",
+        "gridPos": {
+          "x": 16,
+          "y": 8,
+          "w": 8,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "topk(10, engram_interference_episode_pairs_total)",
+            "format": "table",
+            "instant": true,
+            "refId": "A"
+          }
+        ],
+        "transformations": [
+          {
+            "id": "organize",
+            "options": {
+              "excludeByName": {
+                "Time": true
+              },
+              "indexByName": {
+                "target_episode": 0,
+                "competing_episode": 1,
+                "Value": 2
+              },
+              "renameByName": {
+                "target_episode": "Target Episode",
+                "competing_episode": "Competing Episode",
+                "Value": "Interference Count"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": 7,
+        "title": "Reconsolidation Window Hit Rate",
+        "type": "gauge",
+        "gridPos": {
+          "x": 0,
+          "y": 16,
+          "w": 8,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "rate(engram_reconsolidation_window_hits_total[5m]) / (rate(engram_reconsolidation_window_hits_total[5m]) + rate(engram_reconsolidation_window_misses_total[5m]))",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percentunit",
+            "min": 0,
+            "max": 1,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "value": 0,
+                  "color": "red"
+                },
+                {
+                  "value": 0.5,
+                  "color": "green"
+                },
+                {
+                  "value": 0.8,
+                  "color": "blue"
+                }
+              ]
+            }
+          }
+        },
+        "options": {
+          "showThresholdLabels": true,
+          "showThresholdMarkers": true
+        }
+      },
+      {
+        "id": 8,
+        "title": "Modifications Per Reconsolidation Event",
+        "type": "timeseries",
+        "gridPos": {
+          "x": 8,
+          "y": 16,
+          "w": 8,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "rate(engram_reconsolidation_modifications_total[5m]) / rate(engram_reconsolidation_events_total[5m])",
+            "legendFormat": "Modifications/Event",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "custom": {
+              "drawStyle": "line",
+              "lineInterpolation": "smooth"
+            },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "value": 0,
+                  "color": "green"
+                },
+                {
+                  "value": 10,
+                  "color": "red"
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 9,
+        "title": "Plasticity Factor Distribution",
+        "type": "heatmap",
+        "gridPos": {
+          "x": 16,
+          "y": 16,
+          "w": 8,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, engram_reconsolidation_plasticity_factor_bucket)",
+            "legendFormat": "P50",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.95, engram_reconsolidation_plasticity_factor_bucket)",
+            "legendFormat": "P95",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "min": 0,
+            "max": 1,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "value": 0,
+                  "color": "green"
+                },
+                {
+                  "value": 0.9,
+                  "color": "red"
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 10,
+        "title": "DRM False Recall Rate (PRIMARY SLI)",
+        "type": "gauge",
+        "gridPos": {
+          "x": 0,
+          "y": 24,
+          "w": 8,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "rate(engram_drm_critical_lure_recalls_total[5m]) / (rate(engram_drm_critical_lure_recalls_total[5m]) + rate(engram_drm_list_item_recalls_total[5m]))",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percentunit",
+            "min": 0,
+            "max": 1,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "value": 0,
+                  "color": "red"
+                },
+                {
+                  "value": 0.45,
+                  "color": "yellow"
+                },
+                {
+                  "value": 0.55,
+                  "color": "green"
+                },
+                {
+                  "value": 0.65,
+                  "color": "yellow"
+                },
+                {
+                  "value": 0.75,
+                  "color": "red"
+                }
+              ]
+            }
+          }
+        },
+        "options": {
+          "showThresholdLabels": true,
+          "showThresholdMarkers": true,
+          "text": {
+            "titleSize": 16,
+            "valueSize": 48
+          }
+        },
+        "description": "Target: 55-65% (Roediger & McDermott 1995). Acceptable: 45-75%. Critical: <45% or >75%"
+      },
+      {
+        "id": 11,
+        "title": "Critical Lure Generation Rate",
+        "type": "timeseries",
+        "gridPos": {
+          "x": 8,
+          "y": 24,
+          "w": 8,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "rate(engram_drm_critical_lure_generations_total[5m])",
+            "legendFormat": "False Memory Generation Rate",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ops",
+            "custom": {
+              "drawStyle": "line",
+              "lineInterpolation": "smooth"
+            }
+          }
+        },
+        "alert": {
+          "name": "No Critical Lure Generation",
+          "conditions": [
+            {
+              "evaluator": {
+                "params": [0],
+                "type": "eq"
+              },
+              "operator": {
+                "type": "and"
+              },
+              "query": {
+                "params": ["A", "5m", "now"]
+              },
+              "reducer": {
+                "params": [],
+                "type": "last"
+              },
+              "type": "query"
+            }
+          ],
+          "executionErrorState": "alerting",
+          "for": "5m",
+          "frequency": "1m",
+          "message": "Pattern completion may be disabled or semantic priming too weak",
+          "noDataState": "alerting"
+        }
+      },
+      {
+        "id": 12,
+        "title": "Reconstruction Confidence Distribution",
+        "type": "barchart",
+        "gridPos": {
+          "x": 16,
+          "y": 24,
+          "w": 8,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, engram_reconstruction_confidence_bucket)",
+            "legendFormat": "P50 Confidence",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.95, engram_reconstruction_confidence_bucket)",
+            "legendFormat": "P95 Confidence",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "min": 0,
+            "max": 1,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "value": 0,
+                  "color": "red"
+                },
+                {
+                  "value": 0.3,
+                  "color": "green"
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 13,
+        "title": "Metrics Collection Overhead",
+        "type": "gauge",
+        "gridPos": {
+          "x": 0,
+          "y": 32,
+          "w": 8,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "engram_metrics_overhead_percent",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 5,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "value": 0,
+                  "color": "green"
+                },
+                {
+                  "value": 1,
+                  "color": "red"
+                }
+              ]
+            }
+          }
+        },
+        "options": {
+          "showThresholdLabels": true,
+          "showThresholdMarkers": true
+        },
+        "description": "Performance budget: <1% overhead (Task 001 requirement)"
+      },
+      {
+        "id": 14,
+        "title": "Event Buffer Utilization",
+        "type": "gauge",
+        "gridPos": {
+          "x": 8,
+          "y": 32,
+          "w": 8,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "engram_cognitive_event_buffer_utilization",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percent",
+            "min": 0,
+            "max": 100,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "value": 0,
+                  "color": "green"
+                },
+                {
+                  "value": 80,
+                  "color": "yellow"
+                },
+                {
+                  "value": 95,
+                  "color": "red"
+                }
+              ]
+            }
+          }
+        },
+        "options": {
+          "showThresholdLabels": true,
+          "showThresholdMarkers": true
+        }
+      },
+      {
+        "id": 15,
+        "title": "Dropped Events Counter",
+        "type": "stat",
+        "gridPos": {
+          "x": 16,
+          "y": 32,
+          "w": 8,
+          "h": 8
+        },
+        "targets": [
+          {
+            "expr": "rate(engram_cognitive_events_dropped_total[5m])",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ops",
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "value": 0,
+                  "color": "green"
+                },
+                {
+                  "value": 0.000001,
+                  "color": "red"
+                }
+              ]
+            }
+          }
+        },
+        "options": {
+          "textMode": "value_and_name",
+          "graphMode": "area",
+          "colorMode": "background"
+        },
+        "description": "Target: 0 dropped events (data loss unacceptable)"
+      }
+    ],
+    "templating": {
+      "list": [
+        {
+          "name": "instance",
+          "type": "query",
+          "datasource": "Prometheus",
+          "query": "label_values(engram_priming_events_total, instance)",
+          "refresh": 1,
+          "includeAll": true,
+          "multi": false
+        },
+        {
+          "name": "memory_space",
+          "type": "query",
+          "datasource": "Prometheus",
+          "query": "label_values(engram_priming_events_total, memory_space)",
+          "refresh": 1,
+          "includeAll": true,
+          "multi": false
+        }
+      ]
+    },
+    "annotations": {
+      "list": [
+        {
+          "name": "Consolidation Runs",
+          "datasource": "Prometheus",
+          "enable": true,
+          "expr": "changes(engram_consolidation_runs_total[1m]) > 0",
+          "iconColor": "blue"
+        }
+      ]
+    }
+  }
+}
