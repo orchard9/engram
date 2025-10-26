@@ -106,3 +106,7 @@ docs/assets/consolidation/baseline/*.dat
 # Zig build artifacts (Milestone 10)
 /zig/zig-cache/
 /zig/zig-out/
+
+# Regression benchmark artifacts
+engram-core/benches/regression/results/
+engram-core/benches/regression/baselines.json.backup.*

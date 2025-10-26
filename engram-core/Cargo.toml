@@ -114,6 +114,7 @@ futures = "0.3"
 serial_test = "3.2.0"
 loom = "0.7"
 tokio = { version = "1.0", features = ["test-util", "rt", "time", "sync", "macros", "rt-multi-thread"] }
+chrono = { workspace = true }
 
 [[bench]]
 name = "pattern_detection"
@@ -137,6 +138,10 @@ harness = false
 
 [[bench]]
 name = "spreading_comparison"
+harness = false
+
+[[bench]]
+name = "regression"
 harness = false
 
 [features]
