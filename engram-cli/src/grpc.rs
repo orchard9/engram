@@ -899,28 +899,28 @@ impl EngramService for MemoryService {
                 let timestamp_nanos = episode.when.timestamp_subsec_nanos() as i32;
 
                 engram_proto::Episode {
-                id: episode.id,
-                when: Some(::prost_types::Timestamp {
-                    seconds: timestamp_seconds,
-                    nanos: timestamp_nanos,
-                }),
-                what: episode.what,
-                embedding: episode.embedding.to_vec(),
-                encoding_confidence: Some(Confidence {
-                    value: episode.encoding_confidence.raw(),
-                    category: confidence_to_category(episode.encoding_confidence.raw()) as i32,
-                    reasoning: String::new(),
-                }),
-                where_location: episode.where_location.unwrap_or_default(),
-                who: episode.who.unwrap_or_default(),
-                why: String::new(),
-                how: String::new(),
-                decay_rate: episode.decay_rate,
-                emotional_valence: 0.0,
-                importance: 0.0,
-                consolidation_state: ConsolidationState::Recent as i32,
-                last_replay: None,
-            }
+                    id: episode.id,
+                    when: Some(::prost_types::Timestamp {
+                        seconds: timestamp_seconds,
+                        nanos: timestamp_nanos,
+                    }),
+                    what: episode.what,
+                    embedding: episode.embedding.to_vec(),
+                    encoding_confidence: Some(Confidence {
+                        value: episode.encoding_confidence.raw(),
+                        category: confidence_to_category(episode.encoding_confidence.raw()) as i32,
+                        reasoning: String::new(),
+                    }),
+                    where_location: episode.where_location.unwrap_or_default(),
+                    who: episode.who.unwrap_or_default(),
+                    why: String::new(),
+                    how: String::new(),
+                    decay_rate: episode.decay_rate,
+                    emotional_valence: 0.0,
+                    importance: 0.0,
+                    consolidation_state: ConsolidationState::Recent as i32,
+                    last_replay: None,
+                }
             })
             .collect();
 

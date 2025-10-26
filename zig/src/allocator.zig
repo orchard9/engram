@@ -125,7 +125,8 @@ pub const ArenaAllocator = struct {
     /// Returns error.OutOfMemory if allocation would exceed arena capacity.
     pub fn allocArray(self: *ArenaAllocator, comptime T: type, n: usize) ![]T {
         const bytes = try self.alloc(n * @sizeOf(T), @alignOf(T));
-        return std.mem.bytesAsSlice(T, bytes);
+        // SAFETY: alloc() guarantees alignment of @alignOf(T), and size is multiple of @sizeOf(T)
+        return @as([*]T, @ptrCast(@alignCast(bytes.ptr)))[0..n];
     }
 
     /// Reset arena to beginning (bulk deallocation)

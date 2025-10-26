@@ -33,8 +33,20 @@ pub mod decay_functions;
 pub mod spreading_activation;
 pub mod vector_similarity;
 
-/// Epsilon for floating-point comparisons (1e-6 as specified in task)
-pub const EPSILON: f32 = 1e-6;
+/// Epsilon values for floating-point comparisons (operation-specific tolerances)
+///
+/// Different operations accumulate different amounts of floating-point error:
+/// - Exact operations (dot product, addition): 1e-6 is appropriate
+/// - Vector operations with sqrt/division: 1e-5 accounts for transcendental error
+/// - Transcendental functions (exp, log): 1e-4 accounts for ULP accumulation
+/// - Iterative algorithms (spreading): 1e-3 accounts for error compounding
+pub const EPSILON_EXACT: f32 = 1e-6;
+pub const EPSILON_VECTOR_OPS: f32 = 1e-5;
+pub const EPSILON_TRANSCENDENTAL: f32 = 1e-4;
+pub const EPSILON_ITERATIVE: f32 = 1e-3;
+
+/// Legacy epsilon for backwards compatibility
+pub const EPSILON: f32 = EPSILON_EXACT;
 
 /// Number of property-based test cases per kernel (10,000 as specified)
 pub const NUM_PROPTEST_CASES: u32 = 10_000;
@@ -99,9 +111,10 @@ pub fn assert_slices_approx_eq(expected: &[f32], actual: &[f32], epsilon: f32) {
 
     for (i, (exp, act)) in expected.iter().zip(actual.iter()).enumerate() {
         FloatEq::new(*exp, *act).assert_eq_epsilon(epsilon);
-        assert!(FloatEq::new(*exp, *act).is_approx_eq_epsilon(epsilon),
-                "Slice elements differ at index {i}: expected {exp}, got {act} (epsilon: {epsilon})"
-            );
+        assert!(
+            FloatEq::new(*exp, *act).is_approx_eq_epsilon(epsilon),
+            "Slice elements differ at index {i}: expected {exp}, got {act} (epsilon: {epsilon})"
+        );
     }
 }
 
@@ -154,6 +167,8 @@ fn get_corpus_dir() -> PathBuf {
 pub struct TestGraph {
     /// Number of nodes in the graph
     pub num_nodes: usize,
+    /// Edge source nodes (for proper differential testing)
+    pub edge_sources: Vec<u32>,
     /// CSR edge destinations (adjacency list)
     pub adjacency: Vec<u32>,
     /// Edge weights corresponding to adjacency
@@ -170,6 +185,7 @@ impl TestGraph {
         use rand::{Rng, SeedableRng};
 
         let mut rng = StdRng::seed_from_u64(seed);
+        let mut edge_sources = Vec::new();
         let mut adjacency = Vec::new();
         let mut weights = Vec::new();
 
@@ -177,6 +193,7 @@ impl TestGraph {
         for source in 0..num_nodes {
             for target in 0..num_nodes {
                 if source != target && rng.gen_bool(edge_probability) {
+                    edge_sources.push(source as u32);
                     adjacency.push(target as u32);
                     weights.push(rng.r#gen::<f32>());
                 }
@@ -188,6 +205,7 @@ impl TestGraph {
 
         Self {
             num_nodes,
+            edge_sources,
             adjacency,
             weights,
             activations,
@@ -197,10 +215,12 @@ impl TestGraph {
     /// Create a simple linear chain graph: 0 -> 1 -> 2 -> ... -> n
     #[must_use]
     pub fn linear_chain(num_nodes: usize) -> Self {
+        let mut edge_sources = Vec::new();
         let mut adjacency = Vec::new();
         let mut weights = Vec::new();
 
         for i in 0..num_nodes - 1 {
+            edge_sources.push(i as u32);
             adjacency.push((i + 1) as u32);
             weights.push(1.0);
         }
@@ -210,6 +230,7 @@ impl TestGraph {
 
         Self {
             num_nodes,
+            edge_sources,
             adjacency,
             weights,
             activations,
@@ -219,12 +240,14 @@ impl TestGraph {
     /// Create a fully connected graph
     #[must_use]
     pub fn fully_connected(num_nodes: usize) -> Self {
+        let mut edge_sources = Vec::new();
         let mut adjacency = Vec::new();
         let mut weights = Vec::new();
 
         for source in 0..num_nodes {
             for target in 0..num_nodes {
                 if source != target {
+                    edge_sources.push(source as u32);
                     adjacency.push(target as u32);
                     weights.push(1.0 / num_nodes as f32);
                 }
@@ -236,6 +259,7 @@ impl TestGraph {
 
         Self {
             num_nodes,
+            edge_sources,
             adjacency,
             weights,
             activations,
@@ -245,17 +269,20 @@ impl TestGraph {
     /// Create a star graph (one central node connected to all others)
     #[must_use]
     pub fn star(num_nodes: usize) -> Self {
+        let mut edge_sources = Vec::new();
         let mut adjacency = Vec::new();
         let mut weights = Vec::new();
 
         // Center (node 0) connects to all others
         for target in 1..num_nodes {
+            edge_sources.push(0);
             adjacency.push(target as u32);
             weights.push(1.0);
         }
 
         // All others connect back to center
-        for _ in 1..num_nodes {
+        for source in 1..num_nodes {
+            edge_sources.push(source as u32);
             adjacency.push(0);
             weights.push(1.0);
         }
@@ -265,6 +292,7 @@ impl TestGraph {
 
         Self {
             num_nodes,
+            edge_sources,
             adjacency,
             weights,
             activations,

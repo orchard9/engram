@@ -565,7 +565,7 @@ mod tests {
         // EpisodeBuilder requires: id → when → what → embedding → confidence → build
         // For tests, we use minimal valid episodes
         EpisodeBuilder::new()
-            .id(format!("test_{}", content))
+            .id(format!("test_{content}"))
             .when(Utc::now())
             .what(content.to_string())
             .embedding([0.0f32; 768])

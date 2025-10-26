@@ -63,6 +63,42 @@ curl -X POST http://localhost:7432/api/v1/memories/remember \
 curl "http://localhost:7432/api/v1/memories/recall?query=programming"
 ```
 
+## Pattern Completion (Beta)
+
+Pattern completion reconstructs missing memory details using hippocampal CA3 attractor dynamics:
+
+```bash
+# Store a complete memory
+curl -X POST http://localhost:7432/api/v1/episodes/remember \
+  -H "Content-Type: application/json" \
+  -d '{
+    "what": "Einstein published theory of relativity in 1915",
+    "when": "2024-01-05T10:00:00Z",
+    "where": "Physics lecture",
+    "confidence": 0.90
+  }'
+
+# Complete a partial memory
+curl -X POST http://localhost:7432/api/v1/complete \
+  -H "Content-Type: application/json" \
+  -d '{
+    "partial": {
+      "what": "Einstein published theory",
+      "when": null,
+      "where": "Physics lecture"
+    }
+  }'
+```
+
+The response includes:
+
+- `completed` - Reconstructed episode with filled-in details
+- `source` - How completion was achieved (Recalled, Reconstructed, Imagined, Consolidated)
+- `completion_confidence` - Multi-factor confidence score (convergence speed, energy reduction, field consensus)
+- `alternatives` - Alternative hypotheses from System 2 reasoning
+
+For production parameter tuning, see [Pattern Completion Parameter Tuning Guide](../tuning/completion_parameters.md).
+
 ## Next Steps
 
 - **[API Reference](/api/)**: Learn about memory operations and system endpoints

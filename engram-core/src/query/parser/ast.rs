@@ -560,10 +560,10 @@ impl<'a> Pattern<'a> {
                     return Err(ValidationError::InvalidThreshold(*threshold));
                 }
 
-                // Validate embedding dimensions match system expectations (768 for current implementation)
-                if vector.len() != 768 {
+                // Validate embedding dimensions match system expectations
+                if vector.len() != crate::EMBEDDING_DIM {
                     return Err(ValidationError::InvalidEmbeddingDimension {
-                        expected: 768,
+                        expected: crate::EMBEDDING_DIM,
                         actual: vector.len(),
                     });
                 }
@@ -855,7 +855,7 @@ pub enum ValidationError {
     EmptyEmbedding,
 
     #[error(
-        "Invalid embedding dimension: expected {expected}, got {actual}\n  Expected: 768-dimensional vector (current system default)\n  Suggestion: Ensure embedding model matches system configuration\n  Example: Use text-embedding-ada-002 or compatible 768-dim model"
+        "Invalid embedding dimension: expected {expected}, got {actual}\n  Expected: {expected}-dimensional vector (system configuration)\n  Suggestion: Ensure embedding model matches system configuration\n  Example: Use text-embedding-ada-002 or compatible {expected}-dim model"
     )]
     InvalidEmbeddingDimension { expected: usize, actual: usize },
 

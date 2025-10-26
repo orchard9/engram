@@ -7,81 +7,178 @@ on:
       - 'engram-core/benches/**'
       - '.github/workflows/performance.yml'
   push:
-    branches:
-      - main
+    branches: [main]
     paths:
       - 'engram-core/src/query/**'
       - 'engram-core/benches/**'
+      - '.github/workflows/performance.yml'
 
 jobs:
   benchmark:
+    name: Performance Benchmarks
     runs-on: ubuntu-latest
-
     steps:
-    - uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-    - name: Setup Rust
-      uses: dtolnay/rust-toolchain@stable
-      with:
-        components: rustfmt, clippy
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
-    - name: Cache cargo registry
-      uses: actions/cache@v3
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          target
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "engram-core -> target"
 
-    - name: Install Criterion
-      run: cargo install cargo-criterion
+      - name: Install cargo-criterion
+        run: cargo install cargo-criterion --locked
 
-    - name: Run parser benchmarks
-      run: |
-        cargo bench --bench query_parser -- --output-format bencher | tee benchmark_results.txt
+      # Checkout base branch for comparison on PRs
+      - name: Checkout base branch
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch origin ${{ github.base_ref }}
+          git checkout origin/${{ github.base_ref }}
 
-    - name: Check for performance regression
-      run: |
-        # Extract benchmark results
-        echo "## Parser Performance Results" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "| Benchmark | Time |" >> $GITHUB_STEP_SUMMARY
-        echo "|-----------|------|" >> $GITHUB_STEP_SUMMARY
+      # Run benchmarks on base branch (PR only)
+      - name: Run base benchmarks
+        if: github.event_name == 'pull_request'
+        run: |
+          cd engram-core
+          cargo bench --bench query_parser -- --save-baseline base --noplot
 
-        # Parse results and check against targets
-        SIMPLE_TIME=$(grep "parse_simple_recall" benchmark_results.txt | awk '{print $3}')
-        COMPLEX_TIME=$(grep "parse_complex_spread" benchmark_results.txt | awk '{print $3}')
-        EMBEDDING_TIME=$(grep "parse_embedding_1536d" benchmark_results.txt | awk '{print $3}')
+      # Checkout PR branch for comparison
+      - name: Checkout PR branch
+        if: github.event_name == 'pull_request'
+        run: git checkout ${{ github.head_ref }}
 
-        echo "| Simple RECALL | $SIMPLE_TIME | (target: <50μs)" >> $GITHUB_STEP_SUMMARY
-        echo "| Complex SPREAD | $COMPLEX_TIME | (target: <100μs)" >> $GITHUB_STEP_SUMMARY
-        echo "| Large embedding (1536d) | $EMBEDDING_TIME | (target: <200μs)" >> $GITHUB_STEP_SUMMARY
+      # Run benchmarks on current branch
+      - name: Run current benchmarks
+        run: |
+          cd engram-core
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            # Compare against base for PRs
+            cargo bench --bench query_parser -- --baseline base --noplot
+          else
+            # Just run benchmarks for main branch
+            cargo bench --bench query_parser -- --save-baseline main --noplot
+          fi
 
-        # Fail if any benchmark exceeds target by 10%
-        # Note: This is simplified - in production, use proper numeric comparison
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "✅ All performance targets met" >> $GITHUB_STEP_SUMMARY
+      # Extract and format benchmark results
+      - name: Generate benchmark report
+        if: always()
+        run: |
+          cd engram-core
+          echo "## Parser Performance Benchmarks" > benchmark_report.md
+          echo "" >> benchmark_report.md
 
-    - name: Store benchmark results
-      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-      uses: benchmark-action/github-action-benchmark@v1
-      with:
-        tool: 'cargo'
-        output-file-path: benchmark_results.txt
-        github-token: ${{ secrets.GITHUB_TOKEN }}
-        auto-push: true
-        comment-on-alert: true
-        alert-threshold: '110%'
-        fail-on-alert: true
-        benchmark-data-dir-path: 'benchmarks'
+          # Extract timing information from criterion output
+          if [ -f target/criterion/parse_simple_recall/base/estimates.json ]; then
+            echo "### Performance Targets" >> benchmark_report.md
+            echo "" >> benchmark_report.md
+            echo "| Query Type | Target | Current | Status |" >> benchmark_report.md
+            echo "|------------|--------|---------|--------|" >> benchmark_report.md
 
-    - name: Upload benchmark artifacts
-      uses: actions/upload-artifact@v3
-      with:
-        name: benchmark-results
-        path: |
-          benchmark_results.txt
-          target/criterion/
+            # Parse simple recall
+            SIMPLE_TIME=$(cat target/criterion/parse_simple_recall/new/estimates.json 2>/dev/null | jq -r '.mean.point_estimate' | awk '{print $1/1000 " µs"}' || echo "N/A")
+            if [ "$SIMPLE_TIME" != "N/A" ]; then
+              SIMPLE_STATUS="✅"
+              if (( $(echo "$SIMPLE_TIME < 50" | bc -l) )); then
+                SIMPLE_STATUS="✅ PASS"
+              else
+                SIMPLE_STATUS="❌ FAIL"
+              fi
+            fi
+            echo "| Simple RECALL | <50µs | $SIMPLE_TIME | $SIMPLE_STATUS |" >> benchmark_report.md
+
+            # Parse complex spread
+            COMPLEX_TIME=$(cat target/criterion/parse_complex_spread/new/estimates.json 2>/dev/null | jq -r '.mean.point_estimate' | awk '{print $1/1000 " µs"}' || echo "N/A")
+            if [ "$COMPLEX_TIME" != "N/A" ]; then
+              COMPLEX_STATUS="✅"
+              if (( $(echo "$COMPLEX_TIME < 100" | bc -l) )); then
+                COMPLEX_STATUS="✅ PASS"
+              else
+                COMPLEX_STATUS="❌ FAIL"
+              fi
+            fi
+            echo "| Complex SPREAD | <100µs | $COMPLEX_TIME | $COMPLEX_STATUS |" >> benchmark_report.md
+
+            # Parse large embedding
+            EMBED_TIME=$(cat target/criterion/parse_embedding_1536d/new/estimates.json 2>/dev/null | jq -r '.mean.point_estimate' | awk '{print $1/1000 " µs"}' || echo "N/A")
+            if [ "$EMBED_TIME" != "N/A" ]; then
+              EMBED_STATUS="✅"
+              if (( $(echo "$EMBED_TIME < 200" | bc -l) )); then
+                EMBED_STATUS="✅ PASS"
+              else
+                EMBED_STATUS="❌ FAIL"
+              fi
+            fi
+            echo "| Large embedding (1536d) | <200µs | $EMBED_TIME | $EMBED_STATUS |" >> benchmark_report.md
+          fi
+
+          # Check for regressions
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "" >> benchmark_report.md
+            echo "### Regression Analysis" >> benchmark_report.md
+            echo "" >> benchmark_report.md
+
+            # Criterion will output regression information
+            cargo bench --bench query_parser -- --baseline base --noplot 2>&1 | grep -E "Performance has (improved|regressed)" >> benchmark_report.md || echo "No significant changes detected." >> benchmark_report.md
+          fi
+
+      # Upload benchmark artifacts
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: |
+            engram-core/target/criterion/**/*.html
+            engram-core/benchmark_report.md
+          retention-days: 30
+
+      # Comment on PR with results
+      - name: Comment PR with benchmark results
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('engram-core/benchmark_report.md', 'utf8');
+
+            // Find and update existing comment or create new one
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(comment =>
+              comment.user.type === 'Bot' && comment.body.includes('## Parser Performance Benchmarks')
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: report
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: report
+              });
+            }
+
+      # Fail if performance targets not met
+      - name: Check performance targets
+        if: github.event_name == 'pull_request'
+        run: |
+          cd engram-core
+          # Run the performance target test
+          cargo test --bench query_parser test_performance_targets --release

@@ -654,8 +654,8 @@ fn test_constraint_size() {
 
     let size = size_of::<Constraint>();
     assert!(
-        size < 128,
-        "Constraint too large: {size} bytes (target: <128)"
+        size < 64,
+        "Constraint too large: {size} bytes (target: <64)"
     );
     eprintln!("Constraint size: {size} bytes");
 }

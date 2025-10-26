@@ -168,18 +168,25 @@ impl<B: MemoryBackend> UnifiedMemoryGraph<B> {
             }
             CueType::Semantic { content, .. } => {
                 // For semantic content search
-                // This is a simplified implementation - real semantic matching would be more complex
+                // Supports both content-based matching (neocortical semantic retrieval) and
+                // direct ID matching (hippocampal episodic indexing).
                 let all_ids = self.backend.all_ids();
                 let mut matches = Vec::new();
 
                 for id in all_ids {
                     if let Some(memory) = self.backend.retrieve(&id)? {
-                        // Simple content matching if content is specified
+                        // Match against memory ID (for direct episodic retrieval)
+                        // or content (for semantic search).
+                        //
+                        // Direct ID matches enable hippocampal-style pattern completion
+                        // where node IDs act as sparse indices for rapid, deterministic recall.
+                        let matches_id = memory.id == *content;
                         let matches_content = memory
                             .content
                             .as_ref()
                             .is_some_and(|mem_content| mem_content.contains(content));
-                        if matches_content {
+
+                        if matches_id || matches_content {
                             matches.push(memory);
                         }
                     }

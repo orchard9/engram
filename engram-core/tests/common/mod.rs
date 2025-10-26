@@ -298,7 +298,10 @@ mod tests {
 
         // Compute cosine similarity (should be high with small noise)
         let dot: f32 = base.iter().zip(similar.iter()).map(|(a, b)| a * b).sum();
-        assert!(dot > 0.9, "similarity should be high with small noise: {dot}");
+        assert!(
+            dot > 0.9,
+            "similarity should be high with small noise: {dot}"
+        );
     }
 
     #[test]

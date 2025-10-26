@@ -244,6 +244,7 @@ export fn engram_configure_arena(
     arena_config.setConfig(.{
         .pool_size = pool_size,
         .overflow_strategy = strategy,
+        .zero_on_reset = true, // Safe default for production
     });
 }
 

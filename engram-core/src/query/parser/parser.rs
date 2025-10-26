@@ -48,11 +48,12 @@
 
 use super::ast::{
     ConfidenceThreshold, ConsolidateQuery, Constraint, EpisodeSelector, ImagineQuery,
-    NodeIdentifier, Pattern, PredictQuery, Query, RecallQuery, SpreadQuery,
+    NodeIdentifier, Pattern, PredictQuery, Query, RecallQuery, SpreadQuery, ValidationError,
 };
 use super::error::{ParseError, ParserContext};
 use super::token::{Position, Spanned, Token};
 use super::tokenizer::Tokenizer;
+use super::validation;
 use crate::Confidence;
 use std::borrow::Cow;
 use std::result::Result as StdResult;
@@ -126,20 +127,36 @@ impl<'a> Parser<'a> {
     // ========================================================================
 
     /// Parse top-level query by dispatching to operation-specific parsers.
+    ///
+    /// After parsing, validates the query AST to ensure:
+    /// - Embedding dimensions match system configuration
+    /// - Thresholds are in valid ranges
+    /// - Node identifiers are non-empty and reasonable length
+    /// - All semantic constraints are satisfied
+    ///
+    /// This ensures errors are caught at parse time, not execution time.
     fn parse_query(&mut self) -> ParseResult<Query<'a>> {
-        match self.current_token()? {
-            Token::Recall => Ok(Query::Recall(self.parse_recall()?)),
-            Token::Predict => Ok(Query::Predict(self.parse_predict()?)),
-            Token::Imagine => Ok(Query::Imagine(self.parse_imagine()?)),
-            Token::Consolidate => Ok(Query::Consolidate(self.parse_consolidate()?)),
-            Token::Spread => Ok(Query::Spread(self.parse_spread()?)),
-            _token => Err(ParseError::unexpected_token(
-                self.current_token()?,
-                vec!["RECALL", "PREDICT", "IMAGINE", "CONSOLIDATE", "SPREAD"],
-                self.position(),
-                ParserContext::QueryStart,
-            )),
-        }
+        let query = match self.current_token()? {
+            Token::Recall => Query::Recall(self.parse_recall()?),
+            Token::Predict => Query::Predict(self.parse_predict()?),
+            Token::Imagine => Query::Imagine(self.parse_imagine()?),
+            Token::Consolidate => Query::Consolidate(self.parse_consolidate()?),
+            Token::Spread => Query::Spread(self.parse_spread()?),
+            _token => {
+                return Err(ParseError::unexpected_token(
+                    self.current_token()?,
+                    vec!["RECALL", "PREDICT", "IMAGINE", "CONSOLIDATE", "SPREAD"],
+                    self.position(),
+                    ParserContext::QueryStart,
+                ));
+            }
+        };
+
+        // Validate AST semantics before returning
+        // This catches dimension mismatches, invalid ranges, etc. at parse time
+        validate_query(&query, self.position())?;
+
+        Ok(query)
     }
 
     // ========================================================================
@@ -203,22 +220,28 @@ impl<'a> Parser<'a> {
                 Token::MaxHops => {
                     self.advance()?;
                     let hops = self.parse_integer()?;
-                    max_hops = Some(u16::try_from(hops).map_err(|_| {
+                    let hops_u16 = u16::try_from(hops).map_err(|_| {
                         ParseError::validation_error(
                             format!("MAX_HOPS value {hops} out of range (max 65535)"),
                             self.position(),
                             "Use value between 0 and 65535",
                             "SPREAD FROM node MAX_HOPS 10",
                         )
-                    })?);
+                    })?;
+                    validation::validate_max_hops(hops_u16, self.position())?;
+                    max_hops = Some(hops_u16);
                 }
                 Token::Decay => {
                     self.advance()?;
-                    decay_rate = Some(self.parse_float()?);
+                    let rate = self.parse_float()?;
+                    // Validation happens in SpreadQuery::validate() to use specific error message
+                    decay_rate = Some(rate);
                 }
                 Token::Threshold => {
                     self.advance()?;
-                    activation_threshold = Some(self.parse_float()?);
+                    let threshold = self.parse_float()?;
+                    // Validation happens in SpreadQuery::validate() to use specific error message
+                    activation_threshold = Some(threshold);
                 }
                 _ => break,
             }
@@ -309,7 +332,9 @@ impl<'a> Parser<'a> {
 
         let novelty = if self.check(&Token::Novelty) {
             self.advance()?;
-            Some(self.parse_float()?)
+            let value = self.parse_float()?;
+            // Validation happens in ImagineQuery::validate() to use specific error message
+            Some(value)
         } else {
             None
         };
@@ -377,7 +402,9 @@ impl<'a> Parser<'a> {
                 // Check for THRESHOLD clause
                 let threshold = if self.check(&Token::Threshold) {
                     self.advance()?;
-                    self.parse_float()?
+                    let value = self.parse_float()?;
+                    validation::validate_threshold(value, self.position())?;
+                    value
                 } else {
                     0.8 // Default similarity threshold
                 };
@@ -597,6 +624,7 @@ impl<'a> Parser<'a> {
     /// Parse confidence value (0.0-1.0)
     fn parse_confidence_value(&mut self) -> ParseResult<Confidence> {
         let value = self.parse_float()?;
+        validation::validate_confidence_value(value, self.position())?;
         Ok(Confidence::from_raw(value))
     }
 
@@ -653,6 +681,7 @@ impl<'a> Parser<'a> {
     fn parse_node_identifier(&mut self) -> ParseResult<NodeIdentifier<'a>> {
         match self.current_token()? {
             Token::Identifier(name) => {
+                validation::validate_identifier_length(name, self.position())?;
                 let id = NodeIdentifier::borrowed(name);
                 self.advance()?;
                 Ok(id)
@@ -796,6 +825,118 @@ enum ComparisonOp {
 }
 
 // ============================================================================
+// Query Validation
+// ============================================================================
+
+/// Validate query AST semantics after parsing.
+///
+/// This function ensures that all semantic constraints are satisfied:
+/// - Embedding dimensions match system configuration (EMBEDDING_DIM)
+/// - Thresholds are in valid ranges [0, 1]
+/// - Node identifiers are non-empty and reasonable length
+/// - Confidence values are valid
+/// - Decay rates and activation thresholds are in valid ranges
+///
+/// By validating at parse time, we catch errors early and provide better
+/// error messages with source positions.
+fn validate_query(query: &Query<'_>, position: Position) -> ParseResult<()> {
+    match query {
+        Query::Recall(q) => q
+            .validate()
+            .map_err(|e| convert_validation_error(e, position))?,
+        Query::Spread(q) => q
+            .validate()
+            .map_err(|e| convert_validation_error(e, position))?,
+        Query::Predict(q) => q
+            .validate()
+            .map_err(|e| convert_validation_error(e, position))?,
+        Query::Imagine(q) => q
+            .validate()
+            .map_err(|e| convert_validation_error(e, position))?,
+        Query::Consolidate(q) => {
+            q.validate()
+                .map_err(|e| convert_validation_error(e, position))?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Convert ValidationError to ParseError with proper context.
+fn convert_validation_error(err: super::ast::ValidationError, position: Position) -> ParseError {
+    match err {
+        ValidationError::InvalidEmbeddingDimension { expected, actual } => {
+            ParseError::validation_error(
+                format!("Invalid embedding dimension: expected {expected}, got {actual}"),
+                position,
+                format!("Use {expected}-dimensional embedding vector (system configuration)"),
+                format!("RECALL [{:.1}; {}]", 0.1, expected),
+            )
+        }
+        ValidationError::InvalidThreshold(threshold) => ParseError::validation_error(
+            format!("Invalid threshold: {threshold}, must be in [0, 1]"),
+            position,
+            "Use threshold between 0.0 and 1.0",
+            "RECALL [0.1, 0.2, 0.3] THRESHOLD 0.8",
+        ),
+        ValidationError::EmptyEmbedding => ParseError::validation_error(
+            "Empty embedding vector",
+            position,
+            "Provide at least one number in embedding",
+            "RECALL [0.1, 0.2, 0.3]",
+        ),
+        ValidationError::EmptyNodeId => ParseError::validation_error(
+            "Empty node identifier",
+            position,
+            "Provide a non-empty node ID",
+            "RECALL episode_123",
+        ),
+        ValidationError::NodeIdTooLong {
+            max_length,
+            actual_length,
+        } => ParseError::validation_error(
+            format!("Node ID too long: {actual_length} bytes (max {max_length})"),
+            position,
+            format!("Use shorter node ID (max {max_length} bytes)"),
+            "SPREAD FROM node_123",
+        ),
+        ValidationError::EmptyContentMatch => ParseError::validation_error(
+            "Empty content match pattern",
+            position,
+            "Provide non-empty text to match",
+            r#"RECALL "neural networks""#,
+        ),
+        ValidationError::InvalidDecayRate(rate) => ParseError::validation_error(
+            format!("Invalid decay rate: {rate}, must be in [0, 1]"),
+            position,
+            "Use decay rate between 0.0 and 1.0",
+            "SPREAD FROM node DECAY 0.15",
+        ),
+        ValidationError::InvalidActivationThreshold(threshold) => ParseError::validation_error(
+            format!("Invalid activation threshold: {threshold}, must be in [0, 1]"),
+            position,
+            "Use activation threshold between 0.0 and 1.0",
+            "SPREAD FROM node THRESHOLD 0.01",
+        ),
+        ValidationError::InvalidNovelty(novelty) => ParseError::validation_error(
+            format!("Invalid novelty level: {novelty}, must be in [0, 1]"),
+            position,
+            "Use novelty between 0.0 and 1.0",
+            "IMAGINE episode NOVELTY 0.3",
+        ),
+        ValidationError::InvalidInterval { lower, upper } => ParseError::validation_error(
+            format!("Invalid confidence interval: lower={lower:?} > upper={upper:?}"),
+            position,
+            "Ensure lower <= upper",
+            "CONFIDENCE BETWEEN 0.5 AND 0.9",
+        ),
+        ValidationError::InvalidConstraint(reason, suggestion, example) => {
+            ParseError::validation_error(reason, position, suggestion, example)
+        }
+    }
+}
+
+// ============================================================================
 // Unit Tests
 // ============================================================================
 
@@ -854,13 +995,18 @@ mod tests {
 
     #[test]
     fn test_parse_embedding_pattern() {
-        let query = "RECALL [0.1, 0.2, 0.3] THRESHOLD 0.8";
-        let ast = Parser::parse(query).unwrap();
+        // Create 768-dimensional embedding
+        let mut values = Vec::new();
+        for i in 0..crate::EMBEDDING_DIM {
+            values.push(format!("{:.3}", i as f32 / crate::EMBEDDING_DIM as f32));
+        }
+        let query = format!("RECALL [{}] THRESHOLD 0.8", values.join(", "));
+        let ast = Parser::parse(&query).unwrap();
 
         match ast {
             Query::Recall(recall) => {
                 if let Pattern::Embedding { vector, threshold } = recall.pattern {
-                    assert_eq!(vector.len(), 3);
+                    assert_eq!(vector.len(), crate::EMBEDDING_DIM);
                     assert!((threshold - 0.8).abs() < 1e-6);
                 } else {
                     panic!("Expected embedding pattern");
@@ -965,5 +1111,111 @@ mod tests {
             }
             _ => panic!("Expected Spread query"),
         }
+    }
+
+    // ========================================================================
+    // Validation Tests
+    // ========================================================================
+
+    #[test]
+    fn test_validation_invalid_embedding_dimension() {
+        // 3-dimensional embedding should fail (expected 768)
+        let query = "RECALL [0.1, 0.2, 0.3]";
+        let result = Parser::parse(query);
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err.kind, ErrorKind::ValidationError { .. }));
+        assert!(err.to_string().contains("Invalid embedding dimension"));
+    }
+
+    #[test]
+    fn test_validation_valid_embedding_dimension() {
+        // 768-dimensional embedding should succeed
+        let mut values = Vec::new();
+        for i in 0..crate::EMBEDDING_DIM {
+            values.push(format!("{:.3}", i as f32 / crate::EMBEDDING_DIM as f32));
+        }
+        let query = format!("RECALL [{}]", values.join(", "));
+        let result = Parser::parse(&query);
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validation_invalid_threshold() {
+        // Threshold > 1.0 should fail AST validation
+        // Create 768-dimensional embedding
+        let mut values = Vec::new();
+        for _i in 0..crate::EMBEDDING_DIM {
+            values.push("0.1".to_string());
+        }
+        let query = format!("RECALL [{}] THRESHOLD 1.5", values.join(", "));
+        let result = Parser::parse(&query);
+
+        // Threshold validation now happens in AST validation
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err.kind, ErrorKind::ValidationError { .. }));
+        assert!(err.to_string().to_lowercase().contains("threshold"));
+    }
+
+    #[test]
+    fn test_validation_invalid_decay_rate() {
+        // Decay rate > 1.0 should fail validation
+        let query = "SPREAD FROM node DECAY 1.5";
+        let result = Parser::parse(query);
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err.kind, ErrorKind::ValidationError { .. }));
+        assert!(err.to_string().contains("decay"));
+    }
+
+    #[test]
+    fn test_validation_invalid_activation_threshold() {
+        // Activation threshold > 1.0 should fail validation
+        let query = "SPREAD FROM node THRESHOLD 1.5";
+        let result = Parser::parse(query);
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err.kind, ErrorKind::ValidationError { .. }));
+        assert!(err.to_string().contains("activation threshold"));
+    }
+
+    #[test]
+    fn test_validation_invalid_novelty() {
+        // Novelty > 1.0 should fail validation
+        let query = "IMAGINE episode NOVELTY 1.5";
+        let result = Parser::parse(query);
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err.kind, ErrorKind::ValidationError { .. }));
+        assert!(err.to_string().contains("novelty"));
+    }
+
+    #[test]
+    fn test_validation_error_messages_have_suggestions() {
+        let query = "RECALL [0.1, 0.2, 0.3]"; // Wrong dimension
+        let result = Parser::parse(query);
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+
+        // All validation errors should have suggestions and examples
+        assert!(
+            !err.suggestion.is_empty(),
+            "Missing suggestion in validation error"
+        );
+        assert!(
+            !err.example.is_empty(),
+            "Missing example in validation error"
+        );
+        assert!(
+            err.suggestion.contains("768")
+                || err.suggestion.contains(&crate::EMBEDDING_DIM.to_string())
+        );
     }
 }

@@ -13,6 +13,7 @@ When running locally: `http://localhost:7432`
 - `POST /api/v1/memories/remember` - Store a memory
 - `GET /api/v1/memories/recall` - Search and recall memories
 - `POST /api/v1/memories/recognize` - Pattern recognition
+- `POST /api/v1/complete` - Pattern completion (Beta) - Reconstruct missing details from partial memories
 
 ### System Endpoints
 

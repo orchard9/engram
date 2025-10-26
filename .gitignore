@@ -110,3 +110,5 @@ docs/assets/consolidation/baseline/*.dat
 # Regression benchmark artifacts
 engram-core/benches/regression/results/
 engram-core/benches/regression/baselines.json.backup.*
+zig/.zig-cache/
+/build

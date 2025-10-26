@@ -459,19 +459,8 @@ mod tests {
         // Get stats - should return all zeros initially
         let stats = get_arena_stats();
 
-        // Verify fields are reasonable (should all be zero after reset)
-        // We use >= 0 instead of == 0 because other tests might run concurrently
-        assert!(stats.total_resets >= 0, "total_resets should be non-negative");
-        assert!(
-            stats.total_overflows >= 0,
-            "total_overflows should be non-negative"
-        );
-        assert!(
-            stats.max_high_water_mark >= 0,
-            "max_high_water_mark should be non-negative"
-        );
-
-        // Verify debug assertions would catch unreasonable values
+        // Note: All stats fields are usize (unsigned) so they're always >= 0
+        // We just verify the debug assertions would catch unreasonable values
         // These limits match the debug_assert! checks in get_arena_stats()
         assert!(
             stats.total_resets < 1_000_000_000,

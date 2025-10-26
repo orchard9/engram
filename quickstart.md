@@ -107,7 +107,69 @@ curl -X POST http://localhost:7432/api/v1/episodes/remember \
   }' | jq '.'
 ```
 
+### Try Pattern Completion (Beta)
+
+Pattern completion reconstructs missing memory details using CA3 attractor dynamics:
+
+```bash
+# Store a complete memory
+curl -X POST http://localhost:7432/api/v1/episodes/remember \
+  -H "Content-Type: application/json" \
+  -d '{
+    "what": "Einstein published theory of relativity in 1915",
+    "when": "2024-01-05T10:00:00Z",
+    "where": "Physics lecture",
+    "confidence": 0.90
+  }' | jq '.'
+
+# Complete a partial memory
+curl -X POST http://localhost:7432/api/v1/complete \
+  -H "Content-Type: application/json" \
+  -d '{
+    "partial": {
+      "what": "Einstein published theory",
+      "when": null,
+      "where": "Physics lecture"
+    },
+    "params": {
+      "ca3_sparsity": 0.05,
+      "ca1_threshold": 0.7,
+      "num_hypotheses": 3
+    }
+  }' | jq '.'
+```
+
+✅ **Success indicator**: Returns completed episode with `source: "Reconstructed"`
+
+Expected output:
+
+```json
+{
+  "completed": {
+    "what": "Einstein published theory of relativity in 1915",
+    "when": "2024-01-05T10:00:00Z",
+    "where": "Physics lecture",
+    "confidence": 0.87
+  },
+  "source": "Reconstructed",
+  "completion_confidence": 0.82,
+  "alternatives": [
+    {
+      "what": "Einstein published theory of relativity",
+      "confidence": 0.79
+    }
+  ]
+}
+```
+
+**What just happened?**
+
+- `source: "Reconstructed"` - Engram filled in missing details using hippocampal pattern completion
+- `completion_confidence: 0.82` - Multi-factor confidence score for reconstruction quality
+- `alternatives` - Alternative hypotheses from System 2 reasoning
+
 ### Explore the API
+
 - Interactive docs: http://localhost:7432/docs
 - OpenAPI spec: http://localhost:7432/api-docs/openapi.json
 

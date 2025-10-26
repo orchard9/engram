@@ -192,7 +192,7 @@ mod tests {
 
     fn test_episode(content: &str) -> crate::memory::Episode {
         EpisodeBuilder::new()
-            .id(format!("test_{}", content))
+            .id(format!("test_{content}"))
             .when(Utc::now())
             .what(content.to_string())
             .embedding([0.0f32; 768])

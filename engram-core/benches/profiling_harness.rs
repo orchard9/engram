@@ -25,8 +25,19 @@ fn create_realistic_graph(seed: u64) -> Arc<MemoryGraph> {
     // Create nodes with realistic IDs
     let nodes: Vec<String> = (0..node_count).map(|i| format!("memory_{i:06}")).collect();
 
-    // Add edges using preferential attachment to create realistic degree distribution
-    // This creates a scale-free graph similar to real memory networks
+    // Add edges using preferential attachment to create realistic degree distribution.
+    // This creates a scale-free graph similar to real memory networks.
+    //
+    // IMPORTANT: This implementation uses *total degree* (in-degree + out-degree)
+    // for preferential attachment, not just out-degree. This means:
+    //   - Nodes that are popular targets (high in-degree) are more likely to be chosen as sources
+    //   - Nodes that are active sources (high out-degree) are more likely to be chosen again
+    //   - This creates bidirectional hub nodes, which is realistic for memory consolidation
+    //
+    // For memory graphs, total degree is appropriate because:
+    //   1. Frequently accessed memories (high in-degree) trigger more associations
+    //   2. Memories with many associations (high out-degree) are more likely to be reused
+    //   3. Real hippocampal-neocortical consolidation exhibits both patterns
     let mut node_degrees: Vec<usize> = vec![0; node_count];
 
     for edge_idx in 0..edge_count {
@@ -72,6 +83,8 @@ fn create_realistic_graph(seed: u64) -> Arc<MemoryGraph> {
             EdgeType::Excitatory,
         );
 
+        // Update total degree for both source and target
+        // This creates bidirectional hubs in the network
         node_degrees[source_idx] = node_degrees[source_idx].saturating_add(1);
         node_degrees[target_idx] = node_degrees[target_idx].saturating_add(1);
     }
@@ -149,7 +162,7 @@ fn run_decay_simulation(graph: &Arc<MemoryGraph>) {
 fn profiling_workload(c: &mut Criterion) {
     let mut group = c.benchmark_group("profiling_workload");
     group.sample_size(10); // Small sample size for profiling, not precise timing
-    group.warm_up_time(Duration::from_secs(2));
+    group.warm_up_time(Duration::from_secs(5)); // Increased from 2s for better cache warming
     group.measurement_time(Duration::from_secs(30)); // Long measurement for stable profiling
 
     group.bench_function("complete_workload", |b| {

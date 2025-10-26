@@ -2186,6 +2186,10 @@ impl MemoryStore {
     }
 
     /// Filter episodes by embedding similarity
+    ///
+    /// Uses ReLU transformation (max(0, cosine_sim)) to match neural population coding
+    /// where similarity is positive-valued. Negative correlations indicate orthogonal
+    /// or conceptually distinct memories (Kriegeskorte et al., 2008).
     fn filter_by_embedding(
         episodes: Vec<(String, Episode)>,
         vector: &[f32; 768],
@@ -2194,7 +2198,11 @@ impl MemoryStore {
         let mut results = Vec::new();
 
         for (_id, episode) in episodes {
-            let similarity = cosine_similarity(&episode.embedding, vector);
+            let raw_similarity = cosine_similarity(&episode.embedding, vector);
+            // ReLU transformation: negative similarities indicate orthogonal memories
+            // with zero overlap, not anti-similarity. This matches biological neural
+            // population coding where similarity is represented as positive activation overlap.
+            let similarity = raw_similarity.max(0.0);
             let confidence = Confidence::exact(similarity);
 
             if confidence.raw() >= threshold.raw() {
@@ -2270,6 +2278,19 @@ impl MemoryStore {
         let mut results = Vec::new();
 
         for (_id, episode) in episodes {
+            // Check for direct ID match first (hippocampal episodic indexing)
+            // This enables high-confidence, deterministic retrieval via node IDs
+            // analogous to CA3 pattern completion from sparse indices.
+            let id_match = episode.id == content;
+
+            if id_match {
+                // Direct ID lookup returns CERTAIN confidence - this is a deterministic
+                // address-based retrieval, not fuzzy matching.
+                results.push((episode, Confidence::CERTAIN));
+                continue;
+            }
+
+            // Otherwise, perform semantic content matching (neocortical retrieval)
             let match_score = Self::calculate_semantic_similarity(&episode.what, content);
 
             if match_score > 0.0 {

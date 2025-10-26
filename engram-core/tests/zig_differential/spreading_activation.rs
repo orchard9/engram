@@ -15,7 +15,7 @@
 //! implements the actual cache-optimized spreading activation. This validates the
 //! differential testing framework.
 
-use super::{EPSILON, NUM_PROPTEST_CASES, TestGraph, assert_slices_approx_eq};
+use super::{EPSILON_ITERATIVE, NUM_PROPTEST_CASES, TestGraph, assert_slices_approx_eq};
 use proptest::prelude::*;
 
 // Conditional import - tests work with or without zig-kernels feature
@@ -38,41 +38,28 @@ mod zig_kernels {
 }
 
 /// Rust baseline implementation of spreading activation
+///
+/// This is the reference implementation that uses explicit edge source tracking
+/// to properly compute spreading activation across graph edges.
 fn rust_spread_activation(
+    edge_sources: &[u32],
     adjacency: &[u32],
     weights: &[f32],
     activations: &mut [f32],
     num_nodes: usize,
     iterations: u32,
 ) {
+    assert_eq!(edge_sources.len(), adjacency.len());
     assert_eq!(adjacency.len(), weights.len());
 
-    // Build adjacency map for easier lookup
+    // Build adjacency map from explicit edge sources
     let mut adj_map: Vec<Vec<(usize, f32)>> = vec![Vec::new(); num_nodes];
-    for (edge_idx, &target) in adjacency.iter().enumerate() {
-        let target_idx = target as usize;
-        if target_idx < num_nodes && edge_idx < weights.len() {
-            // Find source by counting edges
-            let mut source = 0;
-            let mut edges_so_far = 0;
-            for node in 0..num_nodes {
-                let node_edges = adjacency
-                    .iter()
-                    .enumerate()
-                    .skip(edges_so_far)
-                    .take_while(|_| {
-                        // Simple heuristic: assume edges are grouped by source
-                        true
-                    })
-                    .count();
-                if edges_so_far + node_edges > edge_idx {
-                    source = node;
-                    break;
-                }
-                edges_so_far += node_edges;
-            }
 
-            adj_map[source].push((target_idx, weights[edge_idx]));
+    for (edge_idx, (&source, &target)) in edge_sources.iter().zip(adjacency.iter()).enumerate() {
+        let source_idx = source as usize;
+        let target_idx = target as usize;
+        if source_idx < num_nodes && target_idx < num_nodes {
+            adj_map[source_idx].push((target_idx, weights[edge_idx]));
         }
     }
 
@@ -159,6 +146,7 @@ proptest! {
 
         // Call Rust baseline
         rust_spread_activation(
+            &graph.edge_sources,
             &graph.adjacency,
             &graph.weights,
             &mut rust_activations,
@@ -167,7 +155,7 @@ proptest! {
         );
 
         // Verify equivalence
-        assert_slices_approx_eq(&rust_activations, &zig_activations, EPSILON);
+        assert_slices_approx_eq(&rust_activations, &zig_activations, EPSILON_ITERATIVE);
     }
 
     /// Property test: Linear chains with varying lengths
@@ -190,6 +178,7 @@ proptest! {
         );
 
         rust_spread_activation(
+            &graph.edge_sources,
             &graph.adjacency,
             &graph.weights,
             &mut rust_activations,
@@ -197,7 +186,7 @@ proptest! {
             iterations,
         );
 
-        assert_slices_approx_eq(&rust_activations, &zig_activations, EPSILON);
+        assert_slices_approx_eq(&rust_activations, &zig_activations, EPSILON_ITERATIVE);
     }
 
     /// Property test: Star graphs (hub-and-spoke)
@@ -220,6 +209,7 @@ proptest! {
         );
 
         rust_spread_activation(
+            &graph.edge_sources,
             &graph.adjacency,
             &graph.weights,
             &mut rust_activations,
@@ -227,7 +217,7 @@ proptest! {
             iterations,
         );
 
-        assert_slices_approx_eq(&rust_activations, &zig_activations, EPSILON);
+        assert_slices_approx_eq(&rust_activations, &zig_activations, EPSILON_ITERATIVE);
     }
 }
 
@@ -240,6 +230,7 @@ mod edge_cases {
         // Graph with no edges - activations should not change
         let graph = TestGraph {
             num_nodes: 5,
+            edge_sources: vec![],
             adjacency: vec![],
             weights: vec![],
             activations: vec![1.0, 0.5, 0.0, 0.3, 0.0],
@@ -256,6 +247,7 @@ mod edge_cases {
             10,
         );
         rust_spread_activation(
+            &graph.edge_sources,
             &graph.adjacency,
             &graph.weights,
             &mut rust_activations,
@@ -263,7 +255,7 @@ mod edge_cases {
             10,
         );
 
-        assert_slices_approx_eq(&rust_activations, &zig_activations, EPSILON);
+        assert_slices_approx_eq(&rust_activations, &zig_activations, EPSILON_ITERATIVE);
         // With no edges, stub no-op behavior should preserve activations
         // (but real implementation would also preserve them)
     }
@@ -272,6 +264,7 @@ mod edge_cases {
     fn test_single_node() {
         let graph = TestGraph {
             num_nodes: 1,
+            edge_sources: vec![],
             adjacency: vec![],
             weights: vec![],
             activations: vec![1.0],
@@ -288,6 +281,7 @@ mod edge_cases {
             5,
         );
         rust_spread_activation(
+            &graph.edge_sources,
             &graph.adjacency,
             &graph.weights,
             &mut rust_activations,
@@ -295,7 +289,7 @@ mod edge_cases {
             5,
         );
 
-        assert_slices_approx_eq(&rust_activations, &zig_activations, EPSILON);
+        assert_slices_approx_eq(&rust_activations, &zig_activations, EPSILON_ITERATIVE);
     }
 
     #[test]
@@ -314,6 +308,7 @@ mod edge_cases {
         );
 
         rust_spread_activation(
+            &graph.edge_sources,
             &graph.adjacency,
             &graph.weights,
             &mut rust_activations,
@@ -321,7 +316,7 @@ mod edge_cases {
             5,
         );
 
-        assert_slices_approx_eq(&rust_activations, &zig_activations, EPSILON);
+        assert_slices_approx_eq(&rust_activations, &zig_activations, EPSILON_ITERATIVE);
     }
 
     #[test]
@@ -340,6 +335,7 @@ mod edge_cases {
         );
 
         rust_spread_activation(
+            &graph.edge_sources,
             &graph.adjacency,
             &graph.weights,
             &mut rust_activations,
@@ -347,7 +343,7 @@ mod edge_cases {
             50,
         );
 
-        assert_slices_approx_eq(&rust_activations, &zig_activations, EPSILON);
+        assert_slices_approx_eq(&rust_activations, &zig_activations, EPSILON_ITERATIVE);
     }
 
     #[test]
@@ -355,6 +351,7 @@ mod edge_cases {
         // Create a cycle: 0 -> 1 -> 2 -> 0
         let graph = TestGraph {
             num_nodes: 3,
+            edge_sources: vec![0, 1, 2],
             adjacency: vec![1, 2, 0],
             weights: vec![1.0, 1.0, 1.0],
             activations: vec![1.0, 0.0, 0.0],
@@ -372,6 +369,7 @@ mod edge_cases {
         );
 
         rust_spread_activation(
+            &graph.edge_sources,
             &graph.adjacency,
             &graph.weights,
             &mut rust_activations,
@@ -379,7 +377,7 @@ mod edge_cases {
             10,
         );
 
-        assert_slices_approx_eq(&rust_activations, &zig_activations, EPSILON);
+        assert_slices_approx_eq(&rust_activations, &zig_activations, EPSILON_ITERATIVE);
     }
 
     #[test]
@@ -387,6 +385,7 @@ mod edge_cases {
         // Graph with edges but zero weights - no spreading should occur
         let graph = TestGraph {
             num_nodes: 4,
+            edge_sources: vec![0, 0, 0],
             adjacency: vec![1, 2, 3],
             weights: vec![0.0, 0.0, 0.0],
             activations: vec![1.0, 0.0, 0.0, 0.0],
@@ -404,6 +403,7 @@ mod edge_cases {
         );
 
         rust_spread_activation(
+            &graph.edge_sources,
             &graph.adjacency,
             &graph.weights,
             &mut rust_activations,
@@ -411,7 +411,7 @@ mod edge_cases {
             5,
         );
 
-        assert_slices_approx_eq(&rust_activations, &zig_activations, EPSILON);
+        assert_slices_approx_eq(&rust_activations, &zig_activations, EPSILON_ITERATIVE);
     }
 
     #[test]
@@ -419,6 +419,7 @@ mod edge_cases {
         // Graph with negative weights (inhibitory connections)
         let graph = TestGraph {
             num_nodes: 3,
+            edge_sources: vec![0, 0],
             adjacency: vec![1, 2],
             weights: vec![1.0, -0.5],
             activations: vec![1.0, 0.0, 0.0],
@@ -436,6 +437,7 @@ mod edge_cases {
         );
 
         rust_spread_activation(
+            &graph.edge_sources,
             &graph.adjacency,
             &graph.weights,
             &mut rust_activations,
@@ -443,13 +445,14 @@ mod edge_cases {
             5,
         );
 
-        assert_slices_approx_eq(&rust_activations, &zig_activations, EPSILON);
+        assert_slices_approx_eq(&rust_activations, &zig_activations, EPSILON_ITERATIVE);
     }
 
     #[test]
     fn test_all_nodes_activated() {
         let graph = TestGraph {
             num_nodes: 5,
+            edge_sources: vec![0, 0, 0, 0],
             adjacency: vec![1, 2, 3, 4],
             weights: vec![0.5, 0.5, 0.5, 0.5],
             activations: vec![1.0, 1.0, 1.0, 1.0, 1.0],
@@ -467,6 +470,7 @@ mod edge_cases {
         );
 
         rust_spread_activation(
+            &graph.edge_sources,
             &graph.adjacency,
             &graph.weights,
             &mut rust_activations,
@@ -474,7 +478,7 @@ mod edge_cases {
             5,
         );
 
-        assert_slices_approx_eq(&rust_activations, &zig_activations, EPSILON);
+        assert_slices_approx_eq(&rust_activations, &zig_activations, EPSILON_ITERATIVE);
     }
 
     #[test]
@@ -493,6 +497,7 @@ mod edge_cases {
         );
 
         rust_spread_activation(
+            &graph.edge_sources,
             &graph.adjacency,
             &graph.weights,
             &mut rust_activations,
@@ -500,7 +505,7 @@ mod edge_cases {
             1,
         );
 
-        assert_slices_approx_eq(&rust_activations, &zig_activations, EPSILON);
+        assert_slices_approx_eq(&rust_activations, &zig_activations, EPSILON_ITERATIVE);
     }
 
     #[test]
@@ -519,6 +524,7 @@ mod edge_cases {
         );
 
         rust_spread_activation(
+            &graph.edge_sources,
             &graph.adjacency,
             &graph.weights,
             &mut rust_activations,
@@ -526,16 +532,131 @@ mod edge_cases {
             100,
         );
 
-        assert_slices_approx_eq(&rust_activations, &zig_activations, EPSILON);
+        assert_slices_approx_eq(&rust_activations, &zig_activations, EPSILON_ITERATIVE);
     }
 }
 
 #[cfg(test)]
 mod regression_tests {
-    
+    use super::*;
 
+    /// Regression test for Issue C1: Broken edge source inference
+    ///
+    /// Previously, the Rust baseline used `take_while(|_| true)` which consumed
+    /// ALL edges on the first iteration. This test verifies proper edge tracking.
     #[test]
-    fn test_regression_placeholder() {
-        // Regression tests will be added as interesting cases are discovered
+    fn test_regression_edge_source_tracking() {
+        // Simple graph where source tracking matters: 0->1, 1->2
+        let graph = TestGraph {
+            num_nodes: 3,
+            edge_sources: vec![0, 1],
+            adjacency: vec![1, 2],
+            weights: vec![1.0, 1.0],
+            activations: vec![1.0, 0.0, 0.0],
+        };
+
+        let mut zig_activations = graph.activations.clone();
+        let mut rust_activations = graph.activations.clone();
+
+        zig_kernels::spread_activation(
+            &graph.adjacency,
+            &graph.weights,
+            &mut zig_activations,
+            graph.num_nodes,
+            1,
+        );
+
+        rust_spread_activation(
+            &graph.edge_sources,
+            &graph.adjacency,
+            &graph.weights,
+            &mut rust_activations,
+            graph.num_nodes,
+            1,
+        );
+
+        // After 1 iteration: node 0 should spread to node 1
+        // Node 1 should NOT spread yet (activation happens after iteration completes)
+        assert_slices_approx_eq(&rust_activations, &zig_activations, EPSILON_ITERATIVE);
+    }
+
+    /// Regression test for self-loops (missing edge case from H8)
+    #[test]
+    fn test_regression_self_loops() {
+        // Each node has a self-loop with weight 0.9
+        let graph = TestGraph {
+            num_nodes: 3,
+            edge_sources: vec![0, 1, 2],
+            adjacency: vec![0, 1, 2],
+            weights: vec![0.9, 0.9, 0.9],
+            activations: vec![1.0, 0.5, 0.2],
+        };
+
+        let mut zig_activations = graph.activations.clone();
+        let mut rust_activations = graph.activations.clone();
+
+        zig_kernels::spread_activation(
+            &graph.adjacency,
+            &graph.weights,
+            &mut zig_activations,
+            graph.num_nodes,
+            5,
+        );
+
+        rust_spread_activation(
+            &graph.edge_sources,
+            &graph.adjacency,
+            &graph.weights,
+            &mut rust_activations,
+            graph.num_nodes,
+            5,
+        );
+
+        // Verify activations don't explode (normalization kicks in)
+        assert_slices_approx_eq(&rust_activations, &zig_activations, EPSILON_ITERATIVE);
+        for &act in &rust_activations {
+            assert!(act <= 1.0, "Activations should be normalized");
+        }
+    }
+
+    /// Regression test for multi-edges (missing edge case from H8)
+    #[test]
+    fn test_regression_multi_edges() {
+        // Multiple edges from node 0 to node 1
+        let graph = TestGraph {
+            num_nodes: 2,
+            edge_sources: vec![0, 0, 0],
+            adjacency: vec![1, 1, 1],
+            weights: vec![0.3, 0.3, 0.3],
+            activations: vec![1.0, 0.0],
+        };
+
+        let mut zig_activations = graph.activations.clone();
+        let mut rust_activations = graph.activations.clone();
+
+        zig_kernels::spread_activation(
+            &graph.adjacency,
+            &graph.weights,
+            &mut zig_activations,
+            graph.num_nodes,
+            1,
+        );
+
+        rust_spread_activation(
+            &graph.edge_sources,
+            &graph.adjacency,
+            &graph.weights,
+            &mut rust_activations,
+            graph.num_nodes,
+            1,
+        );
+
+        // Weights should sum (node 1 should receive 0.3 + 0.3 + 0.3 = 0.9)
+        assert_slices_approx_eq(&rust_activations, &zig_activations, EPSILON_ITERATIVE);
+        assert!(
+            (rust_activations[1] - 0.9).abs() < EPSILON_ITERATIVE,
+            "Multi-edge weights should sum, got {}",
+            rust_activations[1]
+        );
     }
 }

@@ -676,7 +676,7 @@ fn generate_suggestion_and_example(
         ),
 
         ParserContext::InPattern => (
-            "Pattern can be a node ID, embedding vector [...], or content string".to_string(),
+            "Use a node ID, embedding vector [...], or content string as the pattern".to_string(),
             "RECALL [0.1, 0.2, 0.3] THRESHOLD 0.8".to_string(),
         ),
 

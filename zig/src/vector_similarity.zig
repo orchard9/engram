@@ -170,8 +170,6 @@ pub fn batchCosineSimilarity(
 /// - ARM64 with NEON: 4 floats per instruction
 /// - Fallback: Scalar implementation with autovectorization hints
 fn dotProductSimd(a: []const f32, b: []const f32) f32 {
-    const len = a.len;
-
     // Runtime CPU feature detection for x86_64
     // For ARM64, NEON is always available (part of base ISA)
     if (builtin.cpu.arch == .x86_64) {

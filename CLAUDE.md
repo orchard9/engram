@@ -30,19 +30,19 @@ If at any point anything gets stuck, move the task to \_blocked, write in the ta
 
 1. Use the systems-product-planner agent to review the previous milestone status and create a comprehensive implementation plan
 2. Create roadmap/milestone-{number}/ directory for the new milestone
-3. Convert the agent's plan into individual task files (001_*_pending.md, 002_*_pending.md, etc.)
+3. Convert the agent's plan into individual task files (001*\*\_pending.md, 002*\*\_pending.md, etc.)
 4. For each task file, use the appropriate specialized agent to review and enhance:
-   - rust-graph-engine-architect: for graph engine and concurrent data structure tasks
-   - systems-architecture-optimizer: for storage, persistence, and performance tasks
-   - memory-systems-researcher: for cognitive dynamics and decay function tasks
-   - verification-testing-lead: for testing, benchmarking, and validation tasks
-   - gpu-acceleration-architect: for SIMD and parallel processing tasks
+    - rust-graph-engine-architect: for graph engine and concurrent data structure tasks
+    - systems-architecture-optimizer: for storage, persistence, and performance tasks
+    - memory-systems-researcher: for cognitive dynamics and decay function tasks
+    - verification-testing-lead: for testing, benchmarking, and validation tasks
+    - gpu-acceleration-architect: for SIMD and parallel processing tasks
 5. Each enhanced task file should include:
-   - Precise technical specifications
-   - Integration points with existing codebase
-   - Specific file paths to create/modify
-   - Acceptance criteria and testing approach
-   - Dependencies and blocking relationships
+    - Precise technical specifications
+    - Integration points with existing codebase
+    - Specific file paths to create/modify
+    - Acceptance criteria and testing approach
+    - Dependencies and blocking relationships
 6. Review all tasks for consistency and completeness
 7. Ensure critical path is clearly identified
 8. Commit the milestone plan with all task files
@@ -61,23 +61,27 @@ If at any point anything gets stuck, move the task to \_blocked, write in the ta
 ## How to write content
 
 When asked to "write content <task file>":
+
 1. Read the specified task file to understand the implementation details
 2. Identify the task number (e.g., 001, 002, 010) and task name from the file
 3. Write content to the appropriate task-specific directory
 
 Content is organized by milestone and task:
-- Base path: `content/milestone_{number}/{task_number}_{task_name}/`
-- Example: `content/milestone_1/001_simd_vector_operations/`
-- Example: `content/milestone_1/010_production_monitoring/`
+
+-   Base path: `content/milestone_{number}/{task_number}_{task_name}/`
+-   Example: `content/milestone_1/001_simd_vector_operations/`
+-   Example: `content/milestone_1/010_production_monitoring/`
 
 For each content piece, create the following files in the task directory:
+
 1. `{content_title}_research.md` - Research topics and findings
 2. `{content_title}_perspectives.md` - Multiple architectural perspectives:
-   - cognitive-architecture, memory-systems, rust-graph-engine, systems-architecture
+    - cognitive-architecture, memory-systems, rust-graph-engine, systems-architecture
 3. `{content_title}_medium.md` - Long-form technical article (choose one perspective)
 4. `{content_title}_twitter.md` - Twitter thread format
 
 Content writing process:
+
 1. Read the current milestone and specific task to understand context
 2. Research topics and document findings in the research file
 3. Develop perspectives from different architectural viewpoints
@@ -139,3 +143,4 @@ graph-systems-acceptance-tester: Use for validating graph database functionality
 ### Rules
 
 Never use emojis. Remove all emojis from any files.
+Never use github workflows.

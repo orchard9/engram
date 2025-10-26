@@ -56,6 +56,7 @@ pub mod parser;
 pub mod token;
 pub mod tokenizer;
 pub mod typo_detection;
+pub mod validation;
 
 // Re-export public API
 pub use ast::*;

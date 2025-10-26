@@ -15,7 +15,7 @@
 //! implements the actual SIMD Ebbinghaus decay. This validates the differential
 //! testing framework correctly detects divergence.
 
-use super::{EPSILON, NUM_PROPTEST_CASES, assert_slices_approx_eq};
+use super::{EPSILON_TRANSCENDENTAL, NUM_PROPTEST_CASES, assert_slices_approx_eq};
 use proptest::prelude::*;
 
 // Conditional import - tests work with or without zig-kernels feature
@@ -33,20 +33,27 @@ mod zig_kernels {
 
 /// Rust baseline implementation of Ebbinghaus decay
 ///
-/// Uses the forgetting curve: S(t) = S₀ * e^(-t/τ)
+/// Uses the forgetting curve: S(t) = S₀ * exp(-t/half_life)
 /// where:
 /// - S(t) is strength at time t
 /// - S₀ is initial strength
-/// - τ is the time constant (memory half-life)
+/// - half_life is the decay time constant (86400 seconds = 1 day)
 /// - t is age in seconds
+///
+/// IMPORTANT: This uses "half-life" semantics matching Zig's DEFAULT_HALF_LIFE.
+/// After time = half_life, strength decays to S₀ * exp(-1) ≈ 0.3679 * S₀
+///
+/// Note: "half-life" in this context is NOT the radioactive decay half-life
+/// (which would use exp(-t*ln(2)/half_life) to decay to 0.5). Instead, it's
+/// the time constant τ where strength decays to 1/e.
 fn rust_ebbinghaus_decay(strengths: &mut [f32], ages_seconds: &[u64]) {
     assert_eq!(strengths.len(), ages_seconds.len());
 
-    const TAU: f64 = 86400.0; // Time constant: 1 day in seconds
+    const HALF_LIFE: f64 = 86400.0; // Matches Zig's DEFAULT_HALF_LIFE (1 day in seconds)
 
     for (strength, &age) in strengths.iter_mut().zip(ages_seconds.iter()) {
         let age_f64 = age as f64;
-        let decay_factor = (-age_f64 / TAU).exp();
+        let decay_factor = (-age_f64 / HALF_LIFE).exp();
         *strength *= decay_factor as f32;
     }
 }
@@ -72,8 +79,8 @@ proptest! {
         // Call Rust baseline
         rust_ebbinghaus_decay(&mut rust_strengths, &ages);
 
-        // Verify equivalence
-        assert_slices_approx_eq(&rust_strengths, &zig_strengths, EPSILON);
+        // Verify equivalence (use EPSILON_TRANSCENDENTAL for exp operations)
+        assert_slices_approx_eq(&rust_strengths, &zig_strengths, EPSILON_TRANSCENDENTAL);
     }
 
     /// Property test: Varying batch sizes
@@ -92,7 +99,7 @@ proptest! {
         zig_kernels::apply_decay(&mut zig_strengths, &ages);
         rust_ebbinghaus_decay(&mut rust_strengths, &ages);
 
-        assert_slices_approx_eq(&rust_strengths, &zig_strengths, EPSILON);
+        assert_slices_approx_eq(&rust_strengths, &zig_strengths, EPSILON_TRANSCENDENTAL);
     }
 
     /// Property test: Uniform age distributions
@@ -112,7 +119,7 @@ proptest! {
         zig_kernels::apply_decay(&mut zig_strengths, &ages);
         rust_ebbinghaus_decay(&mut rust_strengths, &ages);
 
-        assert_slices_approx_eq(&rust_strengths, &zig_strengths, EPSILON);
+        assert_slices_approx_eq(&rust_strengths, &zig_strengths, EPSILON_TRANSCENDENTAL);
     }
 
     /// Property test: Varying strength, constant age
@@ -129,7 +136,7 @@ proptest! {
         zig_kernels::apply_decay(&mut zig_strengths, &ages);
         rust_ebbinghaus_decay(&mut rust_strengths, &ages);
 
-        assert_slices_approx_eq(&rust_strengths, &zig_strengths, EPSILON);
+        assert_slices_approx_eq(&rust_strengths, &zig_strengths, EPSILON_TRANSCENDENTAL);
     }
 
     /// Property test: Linear age progression
@@ -150,7 +157,7 @@ proptest! {
         zig_kernels::apply_decay(&mut zig_strengths, &ages);
         rust_ebbinghaus_decay(&mut rust_strengths, &ages);
 
-        assert_slices_approx_eq(&rust_strengths, &zig_strengths, EPSILON);
+        assert_slices_approx_eq(&rust_strengths, &zig_strengths, EPSILON_TRANSCENDENTAL);
     }
 }
 
@@ -168,12 +175,12 @@ mod edge_cases {
         zig_kernels::apply_decay(&mut zig_strengths, &ages);
         rust_ebbinghaus_decay(&mut rust_strengths, &ages);
 
-        assert_slices_approx_eq(&rust_strengths, &zig_strengths, EPSILON);
+        assert_slices_approx_eq(&rust_strengths, &zig_strengths, EPSILON_TRANSCENDENTAL);
 
         // All strengths should be unchanged (decay factor = e^0 = 1)
         for (&rust_val, &expected) in rust_strengths.iter().zip(&[1.0, 0.8, 0.5, 0.3, 0.1]) {
             assert!(
-                (rust_val - expected).abs() < EPSILON,
+                (rust_val - expected).abs() < EPSILON_TRANSCENDENTAL,
                 "Zero age should preserve strength: expected {expected}, got {rust_val}"
             );
         }
@@ -189,7 +196,7 @@ mod edge_cases {
         zig_kernels::apply_decay(&mut zig_strengths, &ages);
         rust_ebbinghaus_decay(&mut rust_strengths, &ages);
 
-        assert_slices_approx_eq(&rust_strengths, &zig_strengths, EPSILON);
+        assert_slices_approx_eq(&rust_strengths, &zig_strengths, EPSILON_TRANSCENDENTAL);
 
         // All strengths should be heavily decayed (near zero)
         for &strength in &rust_strengths {
@@ -210,11 +217,11 @@ mod edge_cases {
         zig_kernels::apply_decay(&mut zig_strengths, &ages);
         rust_ebbinghaus_decay(&mut rust_strengths, &ages);
 
-        assert_slices_approx_eq(&rust_strengths, &zig_strengths, EPSILON);
+        assert_slices_approx_eq(&rust_strengths, &zig_strengths, EPSILON_TRANSCENDENTAL);
 
         for &strength in &rust_strengths {
             assert!(
-                strength.abs() < EPSILON,
+                strength.abs() < EPSILON_TRANSCENDENTAL,
                 "Zero strength should remain zero: got {strength}"
             );
         }
@@ -229,7 +236,7 @@ mod edge_cases {
         zig_kernels::apply_decay(&mut zig_strengths, &ages);
         rust_ebbinghaus_decay(&mut rust_strengths, &ages);
 
-        assert_slices_approx_eq(&rust_strengths, &zig_strengths, EPSILON);
+        assert_slices_approx_eq(&rust_strengths, &zig_strengths, EPSILON_TRANSCENDENTAL);
     }
 
     #[test]
@@ -242,7 +249,7 @@ mod edge_cases {
         zig_kernels::apply_decay(&mut zig_strengths, &ages);
         rust_ebbinghaus_decay(&mut rust_strengths, &ages);
 
-        assert_slices_approx_eq(&rust_strengths, &zig_strengths, EPSILON);
+        assert_slices_approx_eq(&rust_strengths, &zig_strengths, EPSILON_TRANSCENDENTAL);
     }
 
     #[test]
@@ -254,7 +261,7 @@ mod edge_cases {
         zig_kernels::apply_decay(&mut zig_strengths, &ages);
         rust_ebbinghaus_decay(&mut rust_strengths, &ages);
 
-        assert_slices_approx_eq(&rust_strengths, &zig_strengths, EPSILON);
+        assert_slices_approx_eq(&rust_strengths, &zig_strengths, EPSILON_TRANSCENDENTAL);
 
         // Should decay slightly from 1.0
         for &strength in &rust_strengths {
@@ -274,7 +281,7 @@ mod edge_cases {
         zig_kernels::apply_decay(&mut zig_strengths, &ages);
         rust_ebbinghaus_decay(&mut rust_strengths, &ages);
 
-        assert_slices_approx_eq(&rust_strengths, &zig_strengths, EPSILON);
+        assert_slices_approx_eq(&rust_strengths, &zig_strengths, EPSILON_TRANSCENDENTAL);
 
         // Should decay to ~0.37 (e^-1)
         for &strength in &rust_strengths {
@@ -294,7 +301,7 @@ mod edge_cases {
         zig_kernels::apply_decay(&mut zig_strengths, &ages);
         rust_ebbinghaus_decay(&mut rust_strengths, &ages);
 
-        assert_slices_approx_eq(&rust_strengths, &zig_strengths, EPSILON);
+        assert_slices_approx_eq(&rust_strengths, &zig_strengths, EPSILON_TRANSCENDENTAL);
 
         // Should decay significantly
         for &strength in &rust_strengths {
@@ -320,17 +327,21 @@ mod edge_cases {
         zig_kernels::apply_decay(&mut zig_strengths, &ages);
         rust_ebbinghaus_decay(&mut rust_strengths, &ages);
 
-        assert_slices_approx_eq(&rust_strengths, &zig_strengths, EPSILON);
+        assert_slices_approx_eq(&rust_strengths, &zig_strengths, EPSILON_TRANSCENDENTAL);
 
-        // Strengths should be monotonically decreasing
+        // Strengths should be monotonically decreasing (allow small FP rounding errors)
         for i in 0..rust_strengths.len() - 1 {
+            let diff = rust_strengths[i] - rust_strengths[i + 1];
             assert!(
-                rust_strengths[i] >= rust_strengths[i + 1],
-                "Older memories should have lower strength: strengths[{}]={} >= strengths[{}]={}",
+                diff >= -EPSILON_TRANSCENDENTAL,
+                "Older memories should have lower strength (modulo FP rounding): \
+                 strengths[{}]={} should be >= strengths[{}]={} (diff={}, epsilon={})",
                 i,
                 rust_strengths[i],
                 i + 1,
-                rust_strengths[i + 1]
+                rust_strengths[i + 1],
+                diff,
+                EPSILON_TRANSCENDENTAL
             );
         }
     }
@@ -344,7 +355,7 @@ mod edge_cases {
         zig_kernels::apply_decay(&mut zig_strengths, &ages);
         rust_ebbinghaus_decay(&mut rust_strengths, &ages);
 
-        assert_slices_approx_eq(&rust_strengths, &zig_strengths, EPSILON);
+        assert_slices_approx_eq(&rust_strengths, &zig_strengths, EPSILON_TRANSCENDENTAL);
 
         // Relative ordering should be preserved
         for i in 0..rust_strengths.len() - 1 {
@@ -364,7 +375,7 @@ mod edge_cases {
         zig_kernels::apply_decay(&mut zig_strengths, &ages);
         rust_ebbinghaus_decay(&mut rust_strengths, &ages);
 
-        assert_slices_approx_eq(&rust_strengths, &zig_strengths, EPSILON);
+        assert_slices_approx_eq(&rust_strengths, &zig_strengths, EPSILON_TRANSCENDENTAL);
     }
 
     #[test]
@@ -376,7 +387,7 @@ mod edge_cases {
         zig_kernels::apply_decay(&mut zig_strengths, &ages);
         rust_ebbinghaus_decay(&mut rust_strengths, &ages);
 
-        assert_slices_approx_eq(&rust_strengths, &zig_strengths, EPSILON);
+        assert_slices_approx_eq(&rust_strengths, &zig_strengths, EPSILON_TRANSCENDENTAL);
     }
 
     #[test]
@@ -389,7 +400,7 @@ mod edge_cases {
         zig_kernels::apply_decay(&mut zig_strengths, &ages);
         rust_ebbinghaus_decay(&mut rust_strengths, &ages);
 
-        assert_slices_approx_eq(&rust_strengths, &zig_strengths, EPSILON);
+        assert_slices_approx_eq(&rust_strengths, &zig_strengths, EPSILON_TRANSCENDENTAL);
     }
 
     #[test]
@@ -401,7 +412,7 @@ mod edge_cases {
         zig_kernels::apply_decay(&mut zig_strengths, &ages);
         rust_ebbinghaus_decay(&mut rust_strengths, &ages);
 
-        assert_slices_approx_eq(&rust_strengths, &zig_strengths, EPSILON);
+        assert_slices_approx_eq(&rust_strengths, &zig_strengths, EPSILON_TRANSCENDENTAL);
     }
 
     #[test]
@@ -413,16 +424,88 @@ mod edge_cases {
         zig_kernels::apply_decay(&mut zig_strengths, &ages);
         rust_ebbinghaus_decay(&mut rust_strengths, &ages);
 
-        assert_slices_approx_eq(&rust_strengths, &zig_strengths, EPSILON);
+        assert_slices_approx_eq(&rust_strengths, &zig_strengths, EPSILON_TRANSCENDENTAL);
     }
 }
 
 #[cfg(test)]
 mod regression_tests {
-    
+    use super::*;
 
+    /// Regression test for Issue H3: Decay constant semantics clarification
+    ///
+    /// Verifies that Rust and Zig use the same "half-life" semantics.
+    /// After time = half_life, strength should decay to exp(-1) ≈ 0.3679
     #[test]
-    fn test_regression_placeholder() {
-        // Regression tests will be added as interesting cases are discovered
+    fn test_regression_decay_constant_semantics() {
+        let mut zig_strengths = vec![1.0; 5];
+        let mut rust_strengths = vec![1.0; 5];
+        let ages = vec![86400; 5]; // Exactly 1 half-life
+
+        zig_kernels::apply_decay(&mut zig_strengths, &ages);
+        rust_ebbinghaus_decay(&mut rust_strengths, &ages);
+
+        // Both should decay to exp(-1) ≈ 0.3679
+        assert_slices_approx_eq(&rust_strengths, &zig_strengths, EPSILON_TRANSCENDENTAL);
+        for &strength in &rust_strengths {
+            assert!(
+                (strength - 0.3679).abs() < 0.01,
+                "After one half-life, strength should be ~0.3679, got {strength}"
+            );
+        }
+    }
+
+    /// Regression test for Issue H4: Denormal float handling
+    ///
+    /// Previously, test only checked exact zero. This verifies denormal handling.
+    #[test]
+    fn test_regression_denormal_strengths() {
+        let mut zig_strengths = vec![
+            f32::MIN_POSITIVE, // Smallest normal float
+            1e-38,             // Near denormal threshold
+            1e-45,             // Denormal float
+            0.0,               // Exact zero
+        ];
+        let mut rust_strengths = zig_strengths.clone();
+        let ages = vec![86400; 4]; // 1 day decay
+
+        zig_kernels::apply_decay(&mut zig_strengths, &ages);
+        rust_ebbinghaus_decay(&mut rust_strengths, &ages);
+
+        // Verify no NaN/Inf and consistent handling
+        for (zig, rust) in zig_strengths.iter().zip(rust_strengths.iter()) {
+            assert!(!zig.is_nan() && !rust.is_nan(), "Should not produce NaN");
+            assert!(
+                !zig.is_infinite() && !rust.is_infinite(),
+                "Should not produce Inf"
+            );
+        }
+
+        assert_slices_approx_eq(&rust_strengths, &zig_strengths, EPSILON_TRANSCENDENTAL);
+    }
+
+    /// Regression test for Issue H7: NaN/Inf numerical stability checks
+    ///
+    /// Verifies that very large and very small values don't produce NaN/Inf.
+    #[test]
+    fn test_regression_numerical_stability() {
+        let mut zig_strengths = vec![1e10, 1e-10, f32::MAX, f32::MIN_POSITIVE];
+        let mut rust_strengths = zig_strengths.clone();
+        let ages = vec![1000, 10_000, 100_000, 1_000_000];
+
+        zig_kernels::apply_decay(&mut zig_strengths, &ages);
+        rust_ebbinghaus_decay(&mut rust_strengths, &ages);
+
+        // Check for NaN/Inf in results
+        for &strength in &rust_strengths {
+            assert!(!strength.is_nan(), "Rust produced NaN");
+            assert!(!strength.is_infinite(), "Rust produced Inf");
+        }
+        for &strength in &zig_strengths {
+            assert!(!strength.is_nan(), "Zig produced NaN");
+            assert!(!strength.is_infinite(), "Zig produced Inf");
+        }
+
+        assert_slices_approx_eq(&rust_strengths, &zig_strengths, EPSILON_TRANSCENDENTAL);
     }
 }

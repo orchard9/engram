@@ -21,7 +21,9 @@ Milestone 9 successfully delivers a production-grade query language parser and e
 
 ---
 
-## Tasks Completed (12/12)
+## Tasks Completed (12/12 Core Tasks)
+
+**Note**: Task 013 (Fix Executor Clippy Warnings) was created during review as optional technical debt cleanup. It remains PENDING but does not block milestone completion.
 
 ### ✅ Task 001: Parser Infrastructure
 - **Status**: COMPLETE

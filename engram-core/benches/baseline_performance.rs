@@ -36,9 +36,37 @@ fn generate_embedding(rng: &mut StdRng) -> [f32; 768] {
     embedding
 }
 
-/// Compute cosine similarity between two embeddings
+/// Compute cosine similarity between two normalized 768-dimensional embeddings.
+///
+/// # Preconditions
+/// - Both input vectors MUST have unit L2 norm (magnitude = 1.0)
+/// - For normalized vectors, cosine similarity equals dot product
+///
+/// # Arguments
+/// - `a`: First normalized embedding
+/// - `b`: Second normalized embedding
+///
+/// # Returns
+/// Cosine similarity in range [-1.0, 1.0]
+///
+/// # Panics
+/// In debug builds, panics if vectors are not normalized (tolerance: 1%)
 #[inline]
 fn cosine_similarity(a: &[f32; 768], b: &[f32; 768]) -> f32 {
+    #[cfg(debug_assertions)]
+    {
+        let mag_a = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+        let mag_b = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+        debug_assert!(
+            (mag_a - 1.0).abs() < 0.01,
+            "Vector a not normalized: magnitude = {mag_a}"
+        );
+        debug_assert!(
+            (mag_b - 1.0).abs() < 0.01,
+            "Vector b not normalized: magnitude = {mag_b}"
+        );
+    }
+
     a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
 }
 
