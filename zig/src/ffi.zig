@@ -75,11 +75,11 @@ export fn engram_vector_similarity(
 
 /// Activation spreading kernel (graph-based propagation with refractory periods)
 ///
-/// Performs BFS-style spreading activation across a graph represented in CSR format.
+/// Performs iterative spreading activation across a graph represented in edge-list format.
 /// Updates activations in-place for specified number of iterations.
 ///
 /// Memory Layout:
-/// - adjacency: [num_edges]u32 CSR edge destinations
+/// - adjacency: [num_edges]u32 edge target node indices
 /// - weights: [num_edges]f32 edge weights
 /// - activations: [num_nodes]f32 node activation levels (in/out)
 ///
@@ -88,8 +88,9 @@ export fn engram_vector_similarity(
 /// - weights.len == num_edges
 /// - activations.len == num_nodes
 /// - iterations > 0
+/// - All indices in adjacency are < num_nodes
 ///
-/// Stub Implementation: No-op until Task 006 implements cache-optimized BFS
+/// Implementation: Cache-optimized iterative spreading with normalization (Task 006)
 export fn engram_spread_activation(
     adjacency: [*]const u32,
     weights: [*]const f32,
@@ -98,14 +99,22 @@ export fn engram_spread_activation(
     num_edges: usize,
     iterations: u32,
 ) void {
-    // Stub implementation - no-op
-    // Task 006 will implement cache-optimized spreading activation
-    _ = adjacency;
-    _ = weights;
-    _ = activations;
-    _ = num_nodes;
-    _ = num_edges;
-    _ = iterations;
+    const spreading = @import("spreading_activation.zig");
+
+    // Convert raw pointers to slices for safe Zig code
+    const adjacency_slice = adjacency[0..num_edges];
+    const weights_slice = weights[0..num_edges];
+    const activations_slice = activations[0..num_nodes];
+
+    // Delegate to spreading activation implementation
+    spreading.spreadActivation(
+        adjacency_slice,
+        weights_slice,
+        activations_slice,
+        num_nodes,
+        num_edges,
+        iterations,
+    );
 }
 
 /// Memory decay kernel (Ebbinghaus exponential decay)
@@ -155,12 +164,11 @@ test "vector_similarity_ffi_identical_vectors" {
     try std.testing.expectApproxEqAbs(0.0, scores[1], 1e-6);
 }
 
-test "spread_activation_stub_is_noop" {
+test "spread_activation_propagates_activation" {
+    // Simple graph: 0 -> 1, 0 -> 2
     const adjacency = [_]u32{ 1, 2 };
     const weights = [_]f32{ 0.5, 0.3 };
     var activations = [_]f32{ 1.0, 0.0, 0.0 };
-
-    const original_activations = activations;
 
     engram_spread_activation(
         &adjacency,
@@ -168,13 +176,14 @@ test "spread_activation_stub_is_noop" {
         &activations,
         3,
         2,
-        5,
+        1,
     );
 
-    // Stub should not modify activations
-    try std.testing.expectEqual(original_activations[0], activations[0]);
-    try std.testing.expectEqual(original_activations[1], activations[1]);
-    try std.testing.expectEqual(original_activations[2], activations[2]);
+    // After 1 iteration: nodes 1 and 2 should have received activation
+    try std.testing.expect(activations[1] > 0.0);
+    try std.testing.expect(activations[2] > 0.0);
+    // Source activation should be preserved (normalized)
+    try std.testing.expect(activations[0] >= 0.0);
 }
 
 test "apply_decay_stub_is_noop" {
