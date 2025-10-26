@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
 pub mod cognitive;
+pub mod cognitive_patterns;
 pub mod completion_metrics;
 pub mod hardware;
 pub mod health;
@@ -21,6 +22,7 @@ pub mod streaming;
 pub mod numa_aware;
 
 pub use cognitive::{CognitiveInsight, CognitiveMetrics, ConsolidationState};
+pub use cognitive_patterns::{CognitivePatternMetrics, InterferenceType, PrimingType};
 pub use completion_metrics::{
     CalibrationMonitor, CompletionMetricsRecorder, CompletionResourceMonitor, CompletionTimer,
     ComponentLatencies, ResourceSnapshot,

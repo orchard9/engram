@@ -200,8 +200,15 @@ fn build_cuda_kernels() {
 
 #[cfg(feature = "gpu")]
 fn detect_cuda_toolkit() -> bool {
+    // Determine nvcc binary name based on platform (Windows needs .exe extension)
+    let nvcc_name = if cfg!(target_os = "windows") {
+        "nvcc.exe"
+    } else {
+        "nvcc"
+    };
+
     // Check for nvcc in PATH
-    if let Ok(output) = Command::new("nvcc").arg("--version").output()
+    if let Ok(output) = Command::new(nvcc_name).arg("--version").output()
         && output.status.success()
     {
         let version_str = String::from_utf8_lossy(&output.stdout);
@@ -214,26 +221,38 @@ fn detect_cuda_toolkit() -> bool {
 
     // Check for CUDA_PATH environment variable
     if let Ok(cuda_path) = env::var("CUDA_PATH") {
-        let nvcc_path = PathBuf::from(&cuda_path).join("bin").join("nvcc");
+        let nvcc_path = PathBuf::from(&cuda_path).join("bin").join(nvcc_name);
         if nvcc_path.exists() {
             println!("cargo:warning=Found CUDA at CUDA_PATH: {cuda_path}");
             return true;
         }
     }
 
-    // Check standard installation paths
-    let standard_paths = [
-        "/usr/local/cuda",
-        "/opt/cuda",
-        "/usr/lib/cuda",
-        "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v11.0",
-        "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v11.8",
-        "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.0",
-    ];
+    // Check standard installation paths (platform-specific)
+    let standard_paths = if cfg!(target_os = "windows") {
+        // Windows-specific CUDA installation paths
+        // Check multiple versions as CUDA toolkit installs in versioned directories
+        vec![
+            "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.0",
+            "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v11.8",
+            "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v11.7",
+            "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v11.6",
+            "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v11.0",
+        ]
+    } else {
+        // Unix-like systems (Linux, macOS)
+        vec![
+            "/usr/local/cuda",
+            "/opt/cuda",
+            "/usr/lib/cuda",
+            "/usr/local/cuda-12.0",
+            "/usr/local/cuda-11.8",
+        ]
+    };
 
     for path in &standard_paths {
         let cuda_root = PathBuf::from(path);
-        let nvcc_path = cuda_root.join("bin").join("nvcc");
+        let nvcc_path = cuda_root.join("bin").join(nvcc_name);
         if nvcc_path.exists() {
             println!("cargo:warning=Found CUDA at standard path: {path}");
             // SAFETY: This is safe in build.rs context as there are no concurrent threads
@@ -256,10 +275,18 @@ fn compile_cuda_kernels() {
         "cuda/kernels/validation.cu",
         "cuda/kernels/cosine_similarity.cu",
         "cuda/kernels/hnsw_scoring.cu",
+        "cuda/kernels/spreading_matmul.cu",
     ];
 
     let out_dir = env::var("OUT_DIR").expect("OUT_DIR not set");
     let out_path = PathBuf::from(&out_dir);
+
+    // Determine nvcc binary name based on platform
+    let nvcc_name = if cfg!(target_os = "windows") {
+        "nvcc.exe"
+    } else {
+        "nvcc"
+    };
 
     // Determine compute capability target
     // sm_60 = Maxwell (GTX 1060+), widely compatible
@@ -283,16 +310,18 @@ fn compile_cuda_kernels() {
             obj_path.display()
         );
 
-        let mut nvcc = Command::new("nvcc");
+        let mut nvcc = Command::new(nvcc_name);
         nvcc.arg("-O3")
             .arg(format!("-arch={arch}"))
-            .arg("-std=c++14")
-            .arg("--compiler-options")
-            .arg("-fPIC")
-            .arg("-c")
-            .arg(cu_file)
-            .arg("-o")
-            .arg(&obj_path);
+            .arg("-std=c++14");
+
+        // Platform-specific compiler options
+        if !cfg!(target_os = "windows") {
+            // Unix-like systems need -fPIC for shared libraries
+            nvcc.arg("--compiler-options").arg("-fPIC");
+        }
+
+        nvcc.arg("-c").arg(cu_file).arg("-o").arg(&obj_path);
 
         // Add include path for common headers
         nvcc.arg("-I").arg("cuda");
@@ -370,18 +399,105 @@ fn generate_fallback_stubs() {
     // When CUDA is unavailable, we generate stub implementations
     // that return error codes indicating GPU is not available.
     // This allows the codebase to compile on systems without CUDA.
+    //
+    // All stub functions return -1 to indicate "CUDA not available" error.
+    // This matches the error handling conventions in the actual CUDA kernels.
 
     let stub_code = r#"
 // Auto-generated fallback stubs for CUDA functions
 // These stubs are used when CUDA toolkit is not available
+//
+// All functions return -1 to indicate CUDA is not available.
+// This enables graceful degradation on systems without GPU support.
 
+use std::ffi::c_int;
+
+// Validation kernel stubs (validation.cu)
 #[no_mangle]
-pub extern "C" fn cuda_validate_environment() -> i32 {
+pub extern "C" fn cuda_validate_environment() -> c_int {
     -1 // CUDA not available
 }
 
 #[no_mangle]
-pub extern "C" fn cuda_test_kernel_launch(_output: *mut i32, _size: i32) -> i32 {
+pub extern "C" fn cuda_test_kernel_launch(_output: *mut i32, _size: i32) -> c_int {
+    -1 // CUDA not available
+}
+
+#[no_mangle]
+pub extern "C" fn cuda_test_vector_kernel(
+    _input: *const f32,
+    _output: *mut f32,
+    _count: i32,
+) -> c_int {
+    -1 // CUDA not available
+}
+
+// Cosine similarity kernel stubs (cosine_similarity.cu)
+#[no_mangle]
+pub extern "C" fn cuda_cosine_similarity_batch(
+    _d_targets: *const f32,
+    _query_norm_sq: f32,
+    _d_results: *mut f32,
+    _batch_size: i32,
+) -> c_int {
+    -1 // CUDA not available
+}
+
+#[no_mangle]
+pub extern "C" fn cuda_cosine_set_query(_h_query: *const f32) -> c_int {
+    -1 // CUDA not available
+}
+
+#[no_mangle]
+pub extern "C" fn cuda_cosine_similarity_batch_managed(
+    _h_query: *const f32,
+    _h_targets: *const f32,
+    _query_norm_sq: f32,
+    _h_results: *mut f32,
+    _batch_size: i32,
+) -> c_int {
+    -1 // CUDA not available
+}
+
+// Spreading activation kernel stubs (spreading_matmul.cu)
+#[no_mangle]
+pub extern "C" fn cuda_sparse_spreading(
+    _d_row_ptr: *const c_int,
+    _d_col_idx: *const c_int,
+    _d_weights: *const f32,
+    _d_input_activation: *const f32,
+    _d_output_activation: *mut f32,
+    _num_nodes: c_int,
+    _num_edges: c_int,
+) -> c_int {
+    -1 // CUDA not available
+}
+
+#[no_mangle]
+pub extern "C" fn cuda_sparse_spreading_managed(
+    _h_row_ptr: *const c_int,
+    _h_col_idx: *const c_int,
+    _h_weights: *const f32,
+    _h_input_activation: *const f32,
+    _h_output_activation: *mut f32,
+    _num_nodes: c_int,
+    _num_edges: c_int,
+) -> c_int {
+    -1 // CUDA not available
+}
+
+// HNSW scoring kernel stubs (hnsw_scoring.cu)
+#[no_mangle]
+pub extern "C" fn cuda_hnsw_top_k(
+    _h_query: *const f32,
+    _h_candidates: *const f32,
+    _h_top_k_distances: *mut f32,
+    _h_top_k_indices: *mut c_int,
+    _num_candidates: c_int,
+    _k: c_int,
+    _distance_metric: c_int,
+    _query_norm_sq: f32,
+) -> c_int {
     -1 // CUDA not available
 }
 "#;

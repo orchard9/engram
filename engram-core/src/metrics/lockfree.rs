@@ -1,5 +1,6 @@
 //! Lock-free, wait-free metrics primitives with cache-line alignment
 
+use atomic_float::AtomicF64;
 use crossbeam_utils::CachePadded;
 use std::cmp::Ordering as CmpOrdering;
 use std::convert::TryFrom;
@@ -81,7 +82,8 @@ pub struct LockFreeHistogram {
     /// Total count
     total_count: CachePadded<AtomicU64>,
     /// Sum of all values (for mean calculation)
-    sum: CachePadded<AtomicU64>,
+    /// CORRECTED: Use AtomicF64 instead of storing bit representation in AtomicU64
+    sum: CachePadded<AtomicF64>,
 }
 
 impl LockFreeHistogram {
@@ -102,7 +104,8 @@ impl LockFreeHistogram {
             buckets,
             counts,
             total_count: CachePadded::new(AtomicU64::new(0)),
-            sum: CachePadded::new(AtomicU64::new(0)),
+            // CORRECTED: Initialize with AtomicF64, not bit-packed u64
+            sum: CachePadded::new(AtomicF64::new(0.0)),
         }
     }
 
@@ -139,9 +142,8 @@ impl LockFreeHistogram {
         self.counts[bucket_idx].fetch_add(1, Ordering::Relaxed);
         self.total_count.fetch_add(1, Ordering::Relaxed);
 
-        // Update sum for mean calculation
-        let value_bits = value.to_bits();
-        self.sum.fetch_add(value_bits, Ordering::Relaxed);
+        // CORRECTED: Use atomic f64 add, not bit representation
+        self.sum.fetch_add(value, Ordering::Relaxed);
     }
 
     /// Calculate quantiles from the histogram
@@ -188,17 +190,20 @@ impl LockFreeHistogram {
     }
 
     /// Get the mean value
+    #[must_use]
     pub fn mean(&self) -> f64 {
         let count = self.total_count.load(Ordering::Acquire);
         if count == 0 {
             return 0.0;
         }
 
-        let sum_bits = self.sum.load(Ordering::Acquire);
-        f64::from_bits(sum_bits) / u64_to_f64(count)
+        // CORRECTED: Load actual f64 value
+        let sum = self.sum.load(Ordering::Acquire);
+        sum / u64_to_f64(count)
     }
 
     /// Get the total count
+    #[must_use]
     pub fn count(&self) -> u64 {
         self.total_count.load(Ordering::Acquire)
     }
@@ -209,7 +214,8 @@ impl LockFreeHistogram {
             count.store(0, Ordering::Release);
         }
         self.total_count.store(0, Ordering::Release);
-        self.sum.store(0, Ordering::Release);
+        // CORRECTED: Reset f64 sum properly
+        self.sum.store(0.0, Ordering::Release);
     }
 }
 

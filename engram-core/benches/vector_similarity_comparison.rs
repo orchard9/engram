@@ -91,6 +91,7 @@ fn batch_cosine_similarity_zig(query: &[f32], candidates: &[Vec<f32>]) -> Vec<f3
 }
 
 #[cfg(not(feature = "zig-kernels"))]
+#[allow(dead_code)]
 fn batch_cosine_similarity_zig(query: &[f32], candidates: &[Vec<f32>]) -> Vec<f32> {
     // Fallback to Rust when Zig not available
     batch_cosine_similarity_rust(query, candidates)

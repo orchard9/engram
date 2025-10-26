@@ -279,12 +279,22 @@ pub fn malloc(size: usize) -> Result<*mut c_void, CudaError> {
     unsafe {
         let result = cudaMalloc(&mut ptr, size);
         CudaError::from_raw(result).to_result()?;
+
+        // Defensive null pointer check
+        if ptr.is_null() {
+            return Err(CudaError::OutOfMemory);
+        }
     }
     Ok(ptr)
 }
 
 /// Free device memory
 pub fn free(ptr: *mut c_void) -> Result<(), CudaError> {
+    // Null pointer is a no-op (matches standard free() behavior)
+    if ptr.is_null() {
+        return Ok(());
+    }
+
     unsafe {
         let result = cudaFree(ptr);
         CudaError::from_raw(result).to_result()
@@ -298,6 +308,11 @@ pub fn malloc_managed(size: usize) -> Result<*mut c_void, CudaError> {
         // cudaMemAttachGlobal = 0x01
         let result = cudaMallocManaged(&mut ptr, size, 0x01);
         CudaError::from_raw(result).to_result()?;
+
+        // Defensive null pointer check
+        if ptr.is_null() {
+            return Err(CudaError::OutOfMemory);
+        }
     }
     Ok(ptr)
 }
@@ -309,6 +324,11 @@ pub fn memcpy(
     count: usize,
     kind: CudaMemcpyKind,
 ) -> Result<(), CudaError> {
+    // Validate pointers before calling CUDA API
+    if dst.is_null() || src.is_null() {
+        return Err(CudaError::InvalidValue);
+    }
+
     unsafe {
         let result = cudaMemcpy(dst, src, count, kind as i32);
         CudaError::from_raw(result).to_result()
@@ -317,6 +337,11 @@ pub fn memcpy(
 
 /// Set device memory to a value
 pub fn memset(ptr: *mut c_void, value: i32, count: usize) -> Result<(), CudaError> {
+    // Null pointer check
+    if ptr.is_null() {
+        return Err(CudaError::InvalidValue);
+    }
+
     unsafe {
         let result = cudaMemset(ptr, value, count);
         CudaError::from_raw(result).to_result()
@@ -352,12 +377,22 @@ pub fn malloc_host(size: usize) -> Result<*mut c_void, CudaError> {
     unsafe {
         let result = cudaMallocHost(&mut ptr, size);
         CudaError::from_raw(result).to_result()?;
+
+        // Defensive null pointer check
+        if ptr.is_null() {
+            return Err(CudaError::OutOfMemory);
+        }
     }
     Ok(ptr)
 }
 
 /// Free pinned host memory
 pub fn free_host(ptr: *mut c_void) -> Result<(), CudaError> {
+    // Null pointer is a no-op (matches standard free() behavior)
+    if ptr.is_null() {
+        return Ok(());
+    }
+
     unsafe {
         let result = cudaFreeHost(ptr);
         CudaError::from_raw(result).to_result()
@@ -372,6 +407,11 @@ pub fn memcpy_async(
     kind: CudaMemcpyKind,
     stream: *mut c_void,
 ) -> Result<(), CudaError> {
+    // Validate pointers before calling CUDA API
+    if dst.is_null() || src.is_null() {
+        return Err(CudaError::InvalidValue);
+    }
+
     unsafe {
         let result = cudaMemcpyAsync(dst, src, count, kind as i32, stream);
         CudaError::from_raw(result).to_result()
@@ -385,6 +425,11 @@ pub fn mem_prefetch_async(
     dst_device: i32,
     stream: *mut c_void,
 ) -> Result<(), CudaError> {
+    // Null pointer check
+    if dev_ptr.is_null() {
+        return Err(CudaError::InvalidValue);
+    }
+
     unsafe {
         let result = cudaMemPrefetchAsync(dev_ptr, count, dst_device, stream);
         CudaError::from_raw(result).to_result()
@@ -398,6 +443,11 @@ pub fn mem_advise(
     advice: CudaMemoryAdvise,
     device: i32,
 ) -> Result<(), CudaError> {
+    // Null pointer check
+    if dev_ptr.is_null() {
+        return Err(CudaError::InvalidValue);
+    }
+
     unsafe {
         let result = cudaMemAdvise(dev_ptr, count, advice as i32, device);
         CudaError::from_raw(result).to_result()
@@ -430,10 +480,15 @@ pub fn validate_environment() -> Result<(), String> {
 
 /// Test kernel launch with trivial computation
 pub fn test_kernel_launch(output: &mut [i32]) -> Result<(), String> {
+    // Validate input array is non-empty
+    if output.is_empty() {
+        return Err("Output array cannot be empty".to_string());
+    }
+
     let result = unsafe { cuda_test_kernel_launch(output.as_mut_ptr(), output.len() as i32) };
     match result {
         0 => Ok(()),
-        -1 => Err("cudaMalloc failed".to_string()),
+        -1 => Err("cudaMalloc failed or CUDA not available".to_string()),
         -2 => Err("cudaMemcpy or cudaDeviceSynchronize failed".to_string()),
         _ => Err(format!("Unknown error code: {result}")),
     }
@@ -441,6 +496,11 @@ pub fn test_kernel_launch(output: &mut [i32]) -> Result<(), String> {
 
 /// Test vector kernel with 768-dimensional embeddings
 pub fn test_vector_kernel(input: &[[f32; 768]], output: &mut [f32]) -> Result<(), String> {
+    // Validate arrays are non-empty
+    if input.is_empty() || output.is_empty() {
+        return Err("Input and output arrays cannot be empty".to_string());
+    }
+
     if input.len() != output.len() {
         return Err(format!(
             "Input and output arrays must have same length (got {} and {})",
@@ -459,7 +519,7 @@ pub fn test_vector_kernel(input: &[[f32; 768]], output: &mut [f32]) -> Result<()
 
     match result {
         0 => Ok(()),
-        -1 => Err("cudaMalloc failed".to_string()),
+        -1 => Err("cudaMalloc failed or CUDA not available".to_string()),
         -2 => Err("cudaMemcpy or cudaDeviceSynchronize failed".to_string()),
         _ => Err(format!("Unknown error code: {result}")),
     }

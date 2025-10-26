@@ -346,9 +346,19 @@ impl GpuSpreadingEngine {
             output_mem.set_len(csr_graph.num_nodes);
         }
 
-        // Copy graph structure (cast row_ptr and col_idx to f32 temporarily for unified memory)
-        // Note: This is a limitation of the current UnifiedMemory<f32> design
-        // In production, we'd want UnifiedMemory<T> for int arrays too
+        // CRITICAL TODO: This type conversion is BROKEN!
+        // Casting i32 to f32 loses precision and creates incorrect bit patterns.
+        // The CUDA kernel expects int* but receives float* containing reinterpreted values.
+        //
+        // Example failure:
+        //   i32: 1000 → binary: 0x000003E8
+        //   f32: 1000.0 → binary: 0x447A0000
+        //   Kernel reads 0x447A0000 as i32 → 1,136,721,920 (WRONG!)
+        //
+        // This path is currently UNUSED because we bypass it with cuda_sparse_spreading_managed.
+        // To fix: Implement UnifiedMemory<i32> and use it here.
+        //
+        // DO NOT REMOVE THIS CODE - it documents the problem for future implementation.
         for i in 0..csr_graph.num_nodes + 1 {
             row_ptr_mem[i] = csr_graph.row_ptr[i] as f32;
         }

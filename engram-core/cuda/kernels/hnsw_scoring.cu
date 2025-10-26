@@ -39,6 +39,14 @@ struct TopKResult {
     int index;
 };
 
+// Device function: Sanitize floating-point values
+// Converts NaN to 0.0 and clamps Inf to large finite values
+__device__ inline float sanitize_float(float val) {
+    if (isnan(val)) return 0.0f;
+    if (isinf(val)) return (val > 0.0f) ? 1e10f : -1e10f;
+    return val;
+}
+
 // Device function: Compute L2 distance between query and candidate
 __device__ inline float compute_l2_distance(
     const float* __restrict__ query,
@@ -46,11 +54,13 @@ __device__ inline float compute_l2_distance(
 ) {
     float sum = 0.0f;
 
-    // Compute sum of squared differences
+    // Compute sum of squared differences with NaN/Inf sanitization
     // Unroll by 4 for instruction-level parallelism
     #pragma unroll 4
     for (int d = 0; d < EMBEDDING_DIM; d++) {
-        float diff = query[d] - candidate[d];
+        float q = sanitize_float(query[d]);
+        float c = sanitize_float(candidate[d]);
+        float diff = q - c;
         sum += diff * diff;
     }
 
@@ -67,11 +77,11 @@ __device__ inline float compute_cosine_distance(
     float dot_product = 0.0f;
     float candidate_norm_sq = 0.0f;
 
-    // Compute dot product and candidate norm simultaneously
+    // Compute dot product and candidate norm simultaneously with NaN/Inf sanitization
     #pragma unroll 4
     for (int d = 0; d < EMBEDDING_DIM; d++) {
-        float q_val = query[d];
-        float c_val = candidate[d];
+        float q_val = sanitize_float(query[d]);
+        float c_val = sanitize_float(candidate[d]);
         dot_product += q_val * c_val;
         candidate_norm_sq += c_val * c_val;
     }

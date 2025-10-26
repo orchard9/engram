@@ -409,6 +409,8 @@ impl HybridExecutor {
     /// 3. Historical performance indicates CPU is faster -> CPU
     /// 4. GPU success rate too low -> CPU
     /// 5. Otherwise -> GPU
+    ///
+    /// Uses atomic snapshot of metrics to avoid race conditions.
     fn make_dispatch_decision(&self, operation: Operation, batch_size: usize) -> ExecutionTarget {
         // Rule 1: Too small for GPU
         if batch_size < self.config.gpu_min_batch_size {
@@ -433,23 +435,24 @@ impl HybridExecutor {
                 return ExecutionTarget::CPU;
             }
 
+            // Get atomic snapshot of all metrics to avoid race conditions
+            let metrics = self.performance_tracker.snapshot(operation);
+
             // Rule 3: Historical performance indicates CPU is faster
-            let speedup = self.performance_tracker.gpu_speedup(operation);
-            if speedup > 0.0 && speedup < self.config.gpu_speedup_threshold {
+            if metrics.speedup > 0.0 && metrics.speedup < self.config.gpu_speedup_threshold {
                 tracing::trace!(
                     "GPU speedup {:.2}x < threshold {:.2}x, using CPU",
-                    speedup,
+                    metrics.speedup,
                     self.config.gpu_speedup_threshold
                 );
                 return ExecutionTarget::CPU;
             }
 
             // Rule 4: GPU success rate too low
-            let success_rate = self.performance_tracker.gpu_success_rate(operation);
-            if success_rate < self.config.gpu_success_rate_threshold {
+            if metrics.success_rate < self.config.gpu_success_rate_threshold {
                 tracing::warn!(
                     "GPU success rate {:.2}% < threshold {:.2}%, using CPU",
-                    success_rate * 100.0,
+                    metrics.success_rate * 100.0,
                     self.config.gpu_success_rate_threshold * 100.0
                 );
                 return ExecutionTarget::CPU;

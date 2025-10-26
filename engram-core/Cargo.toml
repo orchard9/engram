@@ -78,7 +78,9 @@ z3 = { version = "0.12", optional = true }
 nalgebra = { version = "0.32", optional = true }
 
 # Production monitoring dependencies
-hwloc = { version = "0.5", optional = true }
+# NOTE: NUMA monitoring temporarily disabled
+# TODO: Re-enable with hwlocality (modern idiomatic bindings) when needed
+# hwlocality = { version = "1.0.0-alpha.6", optional = true }
 uuid = { version = "1.6.1", features = ["v4", "v5"] }
 
 # ANN library bindings for benchmarks
@@ -158,6 +160,10 @@ name = "gpu_cosine_similarity"
 harness = false
 required-features = ["gpu"]
 
+[[bench]]
+name = "metrics_overhead"
+harness = false
+
 [features]
 default = ["hnsw_index", "memory_mapped_persistence", "psychological_decay", "probabilistic_queries", "pattern_completion", "monitoring"]
 # For systems where Z3 is available
@@ -216,7 +222,8 @@ smt_verification = [
 ]
 
 # Production monitoring with lock-free metrics
-monitoring = ["hwloc"]
+# NOTE: NUMA support (hwlocality) temporarily disabled - feature is no-op until re-enabled
+monitoring = []
 
 # Development and testing features
 testing = []

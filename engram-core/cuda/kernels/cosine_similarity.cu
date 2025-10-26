@@ -18,7 +18,7 @@
 //
 // NUMERICAL STABILITY:
 // - IEEE 754 compliant (no fast-math)
-// - Kahan summation for dot product accumulation
+// - Simple accumulation with warp shuffle reduction
 // - Handles zero vectors gracefully (returns 0.0)
 // - Matches CPU scalar implementation within 1e-6 tolerance
 
@@ -39,12 +39,11 @@ __device__ inline void warp_cosine_components(
     const int dims_per_thread = EMBEDDING_DIM / WARP_SIZE; // 768 / 32 = 24
     const int start_dim = lane_id * dims_per_thread;
 
-    // Kahan summation for numerical stability
-    // Reduces floating-point error accumulation in dot product
+    // Simple accumulation (correct for warp shuffle reduction)
+    // Kahan summation is incompatible with warp shuffles as compensation
+    // terms are not associative across reduction boundaries
     float dot_sum = 0.0f;
-    float dot_compensation = 0.0f;
     float norm_sum = 0.0f;
-    float norm_compensation = 0.0f;
 
     // Each thread computes 24 multiply-adds
     // Unroll by 4 for ILP (instruction-level parallelism)
@@ -54,17 +53,8 @@ __device__ inline void warp_cosine_components(
         const float q_val = d_query[dim];
         const float t_val = target[dim];
 
-        // Kahan summation for dot product
-        float dot_y = (q_val * t_val) - dot_compensation;
-        float dot_t = dot_sum + dot_y;
-        dot_compensation = (dot_t - dot_sum) - dot_y;
-        dot_sum = dot_t;
-
-        // Kahan summation for target norm
-        float norm_y = (t_val * t_val) - norm_compensation;
-        float norm_t = norm_sum + norm_y;
-        norm_compensation = (norm_t - norm_sum) - norm_y;
-        norm_sum = norm_t;
+        dot_sum += q_val * t_val;
+        norm_sum += t_val * t_val;
     }
 
     // Warp shuffle reduction: combine partial sums across warp

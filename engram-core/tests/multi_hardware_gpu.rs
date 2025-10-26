@@ -35,7 +35,7 @@ use engram_core::compute::cuda;
 use engram_core::compute::cuda::hybrid::{HybridConfig, HybridExecutor};
 
 #[cfg(cuda_available)]
-use rand::SeedableRng;
+use rand::{Rng, SeedableRng};
 
 #[cfg(cuda_available)]
 use rand_chacha::ChaCha8Rng;

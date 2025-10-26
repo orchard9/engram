@@ -355,8 +355,8 @@ impl<T> IndexMut<usize> for UnifiedMemory<T> {
 pub struct MemoryPool {
     /// Available buffers by capacity (reusable)
     available: DashMap<usize, Vec<UnifiedMemory<f32>>>,
-    /// Total allocated VRAM in bytes
-    total_allocated: AtomicUsize,
+    /// Total allocated VRAM from OS in bytes (includes pooled buffers)
+    total_from_os: AtomicUsize,
     /// VRAM limit (80% of total device memory)
     vram_limit: usize,
     /// Device ID for this pool
@@ -387,7 +387,7 @@ impl MemoryPool {
 
         Ok(Self {
             available: DashMap::new(),
-            total_allocated: AtomicUsize::new(0),
+            total_from_os: AtomicUsize::new(0),
             vram_limit,
             device_id,
         })
@@ -408,46 +408,50 @@ impl MemoryPool {
     /// - Allocation would exceed VRAM limit
     /// - Memory allocation fails
     pub fn allocate(&self, capacity: usize) -> Result<UnifiedMemory<f32>, CudaError> {
-        // Try to reuse existing buffer
+        // Try to reuse existing buffer from pool
         if let Some(mut available_buffers) = self.available.get_mut(&capacity) {
             if let Some(mut buffer) = available_buffers.pop() {
                 // Reset length for reuse
                 unsafe { buffer.set_len(0) };
+                // Buffer is already counted in total_from_os
                 return Ok(buffer);
             }
         }
 
-        // Check VRAM limit before allocating
+        // Check VRAM limit before allocating new buffer from OS
         let size_bytes = capacity * std::mem::size_of::<f32>();
-        let current = self.total_allocated.load(Ordering::Relaxed);
+        let current = self.total_from_os.load(Ordering::Acquire);
         let new_total = current.saturating_add(size_bytes);
 
         if new_total > self.vram_limit {
             return Err(CudaError::OutOfMemory);
         }
 
-        // Allocate new buffer
+        // Allocate new buffer from OS
         let buffer = UnifiedMemory::new_on_device(capacity, self.device_id)?;
-        self.total_allocated
-            .fetch_add(size_bytes, Ordering::Relaxed);
+        self.total_from_os.fetch_add(size_bytes, Ordering::Release);
 
         Ok(buffer)
     }
 
     /// Return memory to pool for reuse
     ///
+    /// Memory remains allocated from OS but is available for reuse.
+    ///
     /// # Arguments
     ///
     /// * `buffer` - Buffer to return to pool
     pub fn deallocate(&self, buffer: UnifiedMemory<f32>) {
         let capacity = buffer.capacity();
+        // Return to pool without changing total_from_os
+        // Memory is still allocated from OS, just not actively in use
         self.available.entry(capacity).or_default().push(buffer);
     }
 
-    /// Get total allocated VRAM
+    /// Get total allocated VRAM from OS (including pooled buffers)
     #[must_use]
     pub fn total_allocated(&self) -> usize {
-        self.total_allocated.load(Ordering::Relaxed)
+        self.total_from_os.load(Ordering::Acquire)
     }
 
     /// Get VRAM limit
@@ -460,7 +464,7 @@ impl MemoryPool {
     #[must_use]
     pub fn would_exceed_limit(&self, capacity: usize) -> bool {
         let size_bytes = capacity * std::mem::size_of::<f32>();
-        let current = self.total_allocated.load(Ordering::Relaxed);
+        let current = self.total_from_os.load(Ordering::Acquire);
         current.saturating_add(size_bytes) > self.vram_limit
     }
 }

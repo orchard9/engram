@@ -229,6 +229,11 @@ impl MemoryPressureMonitor {
     ///
     /// Vector of results from processing all chunks
     ///
+    /// # Panics
+    ///
+    /// Panics if `process_fn` returns a result vector with length different from the chunk length.
+    /// This indicates a programming error in the processing function.
+    ///
     /// # Example
     ///
     /// ```ignore
@@ -252,7 +257,18 @@ impl MemoryPressureMonitor {
         if safe_batch >= items.len() {
             // Process all at once
             tracing::trace!("Processing {} items in single batch", items.len());
-            process_fn(items)
+            let results = process_fn(items);
+
+            // Validate result size matches input size
+            assert_eq!(
+                results.len(),
+                items.len(),
+                "process_fn must return exactly one result per input item (expected {}, got {})",
+                items.len(),
+                results.len()
+            );
+
+            results
         } else {
             // Process in chunks
             tracing::debug!(
@@ -268,6 +284,17 @@ impl MemoryPressureMonitor {
                 tracing::trace!("Processing chunk {}: {} items", chunk_idx, chunk.len());
 
                 let chunk_results = process_fn(chunk);
+
+                // Validate chunk result size matches chunk size to prevent silent data corruption
+                assert_eq!(
+                    chunk_results.len(),
+                    chunk.len(),
+                    "process_fn must return exactly one result per input item for chunk {} (expected {}, got {})",
+                    chunk_idx,
+                    chunk.len(),
+                    chunk_results.len()
+                );
+
                 results.extend(chunk_results);
             }
 
