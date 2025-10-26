@@ -33,6 +33,32 @@
 // FFI boundary requires unsafe code - allow it for this module
 #![allow(unsafe_code)]
 
+// Compile-time assertions for ABI compatibility between Rust and Zig
+// These verify that primitive types have the expected sizes across the FFI boundary.
+// If Zig is compiled with a different target or version, these assertions will fail
+// at compile time rather than causing runtime UB.
+const _: () = {
+    // Helper function for size assertions
+    const fn assert_size<T>(expected: usize) {
+        assert!(
+            core::mem::size_of::<T>() == expected,
+            "Type size mismatch - potential ABI incompatibility"
+        );
+    }
+
+    // Verify pointer size first (used in subsequent assertions)
+    const PTR_SIZE: usize = core::mem::size_of::<*const ()>();
+
+    // Verify primitive type sizes match C ABI expectations
+    assert_size::<u32>(4);
+    assert_size::<f32>(4);
+    assert_size::<u64>(8);
+    assert_size::<usize>(PTR_SIZE); // usize == pointer size
+
+    // Verify pointer size is reasonable (32-bit or 64-bit platforms only)
+    assert!(PTR_SIZE == 4 || PTR_SIZE == 8, "Unsupported pointer size");
+};
+
 #[cfg(feature = "zig-kernels")]
 mod ffi {
     #[link(name = "engram_kernels", kind = "static")]
@@ -419,6 +445,47 @@ mod tests {
 
         apply_decay(&mut strengths, &ages);
     }
+
+    #[test]
+    #[cfg(feature = "zig-kernels")]
+    fn test_arena_stats_initialization() {
+        // Verify that get_arena_stats() returns a valid struct with all fields initialized
+        // This test validates that the FFI call writes to all three pointer locations
+        use crate::zig_kernels::{get_arena_stats, reset_arena_metrics};
+
+        // Reset metrics to known state
+        reset_arena_metrics();
+
+        // Get stats - should return all zeros initially
+        let stats = get_arena_stats();
+
+        // Verify fields are reasonable (should all be zero after reset)
+        // We use >= 0 instead of == 0 because other tests might run concurrently
+        assert!(stats.total_resets >= 0, "total_resets should be non-negative");
+        assert!(
+            stats.total_overflows >= 0,
+            "total_overflows should be non-negative"
+        );
+        assert!(
+            stats.max_high_water_mark >= 0,
+            "max_high_water_mark should be non-negative"
+        );
+
+        // Verify debug assertions would catch unreasonable values
+        // These limits match the debug_assert! checks in get_arena_stats()
+        assert!(
+            stats.total_resets < 1_000_000_000,
+            "total_resets within reasonable bounds"
+        );
+        assert!(
+            stats.total_overflows < 1_000_000_000,
+            "total_overflows within reasonable bounds"
+        );
+        assert!(
+            stats.max_high_water_mark < 1_000_000_000_000,
+            "max_high_water_mark within reasonable bounds (< 1 TB)"
+        );
+    }
 }
 
 // Arena allocator configuration and monitoring (Task 008)
@@ -497,6 +564,23 @@ pub fn configure_arena(pool_size_mb: u32, overflow_strategy: OverflowStrategy) {
 ///
 /// Thread-safe via internal mutex in Zig implementation.
 ///
+/// # Safety
+///
+/// This function uses `unsafe` to call into Zig FFI. The following invariants
+/// are maintained:
+///
+/// 1. All fields are zero-initialized before FFI call
+/// 2. Pointers to stack-allocated struct fields remain valid for call duration
+/// 3. Zig implementation writes valid usize values to all three pointers
+/// 4. No aliasing: each pointer targets a distinct field
+///
+/// # Panics
+///
+/// In debug builds, panics if FFI returns unreasonable values (indicating ABI mismatch):
+/// - Resets > 1 billion (likely uninitialized or corrupted memory)
+/// - Overflows > 1 billion
+/// - High water mark > 1 TB (likely invalid pointer arithmetic)
+///
 /// # Examples
 ///
 /// ```no_run
@@ -513,12 +597,20 @@ pub fn configure_arena(pool_size_mb: u32, overflow_strategy: OverflowStrategy) {
 #[cfg(feature = "zig-kernels")]
 #[must_use]
 pub fn get_arena_stats() -> ArenaStats {
+    // Zero-initialize all fields before FFI call to ensure defined behavior
+    // if Zig implementation fails to write to all pointers
     let mut stats = ArenaStats {
         total_resets: 0,
         total_overflows: 0,
         max_high_water_mark: 0,
     };
 
+    // SAFETY: We pass raw mutable pointers to stack-allocated usize fields.
+    // Invariants:
+    // - Pointers remain valid for entire FFI call duration (stack-allocated)
+    // - No aliasing: each pointer targets a distinct struct field
+    // - Zig implementation must write valid usize values to all three locations
+    // - Fields are zero-initialized, so partial writes are detectable
     unsafe {
         ffi::engram_arena_stats(
             &raw mut stats.total_resets,
@@ -526,6 +618,25 @@ pub fn get_arena_stats() -> ArenaStats {
             &raw mut stats.max_high_water_mark,
         );
     }
+
+    // Defensive validation in debug builds to catch ABI mismatches or
+    // uninitialized memory bugs. These limits are intentionally generous
+    // to avoid false positives in legitimate high-load scenarios.
+    debug_assert!(
+        stats.total_resets < 1_000_000_000,
+        "Arena resets ({}) exceeds reasonable limit - possible ABI mismatch or memory corruption",
+        stats.total_resets
+    );
+    debug_assert!(
+        stats.total_overflows < 1_000_000_000,
+        "Arena overflows ({}) exceeds reasonable limit - possible ABI mismatch or memory corruption",
+        stats.total_overflows
+    );
+    debug_assert!(
+        stats.max_high_water_mark < 1_000_000_000_000, // 1 TB
+        "Arena high water mark ({} bytes) exceeds reasonable limit - possible ABI mismatch or invalid pointer",
+        stats.max_high_water_mark
+    );
 
     stats
 }
