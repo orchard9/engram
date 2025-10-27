@@ -36,6 +36,7 @@ pub fn export_json(events: &[CognitiveEvent]) -> Result<(), Box<dyn std::error::
 
     // Get output file path
     let output_path = {
+        #[allow(clippy::expect_used)] // Test infrastructure - mutex poisoning is a fatal error
         let output = JSON_OUTPUT.lock().expect("JSON_OUTPUT mutex poisoned");
         output.clone()
     };

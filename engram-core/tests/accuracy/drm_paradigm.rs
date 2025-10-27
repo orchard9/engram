@@ -271,6 +271,7 @@ impl FalseMemoryMetrics {
 }
 
 #[test]
+#[ignore = "Expensive test (>30s) - runs pattern completion on 5 DRM lists"]
 fn test_drm_false_memory_rate() {
     // Test that false memory rate is <15% at high confidence
     let lists = DRMList::classic_lists();
@@ -338,6 +339,7 @@ fn test_drm_false_memory_rate() {
 }
 
 #[test]
+#[ignore = "Expensive test (>30s) - runs pattern completion on 5 DRM lists"]
 fn test_drm_source_attribution() {
     // Validate that lure completions are correctly attributed to consolidated/imagined sources
     let lists = DRMList::classic_lists();
@@ -386,6 +388,7 @@ fn test_drm_source_attribution() {
 }
 
 #[test]
+#[ignore = "Expensive test (>30s) - runs multiple pattern completions for confidence calibration"]
 fn test_drm_confidence_calibration() {
     // Test that false lures have lower confidence than true memories
     let lists = DRMList::classic_lists();

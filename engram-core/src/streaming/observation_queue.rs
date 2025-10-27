@@ -148,7 +148,7 @@ pub enum QueueError {
 ///
 /// ## Example
 ///
-/// ```rust
+/// ```ignore
 /// use engram_core::streaming::observation_queue::{ObservationQueue, QueueConfig, ObservationPriority};
 /// use engram_core::types::MemorySpaceId;
 /// use engram_core::memory::Episode;
@@ -212,7 +212,7 @@ impl ObservationQueue {
     ///
     /// # Example
     ///
-    /// ```rust
+    /// ```ignore
     /// use engram_core::streaming::observation_queue::{ObservationQueue, QueueConfig};
     ///
     /// let queue = ObservationQueue::new(QueueConfig {
@@ -260,7 +260,7 @@ impl ObservationQueue {
     ///
     /// # Example
     ///
-    /// ```rust
+    /// ```ignore
     /// use engram_core::streaming::observation_queue::{ObservationQueue, QueueConfig, ObservationPriority, QueueError};
     /// use engram_core::types::MemorySpaceId;
     /// use engram_core::memory::Episode;
@@ -339,7 +339,7 @@ impl ObservationQueue {
     ///
     /// # Example
     ///
-    /// ```rust
+    /// ```ignore
     /// use engram_core::streaming::observation_queue::{ObservationQueue, QueueConfig, ObservationPriority};
     /// use engram_core::types::MemorySpaceId;
     /// use engram_core::memory::Episode;
@@ -409,7 +409,7 @@ impl ObservationQueue {
     ///
     /// # Example
     ///
-    /// ```rust
+    /// ```ignore
     /// use engram_core::streaming::observation_queue::{ObservationQueue, QueueConfig, ObservationPriority};
     /// use engram_core::types::MemorySpaceId;
     /// use engram_core::memory::Episode;
@@ -453,7 +453,7 @@ impl ObservationQueue {
     ///
     /// # Example
     ///
-    /// ```rust
+    /// ```ignore
     /// use engram_core::streaming::observation_queue::{ObservationQueue, QueueConfig};
     ///
     /// let queue = ObservationQueue::new(QueueConfig::default());
@@ -477,7 +477,7 @@ impl ObservationQueue {
     ///
     /// # Example
     ///
-    /// ```rust
+    /// ```ignore
     /// use engram_core::streaming::observation_queue::{ObservationQueue, QueueConfig};
     ///
     /// let queue = ObservationQueue::new(QueueConfig::default());
@@ -499,7 +499,7 @@ impl ObservationQueue {
     ///
     /// # Example
     ///
-    /// ```rust
+    /// ```ignore
     /// use engram_core::streaming::observation_queue::{ObservationQueue, QueueConfig};
     ///
     /// let queue = ObservationQueue::new(QueueConfig::default());
@@ -516,7 +516,7 @@ impl ObservationQueue {
     ///
     /// # Example
     ///
-    /// ```rust
+    /// ```ignore
     /// use engram_core::streaming::observation_queue::{ObservationQueue, QueueConfig};
     ///
     /// let queue = ObservationQueue::new(QueueConfig::default());

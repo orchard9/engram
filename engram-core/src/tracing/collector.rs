@@ -131,24 +131,12 @@ fn export_batch(events: &[CognitiveEvent], config: &TracingConfig) {
         ExportFormat::OtlpGrpc => {
             // Export to OpenTelemetry (implementation in exporters/otlp.rs)
             #[cfg(feature = "cognitive_tracing")]
-            if let Err(e) = crate::tracing::exporters::otlp::export_otlp(events) {
-                tracing::warn!(
-                    target: "engram::tracing::collector",
-                    error = %e,
-                    "Failed to export events to OTLP"
-                );
-            }
+            crate::tracing::exporters::otlp::export_otlp(events);
         }
         ExportFormat::Loki => {
             // Export to Loki (implementation in exporters/loki.rs)
             #[cfg(feature = "cognitive_tracing")]
-            if let Err(e) = crate::tracing::exporters::loki::export_loki(events) {
-                tracing::warn!(
-                    target: "engram::tracing::collector",
-                    error = %e,
-                    "Failed to export events to Loki"
-                );
-            }
+            crate::tracing::exporters::loki::export_loki(events);
         }
     }
 }

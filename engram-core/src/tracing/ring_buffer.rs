@@ -62,7 +62,7 @@ impl<T: Copy> RingBuffer<T> {
         // SAFETY: write_pos is exclusively owned by producer thread in SPSC pattern
         // We use get_unchecked_mut through a const cast to write to the pre-allocated buffer
         unsafe {
-            let slot = self.buffer.as_ptr().add(write_pos) as *mut Option<T>;
+            let slot = self.buffer.as_ptr().add(write_pos).cast_mut();
             slot.write(Some(event));
         }
 
@@ -89,7 +89,7 @@ impl<T: Copy> RingBuffer<T> {
         // Read event
         // SAFETY: read_pos is exclusively owned by consumer thread
         let event = unsafe {
-            let slot = &self.buffer[read_pos] as *const Option<T>;
+            let slot = &raw const self.buffer[read_pos];
             *slot
         };
 
@@ -124,7 +124,7 @@ impl<T: Copy> RingBuffer<T> {
     /// Get buffer capacity
     #[must_use]
     #[allow(dead_code)] // Utility method for diagnostics
-    pub fn capacity(&self) -> usize {
+    pub const fn capacity(&self) -> usize {
         self.capacity
     }
 }

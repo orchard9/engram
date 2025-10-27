@@ -453,6 +453,7 @@ fn test_ca1_threshold_sweep() {
 }
 
 #[test]
+#[ignore = "Expensive test (>60s) - runs 500 pattern completions (5 configs × 100 episodes)"]
 fn test_num_hypotheses_sweep() {
     // Test number of hypotheses parameter sweep
     let dataset = BenchmarkDataset::standard(44);

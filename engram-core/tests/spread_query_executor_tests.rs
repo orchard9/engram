@@ -17,6 +17,8 @@ use engram_core::query::EvidenceSource;
 use engram_core::query::executor::{QueryContext, SpreadExecutionError, execute_spread};
 use engram_core::query::parser::ast::{NodeIdentifier, SpreadQuery};
 use engram_core::{Confidence, Episode, MemoryStore};
+use rand::SeedableRng;
+use rand_chacha::ChaCha8Rng;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -93,11 +95,26 @@ fn create_test_store() -> Arc<MemoryStore> {
 }
 
 fn create_test_episode(id: &str, content: &str) -> Episode {
+    // Use diverse embeddings to prevent deduplication
+    // Hash the id to create a unique seed for each episode
+    let seed = id.bytes().map(u64::from).sum::<u64>();
+
+    let mut rng = ChaCha8Rng::seed_from_u64(seed);
+    let mut embedding = [0.0f32; 768];
+    for val in &mut embedding {
+        *val = rand::Rng::gen_range(&mut rng, -1.0..1.0);
+    }
+    // Normalize
+    let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
+    for val in &mut embedding {
+        *val /= norm;
+    }
+
     Episode::new(
         id.to_string(),
         Utc::now(),
         content.to_string(),
-        [0.1f32; 768],
+        embedding,
         Confidence::HIGH,
     )
 }

@@ -1194,16 +1194,18 @@ impl MemoryStore {
         };
 
         let mut memory_id = memory.id.clone();
-        match dedup_result.action {
+        let is_new_memory = match dedup_result.action {
             DeduplicationAction::Skip => {
                 if dedup_result.existing_id.is_some() {
                     return StoreResult::new(Activation::new(activation * 0.9), true);
                 }
+                true // Not a duplicate, will add new memory
             }
             DeduplicationAction::Replace(existing_id) => {
                 self.hot_memories.remove(&existing_id);
                 let _ = self.content_index.remove(&content_address);
                 self.episode_stored_at.remove(&existing_id);
+                false // Replacing existing memory, count stays the same
             }
             DeduplicationAction::Merge(existing_id) => {
                 if let Some(existing) = self.hot_memories.get(&existing_id) {
@@ -1217,9 +1219,10 @@ impl MemoryStore {
                     return StoreResult::new(Activation::new(activation * 0.95), true);
                 }
                 memory_id = existing_id;
+                true // Fallback case, treat as new
             }
-            _ => {}
-        }
+            _ => true, // Default case, treat as new memory
+        };
 
         let memory_arc = Arc::new(memory);
 
@@ -1265,7 +1268,10 @@ impl MemoryStore {
             }
         }
 
-        self.memory_count.fetch_add(1, Ordering::Relaxed);
+        // Only increment counter if this is truly a new memory (not a replacement)
+        if is_new_memory {
+            self.memory_count.fetch_add(1, Ordering::Relaxed);
+        }
 
         #[cfg(feature = "monitoring")]
         {

@@ -18,7 +18,7 @@ fn test_tracer_with_development_config() {
     tracer.trace_priming(PrimingType::Associative, 0.5, 200, 300);
     tracer.trace_interference(InterferenceType::Retroactive, 0.3, 999, 5);
     tracer.trace_reconsolidation(12345, 0.5, 0.8, 10);
-    tracer.trace_false_memory(0xDEADBEEF, 20, 0.95);
+    tracer.trace_false_memory(0xDEAD_BEEF, 20, 0.95);
 
     // Allow collector to process
     thread::sleep(Duration::from_millis(100));
@@ -84,7 +84,7 @@ fn test_disabled_event_types() {
     // These should be no-ops (not enabled)
     tracer.trace_interference(InterferenceType::Proactive, 0.3, 999, 5);
     tracer.trace_reconsolidation(12345, 0.5, 0.8, 10);
-    tracer.trace_false_memory(0xDEADBEEF, 20, 0.95);
+    tracer.trace_false_memory(0xDEAD_BEEF, 20, 0.95);
 
     thread::sleep(Duration::from_millis(100));
 }

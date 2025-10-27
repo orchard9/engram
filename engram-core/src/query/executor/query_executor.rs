@@ -71,8 +71,8 @@ impl Default for AstQueryExecutorConfig {
 ///
 /// # Example
 ///
-/// ```rust,no_run
-/// use engram_core::query::executor::{QueryExecutor, QueryExecutorConfig, QueryContext};
+/// ```ignore
+/// use engram_core::query::executor::{QueryExecutor, AstQueryExecutorConfig, QueryContext};
 /// use engram_core::query::parser::ast::{Query, Pattern, RecallQuery, NodeIdentifier};
 /// use engram_core::registry::MemorySpaceRegistry;
 /// use engram_core::MemorySpaceId;

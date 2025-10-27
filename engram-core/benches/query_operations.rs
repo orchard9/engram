@@ -39,6 +39,7 @@ fn create_test_episode(id: &str, confidence: Confidence) -> Episode {
         recall_count: 0,
         decay_rate: 0.1,
         decay_function: None,
+        metadata: std::collections::HashMap::new(),
     }
 }
 

@@ -1,6 +1,7 @@
 //! Benchmark cognitive tracing overhead
 
 #![cfg(feature = "cognitive_tracing")]
+#![allow(missing_docs)]
 
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use engram_core::tracing::{CognitiveTracer, InterferenceType, PrimingType, TracingConfig};
@@ -59,7 +60,7 @@ fn benchmark_false_memory_event(c: &mut Criterion) {
 
     c.bench_function("trace_false_memory_enabled", |b| {
         b.iter(|| {
-            tracer.trace_false_memory(black_box(0xDEADBEEF), black_box(20), black_box(0.95));
+            tracer.trace_false_memory(black_box(0xDEAD_BEEF), black_box(20), black_box(0.95));
         });
     });
 }
@@ -80,7 +81,7 @@ fn benchmark_sampling_overhead(c: &mut Criterion) {
         let tracer = CognitiveTracer::new(config);
 
         group.bench_with_input(
-            BenchmarkId::from_parameter(format!("rate_{:.2}", sample_rate)),
+            BenchmarkId::from_parameter(format!("rate_{sample_rate:.2}")),
             &sample_rate,
             |b, _| {
                 b.iter(|| {

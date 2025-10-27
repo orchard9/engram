@@ -248,7 +248,7 @@ mod tests {
 
     fn create_episode_with_embedding(
         id: &str,
-        embedding: [f32; 768],
+        embedding: &[f32; 768],
         when: chrono::DateTime<Utc>,
     ) -> Episode {
         Episode {
@@ -257,7 +257,7 @@ mod tests {
             where_location: None,
             who: None,
             what: "test episode".to_string(),
-            embedding,
+            embedding: *embedding,
             embedding_provenance: None,
             encoding_confidence: Confidence::HIGH,
             vividness_confidence: Confidence::HIGH,
@@ -272,8 +272,8 @@ mod tests {
 
     fn create_similar_embedding(base_value: f32) -> [f32; 768] {
         let mut embedding = [0.0f32; 768];
-        for i in 0..768 {
-            embedding[i] = base_value + (i as f32 * 0.001);
+        for (i, item) in embedding.iter_mut().enumerate() {
+            *item = base_value + (i as f32 * 0.001);
         }
         // Normalize
         let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
@@ -286,10 +286,10 @@ mod tests {
     #[test]
     fn test_default_parameters() {
         let detector = ProactiveInterferenceDetector::default();
-        assert_eq!(detector.similarity_threshold(), 0.7);
+        assert!((detector.similarity_threshold() - 0.7).abs() < f32::EPSILON);
         assert_eq!(detector.prior_memory_window(), Duration::hours(6));
-        assert_eq!(detector.interference_per_item(), 0.05);
-        assert_eq!(detector.max_interference(), 0.30);
+        assert!((detector.interference_per_item() - 0.05).abs() < f32::EPSILON);
+        assert!((detector.max_interference() - 0.30).abs() < f32::EPSILON);
     }
 
     #[test]
@@ -297,11 +297,11 @@ mod tests {
         let detector = ProactiveInterferenceDetector::default();
         let now = Utc::now();
 
-        let new_episode = create_episode_with_embedding("new", create_similar_embedding(1.0), now);
+        let new_episode = create_episode_with_embedding("new", &create_similar_embedding(1.0), now);
 
         let prior_episode = create_episode_with_embedding(
             "prior",
-            create_similar_embedding(1.0),
+            &create_similar_embedding(1.0),
             now - Duration::hours(1),
         );
 
@@ -317,19 +317,19 @@ mod tests {
         let detector = ProactiveInterferenceDetector::default();
         let now = Utc::now();
 
-        let new_episode = create_episode_with_embedding("new", create_similar_embedding(1.0), now);
+        let new_episode = create_episode_with_embedding("new", &create_similar_embedding(1.0), now);
 
         // Within window (3 hours ago)
         let recent_prior = create_episode_with_embedding(
             "recent",
-            create_similar_embedding(1.0),
+            &create_similar_embedding(1.0),
             now - Duration::hours(3),
         );
 
         // Outside window (8 hours ago)
         let old_prior = create_episode_with_embedding(
             "old",
-            create_similar_embedding(1.0),
+            &create_similar_embedding(1.0),
             now - Duration::hours(8),
         );
 
@@ -348,7 +348,7 @@ mod tests {
         let detector = ProactiveInterferenceDetector::default();
         let now = Utc::now();
 
-        let new_episode = create_episode_with_embedding("new", create_similar_embedding(1.0), now);
+        let new_episode = create_episode_with_embedding("new", &create_similar_embedding(1.0), now);
 
         // Test with varying numbers of prior episodes
         for num_prior in 0..=10 {
@@ -356,7 +356,7 @@ mod tests {
                 .map(|i| {
                     create_episode_with_embedding(
                         &format!("prior_{i}"),
-                        create_similar_embedding(1.0),
+                        &create_similar_embedding(1.0),
                         now - Duration::hours(3),
                     )
                 })
@@ -366,8 +366,8 @@ mod tests {
 
             #[allow(clippy::cast_precision_loss)]
             let expected = (num_prior as f32 * 0.05).min(0.30);
-            assert_eq!(
-                result.magnitude, expected,
+            assert!(
+                (result.magnitude - expected).abs() < f32::EPSILON,
                 "Interference should scale linearly: {num_prior} prior → {expected}% interference"
             );
             assert_eq!(result.count, num_prior);
@@ -379,19 +379,19 @@ mod tests {
         let detector = ProactiveInterferenceDetector::default();
         let now = Utc::now();
 
-        let new_episode = create_episode_with_embedding("new", create_similar_embedding(1.0), now);
+        let new_episode = create_episode_with_embedding("new", &create_similar_embedding(1.0), now);
 
         // Similar episode (same embedding pattern)
         let similar_prior = create_episode_with_embedding(
             "similar",
-            create_similar_embedding(1.0),
+            &create_similar_embedding(1.0),
             now - Duration::hours(1),
         );
 
         // Dissimilar episode (different embedding pattern)
         let dissimilar_prior = create_episode_with_embedding(
             "dissimilar",
-            create_similar_embedding(-1.0),
+            &create_similar_embedding(-1.0),
             now - Duration::hours(1),
         );
 
@@ -402,8 +402,8 @@ mod tests {
             result_similar.magnitude > 0.0,
             "Similar episodes should interfere"
         );
-        assert_eq!(
-            result_dissimilar.magnitude, 0.0,
+        assert!(
+            result_dissimilar.magnitude.abs() < f32::EPSILON,
             "Dissimilar episodes should NOT interfere"
         );
     }
@@ -435,7 +435,7 @@ mod tests {
         };
 
         assert!(result.is_significant());
-        assert_eq!(result.accuracy_reduction_percent(), 25.0);
+        assert!((result.accuracy_reduction_percent() - 25.0).abs() < f32::EPSILON);
 
         let insignificant = ProactiveInterferenceResult {
             magnitude: 0.05,

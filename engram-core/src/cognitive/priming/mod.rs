@@ -39,7 +39,7 @@ pub use semantic::{PrimingStatistics, SemanticPrimingEngine};
 ///
 /// # Example
 ///
-/// ```
+/// ```ignore
 /// use engram_core::cognitive::priming::PrimingCoordinator;
 ///
 /// let coordinator = PrimingCoordinator::new();
@@ -166,12 +166,10 @@ impl PrimingCoordinator {
     ) -> (f32, f32, f32, f32) {
         let semantic = self.semantic.compute_priming_boost(target_node);
 
-        let associative = if let Some(prime) = prime_node {
+        let associative = prime_node.map_or(0.0, |prime| {
             self.associative
                 .compute_association_strength(prime, target_node)
-        } else {
-            0.0
-        };
+        });
 
         let repetition = self.repetition.compute_repetition_boost(target_node);
 

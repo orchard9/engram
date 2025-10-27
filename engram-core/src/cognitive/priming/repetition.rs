@@ -286,7 +286,7 @@ mod tests {
         engine.record_exposure("node_a");
         let boost = engine.compute_repetition_boost("node_a");
 
-        assert!((boost - 0.05).abs() < f32::EPSILON, "boost = {}", boost);
+        assert!((boost - 0.05).abs() < f32::EPSILON, "boost = {boost}");
     }
 
     #[test]
@@ -299,10 +299,7 @@ mod tests {
             let expected = (i as f32) * 0.05;
             assert!(
                 (boost - expected).abs() < f32::EPSILON,
-                "exposure {}: boost = {}, expected = {}",
-                i,
-                boost,
-                expected
+                "exposure {i}: boost = {boost}, expected = {expected}"
             );
         }
     }
@@ -321,18 +318,13 @@ mod tests {
                 let expected = (i as f32) * 0.05;
                 assert!(
                     (boost - expected).abs() < f32::EPSILON,
-                    "exposure {}: boost = {}, expected = {}",
-                    i,
-                    boost,
-                    expected
+                    "exposure {i}: boost = {boost}, expected = {expected}"
                 );
             } else {
                 // At ceiling
                 assert!(
                     (boost - 0.30).abs() < f32::EPSILON,
-                    "exposure {}: boost = {}, should be at ceiling 0.30",
-                    i,
-                    boost
+                    "exposure {i}: boost = {boost}, should be at ceiling 0.30"
                 );
             }
         }
@@ -342,7 +334,7 @@ mod tests {
     fn test_no_exposure_returns_zero() {
         let engine = RepetitionPrimingEngine::new();
         let boost = engine.compute_repetition_boost("nonexistent_node");
-        assert_eq!(boost, 0.0);
+        assert!(boost.abs() < f32::EPSILON);
     }
 
     #[test]
@@ -358,7 +350,7 @@ mod tests {
 
         // Reset
         engine.reset_exposures("node_d");
-        assert_eq!(engine.compute_repetition_boost("node_d"), 0.0);
+        assert!(engine.compute_repetition_boost("node_d").abs() < f32::EPSILON);
     }
 
     #[test]
@@ -420,7 +412,7 @@ mod tests {
         }
 
         let boost = engine.compute_repetition_boost("node_h");
-        assert!((boost - 0.40).abs() < f32::EPSILON, "boost = {}", boost);
+        assert!((boost - 0.40).abs() < f32::EPSILON, "boost = {boost}");
     }
 
     #[test]
@@ -444,7 +436,10 @@ mod tests {
 
         // Wait for all threads
         for handle in handles {
-            handle.join().unwrap();
+            #[allow(clippy::expect_used)] // Test code - failure here is expected to panic
+            handle
+                .join()
+                .expect("Thread panicked during concurrent exposure recording");
         }
 
         // Should have exactly 1000 exposures

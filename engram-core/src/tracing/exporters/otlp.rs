@@ -9,7 +9,7 @@ use crate::tracing::event::CognitiveEvent;
 ///
 /// Currently a stub implementation. To enable, add opentelemetry dependencies
 /// and implement proper OTLP/gRPC export.
-pub fn export_otlp(_events: &[CognitiveEvent]) -> Result<(), Box<dyn std::error::Error>> {
+pub fn export_otlp(_events: &[CognitiveEvent]) {
     // TODO: Implement OTLP export
     // This would involve:
     // 1. Converting CognitiveEvent to OTLP Span/Log format
@@ -21,6 +21,4 @@ pub fn export_otlp(_events: &[CognitiveEvent]) -> Result<(), Box<dyn std::error:
         target: "engram::tracing::otlp",
         "OTLP export not yet implemented"
     );
-
-    Ok(())
 }

@@ -168,6 +168,7 @@ impl RetroactiveInterferenceDetector {
     /// 1. Subsequent episode learned AFTER target (temporal ordering)
     /// 2. Subsequent episode learned BEFORE retrieval (interpolated)
     /// 3. Target within consolidation window
+    ///
     /// Plus similarity check.
     fn is_retroactively_interfering(
         &self,
@@ -298,7 +299,7 @@ impl RetroactiveInterferenceResult {
 
     /// No interference detected
     #[must_use]
-    pub fn none() -> Self {
+    pub const fn none() -> Self {
         Self {
             magnitude: 0.0,
             interfering_episodes: Vec::new(),
@@ -336,7 +337,7 @@ mod tests {
 
     fn create_episode_with_embedding(
         id: &str,
-        embedding: [f32; 768],
+        embedding: &[f32; 768],
         when: DateTime<Utc>,
     ) -> Episode {
         Episode {
@@ -345,7 +346,7 @@ mod tests {
             where_location: None,
             who: None,
             what: "test episode".to_string(),
-            embedding,
+            embedding: *embedding,
             embedding_provenance: None,
             encoding_confidence: Confidence::HIGH,
             vividness_confidence: Confidence::HIGH,
@@ -360,8 +361,8 @@ mod tests {
 
     fn create_similar_embedding(base_value: f32) -> [f32; 768] {
         let mut embedding = [0.0f32; 768];
-        for i in 0..768 {
-            embedding[i] = base_value + (i as f32 * 0.001);
+        for (i, item) in embedding.iter_mut().enumerate() {
+            *item = base_value + (i as f32 * 0.001);
         }
         // Normalize
         let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
@@ -374,9 +375,9 @@ mod tests {
     #[test]
     fn test_default_parameters() {
         let detector = RetroactiveInterferenceDetector::default();
-        assert_eq!(detector.base_interference(), 0.15);
-        assert_eq!(detector.similarity_threshold(), 0.6);
-        assert_eq!(detector.max_interference(), 0.25);
+        assert!((detector.base_interference() - 0.15).abs() < f32::EPSILON);
+        assert!((detector.similarity_threshold() - 0.6).abs() < f32::EPSILON);
+        assert!((detector.max_interference() - 0.25).abs() < f32::EPSILON);
         assert_eq!(detector.consolidation_window(), Duration::hours(24));
     }
 
@@ -388,13 +389,13 @@ mod tests {
         // PHASE 1: Learn List A at T=0
         let list_a_time = Utc::now();
         let list_a_episode =
-            create_episode_with_embedding("list_a", create_similar_embedding(1.0), list_a_time);
+            create_episode_with_embedding("list_a", &create_similar_embedding(1.0), list_a_time);
 
         // PHASE 2: Learn List B at T=30min (DURING retention interval)
         let list_b_time = list_a_time + Duration::minutes(30);
         let list_b_episode = create_episode_with_embedding(
             "list_b",
-            create_similar_embedding(1.0), // High similarity
+            &create_similar_embedding(1.0), // High similarity
             list_b_time,
         );
 
@@ -404,7 +405,7 @@ mod tests {
         // Detect interference on List A
         let interference = detector.detect_interference(
             &list_a_episode,
-            &[list_b_episode.clone()],
+            std::slice::from_ref(&list_b_episode),
             retrieval_time,
         );
 
@@ -421,7 +422,7 @@ mod tests {
         let list_c_time = retrieval_time + Duration::minutes(30);
         let list_c_episode = create_episode_with_embedding(
             "list_c",
-            create_similar_embedding(1.0), // High similarity
+            &create_similar_embedding(1.0), // High similarity
             list_c_time,
         );
 
@@ -433,8 +434,8 @@ mod tests {
 
         // List C was learned AFTER retrieval, NOT during retention interval
         // Therefore it CANNOT interfere retroactively
-        assert_eq!(
-            interference_c.magnitude, 0.0,
+        assert!(
+            interference_c.magnitude.abs() < f32::EPSILON,
             "List C learned after retrieval cannot retroactively interfere"
         );
         assert_eq!(interference_c.count, 0);
@@ -446,19 +447,19 @@ mod tests {
         let now = Utc::now();
         let retrieval_time = now + Duration::hours(1);
 
-        let target = create_episode_with_embedding("target", create_similar_embedding(1.0), now);
+        let target = create_episode_with_embedding("target", &create_similar_embedding(1.0), now);
 
         // Episode learned BEFORE target (should NOT interfere retroactively)
         let before_episode = create_episode_with_embedding(
             "before",
-            create_similar_embedding(1.0),
+            &create_similar_embedding(1.0),
             now - Duration::hours(1),
         );
 
         let interference = detector.detect_interference(&target, &[before_episode], retrieval_time);
 
-        assert_eq!(
-            interference.magnitude, 0.0,
+        assert!(
+            interference.magnitude.abs() < f32::EPSILON,
             "Episodes learned before target cannot interfere retroactively"
         );
     }
@@ -469,7 +470,7 @@ mod tests {
 
         let target_time = Utc::now();
         let target =
-            create_episode_with_embedding("target", create_similar_embedding(1.0), target_time);
+            create_episode_with_embedding("target", &create_similar_embedding(1.0), target_time);
 
         let retrieval_time = target_time + Duration::minutes(60);
 
@@ -484,13 +485,13 @@ mod tests {
         // Create embedding with controlled similarity ~0.9
         let mut high_sim_embedding = create_similar_embedding(1.0);
         // Slightly perturb to get ~0.9 similarity
-        for i in 0..100 {
-            high_sim_embedding[i] *= 0.95;
+        for item in high_sim_embedding.iter_mut().take(100) {
+            *item *= 0.95;
         }
 
         let interfering = create_episode_with_embedding(
             "interfering",
-            high_sim_embedding,
+            &high_sim_embedding,
             target_time + Duration::minutes(30), // Interpolated
         );
 
@@ -511,13 +512,13 @@ mod tests {
 
         let target_time = Utc::now();
         let target =
-            create_episode_with_embedding("target", create_similar_embedding(1.0), target_time);
+            create_episode_with_embedding("target", &create_similar_embedding(1.0), target_time);
 
         // Test retrieval within consolidation window (should interfere)
         let early_retrieval = target_time + Duration::hours(12);
         let early_interfering = create_episode_with_embedding(
             "early",
-            create_similar_embedding(1.0),
+            &create_similar_embedding(1.0),
             target_time + Duration::hours(6), // Interpolated
         );
 
@@ -532,14 +533,14 @@ mod tests {
         let late_retrieval = target_time + Duration::hours(48);
         let late_interfering = create_episode_with_embedding(
             "late",
-            create_similar_embedding(1.0),
+            &create_similar_embedding(1.0),
             target_time + Duration::hours(36), // Still interpolated, but target consolidated
         );
 
         let late_interference =
             detector.detect_interference(&target, &[late_interfering], late_retrieval);
-        assert_eq!(
-            late_interference.magnitude, 0.0,
+        assert!(
+            late_interference.magnitude.abs() < f32::EPSILON,
             "Should NOT interfere outside 24h consolidation window"
         );
     }
@@ -550,19 +551,19 @@ mod tests {
         let now = Utc::now();
         let retrieval_time = now + Duration::hours(1);
 
-        let target = create_episode_with_embedding("target", create_similar_embedding(1.0), now);
+        let target = create_episode_with_embedding("target", &create_similar_embedding(1.0), now);
 
         // Similar episode (same embedding pattern)
         let similar = create_episode_with_embedding(
             "similar",
-            create_similar_embedding(1.0),
+            &create_similar_embedding(1.0),
             now + Duration::minutes(30), // Interpolated
         );
 
         // Dissimilar episode (different embedding pattern)
         let dissimilar = create_episode_with_embedding(
             "dissimilar",
-            create_similar_embedding(-1.0),
+            &create_similar_embedding(-1.0),
             now + Duration::minutes(30), // Interpolated
         );
 
@@ -574,8 +575,8 @@ mod tests {
             result_similar.magnitude > 0.0,
             "Similar episodes should interfere"
         );
-        assert_eq!(
-            result_dissimilar.magnitude, 0.0,
+        assert!(
+            result_dissimilar.magnitude.abs() < f32::EPSILON,
             "Dissimilar episodes should NOT interfere"
         );
     }
@@ -589,14 +590,14 @@ mod tests {
 
         // High similarity condition (should show ~25% interference with multiple items)
         let target =
-            create_episode_with_embedding("target", create_similar_embedding(1.0), target_time);
+            create_episode_with_embedding("target", &create_similar_embedding(1.0), target_time);
 
         // Create multiple highly similar interfering episodes
         let interfering: Vec<Episode> = (0..5)
             .map(|i| {
                 create_episode_with_embedding(
                     &format!("interfering_{i}"),
-                    create_similar_embedding(1.0),
+                    &create_similar_embedding(1.0),
                     target_time + Duration::minutes(10 + i * 5), // Interpolated early
                 )
             })
@@ -665,7 +666,7 @@ mod tests {
         };
 
         assert!(result.is_significant());
-        assert_eq!(result.accuracy_reduction_percent(), 20.0);
+        assert!((result.accuracy_reduction_percent() - 20.0).abs() < f32::EPSILON);
 
         let insignificant = RetroactiveInterferenceResult {
             magnitude: 0.05,

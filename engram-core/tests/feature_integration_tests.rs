@@ -60,6 +60,7 @@ fn test_null_index_provider() {
             recall_count: 1,
             decay_rate: 1.0,
             decay_function: None, // Use system default
+            metadata: std::collections::HashMap::new(),
         },
         Episode {
             id: "test2".to_string(),
@@ -76,6 +77,7 @@ fn test_null_index_provider() {
             recall_count: 2,
             decay_rate: 0.9,
             decay_function: None, // Use system default
+            metadata: std::collections::HashMap::new(),
         },
     ];
 
@@ -118,6 +120,7 @@ fn test_null_storage_provider() {
         recall_count: 1,
         decay_rate: 1.0,
         decay_function: None, // Use system default
+        metadata: std::collections::HashMap::new(),
     };
 
     // Test store and retrieve
@@ -163,6 +166,7 @@ fn test_null_decay_provider() {
         recall_count: 1,
         decay_rate: 1.0,
         decay_function: None, // Use system default
+        metadata: std::collections::HashMap::new(),
     };
 
     decay.apply_decay(&mut episode, elapsed);

@@ -5,6 +5,33 @@
 //! - DRM paradigm false memory testing
 //! - Serial position curve biological plausibility
 //! - Parameter tuning and Pareto frontier analysis
+//!
+//! ## Test Performance Optimization
+//!
+//! Pattern completion tests are computationally expensive due to:
+//! - CA3 attractor dynamics with Hebbian learning
+//! - Multiple HNSW traversals per completion
+//! - Parameter sweeps testing multiple configurations
+//!
+//! Many tests are marked with `#[ignore]` to keep default test runs fast (<2 minutes).
+//! These expensive tests (>30s each) should only run during full validation.
+//!
+//! ### Running Tests
+//!
+//! **Fast validation** (default, ~2 minutes):
+//! ```bash
+//! cargo test --test accuracy_validation_tests
+//! ```
+//!
+//! **Full validation suite** (all tests including expensive ones, ~5-6 minutes):
+//! ```bash
+//! cargo test --test accuracy_validation_tests -- --ignored --nocapture
+//! ```
+//!
+//! **Run both fast and expensive tests**:
+//! ```bash
+//! cargo test --test accuracy_validation_tests -- --include-ignored --nocapture
+//! ```
 
 #![cfg(feature = "pattern_completion")]
 

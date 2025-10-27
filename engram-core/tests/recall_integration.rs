@@ -17,37 +17,49 @@ mod tests {
     };
     use engram_core::index::CognitiveHnswIndex;
     use engram_core::{Confidence, Cue, EpisodeBuilder, MemoryStore};
+    use rand::SeedableRng;
+    use rand_chacha::ChaCha8Rng;
     use std::collections::HashMap;
     use std::sync::Arc;
     use std::time::Duration;
+
+    /// Helper to create diverse embeddings (prevent deduplication)
+    fn random_embedding(seed: u64) -> [f32; 768] {
+        let mut rng = ChaCha8Rng::seed_from_u64(seed);
+        let mut embedding = [0.0f32; 768];
+        for val in &mut embedding {
+            *val = rand::Rng::gen_range(&mut rng, -1.0..1.0);
+        }
+        // Normalize
+        let norm: f32 = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
+        for val in &mut embedding {
+            *val /= norm;
+        }
+        embedding
+    }
 
     /// Create a test memory store with sample episodes and HNSW index enabled
     fn create_test_store() -> MemoryStore {
         let store = MemoryStore::new(100).with_hnsw_index();
 
-        // Add some test episodes
+        // Add some test episodes with diverse embeddings
         let episodes = vec![
-            ("memory1", "Learning Rust programming", vec![0.5f32; 768]),
-            ("memory2", "Writing integration tests", vec![0.6f32; 768]),
-            ("memory3", "Building cognitive systems", vec![0.7f32; 768]),
+            ("memory1", "Learning Rust programming", random_embedding(1)),
+            ("memory2", "Writing integration tests", random_embedding(2)),
+            ("memory3", "Building cognitive systems", random_embedding(3)),
             (
                 "memory4",
                 "Parallel processing techniques",
-                vec![0.8f32; 768],
+                random_embedding(4),
             ),
             (
                 "memory5",
                 "Memory consolidation research",
-                vec![0.9f32; 768],
+                random_embedding(5),
             ),
         ];
 
-        for (id, content, embedding_vec) in episodes {
-            let mut embedding = [0.0f32; 768];
-            for (i, val) in embedding_vec.iter().enumerate() {
-                embedding[i] = *val;
-            }
-
+        for (id, content, embedding) in episodes {
             let episode = EpisodeBuilder::new()
                 .id(id.to_string())
                 .when(Utc::now())
@@ -167,9 +179,9 @@ mod tests {
             recall_config,
         );
 
-        // Create a test cue
-        let mut cue_embedding = [0.0f32; 768];
-        cue_embedding.fill(0.7);
+        // Create a test cue using one of the stored episode embeddings
+        // This ensures we have high similarity and will get results
+        let cue_embedding = random_embedding(3); // Same seed as memory3
         let cue = Cue::embedding(
             "similarity_test".to_string(),
             cue_embedding,
@@ -364,7 +376,9 @@ mod tests {
             recall_config,
         );
 
-        let cue = Cue::embedding("fallback_test".to_string(), [0.7f32; 768], Confidence::HIGH);
+        // Use a matching embedding from the store to ensure results
+        let cue_embedding = random_embedding(1); // Same seed as memory1
+        let cue = Cue::embedding("fallback_test".to_string(), cue_embedding, Confidence::HIGH);
         let results = recall.recall(&cue, &store).expect("Recall failed");
 
         // Should still return results even with timeout (via fallback)

@@ -59,7 +59,7 @@ impl CognitiveTracer {
     }
 
     /// Record priming event (zero-overhead when tracing disabled)
-    #[inline(always)]
+    #[inline]
     pub fn trace_priming(
         &self,
         priming_type: PrimingType,
@@ -91,7 +91,7 @@ impl CognitiveTracer {
     }
 
     /// Record interference event
-    #[inline(always)]
+    #[inline]
     pub fn trace_interference(
         &self,
         interference_type: InterferenceType,
@@ -124,7 +124,7 @@ impl CognitiveTracer {
     }
 
     /// Record reconsolidation event
-    #[inline(always)]
+    #[inline]
     pub fn trace_reconsolidation(
         &self,
         episode_id: u64,
@@ -157,7 +157,7 @@ impl CognitiveTracer {
     }
 
     /// Record false memory event
-    #[inline(always)]
+    #[inline]
     pub fn trace_false_memory(
         &self,
         critical_lure_hash: u64,

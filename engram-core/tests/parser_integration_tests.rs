@@ -422,12 +422,13 @@ fn test_node_id_with_underscores() {
 
 #[test]
 fn test_spread_max_hops_boundary() {
-    let query = "SPREAD FROM node MAX_HOPS 65535";
+    // Test valid boundary (MAX_HOPS <= 100)
+    let query = "SPREAD FROM node MAX_HOPS 100";
     let ast = Parser::parse(query).unwrap();
 
     match ast {
         Query::Spread(spread) => {
-            assert_eq!(spread.max_hops, Some(65535)); // Max u16 value
+            assert_eq!(spread.max_hops, Some(100));
         }
         _ => panic!("Expected Spread query"),
     }

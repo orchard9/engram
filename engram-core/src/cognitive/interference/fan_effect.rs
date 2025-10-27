@@ -357,8 +357,8 @@ mod tests {
     #[test]
     fn test_default_parameters() {
         let detector = FanEffectDetector::default();
-        assert_eq!(detector.base_retrieval_time_ms(), 1150.0);
-        assert_eq!(detector.time_per_association_ms(), 70.0);
+        assert!((detector.base_retrieval_time_ms() - 1150.0).abs() < f32::EPSILON);
+        assert!((detector.time_per_association_ms() - 70.0).abs() < f32::EPSILON);
         assert!(!detector.use_sqrt_divisor());
     }
 
@@ -404,12 +404,24 @@ mod tests {
         let slope_2_3 = rt3 - rt2;
         let slope_3_5 = (rt5 - rt3) / 2.0;
 
-        assert_eq!(slope_1_2, 70.0, "Slope 1→2 should be 70ms");
-        assert_eq!(slope_2_3, 70.0, "Slope 2→3 should be 70ms");
-        assert_eq!(slope_3_5, 70.0, "Slope 3→5 should be 70ms");
+        assert!(
+            (slope_1_2 - 70.0).abs() < f32::EPSILON,
+            "Slope 1→2 should be 70ms"
+        );
+        assert!(
+            (slope_2_3 - 70.0).abs() < f32::EPSILON,
+            "Slope 2→3 should be 70ms"
+        );
+        assert!(
+            (slope_3_5 - 70.0).abs() < f32::EPSILON,
+            "Slope 3→5 should be 70ms"
+        );
 
         // Verify base time
-        assert_eq!(rt1, 1150.0, "Base time (fan=1) should be 1150ms");
+        assert!(
+            (rt1 - 1150.0).abs() < f32::EPSILON,
+            "Base time (fan=1) should be 1150ms"
+        );
     }
 
     #[test]
@@ -424,7 +436,10 @@ mod tests {
             activation_divisor: 1.0,
         };
         let activation_fan1 = detector.apply_to_activation(base_activation, &result_fan1);
-        assert_eq!(activation_fan1, 1.0, "Fan=1 should have full activation");
+        assert!(
+            (activation_fan1 - 1.0).abs() < f32::EPSILON,
+            "Fan=1 should have full activation"
+        );
 
         // Fan = 3: One-third activation per edge
         let result_fan3 = FanEffectResult {
@@ -433,9 +448,8 @@ mod tests {
             activation_divisor: 3.0,
         };
         let activation_fan3 = detector.apply_to_activation(base_activation, &result_fan3);
-        assert_eq!(
-            activation_fan3,
-            1.0 / 3.0,
+        assert!(
+            (activation_fan3 - 1.0 / 3.0).abs() < f32::EPSILON,
             "Fan=3 should divide activation by 3"
         );
 
@@ -446,9 +460,8 @@ mod tests {
             activation_divisor: 5.0,
         };
         let activation_fan5 = detector.apply_to_activation(base_activation, &result_fan5);
-        assert_eq!(
-            activation_fan5,
-            1.0 / 5.0,
+        assert!(
+            (activation_fan5 - 1.0 / 5.0).abs() < f32::EPSILON,
             "Fan=5 should divide activation by 5"
         );
     }
@@ -461,7 +474,10 @@ mod tests {
         // Linear mode: fan=9 → divisor=9
         // Sqrt mode: fan=9 → divisor=3
         let divisor = detector.compute_activation_divisor(9);
-        assert_eq!(divisor, 3.0, "Sqrt of 9 should be 3");
+        assert!(
+            (divisor - 3.0).abs() < f32::EPSILON,
+            "Sqrt of 9 should be 3"
+        );
 
         // Application to activation
         let base_activation = 1.0;
@@ -472,9 +488,8 @@ mod tests {
         };
 
         let activation = detector.apply_to_activation(base_activation, &result);
-        assert_eq!(
-            activation,
-            1.0 / 3.0,
+        assert!(
+            (activation - 1.0 / 3.0).abs() < f32::EPSILON,
             "Activation should be divided by sqrt(9) = 3"
         );
     }
@@ -488,7 +503,7 @@ mod tests {
         };
 
         assert!(!result.is_high_fan(), "Fan=3 should not be high");
-        assert_eq!(result.slowdown_ms(1150.0), 140.0);
+        assert!((result.slowdown_ms(1150.0) - 140.0).abs() < f32::EPSILON);
 
         let high_result = FanEffectResult {
             fan: 5,
@@ -503,7 +518,7 @@ mod tests {
     fn test_single_association() {
         let result = FanEffectResult::single_association(1150.0);
         assert_eq!(result.fan, 1);
-        assert_eq!(result.retrieval_time_ms, 1150.0);
-        assert_eq!(result.activation_divisor, 1.0);
+        assert!((result.retrieval_time_ms - 1150.0).abs() < f32::EPSILON);
+        assert!((result.activation_divisor - 1.0).abs() < f32::EPSILON);
     }
 }

@@ -272,11 +272,9 @@ impl AssociativePrimingEngine {
             }
 
             // Check temporal recency
-            if let Ok(last_seen) = entry.last_seen.lock() {
+            entry.last_seen.lock().map_or(true, |last_seen| {
                 now.duration_since(*last_seen) < prune_threshold
-            } else {
-                true // Keep if lock is poisoned
-            }
+            })
         });
 
         // Prune old activations
@@ -399,11 +397,14 @@ mod tests {
         // Second activation within window (both nodes recently active)
         engine.record_coactivation("thunder", "lightning");
 
+        // Third activation to meet default threshold of 3
+        engine.record_coactivation("thunder", "lightning");
+
         // Check association strength
         let strength = engine.compute_association_strength("thunder", "lightning");
         assert!(
             strength > 0.0,
-            "Association should form after 2 co-occurrences"
+            "Association should form after 3 co-occurrences (default threshold)"
         );
     }
 
@@ -416,7 +417,10 @@ mod tests {
         engine.record_coactivation("node_a", "node_b");
 
         let strength = engine.compute_association_strength("node_a", "node_b");
-        assert_eq!(strength, 0.0, "Should not form association below threshold");
+        assert!(
+            strength.abs() < f32::EPSILON,
+            "Should not form association below threshold"
+        );
     }
 
     #[test]
@@ -438,8 +442,7 @@ mod tests {
         // Should be close to 0.5 (accounting for implementation details)
         assert!(
             strength_ab > 0.3 && strength_ab < 0.7,
-            "strength_ab = {}",
-            strength_ab
+            "strength_ab = {strength_ab}"
         );
     }
 
@@ -467,7 +470,10 @@ mod tests {
         engine.record_coactivation("node", "node");
         let strength = engine.compute_association_strength("node", "node");
 
-        assert_eq!(strength, 0.0, "Self-associations should be zero");
+        assert!(
+            strength.abs() < f32::EPSILON,
+            "Self-associations should be zero"
+        );
     }
 
     #[test]
@@ -505,7 +511,7 @@ mod tests {
             engine.record_coactivation("old_a", "old_b");
         }
 
-        assert!(engine.cooccurrence_counts.len() > 0);
+        assert!(!engine.cooccurrence_counts.is_empty());
 
         // Wait for expiration
         std::thread::sleep(Duration::from_millis(120)); // 12× window

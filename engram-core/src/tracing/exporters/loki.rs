@@ -9,7 +9,7 @@ use crate::tracing::event::CognitiveEvent;
 ///
 /// Currently a stub implementation. To enable, add reqwest/hyper dependencies
 /// and implement proper Loki HTTP API export.
-pub fn export_loki(_events: &[CognitiveEvent]) -> Result<(), Box<dyn std::error::Error>> {
+pub fn export_loki(_events: &[CognitiveEvent]) {
     // TODO: Implement Loki export
     // This would involve:
     // 1. Converting CognitiveEvent to Loki log format
@@ -21,6 +21,4 @@ pub fn export_loki(_events: &[CognitiveEvent]) -> Result<(), Box<dyn std::error:
         target: "engram::tracing::loki",
         "Loki export not yet implemented"
     );
-
-    Ok(())
 }

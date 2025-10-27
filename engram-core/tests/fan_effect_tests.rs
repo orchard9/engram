@@ -2,6 +2,8 @@
 //!
 //! Validates Anderson (1974) empirical findings using Engram's memory graph.
 
+#![allow(clippy::float_cmp)]
+
 use engram_core::Confidence;
 use engram_core::cognitive::interference::{
     FanEffectDetector, FanEffectResult, FanEffectStatistics,

@@ -296,15 +296,20 @@ mod tests {
             original_episode: episode.clone(),
         };
 
+        #[allow(clippy::expect_used)] // Test code - failure here is expected to panic
         let tagged = bridge
             .process_reconsolidated_memory(episode, &recon_result)
-            .unwrap();
+            .expect("Failed to process reconsolidated memory");
 
         // Verify metadata
         assert!(tagged.has_metadata("reconsolidation_event"));
         assert!(tagged.has_metadata("reconsolidation_cycles"));
         assert!(tagged.has_metadata("window_position"));
-        assert_eq!(tagged.get_metadata("reconsolidation_cycles").unwrap(), "1");
+        #[allow(clippy::expect_used)] // Test code - failure here is expected to panic
+        let cycles = tagged
+            .get_metadata("reconsolidation_cycles")
+            .expect("Missing reconsolidation_cycles metadata");
+        assert_eq!(cycles, "1");
     }
 
     #[test]

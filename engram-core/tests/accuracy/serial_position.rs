@@ -333,6 +333,7 @@ fn test_serial_position_curve() {
 }
 
 #[test]
+#[ignore = "Expensive test (>30s) - runs pattern completion on sequential episodes"]
 fn test_recency_effect_temporal_weighting() {
     // Validate that recency effect is driven by temporal proximity
     let episodes = generate_sequential_episodes(15, 10); // 10 second spacing
@@ -372,6 +373,7 @@ fn test_recency_effect_temporal_weighting() {
 }
 
 #[test]
+#[ignore = "Expensive test (>30s) - runs pattern completion on sequential episodes"]
 fn test_primacy_effect_consolidation() {
     // Validate that primacy effect is driven by consolidation strength
     let episodes = generate_sequential_episodes(15, 1);

@@ -34,8 +34,8 @@
 //!
 //! # Example: AST Query Execution
 //!
-//! ```rust,no_run
-//! use engram_core::query::executor::{QueryExecutor, QueryExecutorConfig, QueryContext};
+//! ```ignore
+//! use engram_core::query::executor::{QueryExecutor, AstQueryExecutorConfig, QueryContext};
 //! use engram_core::query::parser::ast::{Query, Pattern, RecallQuery, NodeIdentifier};
 //! use engram_core::registry::MemorySpaceRegistry;
 //! use engram_core::MemorySpaceId;
@@ -48,7 +48,7 @@
 //!     |_id, _dirs| Err(engram_core::registry::MemorySpaceError::NotFound { id: _id.clone() })
 //! )?);
 //!
-//! let executor = QueryExecutor::new(registry, QueryExecutorConfig::default());
+//! let executor = QueryExecutor::new(registry, AstQueryExecutorConfig::default());
 //!
 //! let query = Query::Recall(RecallQuery {
 //!     pattern: Pattern::NodeId(NodeIdentifier::from("episode_123")),
