@@ -3,9 +3,13 @@
 //! Implements interference effects from cognitive psychology including
 //! proactive, retroactive, and fan effects based on empirical research.
 
+pub mod fan_effect;
 pub mod proactive;
+pub mod retroactive;
 
+pub use fan_effect::{FanEffectDetector, FanEffectResult, FanEffectStatistics};
 pub use proactive::{ProactiveInterferenceDetector, ProactiveInterferenceResult};
+pub use retroactive::{RetroactiveInterferenceDetector, RetroactiveInterferenceResult};
 
 /// Type of interference effect
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -155,8 +155,6 @@ mod tests {
 
     #[test]
     fn test_sampling() {
-        use rand::Rng;
-
         let mut config = TracingConfig::disabled();
         config.sample_rates.insert(EventType::Priming, 0.0);
         assert!(!config.should_sample(EventType::Priming));
