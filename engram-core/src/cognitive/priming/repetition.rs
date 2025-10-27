@@ -162,8 +162,7 @@ impl RepetitionPrimingEngine {
         let exposure_count = self
             .exposure_counts
             .get(node_id)
-            .map(|count| count.load(Ordering::Relaxed))
-            .unwrap_or(0);
+            .map_or(0, |count| count.load(Ordering::Relaxed));
 
         // Linear accumulation: boost = exposures × boost_per_repetition
         let linear_boost = (exposure_count as f32) * self.boost_per_repetition;

@@ -132,13 +132,15 @@ impl AssociativePrimingEngine {
         let now = Instant::now();
 
         // Check temporal window for both nodes
-        let a_in_window = self.recent_activations.get(node_a).map_or(false, |entry| {
-            now.duration_since(*entry) <= self.cooccurrence_window
-        });
+        let a_in_window = self
+            .recent_activations
+            .get(node_a)
+            .is_some_and(|entry| now.duration_since(*entry) <= self.cooccurrence_window);
 
-        let b_in_window = self.recent_activations.get(node_b).map_or(false, |entry| {
-            now.duration_since(*entry) <= self.cooccurrence_window
-        });
+        let b_in_window = self
+            .recent_activations
+            .get(node_b)
+            .is_some_and(|entry| now.duration_since(*entry) <= self.cooccurrence_window);
 
         // Only count as co-occurrence if both nodes activated within window
         if a_in_window && b_in_window {
@@ -147,7 +149,7 @@ impl AssociativePrimingEngine {
 
             // Update co-occurrence count
             self.cooccurrence_counts
-                .entry(pair.clone())
+                .entry(pair)
                 .and_modify(|entry| {
                     entry.count.fetch_add(1, Ordering::Relaxed);
                     if let Ok(mut last_seen) = entry.last_seen.lock() {
@@ -228,8 +230,7 @@ impl AssociativePrimingEngine {
         let cooccurrence_count = self
             .cooccurrence_counts
             .get(&pair)
-            .map(|entry| entry.count.load(Ordering::Relaxed))
-            .unwrap_or(0);
+            .map_or(0, |entry| entry.count.load(Ordering::Relaxed));
 
         // Check minimum threshold
         if cooccurrence_count < self.min_cooccurrence {
@@ -240,8 +241,7 @@ impl AssociativePrimingEngine {
         let prime_count = self
             .node_activation_counts
             .get(prime)
-            .map(|count| count.load(Ordering::Relaxed))
-            .unwrap_or(1); // Avoid division by zero
+            .map_or(1, |count| count.load(Ordering::Relaxed)); // Default to 1 to avoid division by zero
 
         // Compute conditional probability: P(target | prime) = P(prime,target) / P(prime)
         let strength = (cooccurrence_count as f32) / (prime_count as f32);
