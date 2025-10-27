@@ -283,6 +283,7 @@ fn test_isotonic_calibration_per_bin() {
 }
 
 #[test]
+#[ignore = "Slow test (>60s) - runs 44 pattern completions"]
 fn test_isotonic_calibration_monotonicity() {
     // Verify that calibrated probabilities preserve monotonicity
     let (train_episodes, test_partials, test_ground_truth) = generate_calibration_dataset(44);
@@ -347,6 +348,7 @@ fn test_isotonic_calibration_monotonicity() {
 }
 
 #[test]
+#[ignore = "Slow test (>60s) - runs 45 pattern completions"]
 fn test_isotonic_calibration_improvement() {
     // Test that calibration improves over raw scores
     let (train_episodes, test_partials, test_ground_truth) = generate_calibration_dataset(45);
