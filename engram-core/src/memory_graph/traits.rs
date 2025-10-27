@@ -202,4 +202,17 @@ pub trait GraphBackend: MemoryBackend {
     /// Returns [`MemoryError`] if the backend cannot iterate the stored edges.
     #[must_use = "Handle the result to detect backend failures"]
     fn all_edges(&self) -> Result<Vec<(Uuid, Uuid, f32)>, MemoryError>;
+
+    /// Get the count of outgoing edges from a node
+    ///
+    /// Used for computing fan effect (number of associations).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MemoryError`] if the backend cannot access the node's edges.
+    #[must_use = "Handle the result to detect backend failures"]
+    fn get_outgoing_edge_count(&self, id: &Uuid) -> Result<usize, MemoryError> {
+        // Default implementation using get_neighbors
+        self.get_neighbors(id).map(|neighbors| neighbors.len())
+    }
 }

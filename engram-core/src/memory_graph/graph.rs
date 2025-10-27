@@ -315,6 +315,18 @@ impl<B: GraphBackend> UnifiedMemoryGraph<B> {
     pub fn all_edges(&self) -> Result<Vec<(Uuid, Uuid, f32)>, MemoryError> {
         self.backend.all_edges()
     }
+
+    /// Get the count of outgoing edges from a node
+    ///
+    /// Used for computing fan effect (number of associations).
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`MemoryError`] if the backend cannot access the node's edges.
+    #[must_use = "Handle the result to detect memory graph errors"]
+    pub fn get_outgoing_edge_count(&self, id: &Uuid) -> Result<usize, MemoryError> {
+        self.backend.get_outgoing_edge_count(id)
+    }
 }
 
 /// Convenience constructors for common backend configurations

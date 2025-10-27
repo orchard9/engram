@@ -47,7 +47,8 @@ pub fn start_collector_thread(
     let shutdown = Arc::new(AtomicBool::new(false));
     let shutdown_clone = Arc::clone(&shutdown);
 
-    #[allow(clippy::expect_used)] // System initialization: panic is acceptable if thread spawn fails
+    #[allow(clippy::expect_used)]
+    // System initialization: panic is acceptable if thread spawn fails
     let handle = thread::Builder::new()
         .name("engram-tracer-collector".to_string())
         .spawn(move || {
