@@ -499,6 +499,7 @@ mod tests {
             recall_count: 0,
             decay_rate: 0.1,
             decay_function: None, // Use system default
+            metadata: std::collections::HashMap::new(),
         };
 
         memory_store.store(episode);
@@ -571,6 +572,7 @@ mod tests {
             recall_count: 0,
             decay_rate: 0.1,
             decay_function: None, // Use system default
+            metadata: std::collections::HashMap::new(),
         }
     }
 }

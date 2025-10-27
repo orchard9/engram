@@ -222,6 +222,7 @@ impl GroundTruthGenerator {
                 recall_count: 0,
                 decay_rate: 0.03,
                 decay_function: None,
+                metadata: std::collections::HashMap::new(),
             });
         }
 
@@ -557,6 +558,7 @@ fn test_validation_metrics_calculation() {
         recall_count: 0,
         decay_rate: 0.03,
         decay_function: None,
+        metadata: std::collections::HashMap::new(),
     };
 
     let recon_episode = Episode {
@@ -574,6 +576,7 @@ fn test_validation_metrics_calculation() {
         recall_count: 0,
         decay_rate: 0.03,
         decay_function: None,
+        metadata: std::collections::HashMap::new(),
     };
 
     let corruption_fields = vec![vec!["what", "where", "who"]];

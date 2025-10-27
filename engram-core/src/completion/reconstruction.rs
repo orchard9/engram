@@ -365,6 +365,7 @@ impl PatternCompleter for PatternReconstructor {
                 recall_count: 0,
                 decay_rate: 0.05,
                 decay_function: None, // Use system default for reconstructed episodes
+                metadata: std::collections::HashMap::new(),
             };
 
             // Build source map

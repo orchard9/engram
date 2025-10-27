@@ -239,6 +239,7 @@ fn generate_sequential_episodes(count: usize, spacing_seconds: i64) -> Vec<Episo
             recall_count: if i < 3 { 2 } else { 0 }, // Early items rehearsed more
             decay_rate: 0.03,
             decay_function: None,
+            metadata: std::collections::HashMap::new(),
         });
     }
 

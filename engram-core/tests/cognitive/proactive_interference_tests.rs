@@ -33,6 +33,7 @@ fn create_episode_with_embedding(
         decay_rate: 0.05,
         decay_function: None,
         metadata: std::collections::HashMap::new(),
+        metadata: std::collections::HashMap::new(),
     }
 }
 

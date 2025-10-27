@@ -26,6 +26,8 @@
 //! 3. Lee, J. L. (2009). Reconsolidation: maintaining memory relevance. *Trends in Neurosciences*, 32(8), 413-420.
 //! 4. Dudai, Y. (2006). Reconsolidation: the advantage of being refocused. *Current Opinion in Neurobiology*, 16(2), 174-178.
 
+pub mod consolidation_integration;
+
 use crate::{Confidence, Episode};
 use chrono::{DateTime, Duration, Utc};
 use dashmap::DashMap;

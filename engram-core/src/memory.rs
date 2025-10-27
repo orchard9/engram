@@ -252,6 +252,10 @@ pub struct Episode {
 
     /// Optional decay function override for this episode (None = use system default)
     pub decay_function: Option<DecayFunction>,
+
+    /// Arbitrary metadata for tracking reconsolidation, consolidation events, etc.
+    #[serde(default)]
+    pub metadata: std::collections::HashMap<String, String>,
 }
 
 impl Episode {
@@ -280,6 +284,7 @@ impl Episode {
             recall_count: 0,
             decay_rate: 0.05,     // Episodes decay slower than individual memories
             decay_function: None, // Use system default unless overridden
+            metadata: std::collections::HashMap::new(),
         }
     }
 
@@ -309,6 +314,7 @@ impl Episode {
             recall_count: 0,
             decay_rate: 0.05,
             decay_function: None, // Use system default unless overridden
+            metadata: std::collections::HashMap::new(),
         }
     }
 
@@ -442,6 +448,27 @@ impl Episode {
         total += 1.0;
 
         score / total
+    }
+
+    /// Add metadata key-value pair to episode (builder pattern)
+    ///
+    /// Used for tracking reconsolidation events, consolidation status, etc.
+    #[must_use]
+    pub fn with_metadata(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.metadata.insert(key.into(), value.into());
+        self
+    }
+
+    /// Get metadata value by key
+    #[must_use]
+    pub fn get_metadata(&self, key: &str) -> Option<&String> {
+        self.metadata.get(key)
+    }
+
+    /// Check if episode has specific metadata key
+    #[must_use]
+    pub fn has_metadata(&self, key: &str) -> bool {
+        self.metadata.contains_key(key)
     }
 }
 

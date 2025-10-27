@@ -51,6 +51,8 @@ pub mod storage;
 pub mod store;
 pub mod streaming;
 pub mod streaming_health;
+#[cfg(any(feature = "cognitive_tracing", not(feature = "cognitive_tracing")))]
+pub mod tracing;
 pub mod types;
 #[cfg(feature = "zig-kernels")]
 pub mod zig_kernels;

@@ -110,6 +110,7 @@ fn generate_calibration_dataset(seed: u64) -> (Vec<Episode>, Vec<PartialEpisode>
             recall_count: 0,
             decay_rate: 0.03,
             decay_function: None,
+            metadata: std::collections::HashMap::new(),
         });
     }
 

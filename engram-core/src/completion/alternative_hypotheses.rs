@@ -238,6 +238,7 @@ mod tests {
             recall_count: 0,
             decay_rate: 0.05,
             decay_function: None,
+            metadata: std::collections::HashMap::new(),
         }
     }
 

@@ -416,6 +416,7 @@ mod integration_tests {
             recall_count: 0,
             decay_rate: 0.1,
             decay_function: None, // Use system default
+            metadata: std::collections::HashMap::new(),
         }
     }
 }

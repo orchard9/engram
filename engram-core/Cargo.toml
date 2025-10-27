@@ -164,10 +164,18 @@ required-features = ["gpu"]
 name = "metrics_overhead"
 harness = false
 
+[[bench]]
+name = "tracing_overhead"
+harness = false
+required-features = ["cognitive_tracing"]
+
 [features]
 default = ["hnsw_index", "memory_mapped_persistence", "psychological_decay", "probabilistic_queries", "pattern_completion", "monitoring"]
 # For systems where Z3 is available
 full = ["default", "smt_verification"]
+
+# Cognitive event tracing with bounded memory
+cognitive_tracing = []
 
 # GPU acceleration with CUDA (requires CUDA toolkit 11.0+)
 gpu = []
