@@ -56,7 +56,7 @@ pub struct MigrationPipeline<S: DataSource, T: MemoryTransformer> {
 impl<S: DataSource, T: MemoryTransformer> MigrationPipeline<S, T> {
     /// Create a new migration pipeline
     #[must_use]
-    pub fn new(source: S, transformer: T, batch_size: usize) -> Self {
+    pub const fn new(source: S, transformer: T, batch_size: usize) -> Self {
         Self {
             source,
             transformer,
@@ -65,17 +65,17 @@ impl<S: DataSource, T: MemoryTransformer> MigrationPipeline<S, T> {
     }
 
     /// Get reference to data source
-    pub fn source(&self) -> &S {
+    pub const fn source(&self) -> &S {
         &self.source
     }
 
     /// Get mutable reference to data source
-    pub fn source_mut(&mut self) -> &mut S {
+    pub const fn source_mut(&mut self) -> &mut S {
         &mut self.source
     }
 
     /// Get reference to transformer
-    pub fn transformer(&self) -> &T {
+    pub const fn transformer(&self) -> &T {
         &self.transformer
     }
 

@@ -7,8 +7,11 @@ This document provides step-by-step procedures for rolling back Zig performance 
 Use this guide when:
 
 - Zig kernels cause production incidents (crashes, correctness issues)
+
 - Performance degrades below acceptable thresholds
+
 - Arena overflows cannot be resolved through tuning
+
 - Planned maintenance requires disabling Zig kernels
 
 ## Decision Matrix
@@ -29,7 +32,9 @@ Use this procedure for critical issues requiring immediate failover to Rust base
 ### Prerequisites
 
 - Access to production deployment infrastructure
+
 - Ability to rebuild and deploy binaries
+
 - Rollback window approval (if required)
 
 ### Step 1: Stop the Service
@@ -46,6 +51,7 @@ docker stop engram-container
 
 # Kubernetes
 kubectl scale deployment engram --replicas=0
+
 ```
 
 **Recovery Time Objective (RTO)**: Service offline for 5-10 minutes during rebuild and restart.
@@ -69,6 +75,7 @@ nm target/release/engram-cli | grep engram_vector_similarity
 # Alternatively, use objdump to verify
 objdump -T target/release/engram-cli | grep zig
 # Should output: (no results)
+
 ```
 
 ### Step 3: Deploy Rolled-Back Binary
@@ -82,6 +89,7 @@ sudo cp target/release/engram-cli /usr/local/bin/engram-cli
 
 # Verify binary is updated
 /usr/local/bin/engram-cli --version
+
 ```
 
 ### Step 4: Restart Service
@@ -99,6 +107,7 @@ docker start engram-container
 
 # Kubernetes
 kubectl scale deployment engram --replicas=3  # Or original replica count
+
 ```
 
 ### Step 5: Verify Rollback
@@ -115,6 +124,7 @@ curl http://localhost:7432/health
 # Verify Rust baseline is active
 curl http://localhost:7432/internal/zig/status
 # Expected: {"zig_kernels_enabled": false}
+
 ```
 
 ### Step 6: Monitor Baseline Performance
@@ -125,6 +135,7 @@ cargo bench --bench regression
 
 # Check key metrics
 curl http://localhost:7432/metrics | grep kernel_duration
+
 ```
 
 **Expected**: Performance returns to pre-Zig baseline (slower but stable).
@@ -168,6 +179,7 @@ Gradually reduce Zig kernel usage across instance fleet:
 
 # Monitor for 1 hour
 # Check error rates, latency, throughput
+
 ```
 
 #### Phase 2: Roll Back 25% of Fleet
@@ -179,6 +191,7 @@ for instance in prod-1 prod-2 prod-3; do
 done
 
 # Monitor for 30 minutes
+
 ```
 
 #### Phase 3: Roll Back Remaining 75%
@@ -188,6 +201,7 @@ done
 ./scripts/deploy_rust_only_all.sh
 
 # Verify all instances are Rust-only
+
 ```
 
 **Total Rollback Time**: 2-3 hours with monitoring windows
@@ -207,6 +221,7 @@ lb-control set-weight zig-instances:50 rust-instances:50
 lb-control set-weight zig-instances:0 rust-instances:100
 
 # Decommission Zig instances
+
 ```
 
 ### Strategy 3: Feature Flag Toggle
@@ -220,6 +235,7 @@ curl -X POST http://localhost:7432/config/set \
   -d '{"zig_kernels_enabled": false}'
 
 // No restart required - takes effect on next kernel invocation
+
 ```
 
 **Advantage**: Instant rollback without rebuild or restart.
@@ -242,6 +258,7 @@ sudo systemctl restart engram
 
 # Monitor overflow rate
 watch -n 5 'curl -s http://localhost:7432/internal/zig/arena_stats | jq .total_overflows'
+
 ```
 
 If overflows persist, proceed with rollback.
@@ -260,6 +277,7 @@ cargo bench --bench regression
 
 # If performance improves, keep reduced threads
 # Otherwise, proceed with rollback
+
 ```
 
 ## Verification After Rollback
@@ -276,6 +294,7 @@ cargo test --test integration --release
 ./scripts/smoke_test.sh
 
 # Expected: All tests pass
+
 ```
 
 ### Performance Verification
@@ -286,6 +305,7 @@ cargo bench --bench baseline_performance
 
 # Verify performance matches historical baseline
 # (should be within 5% of pre-Zig introduction)
+
 ```
 
 ### Error Rate Verification
@@ -298,6 +318,7 @@ journalctl -u engram --since "10 minutes ago" | grep -i error
 # Monitor error rate metrics
 curl http://localhost:7432/metrics | grep error_rate
 # Should return to baseline levels
+
 ```
 
 ## Common Rollback Scenarios
@@ -305,80 +326,119 @@ curl http://localhost:7432/metrics | grep error_rate
 ### Scenario 1: Arena Overflows Causing Errors
 
 **Symptoms**:
+
 - High error rate in logs (OutOfMemory errors)
+
 - `total_overflows` metric increasing rapidly
+
 - Client-visible failures
 
 **Root Cause**: Arena capacity insufficient for workload
 
 **Rollback Decision**:
+
 1. **First**: Attempt increasing arena size (`ENGRAM_ARENA_SIZE=8388608`)
+
 2. **If errors persist**: Perform **Gradual Rollback** within 1 hour
+
 3. **If critical**: Perform **Emergency Rollback** immediately
 
 **Follow-up**:
+
 - Analyze peak memory usage during failed workload
+
 - Calculate required arena size: `peak_usage * 1.5`
+
 - Re-enable Zig kernels with larger arenas in staging
+
 - Validate before re-deploying to production
 
 ### Scenario 2: Performance Regression
 
 **Symptoms**:
+
 - Increased latency (p50, p99 above thresholds)
+
 - Reduced throughput
+
 - Regression benchmarks fail
 
 **Root Cause**: Possible causes:
+
 - SIMD not enabled (CPU lacks AVX2/NEON)
+
 - Thread contention or lock thrashing
+
 - Arena allocations slower than expected
 
 **Rollback Decision**:
+
 1. **First**: Verify CPU features and thread count
+
 2. **If no improvement**: Perform **Gradual Rollback** within 4 hours
+
 3. **If impact >20%**: Perform **Emergency Rollback** within 1 hour
 
 **Follow-up**:
+
 - Profile with perf/Instruments to identify bottleneck
+
 - Test on identical hardware in staging
+
 - Validate performance improvements before re-deployment
 
 ### Scenario 3: Numerical Divergence
 
 **Symptoms**:
+
 - Differential tests fail in production
+
 - Incorrect results compared to Rust baseline
+
 - Data integrity concerns
 
 **Root Cause**: Floating-point precision issue or FFI bug
 
 **Rollback Decision**:
+
 - **Immediate Emergency Rollback** (correctness issue)
+
 - Treat as critical incident
 
 **Follow-up**:
+
 - Capture failing test cases and inputs
+
 - File critical bug report with reproduction
+
 - Investigate numerical accuracy in Zig kernels
+
 - Re-enable only after fix validated in staging
 
 ### Scenario 4: Build Failures After Upgrade
 
 **Symptoms**:
+
 - `cargo build --features zig-kernels` fails
+
 - Zig compiler errors during build
+
 - ABI compatibility issues
 
 **Root Cause**: Zig version incompatibility or build system changes
 
 **Rollback Decision**:
+
 - **Build Rust-only version** immediately
+
 - Deploy to avoid production outage
 
 **Follow-up**:
+
 - Pin Zig version to 0.13.0
+
 - Update build scripts to verify Zig version
+
 - Test builds in CI before merging
 
 ## Rollback Testing
@@ -401,6 +461,7 @@ sleep 300
 ./scripts/health_check.sh staging
 
 # Expected: Staging returns to healthy state within 10 minutes
+
 ```
 
 ### Rollback Checklist
@@ -408,14 +469,23 @@ sleep 300
 Use this checklist during drills:
 
 - [ ] Stop service completes without errors
+
 - [ ] Rebuild completes in <5 minutes
+
 - [ ] Binary deployment succeeds
+
 - [ ] Service restart succeeds
+
 - [ ] Health checks pass
+
 - [ ] Zig symbols absent from binary (verified)
+
 - [ ] Logs show no Zig-related messages
+
 - [ ] Performance returns to baseline
+
 - [ ] Integration tests pass
+
 - [ ] Total rollback time <10 minutes
 
 ## Post-Rollback Actions
@@ -425,14 +495,19 @@ After completing rollback:
 ### 1. Root Cause Analysis
 
 - Identify why rollback was necessary
+
 - Document specific failure mode
+
 - Determine if issue is reproducible
 
 ### 2. Fix and Validate
 
 - Address root cause in development environment
+
 - Write regression test to prevent recurrence
+
 - Validate fix in staging with production-like workload
+
 - Run extended soak test (24+ hours)
 
 ### 3. Re-Deployment Plan
@@ -440,15 +515,21 @@ After completing rollback:
 When re-enabling Zig kernels:
 
 - Start with canary deployment (5% traffic)
+
 - Monitor for 48 hours before expanding
+
 - Have rollback plan ready (this document)
+
 - Communicate plan to operations team
 
 ### 4. Documentation Update
 
 - Update this document with lessons learned
+
 - Add new troubleshooting guidance
+
 - Document configuration changes
+
 - Update deployment runbooks
 
 ## Emergency Contacts
@@ -456,7 +537,9 @@ When re-enabling Zig kernels:
 For rollback assistance:
 
 - **On-call Engineer**: Check on-call rotation
+
 - **Engram Team Lead**: Contact via team channel
+
 - **Emergency Escalation**: Page engineering manager for critical incidents
 
 ## Rollback Scripts
@@ -492,6 +575,7 @@ systemctl status engram
 
 echo "Rollback complete. Verify health:"
 echo "  curl http://localhost:7432/health"
+
 ```
 
 ### /scripts/deploy_rust_only.sh
@@ -517,10 +601,13 @@ ssh $INSTANCE "sudo systemctl stop engram && \
   sudo systemctl start engram"
 
 echo "Deployment complete."
+
 ```
 
 ## See Also
 
 - [Operations Guide](./zig_performance_kernels.md) - Deployment and configuration
+
 - [Architecture Documentation](../internal/zig_architecture.md) - Internal design
+
 - [Performance Regression Guide](../internal/performance_regression_guide.md) - Benchmarking

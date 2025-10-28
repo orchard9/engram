@@ -5,8 +5,11 @@ Engram's consolidation system now streams semantic beliefs from the background s
 ## Scheduler-Backed Snapshots
 
 - `ConsolidationScheduler` writes `ConsolidationSnapshot` instances into the global cache after each run.
+
 - `/api/v1/consolidations*` and `/api/v1/stream/consolidation` serve the cached snapshot, falling back to on-demand generation only while the scheduler warms up.
+
 - Cached snapshots include the contributing episode timestamps: `observed_at`, `stored_at`, and `last_access` for every citation.
+
 - **Health Contract**:
   - Target run cadence: every 300s (scheduler default). If no run completes within 1.5× the configured interval, treat the scheduler as degraded.
   - Failover: API automatically regenerates on-demand snapshots when `consolidation_cache` is empty; operators should still investigate root cause within one hour.
@@ -39,16 +42,23 @@ Use the streaming metrics endpoint or Prometheus scrape target to verify these v
 ## Belief Update Log
 
 - Consolidation runs append JSONL entries to the belief update log under `data/consolidation/alerts/`.
+
 - Each entry records the semantic pattern ID, confidence delta, citation churn, novelty score, and `generated_at` timestamp.
+
 - Operators can tail the log for near-real-time diagnostics or load it into the observability stack for historical analysis.
 
 ## Runbook
 
 1. **Verify**: Check `engram_consolidation_runs_total` against `failures_total` to confirm the scheduler is making progress.
+
 2. **Inspect**: Tail the belief update log for spikes in `confidence_delta` or dropped citations.
+
 3. **Respond**: Use the alert thresholds above to choose between manual reruns, parameter adjustments, or incident escalation.
+
 4. **Document**: Update the relevant milestone task file with findings and create follow-up tasks when remediation requires code changes.
+
 5. **Failover**: If the cache is empty during an outage, trigger `MemoryStore::consolidation_snapshot` manually to keep API responses live, then remediate scheduler state before returning to normal cadence.
+
 6. **Dashboard Review**: Consult the consolidation dashboard (see `consolidation_dashboard.md`) to confirm SLA visualizations and annotations remain accurate after each incident.
 
 ## Soak Harness & Baseline Artifacts
@@ -67,4 +77,5 @@ Use the streaming metrics endpoint or Prometheus scrape target to verify these v
   - `docs/assets/consolidation/baseline/metrics.jsonl` — rolling `AggregatedMetrics` snapshots.
   - `docs/assets/consolidation/baseline/snapshots.jsonl` — belief summaries (`pattern_count`, replay stats).
   - `docs/assets/consolidation/baseline/belief_updates.jsonl` — persisted deltas for alerting pipelines.
+
 - A 30-second reference capture (scheduler interval 5s) is checked in as a smoke baseline; regenerate with a full 1h run before publishing dashboards or tuning SLAs.

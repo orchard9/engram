@@ -1,0 +1,84 @@
+# Staging Configuration Template
+# Medium capacity for pre-production testing
+#
+# This configuration is optimized for:
+# - Single memory space (staging environment)
+# - Moderate throughput (50K ops/sec target)
+# - Relaxed latency (P99 < 200ms acceptable)
+# - 16GB RAM, 8 cores, 200GB SSD
+#
+# Capacity planning:
+# - Hot tier: 100K * 12KB = 1.2GB RAM
+# - Warm tier: 1M * 10KB = 10GB disk
+# - Cold tier: 10M * 8KB = 80GB disk
+# - Total: 1.2GB RAM + 90GB disk
+
+[feature_flags]
+# Enable beta features for testing before production
+spreading_api_beta = true
+
+[memory_spaces]
+# Use staging-specific namespace to avoid production conflicts
+default_space = "staging"
+
+# Single space sufficient for staging environment
+bootstrap_spaces = ["staging"]
+
+[persistence]
+# Staging data root (can be local disk or mounted volume)
+data_root = "/opt/engram-staging"
+
+# Hot tier: 100K memories = 1.2GB RAM
+# Smaller than production to fit staging hardware
+hot_capacity = 100_000
+
+# Warm tier: 1M memories = 10GB disk
+# Moderate capacity for testing migrations and tiering
+warm_capacity = 1_000_000
+
+# Cold tier: 10M memories = 80GB disk
+# Sufficient for testing consolidation and archival
+cold_capacity = 10_000_000
+
+# Spreading activation configuration (future TOML support)
+# Current defaults via code:
+# - decay_rate: 0.85 (match production)
+# - threshold: 0.10 (slightly lower for testing recall)
+# - max_hops: 5 (match production)
+# - max_workers: 8 (match CPU cores)
+
+# Consolidation configuration (future TOML support)
+# Current defaults via code:
+# - interval: 10 minutes (more frequent for faster testing)
+# - min_episode_age: 1 hour (rapid consolidation for testing)
+# - pattern_detection.min_cluster_size: 3
+# - pattern_detection.similarity_threshold: 0.80
+
+# Monitoring configuration
+# Prometheus metrics on port 9091 (avoid production conflict)
+# Log level: debug (verbose logging for troubleshooting)
+# Tracing enabled for request debugging
+
+# Testing guidelines for staging:
+# 1. Load testing: Target 50K ops/sec sustained
+# 2. Latency testing: Ensure P99 < 200ms under load
+# 3. Failure injection: Test resilience and recovery
+# 4. Migration testing: Verify production migration scripts
+# 5. Security testing: Validate auth and TLS configuration
+
+# Performance expectations:
+# - Hot tier hit rate: >0.90 (slightly lower than prod acceptable)
+# - Spreading latency P99: <100ms
+# - Consolidation cycle: Complete within 10 minutes
+# - Memory usage: Stable around 2GB total
+
+# Data lifecycle in staging:
+# - Automatic cleanup: Clear data older than 30 days
+# - Synthetic load: Generate test traffic for realistic conditions
+# - Production snapshots: Load anonymized production data for testing
+
+# CI/CD integration:
+# - Automated deployment: Deploy from main branch on commit
+# - Health checks: Validate startup within 30 seconds
+# - Smoke tests: Run basic API tests after deployment
+# - Rollback: Automatic rollback on health check failure

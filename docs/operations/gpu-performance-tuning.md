@@ -9,7 +9,9 @@
 **This performance tuning guide describes optimization for FUTURE GPU implementation (Milestone 13+).**
 
 **CURRENT MILESTONE 12 STATUS**:
+
 - **IMPLEMENTED**: CPU SIMD implementation (production-ready, high performance)
+
 - **NOT IMPLEMENTED**: CUDA kernels, GPU acceleration, GPU-specific tuning parameters
 
 **CURRENT PERFORMANCE TUNING**: Focus on batch sizes, CPU core count, and memory bandwidth optimization for CPU SIMD implementation. GPU-specific tuning will be relevant when CUDA kernels are implemented in Milestone 13+.
@@ -27,6 +29,7 @@ For architectural details, see the GPU Architecture Reference. For troubleshooti
 ## Performance Tuning Workflow
 
 ```
+
 1. Establish Baseline
    └─> Run benchmarks to measure current performance
 
@@ -41,6 +44,7 @@ For architectural details, see the GPU Architecture Reference. For troubleshooti
 
 5. Iterate
    └─> Repeat for each optimization until targets met
+
 ```
 
 ## Step 1: Establish Baseline
@@ -59,6 +63,7 @@ cargo bench --bench gpu_performance_validation -- --save-baseline baseline_v1
 # - GPU latency (P50, P99)
 # - Speedup ratio (GPU vs CPU)
 # - Break-even batch size
+
 ```
 
 **Example Baseline**:
@@ -75,6 +80,7 @@ Activation Spreading (1000 nodes):
   GPU: 120 us (P50), 135 us (P99)
   Speedup: 7.1x
   Break-even: 512 nodes
+
 ```
 
 ### Collect Production Metrics
@@ -88,6 +94,7 @@ grep -E "gpu_(launches|fallbacks|success_rate|speedup)" baseline_metrics.txt
 
 # Workload characteristics:
 grep batch_size_histogram baseline_metrics.txt
+
 ```
 
 ## Step 2: Profile Workload
@@ -113,6 +120,7 @@ nvidia-smi dmon -s puct -c 100 > gpu_utilization.log
 # pwr (power draw):
 #   - Near power limit: GPU working hard
 #   - Well below limit: Not fully utilized
+
 ```
 
 **Latency Breakdown**:
@@ -129,6 +137,7 @@ nsys stats --report cuda_gpu_kern_sum timeline.qdrep
 # - Memory transfer time (CPU <-> GPU)
 # - Launch overhead (gap between kernels)
 # - Idle time (GPU waiting for work)
+
 ```
 
 **Example Profiling Output**:
@@ -142,6 +151,7 @@ Total Time: 1000 ms
 
 Bottleneck: GPU is idle 45% of time
 → Need to increase batch sizes or launch frequency
+
 ```
 
 ### Workload Classification
@@ -149,18 +159,27 @@ Bottleneck: GPU is idle 45% of time
 Determine your workload type:
 
 **High-Throughput Workload**:
+
 - Many concurrent queries (>100 QPS)
+
 - Batch sizes naturally large (>256 vectors)
+
 - Latency tolerance: P99 < 100ms
 
 **Low-Latency Workload**:
+
 - Few concurrent queries (<10 QPS)
+
 - Small batch sizes (<64 vectors)
+
 - Latency requirement: P99 < 10ms
 
 **Mixed Workload**:
+
 - Variable query rate
+
 - Variable batch sizes
+
 - Need both throughput and latency
 
 Tuning strategy differs for each workload type.
@@ -190,6 +209,7 @@ telemetry_enabled = true
 performance_window_size = 200    # Larger window for stable averages
 
 # Note: vram_safety_margin not in HybridConfig yet
+
 ```
 
 **Low-Latency Workload** (Planned configuration):
@@ -207,6 +227,7 @@ gpu_success_rate_threshold = 0.98
 [gpu.telemetry]
 telemetry_enabled = true
 performance_window_size = 100
+
 ```
 
 **Mixed Workload** (Planned configuration):
@@ -224,6 +245,7 @@ gpu_success_rate_threshold = 0.95
 [gpu.telemetry]
 telemetry_enabled = true
 performance_window_size = 150
+
 ```
 
 ### Datacenter GPU Tuning (A100, H100, V100) - PLANNED
@@ -246,6 +268,7 @@ success_rate_threshold = 0.95
 [gpu.telemetry]
 enabled = true
 performance_window = 500     # Higher query volume
+
 ```
 
 **Low-Latency Workload**:
@@ -264,6 +287,7 @@ success_rate_threshold = 0.98
 [gpu.telemetry]
 enabled = true
 performance_window = 200
+
 ```
 
 ### Parameter Tuning Guide
@@ -290,6 +314,7 @@ done
 # 128: GPU much faster (80us vs 30us)
 
 # Set min_batch_size = 64 (or 48 to be conservative)
+
 ```
 
 **Recommendations**:
@@ -316,6 +341,7 @@ nvidia-smi dmon -s m -c 100
 #   Increase safety margin to 0.9 (prevent OOM)
 # If OOM events occur:
 #   Increase safety margin or reduce max batch size
+
 ```
 
 **Recommendations**:
@@ -340,6 +366,7 @@ curl http://localhost:8080/metrics | grep gpu_speedup_ratio
 #   Can lower threshold to 1.2 (use GPU more often)
 # If speedup_ratio is < 2x:
 #   Increase threshold to 2.0 (be more selective)
+
 ```
 
 **Recommendations**:
@@ -365,12 +392,15 @@ curl http://localhost:8080/metrics | grep gpu_success_rate
 #   Investigate failures (OOM? CUDA errors?)
 # If success_rate < 0.95:
 #   GPU is unreliable, may auto-disable
+
 ```
 
 **Recommendations**:
 
 - Production: 0.95 (tolerate 5% failure, fallback to CPU)
+
 - Strict SLA: 0.98 (tolerate only 2% failure)
+
 - Development: 0.90 (more tolerant for debugging)
 
 ## Step 4: Batch Size Optimization
@@ -398,11 +428,15 @@ for chunk in queries.chunks(batch_size) {
         send_response(result);
     }
 }
+
 ```
 
 **Tradeoffs**:
+
 - Increases latency for individual queries (waiting for batch)
+
 - Increases throughput overall (more efficient GPU use)
+
 - Best for high-QPS services where latency tolerance allows
 
 ### Dynamic Batching
@@ -431,6 +465,7 @@ loop {
         pending_queries.clear();
     }
 }
+
 ```
 
 **Tuning Parameters**:
@@ -464,6 +499,7 @@ nvidia-smi --query-gpu=temperature.gpu --format=csv -l 1
 
 # If temperature > 85C, reduce power limit
 # If temperature < 75C and not hitting power limit, can increase further
+
 ```
 
 **Recommendations**:
@@ -497,15 +533,21 @@ sudo nvidia-smi -lmc 7001  # Lock memory clock
 
 # This increases power consumption but reduces P99 latency
 # Best for production workloads with strict SLAs
+
 ```
 
 **When to Lock Clocks**:
+
 - Production with strict P99 latency SLAs
+
 - Benchmarking (reduces variance)
 
 **When NOT to Lock Clocks**:
+
 - Development (wastes power)
+
 - Multi-tenant systems (unfair to other users)
+
 - Limited cooling (may overheat)
 
 ### Cooling Optimization
@@ -521,12 +563,17 @@ nvidia-smi --query-gpu=temperature.gpu --format=csv -l 1
 
 # If temperature drops significantly:
 # Consider improving case airflow or adding GPU cooler
+
 ```
 
 **Cooling Improvements**:
+
 1. Clean dust from GPU fans and heatsink
+
 2. Improve case airflow (add intake/exhaust fans)
+
 3. Upgrade GPU cooler (for consumer cards)
+
 4. Use server rack with proper ventilation (datacenter)
 
 ## Step 6: Multi-Tenant Optimization
@@ -549,16 +596,23 @@ nvidia-cuda-mps-control -d
 ./target/release/engram start --port 8082 &
 
 # Each instance shares GPU with lower overhead
+
 ```
 
 **Benefits**:
+
 - Lower overhead than time-slicing
+
 - Better GPU utilization
+
 - Fair resource sharing
 
 **Drawbacks**:
+
 - Requires exclusive compute mode
+
 - More complex monitoring
+
 - Failure in one process can affect others
 
 ### GPU Partitioning (A100 MIG)
@@ -584,11 +638,15 @@ nvidia-smi -L
 # Run Engram on specific MIG instance
 export CUDA_VISIBLE_DEVICES=MIG-xxx
 ./target/release/engram start
+
 ```
 
 **Use Cases**:
+
 - Multi-tenant SaaS
+
 - Isolated testing environments
+
 - Guaranteed QoS per tenant
 
 ## Step 7: Monitoring and Continuous Optimization
@@ -598,6 +656,7 @@ export CUDA_VISIBLE_DEVICES=MIG-xxx
 **Grafana Dashboard Panels**:
 
 1. **GPU Utilization**:
+
    ```promql
    # GPU compute utilization
    nvidia_smi_utilization_gpu_ratio{gpu="0"}
@@ -607,6 +666,7 @@ export CUDA_VISIBLE_DEVICES=MIG-xxx
    ```
 
 2. **Engram GPU Metrics** (for future implementation):
+
    ```promql
    # GPU launch rate
    rate(engram_gpu_launch_total[5m])
@@ -619,6 +679,7 @@ export CUDA_VISIBLE_DEVICES=MIG-xxx
    ```
 
 3. **Latency Percentiles**:
+
    ```promql
    # P50 latency
    histogram_quantile(0.50, rate(engram_spreading_latency_bucket[5m]))
@@ -628,6 +689,7 @@ export CUDA_VISIBLE_DEVICES=MIG-xxx
    ```
 
 4. **Batch Size Distribution**:
+
    ```promql
    # Histogram of batch sizes
    rate(engram_batch_size_bucket[5m])
@@ -637,6 +699,7 @@ export CUDA_VISIBLE_DEVICES=MIG-xxx
 
 ```yaml
 # Alert if GPU speedup degrades (when GPU metrics implemented)
+
 - alert: GPUSpeedupRegression
   # TBD: Will use derived speedup metric from latency data
   expr: engram_gpu_speedup_derived < 3.0
@@ -648,6 +711,7 @@ export CUDA_VISIBLE_DEVICES=MIG-xxx
     description: "Current speedup: {{ $value }}, investigate performance"
 
 # Alert if P99 latency increases
+
 - alert: HighP99Latency
   expr: histogram_quantile(0.99, rate(engram_spreading_latency_bucket[5m])) > 100
   for: 5m
@@ -658,6 +722,7 @@ export CUDA_VISIBLE_DEVICES=MIG-xxx
     description: "P99: {{ $value }}ms, check GPU utilization and batch sizes"
 
 # Alert if GPU utilization too low (for future GPU implementation)
+
 - alert: LowGPUUtilization
   expr: nvidia_smi_utilization_gpu_ratio < 0.3 and rate(engram_gpu_launch_total[5m]) > 0
   for: 15m
@@ -666,6 +731,7 @@ export CUDA_VISIBLE_DEVICES=MIG-xxx
   annotations:
     summary: "GPU underutilized"
     description: "GPU utilization: {{ $value }}, consider increasing batch sizes"
+
 ```
 
 ### A/B Testing Configuration Changes
@@ -698,6 +764,7 @@ diff baseline_metrics.txt new_metrics.txt
 # If improvement > 10%: Keep
 # If improvement < 5%: Revert
 # If regression: Immediately revert
+
 ```
 
 ## Performance Optimization Checklist
@@ -705,18 +772,31 @@ diff baseline_metrics.txt new_metrics.txt
 Before considering performance "tuned", verify:
 
 - [ ] Baseline benchmarks recorded
+
 - [ ] Workload profiled (CPU/GPU/memory bottleneck identified)
+
 - [ ] Configuration tuned for GPU type and workload
+
 - [ ] Batch sizes optimized (>= min_batch_size for most queries)
+
 - [ ] GPU utilization > 70% under load (if expecting GPU use)
+
 - [ ] P99 latency meets SLA requirements
+
 - [ ] GPU speedup > 3x vs CPU baseline
+
 - [ ] OOM events < 1 per hour (target: 0)
+
 - [ ] GPU success rate > 95%
+
 - [ ] Power/thermal limits not throttling GPU
+
 - [ ] PCIe bandwidth sufficient (Gen 3 x16 or better)
+
 - [ ] Monitoring dashboards created
+
 - [ ] Performance regression alerts configured
+
 - [ ] A/B testing process established
 
 ## Common Performance Pitfalls
@@ -726,14 +806,19 @@ Before considering performance "tuned", verify:
 **Symptom**: GPU available but not being used
 
 **Diagnosis**:
+
 ```bash
 curl http://localhost:8080/metrics | grep batch_size_histogram
 # Shows most batches < min_batch_size
+
 ```
 
 **Solution**:
+
 - Lower `min_batch_size` in configuration
+
 - Implement application-level batching
+
 - Use dynamic batching with short timeout
 
 ### Pitfall 2: Too Aggressive min_batch_size
@@ -741,15 +826,20 @@ curl http://localhost:8080/metrics | grep batch_size_histogram
 **Symptom**: High P99 latency, many CPU operations
 
 **Diagnosis**:
+
 ```bash
 # High proportion of operations use CPU despite GPU available
 curl http://localhost:8080/metrics | grep gpu_launches_total
 # Value doesn't increase much under load
+
 ```
 
 **Solution**:
+
 - Reduce `min_batch_size`
+
 - Profile actual batch size distribution
+
 - Set threshold at P25 of distribution
 
 ### Pitfall 3: GPU Throttling
@@ -757,16 +847,21 @@ curl http://localhost:8080/metrics | grep gpu_launches_total
 **Symptom**: Performance degrades over time
 
 **Diagnosis**:
+
 ```bash
 nvidia-smi --query-gpu=temperature.gpu,clocks.sm,clocks.max.sm --format=csv -l 1
 
 # temperature > 80C and clocks.sm < clocks.max.sm
 # GPU is thermal throttling
+
 ```
 
 **Solution**:
+
 - Improve cooling
+
 - Reduce power limit
+
 - Check case airflow
 
 ### Pitfall 4: CPU Bottleneck
@@ -774,16 +869,22 @@ nvidia-smi --query-gpu=temperature.gpu,clocks.sm,clocks.max.sm --format=csv -l 1
 **Symptom**: Low GPU utilization despite correct config
 
 **Diagnosis**:
+
 ```bash
 # GPU at 30%, CPU at 100%
 top  # Shows high CPU usage
 nvidia-smi dmon  # Shows low GPU usage
+
 ```
 
 **Solution**:
+
 - Increase CPU cores
+
 - Optimize data preparation (reduce serialization overhead)
+
 - Use more worker threads
+
 - Profile CPU hotspots with `perf`
 
 ### Pitfall 5: Memory Transfer Overhead
@@ -791,15 +892,20 @@ nvidia-smi dmon  # Shows low GPU usage
 **Symptom**: GPU utilization is bursty (spikes to 100%, then 0%)
 
 **Diagnosis**:
+
 ```bash
 # Nsight Systems shows alternating pattern:
 # GPU compute, idle, memory transfer, idle, GPU compute
 nsys profile -o timeline.qdrep ./target/release/engram start
+
 ```
 
 **Solution**:
+
 - Use CUDA Unified Memory (already default in Engram)
+
 - Increase batch sizes to amortize transfer overhead
+
 - Consider pinned host memory (future optimization)
 
 ## Advanced Optimizations
@@ -839,16 +945,23 @@ vram_safety_margin = 0.75
 
 [gpu.thresholds]
 speedup_threshold = 1.4
+
 ```
 
 **Expected Performance**:
+
 - Cosine similarity: 7x speedup at 1K vectors
+
 - Activation spreading: 7x speedup at 1K nodes
+
 - Max throughput: ~400K vectors/sec
 
 **Tuning Focus**:
+
 - Batch size optimization critical
+
 - Memory bandwidth limited (360 GB/s)
+
 - Good for development and small production
 
 ### NVIDIA A100 (40GB)
@@ -860,17 +973,25 @@ vram_safety_margin = 0.70
 
 [gpu.thresholds]
 speedup_threshold = 1.2
+
 ```
 
 **Expected Performance**:
+
 - Cosine similarity: 26x speedup at 10K vectors
+
 - Activation spreading: 19x speedup at 10K nodes
+
 - Max throughput: ~10M vectors/sec
 
 **Tuning Focus**:
+
 - Use aggressive batching (>1K vectors)
+
 - Leverage high memory bandwidth (1555 GB/s)
+
 - Consider MIG for multi-tenancy
+
 - Ideal for production at scale
 
 ### NVIDIA T4 (16GB)
@@ -882,24 +1003,35 @@ vram_safety_margin = 0.80
 
 [gpu.thresholds]
 speedup_threshold = 1.5
+
 ```
 
 **Expected Performance**:
+
 - Cosine similarity: 5x speedup at 1K vectors
+
 - Activation spreading: 5x speedup at 1K nodes
+
 - Max throughput: ~300K vectors/sec
 
 **Tuning Focus**:
+
 - Good for inference workloads
+
 - Lower power (70W) suitable for edge/cloud
+
 - Higher launch overhead than A100
 
 ## References
 
 - **Performance Report**: `/roadmap/milestone-12/performance_report.md`
+
 - **Optimization Roadmap**: `/roadmap/milestone-12/optimization_roadmap.md`
+
 - **GPU Architecture**: See GPU Architecture Reference
+
 - **Deployment**: See GPU Deployment Guide
+
 - **Troubleshooting**: See GPU Troubleshooting Guide
 
 ## Appendix: Performance Tuning Tools
@@ -920,11 +1052,15 @@ nsys-ui timeline.qdrep
 
 # Or generate text report
 nsys stats --report cuda_gpu_kern_sum timeline.qdrep
+
 ```
 
 **What to Look For**:
+
 - Kernel execution time vs gaps
+
 - Memory transfer overhead
+
 - CPU/GPU utilization overlap
 
 ### NVIDIA Nsight Compute
@@ -943,11 +1079,15 @@ ncu --set compute -o compute.ncu-rep ./target/release/engram start
 
 # Analyze
 ncu-ui kernel.ncu-rep
+
 ```
 
 **What to Look For**:
+
 - SM occupancy (target: >50%)
+
 - Memory bandwidth utilization (target: >60%)
+
 - Warp efficiency (target: >80%)
 
 ### Flamegraph
@@ -962,11 +1102,15 @@ cargo install flamegraph
 cargo flamegraph --bench gpu_performance_validation
 
 # Open flamegraph.svg in browser
+
 ```
 
 **What to Look For**:
+
 - Hot paths in Rust code
+
 - Serialization overhead
+
 - Lock contention
 
 ### Custom Metrics
@@ -981,6 +1125,7 @@ let result = gpu_operation(&batch);
 let elapsed = start.elapsed();
 
 metrics.record_gpu_latency(elapsed.as_micros());
+
 ```
 
 ## Tuning Examples by Scenario
@@ -988,8 +1133,11 @@ metrics.record_gpu_latency(elapsed.as_micros());
 ### Scenario 1: Real-Time Recommendation System
 
 **Requirements**:
+
 - P99 latency < 20ms
+
 - 1000 QPS peak
+
 - Batch sizes: 10-100 queries
 
 **Tuning**:
@@ -1005,18 +1153,25 @@ success_rate_threshold = 0.98
 
 # Use dynamic batching with 5ms timeout
 # This creates batches of ~50 queries at 1000 QPS
+
 ```
 
 **Expected Result**:
+
 - 60% of queries use GPU (batches >= 96)
+
 - P99 latency: 12-15ms
+
 - GPU utilization: 40-60%
 
 ### Scenario 2: Batch ETL Pipeline
 
 **Requirements**:
+
 - Throughput > 1M vectors/hour
+
 - Latency not critical
+
 - Large batches (1000+ vectors)
 
 **Tuning**:
@@ -1031,18 +1186,25 @@ speedup_threshold = 1.2  # Always prefer GPU
 success_rate_threshold = 0.95
 
 # Increase batch size to 4096 in ETL code
+
 ```
 
 **Expected Result**:
+
 - 100% of operations use GPU
+
 - Throughput: 3-5M vectors/hour (A100)
+
 - GPU utilization: 90-100%
 
 ### Scenario 3: Multi-Tenant SaaS
 
 **Requirements**:
+
 - Isolation between tenants
+
 - Fair resource sharing
+
 - Variable workloads
 
 **Tuning**:
@@ -1053,6 +1215,7 @@ sudo nvidia-smi -mig 1
 sudo nvidia-smi mig -cgi 1g.10gb,1g.10gb,1g.10gb -C
 
 # Each Engram instance on separate MIG
+
 ```
 
 ```toml
@@ -1063,9 +1226,13 @@ vram_safety_margin = 0.85  # Conservative (shared resource)
 [gpu.thresholds]
 speedup_threshold = 1.5
 success_rate_threshold = 0.95
+
 ```
 
 **Expected Result**:
+
 - Each tenant gets guaranteed GPU slice
+
 - No interference between tenants
+
 - Total throughput: 80% of full GPU (MIG overhead)

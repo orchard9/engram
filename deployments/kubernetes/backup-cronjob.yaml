@@ -1,0 +1,96 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: engram-backup
+  namespace: default
+  labels:
+    app: engram
+    component: backup
+spec:
+  schedule: "0 */4 * * *"  # Every 4 hours (RPO 4h)
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: engram
+            component: backup
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: backup
+            image: engram/engram:latest
+            imagePullPolicy: IfNotPresent
+            command:
+            - /bin/bash
+            - -c
+            - |
+              echo "Starting Engram backup job at $(date)"
+              /scripts/backup_full.sh
+              echo "Backup completed at $(date)"
+            env:
+            - name: ENGRAM_DATA_DIR
+              value: /data
+            - name: BACKUP_DIR
+              value: /backups
+            - name: ENGRAM_SPACE_ID
+              value: all
+            - name: BACKUP_PARALLEL
+              value: "4"
+            volumeMounts:
+            - name: data
+              mountPath: /data
+              readOnly: true
+            - name: backups
+              mountPath: /backups
+            - name: scripts
+              mountPath: /scripts
+              readOnly: true
+            resources:
+              requests:
+                memory: "512Mi"
+                cpu: "500m"
+              limits:
+                memory: "2Gi"
+                cpu: "2000m"
+          volumes:
+          - name: data
+            persistentVolumeClaim:
+              claimName: engram-data
+          - name: backups
+            persistentVolumeClaim:
+              claimName: engram-backups
+          - name: scripts
+            configMap:
+              name: engram-backup-scripts
+              defaultMode: 0755
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: engram-backup-scripts
+  namespace: default
+data:
+  # Note: In production, mount these scripts from the container image
+  # or use a separate volume with the actual script files
+  backup_full.sh: |
+    #!/bin/bash
+    # This is a placeholder - actual script should be in container image
+    echo "Backup script should be provided via container image"
+    exit 0
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: engram-backups
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Gi
+  storageClassName: fast-ssd

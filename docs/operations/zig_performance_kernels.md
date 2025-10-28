@@ -5,7 +5,9 @@
 Engram includes optional Zig performance kernels that accelerate compute-intensive operations through SIMD vectorization and optimized memory management. These kernels provide measurable performance improvements for production workloads:
 
 - **Vector similarity**: 15-25% faster cosine similarity calculations for embedding search
+
 - **Activation spreading**: 20-35% faster graph traversal for associative memory retrieval
+
 - **Memory decay**: 20-30% faster Ebbinghaus decay calculations for temporal dynamics
 
 This guide covers deployment, configuration, monitoring, and troubleshooting for production environments.
@@ -15,8 +17,11 @@ This guide covers deployment, configuration, monitoring, and troubleshooting for
 Zig kernels integrate with Rust through a C-compatible FFI boundary:
 
 - **Language boundary**: Rust manages graph data structures, Zig handles compute kernels
+
 - **Memory model**: Caller-allocated buffers (Rust), zero-copy computation (Zig)
+
 - **Thread safety**: Thread-local arena allocators eliminate contention
+
 - **Fallback**: Runtime feature detection gracefully degrades to Rust implementations
 
 For detailed architecture, see [Architecture Documentation](../internal/zig_architecture.md).
@@ -26,8 +31,11 @@ For detailed architecture, see [Architecture Documentation](../internal/zig_arch
 ### System Requirements
 
 - **Operating System**: Linux (x86_64, ARM64) or macOS (Apple Silicon, Intel)
+
 - **CPU Features**: AVX2 (x86_64) or NEON (ARM64) for SIMD acceleration
+
 - **Memory**: Minimum 1MB per thread for arena allocators (configurable)
+
 - **Zig Compiler**: Version 0.13.0 (required at build time)
 
 ### Installing Zig
@@ -40,6 +48,7 @@ brew install zig
 
 # Verify installation
 zig version  # Should output: 0.13.0
+
 ```
 
 #### Linux
@@ -56,6 +65,7 @@ source ~/.bashrc
 
 # Verify installation
 zig version
+
 ```
 
 #### ARM64 Linux
@@ -65,6 +75,7 @@ wget https://ziglang.org/download/0.13.0/zig-linux-aarch64-0.13.0.tar.xz
 tar xf zig-linux-aarch64-0.13.0.tar.xz
 sudo mv zig-linux-aarch64-0.13.0 /opt/zig
 # Add to PATH as above
+
 ```
 
 ### Rust Toolchain
@@ -73,6 +84,7 @@ Ensure Rust 1.75+ is installed:
 
 ```bash
 rustc --version  # Should be 1.75.0 or higher
+
 ```
 
 ## Building with Zig Kernels
@@ -89,6 +101,7 @@ cargo build --features zig-kernels
 # Verify Zig kernels are linked
 nm target/debug/engram-cli | grep engram_vector_similarity
 # Should output FFI function symbols
+
 ```
 
 ### Production Build
@@ -103,6 +116,7 @@ cargo build --release --features zig-kernels
 # Verify release binary includes Zig kernels
 ldd target/release/engram-cli  # Linux
 otool -L target/release/engram-cli  # macOS
+
 ```
 
 ### Build Verification
@@ -114,6 +128,7 @@ Run differential tests to ensure Zig kernels produce identical results to Rust b
 cargo test --features zig-kernels --test zig_differential
 
 # Expected output: All tests pass with zero divergence
+
 ```
 
 Run performance regression benchmarks:
@@ -123,6 +138,7 @@ Run performance regression benchmarks:
 ./scripts/benchmark_regression.sh
 
 # Expected: 15-35% improvement on target operations
+
 ```
 
 ## Configuration
@@ -139,12 +155,15 @@ export ENGRAM_ARENA_SIZE=2097152  # 2MB (default: 1MB)
 
 # Set overflow behavior: panic, error, fallback
 export ENGRAM_ARENA_OVERFLOW=error  # Default: error
+
 ```
 
 #### Overflow Strategies
 
 - **panic**: Abort process on overflow (development/testing only)
+
 - **error**: Return error and log warning (recommended for production)
+
 - **fallback**: Attempt fallback to system allocator (experimental)
 
 #### Runtime Configuration
@@ -156,6 +175,7 @@ use engram::zig_kernels::{configure_arena, OverflowStrategy};
 
 // Configure arena before first kernel invocation
 configure_arena(2, OverflowStrategy::ErrorReturn);  // 2MB per thread
+
 ```
 
 ### Sizing Guidelines
@@ -183,6 +203,7 @@ export RAYON_NUM_THREADS=8  # Match CPU core count
 
 # Verify thread count at runtime
 ./target/release/engram-cli config get concurrency.num_threads
+
 ```
 
 **Best Practice**: Set `RAYON_NUM_THREADS` to physical core count, not hyperthreads.
@@ -199,6 +220,7 @@ grep avx2 /proc/cpuinfo
 
 # macOS
 sysctl -a | grep machdep.cpu.features | grep AVX2
+
 ```
 
 If AVX2 is not available, Zig kernels fall back to scalar implementations (slower).
@@ -209,6 +231,7 @@ If AVX2 is not available, Zig kernels fall back to scalar implementations (slowe
 # NEON is standard on all ARMv8+ processors
 # Verify ARM architecture version
 uname -m  # Should output: aarch64 or arm64
+
 ```
 
 ## Deployment
@@ -218,13 +241,21 @@ uname -m  # Should output: aarch64 or arm64
 Before deploying to production:
 
 - [ ] Zig 0.13.0 installed on all production nodes
+
 - [ ] Build with `--features zig-kernels` succeeds
+
 - [ ] All differential tests pass (zero correctness regressions)
+
 - [ ] Regression benchmarks show expected improvements (15-35%)
+
 - [ ] Arena size configured for expected workload
+
 - [ ] CPU features verified (AVX2 on x86_64, NEON on ARM64)
+
 - [ ] Monitoring and alerting configured (see below)
+
 - [ ] Rollback procedure documented and tested
+
 - [ ] Gradual rollout plan prepared (canary -> production)
 
 ### Deployment Strategies
@@ -232,17 +263,22 @@ Before deploying to production:
 #### Option 1: Canary Deployment
 
 1. Deploy to 5% of production traffic (canary instances)
+
 2. Monitor for 24 hours:
    - Arena overflow rate should be <0.1%
    - Performance improvements match benchmarks
    - No increase in error rates
+
 3. Gradually increase to 25%, 50%, 100%
 
 #### Option 2: Blue-Green Deployment
 
 1. Deploy Zig-enabled build to green environment
+
 2. Run smoke tests and performance validation
+
 3. Switch traffic from blue to green
+
 4. Monitor for 1 hour before decommissioning blue
 
 #### Option 3: Feature Flag
@@ -256,6 +292,7 @@ if config.get("zig_kernels_enabled") {
 } else {
     use rust_baseline::vector_similarity;
 }
+
 ```
 
 ## Monitoring
@@ -276,6 +313,7 @@ curl http://localhost:7432/internal/zig/arena_stats
   "total_overflows": 0,
   "max_high_water_mark": 1572864  // bytes
 }
+
 ```
 
 **Alert if**: `total_overflows > 0` or `max_high_water_mark > arena_size * 0.9`
@@ -293,6 +331,7 @@ let duration = start.elapsed();
 
 // Log or export to metrics system
 metrics.record_histogram("zig_kernel.vector_similarity", duration);
+
 ```
 
 **Alert if**: p99 latency exceeds baseline expectations:
@@ -318,6 +357,7 @@ engram_zig_arena_high_water_mark_bytes
 histogram_quantile(0.99,
   rate(engram_zig_kernel_duration_seconds_bucket[5m])
 )
+
 ```
 
 ### Recommended Alerts
@@ -325,8 +365,11 @@ histogram_quantile(0.99,
 Configure alerts for production:
 
 1. **Arena overflow rate > 1%**: Increase arena size or investigate large allocations
+
 2. **Similarity query p99 > 3us**: Performance regression or resource contention
+
 3. **Spreading activation p99 > 150us**: Graph size or connectivity issues
+
 4. **Zig kernel errors > 0.1%**: FFI boundary issues or memory corruption
 
 ## Performance Tuning
@@ -343,6 +386,7 @@ objdump -d target/release/engram-cli | grep -E 'vfmadd|vmulps|vaddps'  # AVX2
 objdump -d target/release/engram-cli | grep -E 'fmla|fmul|fadd'        # NEON
 
 # If no SIMD instructions found, verify CPU features
+
 ```
 
 #### 2. Profile Arena Overhead
@@ -355,6 +399,7 @@ export ENGRAM_ARENA_METRICS=1
 ./target/release/engram-cli benchmark --workload vector_similarity
 
 # Output will include arena utilization percentage
+
 ```
 
 #### 3. Check Thread Contention
@@ -365,6 +410,7 @@ perf record -g ./target/release/engram-cli benchmark
 perf report
 
 # Look for lock contention or false sharing
+
 ```
 
 ### Tuning Strategies
@@ -378,6 +424,7 @@ If high-water mark approaches arena capacity:
 export ENGRAM_ARENA_SIZE=4194304  # 4MB
 
 # Retest and check overflow rate
+
 ```
 
 If high-water mark is much smaller than arena:
@@ -385,6 +432,7 @@ If high-water mark is much smaller than arena:
 ```bash
 # Decrease to save memory
 export ENGRAM_ARENA_SIZE=524288  # 512KB
+
 ```
 
 #### Thread Count Optimization
@@ -397,6 +445,7 @@ for threads in 4 8 16 32; do
 done
 
 # Use thread count with best throughput
+
 ```
 
 #### NUMA Considerations
@@ -408,6 +457,7 @@ On multi-socket systems:
 numactl --cpunodebind=0 --membind=0 ./target/release/engram-cli
 
 # Verify arena allocations happen on local node
+
 ```
 
 ## Troubleshooting
@@ -419,6 +469,7 @@ numactl --cpunodebind=0 --membind=0 ./target/release/engram-cli
 ```
 error: could not execute process `zig` (never executed)
 Caused by: No such file or directory
+
 ```
 
 **Solution**: Install Zig 0.13.0 and ensure it's in PATH:
@@ -426,12 +477,14 @@ Caused by: No such file or directory
 ```bash
 which zig  # Should output: /usr/local/bin/zig or similar
 zig version  # Should output: 0.13.0
+
 ```
 
 #### Error: Zig version mismatch
 
 ```
 WARNING: Recommended Zig version is 0.13.0, found 0.12.0
+
 ```
 
 **Solution**: Upgrade to Zig 0.13.0:
@@ -441,12 +494,14 @@ WARNING: Recommended Zig version is 0.13.0, found 0.12.0
 brew upgrade zig
 
 # Linux - download from ziglang.org
+
 ```
 
 #### Error: cargo build failed in build.rs
 
 ```
 error: failed to run custom build command for `engram-core`
+
 ```
 
 **Solution**: Check Zig build output:
@@ -457,6 +512,7 @@ cd zig
 zig build -Doptimize=ReleaseFast
 
 # Check for errors
+
 ```
 
 ### Runtime Issues
@@ -465,6 +521,7 @@ zig build -Doptimize=ReleaseFast
 
 ```
 WARN Arena overflow, falling back to system allocator
+
 ```
 
 **Diagnosis**: Arena capacity insufficient for workload
@@ -474,6 +531,7 @@ WARN Arena overflow, falling back to system allocator
 ```bash
 export ENGRAM_ARENA_SIZE=4194304  # 4MB
 ./target/release/engram-cli restart
+
 ```
 
 **Prevention**: Monitor `max_high_water_mark` and size arenas to 2x peak usage.
@@ -482,12 +540,17 @@ export ENGRAM_ARENA_SIZE=4194304  # 4MB
 
 ```
 REGRESSION: vector_similarity_768d_1000c is 12.5% slower than baseline
+
 ```
 
 **Diagnosis**: Possible causes:
+
 1. SIMD not enabled (missing AVX2/NEON)
+
 2. Arena size too small (frequent overflows)
+
 3. Thread contention or lock thrashing
+
 4. Memory pressure (swapping)
 
 **Solution**:
@@ -506,6 +569,7 @@ perf report  # Look for lock contention
 
 # 4. Check memory pressure
 free -h  # Ensure sufficient free memory
+
 ```
 
 #### Symptom: Numerical divergence from Rust baseline
@@ -514,6 +578,7 @@ free -h  # Ensure sufficient free memory
 FAIL: Differential test failed - Zig result differs from Rust baseline
 Expected: 0.8765432
 Got: 0.8765431
+
 ```
 
 **Diagnosis**: Floating-point precision differences (usually acceptable)
@@ -523,6 +588,7 @@ Got: 0.8765431
 ```bash
 # Differential tests allow small epsilon (1e-6)
 # If delta > epsilon, file a bug report with reproduction
+
 ```
 
 ### Validation
@@ -539,6 +605,7 @@ Got: 0.8765431
 {
     println!("Using Rust baseline implementations");
 }
+
 ```
 
 #### Compare performance
@@ -551,6 +618,7 @@ cargo bench --features zig-kernels --bench regression
 cargo bench --bench regression
 
 # Compare results
+
 ```
 
 #### Verify correctness
@@ -560,6 +628,7 @@ cargo bench --bench regression
 cargo test --features zig-kernels --test zig_differential
 
 # Expected: All tests pass with zero divergence
+
 ```
 
 ## Production Operations
@@ -580,6 +649,7 @@ curl http://localhost:7432/internal/zig/status
   "arena_overflows": 0,
   "last_kernel_invocation": "2025-10-25T10:30:00Z"
 }
+
 ```
 
 ### Log Monitoring
@@ -590,6 +660,7 @@ Key log messages to monitor:
 INFO  Zig kernels initialized: vector_similarity, spreading_activation, decay_calculation
 WARN  Arena overflow detected on thread 4, consider increasing ENGRAM_ARENA_SIZE
 ERROR Zig kernel invocation failed: OutOfMemory
+
 ```
 
 ### Incident Response
@@ -597,15 +668,21 @@ ERROR Zig kernel invocation failed: OutOfMemory
 If Zig kernels cause production issues:
 
 1. **Immediate**: Follow [Rollback Procedures](./zig_rollback_procedures.md)
+
 2. **Investigation**: Capture logs, metrics, and reproduction steps
+
 3. **Escalation**: File incident report with Engram team
+
 4. **Post-mortem**: Schedule review and update documentation
 
 ## See Also
 
 - [Rollback Procedures](./zig_rollback_procedures.md) - Emergency and gradual rollback strategies
+
 - [Architecture Documentation](../internal/zig_architecture.md) - Internal design for maintainers
+
 - [Performance Regression Guide](../internal/performance_regression_guide.md) - Benchmarking framework
+
 - [Profiling Results](../internal/profiling_results.md) - Hotspot analysis and kernel selection
 
 ## Support
@@ -613,6 +690,9 @@ If Zig kernels cause production issues:
 For production support:
 
 - Check troubleshooting guide above
+
 - Review [GitHub Issues](https://github.com/orchard9/engram/issues) for known issues
+
 - File new issues with reproduction steps and system information
+
 - Contact engineering team for critical production incidents

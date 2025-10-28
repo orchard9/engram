@@ -21,7 +21,9 @@ Spreading recalls are guarded by a three-state breaker (`Closed`, `HalfOpen`,
 `Open`). Operators can monitor state transitions via:
 
 - Streaming metric `engram_spreading_breaker_state` (0=Closed, 1=HalfOpen, 2=Open)
+
 - Counter `engram_spreading_breaker_transitions_total`
+
 - Log lines tagged `engram::recall` when the breaker opens, reopens, or closes
 
 When the breaker opens the system automatically falls back to similarity-only
@@ -36,8 +38,10 @@ update (batch size, maximum depth, tier timeout) and applies the change when
 an improvement is predicted.
 
 - Audit log endpoint: `GET /api/v1/system/spreading/config`
+
 - Payload contains before/after values, tier, timestamp, predicted benefit, and
   the reason captured during evaluation.
+
 - Streaming metrics: `engram_spreading_autotune_changes_total` and
   `engram_spreading_autotune_last_improvement`
 
@@ -50,6 +54,7 @@ work).
 - Grafana dashboard: [`docs/operations/spreading_dashboard.json`](spreading_dashboard.json)
   - Import into Grafana to chart per-tier latency, breaker behaviour, fallback
     rates, pool utilisation, and auto-tune activity.
+
 - Prometheus rules: [`deploy/observability/prometheus/spreading.rules.yaml`](../../deploy/observability/prometheus/spreading.rules.yaml)
   - Recording rules provide smoothed latency and failure ratios.
   - Alerts cover latency SLO breaches, breaker openings, elevated failure rate,
@@ -62,6 +67,7 @@ rollouts:
 
 ```bash
 cargo run --bin fuzz-spreading-latency -- --duration 120s --latency-spike 15ms --failure-rate 0.15
+
 ```
 
 The tool injects synthetic latency/failure patterns into the spreading engine,
@@ -77,6 +83,7 @@ Recent verification runs:
     objective that feeds `SpreadingHotLatencySLOBreach`.
   - Failure volume raised `engram_spreading_latency_budget_violations_total`
     confirming the budget regression alert path.
+
 - 90s spike (`--latency-spike 30ms --failure-rate 0.25`)
   - Breaker opened immediately (state `2`, transitions counter incremented).
   - Auto-tuner pushed an audit entry for the hot tier: batch `64→8`, max depth
@@ -91,7 +98,10 @@ fired and which auto-tune adjustments occurred.
 ## Operational Checklist
 
 1. Check `/health/spreading` and `/api/v1/system/health` for probe status.
+
 2. Review Grafana dashboard for latency spikes or breaker churn.
+
 3. Inspect Prometheus alerts and correlate with the auto-tune audit log.
+
 4. If latency remains elevated, capture metrics, disable auto-tune via CLI flag,
    and execute the chaos harness to reproduce before filing an incident report.

@@ -7,8 +7,11 @@ Guide for migrating existing Engram deployments to multi-tenant memory spaces.
 Engram's memory spaces provide isolated multi-tenant environments with separate:
 
 - Memory storage and persistence layers
+
 - Spreading activation graphs
+
 - Health metrics and diagnostics
+
 - WAL (Write-Ahead Log) and tier storage
 
 Each space operates independently while sharing the same Engram instance.
@@ -16,7 +19,9 @@ Each space operates independently while sharing the same Engram instance.
 ## Prerequisites
 
 - Engram build with Milestone 7 features (multi-tenancy support)
+
 - Existing single-tenant deployment (optional)
+
 - Understanding of current data layout and access patterns
 
 ## Backward Compatibility
@@ -24,8 +29,11 @@ Each space operates independently while sharing the same Engram instance.
 Memory spaces maintain 100% backward compatibility:
 
 - Existing deployments work unchanged without configuration
+
 - All operations default to the `default` space when no space is specified
+
 - No breaking changes to existing API contracts
+
 - Gradual migration path allows phased client updates
 
 ## Migration Steps
@@ -36,6 +44,7 @@ Stop existing instance:
 
 ```bash
 ./target/debug/engram stop
+
 ```
 
 Build or deploy new version with multi-tenancy support:
@@ -43,6 +52,7 @@ Build or deploy new version with multi-tenancy support:
 ```bash
 git pull origin main
 cargo build --release
+
 ```
 
 ### 2. Update Configuration
@@ -55,12 +65,15 @@ data_root = "~/.local/share/engram"  # Tilde expansion supported
 hot_capacity = 100000
 warm_capacity = 1000000
 cold_capacity = 10000000
+
 ```
 
 Configuration file locations:
 
 - Linux: `~/.config/engram/config.toml`
+
 - macOS: `~/Library/Application Support/engram/config.toml`
+
 - Custom: Specify with `--config` flag
 
 ### 3. Start Server with Auto-Discovery
@@ -69,13 +82,17 @@ Start the upgraded Engram instance:
 
 ```bash
 ./target/release/engram start
+
 ```
 
 The registry automatically:
 
 1. Scans `data_root` for existing space directories
+
 2. Discovers any previously created memory spaces
+
 3. Runs WAL recovery for each space
+
 4. Makes all spaces available for requests
 
 Check startup logs for recovery status:
@@ -84,6 +101,7 @@ Check startup logs for recovery status:
 INFO  engram_core::registry: Discovered 3 memory spaces: [default, production, staging]
 INFO  engram_core::registry: Recovered 'default': 1200 entries, 0 corrupted, took 45ms
 INFO  engram_core::registry: Recovered 'production': 3500 entries, 0 corrupted, took 120ms
+
 ```
 
 ### 4. Verify Existing Data
@@ -96,6 +114,7 @@ Check that your existing data is accessible in the `default` space:
 
 # Via HTTP
 curl http://localhost:7432/api/v1/system/health
+
 ```
 
 Expected response:
@@ -112,6 +131,7 @@ Expected response:
     }
   ]
 }
+
 ```
 
 ### 5. Create Additional Spaces
@@ -128,6 +148,7 @@ curl -X POST http://localhost:7432/api/v1/memories/remember \
   -H "Content-Type: application/json" \
   -H "X-Memory-Space: production" \
   -d '{"content": "First production memory", "confidence": 0.95}'
+
 ```
 
 List all spaces:
@@ -137,6 +158,7 @@ List all spaces:
 
 # Or via HTTP
 curl http://localhost:7432/api/v1/spaces
+
 ```
 
 ### 6. Migrate Clients Gradually
@@ -148,24 +170,30 @@ Update clients to specify memory spaces using one of three methods:
 ```bash
 curl -H "X-Memory-Space: production" \
   http://localhost:7432/api/v1/memories/recall?query=data
+
 ```
 
 Advantages:
 
 - Cleanest separation of routing from business logic
+
 - Works with all HTTP methods (GET, POST, etc.)
+
 - Easy to add via middleware or API gateway
 
 #### Option 2: Query Parameter
 
 ```bash
 curl "http://localhost:7432/api/v1/memories/recall?space=production&query=data"
+
 ```
 
 Advantages:
 
 - No header manipulation needed
+
 - Works with simple HTTP clients
+
 - Easy to test in browser
 
 #### Option 3: Request Body
@@ -178,12 +206,15 @@ curl -X POST http://localhost:7432/api/v1/memories/remember \
     "confidence": 0.9,
     "memory_space": "production"
   }'
+
 ```
 
 Advantages:
 
 - All request data in one place
+
 - No URL modification needed
+
 - Works for complex POST requests
 
 #### Routing Precedence
@@ -191,7 +222,9 @@ Advantages:
 When multiple sources specify a space:
 
 1. `X-Memory-Space` header (highest priority)
+
 2. `?space=<space_id>` query parameter
+
 3. `"memory_space"` field in JSON body
 
 This allows header-based routing to override application-level defaults.
@@ -216,14 +249,19 @@ episode = engram.Episode(
     confidence=0.95,
     memory_space_id="production"
 )
+
 ```
 
 Apply to all RPC methods:
 
 - `Store()` - memory_space_id in Episode
+
 - `Recall()` - memory_space_id in RecallRequest
+
 - `streaming_remember()` - memory_space_id in each RememberRequest
+
 - `streaming_recall()` - memory_space_id in each RecallRequest
+
 - `stream()` - memory_space_id in StreamRequest
 
 ## Monitoring Multi-Tenant Deployments
@@ -234,6 +272,7 @@ Query per-space health via HTTP:
 
 ```bash
 curl http://localhost:7432/api/v1/system/health | jq
+
 ```
 
 Response shows metrics for all spaces:
@@ -257,6 +296,7 @@ Response shows metrics for all spaces:
     }
   ]
 }
+
 ```
 
 ### CLI Status with Space Filter
@@ -265,12 +305,14 @@ View all spaces:
 
 ```bash
 ./target/release/engram status
+
 ```
 
 Filter to specific space:
 
 ```bash
 ./target/release/engram status --space production
+
 ```
 
 Output includes formatted table:
@@ -282,6 +324,7 @@ Per-Space Metrics:
 ├────────────────────┼───────────┼──────────┼─────────────┼─────────────────┤
 │ production         │      3500 │    15.0% │        2.50 │        12.30/s │
 └────────────────────┴───────────┴──────────┴─────────────┴─────────────────┘
+
 ```
 
 ### Directory Structure Inspection
@@ -305,12 +348,14 @@ Spaces create isolated directory hierarchies:
     ├── hot/
     ├── warm/
     └── cold/
+
 ```
 
 Check directory sizes:
 
 ```bash
 du -sh ~/.local/share/engram/*/
+
 ```
 
 ## Advanced Configuration
@@ -322,6 +367,7 @@ Override default data location:
 ```toml
 [persistence]
 data_root = "/mnt/engram-data"
+
 ```
 
 Or via environment variable:
@@ -329,6 +375,7 @@ Or via environment variable:
 ```bash
 export ENGRAM_DATA_ROOT="/mnt/engram-data"
 ./target/release/engram start
+
 ```
 
 ### Per-Space Tier Capacities
@@ -344,7 +391,9 @@ Tier capacities are currently global across all spaces. Future enhancement will 
 **Causes**:
 
 1. Space name typo in client code
+
 2. Space not created yet (automatic creation may be disabled)
+
 3. Registry startup issues
 
 **Solutions**:
@@ -358,6 +407,7 @@ Tier capacities are currently global across all spaces. Future enhancement will 
 
 # Check server logs
 tail -f /var/log/engram/server.log
+
 ```
 
 ### WAL Recovery Failures
@@ -367,7 +417,9 @@ tail -f /var/log/engram/server.log
 **Causes**:
 
 1. Unclean shutdown (power loss)
+
 2. Disk corruption
+
 3. Concurrent writes (improper shutdown)
 
 **Solutions**:
@@ -380,6 +432,7 @@ tail -f /var/log/engram/server.log
 # Full WAL rebuild (DESTRUCTIVE - only if backup exists):
 rm -rf ~/.local/share/engram/<space>/wal/*
 # Server will start with empty space
+
 ```
 
 ### Cross-Space Data Leakage
@@ -389,7 +442,9 @@ rm -rf ~/.local/share/engram/<space>/wal/*
 **Causes**:
 
 1. Client not setting space correctly
+
 2. Default space fallback behavior
+
 3. HTTP routing gap (Task 004 follow-up incomplete)
 
 **Verification**:
@@ -406,6 +461,7 @@ curl -H "X-Memory-Space: tenant-b" \
 
 # Expected: No results (empty array)
 # If you see results: HTTP routing gap, see Known Issues below
+
 ```
 
 ### Performance Degradation
@@ -415,7 +471,9 @@ curl -H "X-Memory-Space: tenant-b" \
 **Causes**:
 
 1. Registry contention under high load
+
 2. Increased directory I/O
+
 3. Per-space consolidation overhead
 
 **Diagnostics**:
@@ -426,12 +484,15 @@ curl http://localhost:7432/api/v1/system/health | jq '.spaces[] | {space, pressu
 
 # Monitor registry lock contention (if available)
 curl http://localhost:7432/metrics | grep registry_lock_wait
+
 ```
 
 **Mitigations**:
 
 - Reduce number of active spaces
+
 - Increase tier capacities to reduce consolidation frequency
+
 - Use space-specific rate limiting at API gateway
 
 ## Known Issues
@@ -480,6 +541,7 @@ If migration causes issues, rollback to single-tenant mode:
 
 ```bash
 ./target/release/engram stop
+
 ```
 
 ### 2. Restore Previous Binary
@@ -491,6 +553,7 @@ cp /backup/engram ./target/release/engram
 # Or rebuild from previous commit
 git checkout <previous-commit>
 cargo build --release
+
 ```
 
 ### 3. Consolidate Spaces (Optional)
@@ -505,6 +568,7 @@ cat ~/.local/share/engram/production/wal/* \
 
 # Remove other spaces
 rm -rf ~/.local/share/engram/{production,staging}
+
 ```
 
 Note: This is a simplified merge. Production rollback should use proper WAL replay.
@@ -513,6 +577,7 @@ Note: This is a simplified merge. Production rollback should use proper WAL repl
 
 ```bash
 ./target/release/engram start
+
 ```
 
 All data will be in the `default` space, accessible without specifying space.
@@ -520,17 +585,25 @@ All data will be in the `default` space, accessible without specifying space.
 ## Best Practices
 
 1. **Start Small**: Create 2-3 spaces initially to validate isolation
+
 2. **Monitor Early**: Set up per-space metrics monitoring before production traffic
+
 3. **Test Fallback**: Verify default space behavior works as expected
+
 4. **Document Spaces**: Maintain mapping of space IDs to tenant/environment names
+
 5. **Backup Per-Space**: Implement backup strategy that preserves space isolation
+
 6. **Load Test**: Validate performance with realistic multi-tenant load patterns
 
 ## Further Reading
 
 - [README - Memory Spaces Section](../../README.md#memory-spaces-multi-tenancy)
+
 - [API Reference - Multi-Tenancy](../api/index.md#multi-tenancy-memory-spaces)
+
 - [Usage Guide - Multi-Tenancy](../../usage.md#multi-tenancy-memory-spaces)
+
 - [Milestone 7 Completion Summary](../../roadmap/milestone-7/MILESTONE_7_COMPLETION_SUMMARY.md)
 
 ## Support
@@ -538,5 +611,7 @@ All data will be in the `default` space, accessible without specifying space.
 For issues or questions:
 
 - GitHub Issues: <https://github.com/orchard9/engram/issues>
+
 - Documentation: <https://docs.engram.dev>
+
 - Task tracking: `roadmap/milestone-7/`

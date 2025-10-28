@@ -5,12 +5,19 @@ Comprehensive error catalog for Engram with remediation guidance. Every error in
 ## Table of Contents
 
 - [Error Structure](#error-structure)
+
 - [Storage Errors (ERR-1xxx)](#storage-errors-err-1xxx)
+
 - [Retrieval Errors (ERR-2xxx)](#retrieval-errors-err-2xxx)
+
 - [Consolidation Errors (ERR-3xxx)](#consolidation-errors-err-3xxx)
+
 - [Validation Errors (ERR-4xxx)](#validation-errors-err-4xxx)
+
 - [System Errors (ERR-5xxx)](#system-errors-err-5xxx)
+
 - [Quick Reference Table](#quick-reference-table)
+
 - [Diagnostic Commands](#diagnostic-commands)
 
 ## Error Structure
@@ -35,6 +42,7 @@ All Engram errors follow this educational format:
     "similar_errors": ["ERR-YYYY", "ERR-ZZZZ"]
   }
 }
+
 ```
 
 Think of errors as teaching moments - they explain cognitive concepts while helping you debug.
@@ -60,12 +68,15 @@ Think of this like trying to fit a square peg in a round hole - Engram's vector 
 #### Common Causes
 
 - Using embeddings from different models (e.g., BERT-base-768 vs GPT-small-1536)
+
 - Accidentally truncating or padding vectors
+
 - Copy-paste errors in embedding arrays
 
 #### Resolution Steps
 
 1. **Verify embedding model matches server configuration**
+
    ```bash
    # Check server embedding dimension
    curl http://localhost:8080/api/v1/introspect | jq '.metrics.embedding_dimension'
@@ -73,6 +84,7 @@ Think of this like trying to fit a square peg in a round hole - Engram's vector 
    ```
 
 2. **Ensure your embedding model produces correct dimensions**
+
    ```python
    # Python example with sentence-transformers
    from sentence_transformers import SentenceTransformer
@@ -85,6 +97,7 @@ Think of this like trying to fit a square peg in a round hole - Engram's vector 
    ```
 
 3. **If you need different dimensions, reconfigure server**
+
    ```bash
    # Start Engram with custom dimension
    engram start --embedding-dimension 384
@@ -102,6 +115,7 @@ curl -X POST http://localhost:8080/api/v1/memories/remember \
       "confidence": {"value": 0.8}
     }
   }'
+
 ```
 
 #### Example Response
@@ -124,6 +138,7 @@ curl -X POST http://localhost:8080/api/v1/memories/remember \
     "similar_errors": ["ERR-4003"]
   }
 }
+
 ```
 
 #### Related Errors
@@ -147,12 +162,15 @@ In Engram, confidence represents uncertainty like probability - 0.0 means "compl
 #### Common Causes
 
 - Confusing confidence with other scales (e.g., 0-100 percentage)
+
 - Negative values from unchecked calculations
+
 - Using confidence as a priority score
 
 #### Resolution Steps
 
 1. **Normalize confidence to [0.0, 1.0]**
+
    ```python
    # If you have percentage (0-100)
    confidence = percentage / 100.0
@@ -162,6 +180,7 @@ In Engram, confidence represents uncertainty like probability - 0.0 means "compl
    ```
 
 2. **Use confidence categories if uncertain about numeric values**
+
    ```python
    # Map intuitive categories to numbers
    CONFIDENCE_MAP = {
@@ -176,6 +195,7 @@ In Engram, confidence represents uncertainty like probability - 0.0 means "compl
    ```
 
 3. **Include reasoning to justify confidence**
+
    ```json
    {
      "confidence": {
@@ -204,6 +224,7 @@ In Engram, confidence represents uncertainty like probability - 0.0 means "compl
     }
   }
 }
+
 ```
 
 ---
@@ -221,22 +242,27 @@ The specified memory space doesn't exist. Memory spaces provide tenant isolation
 #### Common Causes
 
 - Typo in memory_space_id
+
 - Memory space not created yet
+
 - Using wrong credentials for different tenant
 
 #### Resolution Steps
 
 1. **List available memory spaces**
+
    ```bash
    engram space list
    ```
 
 2. **Create memory space if needed**
+
    ```bash
    engram space create --id "my_space" --description "My memory space"
    ```
 
 3. **Verify authentication scope**
+
    ```bash
    # Check which memory space your API key can access
    curl -H "Authorization: Bearer ${API_KEY}" \
@@ -258,6 +284,7 @@ The specified memory space doesn't exist. Memory spaces provide tenant isolation
     }
   }
 }
+
 ```
 
 ---
@@ -275,6 +302,7 @@ Memory ID already exists. Unlike traditional databases, Engram requires unique m
 #### Resolution Steps
 
 1. **Use server-generated IDs (recommended)**
+
    ```python
    # Don't specify ID - let Engram generate it
    memory = Memory(
@@ -285,6 +313,7 @@ Memory ID already exists. Unlike traditional databases, Engram requires unique m
    ```
 
 2. **Check if memory exists first (deduplication pattern)**
+
    ```python
    # Recognize before remember
    response = client.recognize(content="...")
@@ -297,6 +326,7 @@ Memory ID already exists. Unlike traditional databases, Engram requires unique m
    ```
 
 3. **Use content-addressable IDs**
+
    ```python
    import hashlib
 
@@ -320,6 +350,7 @@ Memory ID already exists. Unlike traditional databases, Engram requires unique m
     }
   }
 }
+
 ```
 
 ## Retrieval Errors (ERR-2xxx)
@@ -343,12 +374,15 @@ This is a key cognitive difference: unlike database queries that fail when no re
 #### Common Causes
 
 - Threshold too high for available memories
+
 - Query too specific or novel
+
 - Natural state for new memory spaces
 
 #### Resolution Steps
 
 1. **Lower confidence threshold**
+
    ```python
    # Too strict
    response = client.recall(cue, threshold=0.9)  # Might return nothing
@@ -358,6 +392,7 @@ This is a key cognitive difference: unlike database queries that fail when no re
    ```
 
 2. **Check returned confidence**
+
    ```python
    response = client.recall(cue)
 
@@ -367,6 +402,7 @@ This is a key cognitive difference: unlike database queries that fail when no re
    ```
 
 3. **Use pattern completion for partial matches**
+
    ```python
    # If recall returns nothing, try pattern completion
    if len(response.memories) == 0:
@@ -390,6 +426,7 @@ This is a key cognitive difference: unlike database queries that fail when no re
     "recall_time_ms": 67
   }
 }
+
 ```
 
 ---
@@ -407,9 +444,13 @@ The cue type is not recognized or not supported in this Engram version.
 #### Supported Cue Types
 
 - `embedding`: Direct vector similarity
+
 - `semantic`: Natural language query
+
 - `context`: Episodic context (time/location/people)
+
 - `temporal`: Temporal pattern matching
+
 - `pattern`: Partial memory completion
 
 #### Resolution Steps
@@ -423,6 +464,7 @@ cues = {
     'temporal': Cue(temporal=TemporalCue(...)),
     'pattern': Cue(pattern=PatternCue(...))
 }
+
 ```
 
 ---
@@ -442,12 +484,15 @@ Think of this like a wildfire spreading faster than you can track it - the query
 #### Common Causes
 
 - Unlimited hops with low decay (activation spreads indefinitely)
+
 - Very general query in large memory space
+
 - Highly interconnected memory graph
 
 #### Resolution Steps
 
 1. **Limit maximum hops**
+
    ```python
    # Unbounded spreading (can timeout)
    cue = Cue(
@@ -465,6 +510,7 @@ Think of this like a wildfire spreading faster than you can track it - the query
    ```
 
 2. **Increase activation decay**
+
    ```python
    # Slow decay (spreads far)
    cue.activation_decay = 0.1
@@ -474,6 +520,7 @@ Think of this like a wildfire spreading faster than you can track it - the query
    ```
 
 3. **Use pattern completion for broad queries**
+
    ```python
    # Instead of spreading activation
    response = client.recall(cue, spread_activation=True)  # Might timeout
@@ -483,6 +530,7 @@ Think of this like a wildfire spreading faster than you can track it - the query
    ```
 
 4. **Increase timeout for complex queries**
+
    ```python
    # Python
    response = client.recall(cue, timeout=10.0)  # 10 seconds
@@ -513,6 +561,7 @@ Think of this like a wildfire spreading faster than you can track it - the query
     "similar_errors": ["ERR-2004", "ERR-5001"]
   }
 }
+
 ```
 
 ---
@@ -542,6 +591,7 @@ thresholds = {
     'normal': 0.7,     # Moderately similar
     'permissive': 0.5  # Loosely similar
 }
+
 ```
 
 ## Consolidation Errors (ERR-3xxx)
@@ -565,6 +615,7 @@ Think of this like sleep - you can't sleep twice at the same time. Each consolid
 #### Resolution Steps
 
 1. **Wait for current consolidation to complete**
+
    ```bash
    # Check consolidation status
    curl http://localhost:8080/api/v1/introspect | jq '.active_processes'
@@ -572,6 +623,7 @@ Think of this like sleep - you can't sleep twice at the same time. Each consolid
    ```
 
 2. **Monitor consolidation progress**
+
    ```python
    # Stream consolidation progress
    async for event in client.dream(replay_cycles=10):
@@ -580,6 +632,7 @@ Think of this like sleep - you can't sleep twice at the same time. Each consolid
    ```
 
 3. **Cancel running consolidation (if needed)**
+
    ```bash
    # Emergency cancel (loses progress)
    engram consolidate cancel --force
@@ -597,6 +650,7 @@ Think of this like sleep - you can't sleep twice at the same time. Each consolid
     "estimated_completion": "2024-10-27T10:18:00Z"
   }
 }
+
 ```
 
 ---
@@ -614,12 +668,14 @@ Not enough memories meet consolidation criteria. Consolidation needs a minimum n
 #### Resolution Steps
 
 1. **Check pending memories count**
+
    ```bash
    curl http://localhost:8080/api/v1/introspect | \
      jq '.metrics.consolidation_pending'
    ```
 
 2. **Lower importance threshold**
+
    ```python
    # Too strict (might skip memories)
    response = client.consolidate(
@@ -633,6 +689,7 @@ Not enough memories meet consolidation criteria. Consolidation needs a minimum n
    ```
 
 3. **Wait for more memories to accumulate**
+
    ```python
    # Consolidation works best with batches
    MIN_BATCH_SIZE = 100
@@ -665,6 +722,7 @@ engram space wait-unlock --id "my_space" --timeout 300
 
 # Force unlock (admin only, dangerous)
 engram space unlock --id "my_space" --force
+
 ```
 
 ## Validation Errors (ERR-4xxx)
@@ -713,6 +771,7 @@ memory = Memory(
     embedding=[...],
     confidence=Confidence(value=0.8, reasoning="Estimated")
 )
+
 ```
 
 ---
@@ -741,6 +800,7 @@ timestamp.FromDatetime(datetime.now())
 # RFC3339 string (REST)
 timestamp_str = "2024-10-27T10:30:00Z"
 timestamp_str = datetime.now().isoformat() + "Z"
+
 ```
 
 ---
@@ -769,6 +829,7 @@ if np.any(np.isnan(embedding)) or np.any(np.isinf(embedding)):
 
 # Normalize if needed
 embedding = embedding / np.linalg.norm(embedding)
+
 ```
 
 ---
@@ -786,6 +847,7 @@ Invalid or missing API key, or token expired.
 #### Resolution Steps
 
 1. **Check API key format**
+
    ```bash
    # Valid format: ek_live_<32_hex_chars>
    echo $ENGRAM_API_KEY
@@ -793,11 +855,13 @@ Invalid or missing API key, or token expired.
    ```
 
 2. **Verify API key is active**
+
    ```bash
    engram auth verify --key "${ENGRAM_API_KEY}"
    ```
 
 3. **Check token expiration (JWT)**
+
    ```python
    import jwt
 
@@ -810,6 +874,7 @@ Invalid or missing API key, or token expired.
    ```
 
 4. **Generate new API key**
+
    ```bash
    engram auth create-key --name "new-key"
    ```
@@ -833,16 +898,19 @@ One or more storage tiers (hot/warm/cold) are unavailable.
 #### Resolution Steps
 
 1. **Check tier health**
+
    ```bash
    ./scripts/diagnose_health.sh
    ```
 
 2. **Check tier configuration**
+
    ```bash
    engram introspect | jq '.health.components.storage'
    ```
 
 3. **Restart unhealthy tier**
+
    ```bash
    # If RocksDB (cold tier) is down
    engram storage restart --tier cold
@@ -871,6 +939,7 @@ engram version --verbose | grep -i cuda
 
 # Restart with CPU-only mode
 engram start --no-gpu
+
 ```
 
 ---
@@ -888,6 +957,7 @@ Request rate exceeded configured limits.
 #### Resolution Steps
 
 1. **Implement exponential backoff**
+
    ```python
    import time
 
@@ -905,6 +975,7 @@ Request rate exceeded configured limits.
    ```
 
 2. **Use batching/streaming**
+
    ```python
    # Instead of 100 individual requests
    for memory in memories:
@@ -915,6 +986,7 @@ Request rate exceeded configured limits.
    ```
 
 3. **Check rate limit headers**
+
    ```bash
    curl -i http://localhost:8080/api/v1/memories/recall
    # X-RateLimit-Limit: 100
@@ -939,6 +1011,7 @@ Request rate exceeded configured limits.
     }
   }
 }
+
 ```
 
 ---
@@ -956,6 +1029,7 @@ Engram service is temporarily unavailable (startup, shutdown, or overloaded).
 #### Resolution Steps
 
 1. **Check service status**
+
    ```bash
    systemctl status engram
    # or
@@ -963,11 +1037,13 @@ Engram service is temporarily unavailable (startup, shutdown, or overloaded).
    ```
 
 2. **Check logs**
+
    ```bash
    journalctl -u engram --since "5 minutes ago"
    ```
 
 3. **Wait and retry with backoff**
+
    ```python
    import time
 
@@ -1018,6 +1094,7 @@ When errors occur, use these commands to diagnose:
 
 # Component-specific health
 curl http://localhost:8080/api/v1/introspect | jq '.health'
+
 ```
 
 ### Storage Diagnostics
@@ -1030,6 +1107,7 @@ curl http://localhost:8080/api/v1/introspect | \
 # Check memory statistics
 curl http://localhost:8080/api/v1/introspect | \
   jq '.statistics'
+
 ```
 
 ### Performance Diagnostics
@@ -1040,6 +1118,7 @@ engram metrics --metric recall_latency_p99 --last 5m
 
 # Check activation spreading stats
 engram metrics --metric activation_spread_time --last 1h
+
 ```
 
 ### Log Analysis
@@ -1053,6 +1132,7 @@ journalctl -u engram | grep "ERR-2003"
 
 # Export diagnostics bundle
 engram support export-diagnostics --output diagnostics.tar.gz
+
 ```
 
 ## Getting Help
@@ -1065,6 +1145,7 @@ If error persists after following resolution steps:
    - [Operations Guide](/operations/)
 
 2. **Run diagnostics**
+
    ```bash
    ./scripts/diagnose_health.sh > health_report.txt
    engram support export-diagnostics --output diagnostics.tar.gz
@@ -1108,6 +1189,7 @@ def robust_recall(cue, max_retries=3):
 
     # Fallback to pattern completion
     return client.complete(partial_pattern=cue)
+
 ```
 
 ### Educational Logging
@@ -1126,6 +1208,7 @@ def handle_error(error):
 
     # Track for metrics
     metrics.increment(f"errors.{error.code}")
+
 ```
 
 ### Retry Strategy
@@ -1142,11 +1225,15 @@ RETRIABLE_ERRORS = {'ERR-2003', 'ERR-3001', 'ERR-5001', 'ERR-5003', 'ERR-5004'}
 )
 def retriable_operation():
     return client.recall(cue)
+
 ```
 
 ## Next Steps
 
 - **API References**: [REST](/reference/rest-api.md) | [gRPC](/reference/grpc-api.md)
+
 - **Operations**: [Troubleshooting Guide](/operations/troubleshooting.md)
+
 - **Monitoring**: [Health Checks](/operations/monitoring.md)
+
 - **Performance**: [Tuning Guide](/operations/performance-tuning.md)

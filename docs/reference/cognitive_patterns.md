@@ -5,8 +5,11 @@ Complete API documentation for Engram's biologically-inspired cognitive patterns
 ## Quick Navigation
 
 - [Priming](#priming) - Semantic, associative, and repetition priming
+
 - [Interference](#interference) - Proactive, retroactive, and fan effect
+
 - [Reconsolidation](#reconsolidation) - Memory updating during recall
+
 - [Integration Examples](#integration-examples) - Real-world usage patterns
 
 ---
@@ -39,6 +42,7 @@ let node_id = "hospital_staff";
 let boost = priming.compute_priming_boost(node_id);
 println!("Priming boost: {:.1}%", boost * 100.0);
 // Output: Priming boost: 12.5%
+
 ```
 
 #### Configuration
@@ -54,21 +58,33 @@ println!("Priming boost: {:.1}%", boost * 100.0);
 #### Empirical Justification
 
 **Priming Strength (0.15):**
+
 - Neely (1977) found 10-20% reaction time reduction for primed words
+
 - RT reduction: 50-80ms from 600ms baseline = 8.3%-13.3%
+
 - We use 15% (midpoint) as activation boost
+
 - Validation: DRM paradigm produces 60% false recall (target: 55-65%)
 
 **Decay Half-Life (300ms):**
+
 - Neely (1977): Automatic spreading activation peaks at 200-400ms SOA
+
 - Most priming occurs within 400ms of prime presentation
+
 - 300ms half-life ensures ~90% decay within 1 second
+
 - Biological constraint: Automatic (not strategic) processing
 
 **Similarity Threshold (0.6):**
+
 - Optimized via parameter sweep on DRM word lists
+
 - Balances false positives vs false negatives
+
 - Below 0.5: Too many spurious primes
+
 - Above 0.7: Misses valid semantic relations
 
 #### API Reference
@@ -147,6 +163,7 @@ pub struct PrimingStatistics {
     /// P50 semantic similarity of primed pairs
     pub median_similarity: f32,
 }
+
 ```
 
 #### Performance Characteristics
@@ -162,8 +179,10 @@ pub struct PrimingStatistics {
 **Scaling:** O(k log n) where k = max_neighbors, n = graph_size
 
 **Run benchmark:**
+
 ```bash
 cargo bench --bench priming_performance -- --exact semantic
+
 ```
 
 #### Common Mistakes
@@ -183,6 +202,7 @@ for (i, episode) in episodes.iter().enumerate() {
         priming.prune_expired();
     }
 }
+
 ```
 
 **Why this matters:** Memory leak, performance degradation over time.
@@ -197,6 +217,7 @@ let activation = base_activation + priming.compute_priming_boost(node);
 // GOOD: Multiplicative boost (correct)
 let boost = priming.compute_priming_boost(node);
 let activation = base_activation * (1.0 + boost);
+
 ```
 
 **Why this matters:** Additive boost can exceed valid activation range [0, 1].
@@ -210,6 +231,7 @@ if recently_activated_by_spreading(node) {
 } else {
     activation *= 1.0 + priming.compute_priming_boost(node);
 }
+
 ```
 
 ### Associative Priming
@@ -232,18 +254,25 @@ priming.activate_associative_priming("coffee");
 
 let boost = priming.compute_associative_boost("morning");
 // boost ≈ 0.12 (0.15 * 0.8 = strength * co-occurrence)
+
 ```
 
 #### When to Use
 
 Use associative priming when:
+
 - Building user preference models (co-viewed items)
+
 - Learning temporal patterns (morning routines)
+
 - Tracking episodic associations (this happened with that)
 
 Don't use when:
+
 - Pure semantic similarity is sufficient
+
 - Co-occurrence data sparse or noisy
+
 - Memory constraints tight (stores co-occurrence table)
 
 #### Configuration
@@ -272,18 +301,25 @@ priming.record_access("episode_42");
 // Shortly after, same episode gets boost
 let boost = priming.compute_repetition_boost("episode_42");
 // boost = 0.20 immediately, decays to 0.10 after 1 second
+
 ```
 
 #### When to Use
 
 Use for:
+
 - Recently accessed item caching
+
 - Recency bias in recall
+
 - Working memory simulation
 
 Configuration:
+
 - Fast decay (200ms half-life)
+
 - Higher initial boost (0.20)
+
 - Simple recency tracking
 
 ---
@@ -322,6 +358,7 @@ let result = detector.detect_proactive_interference(
 println!("Interference: {:.1}%", result.interference_magnitude * 100.0);
 // Output: Interference: 15.0%
 // Confidence reduced by 15% due to similar prior memories
+
 ```
 
 #### What It Does
@@ -329,18 +366,24 @@ println!("Interference: {:.1}%", result.interference_magnitude * 100.0);
 Proactive interference models how prior similar memories make new learning harder. When you store similar episodes within 6 hours of each other, the new episode's confidence is reduced proportionally.
 
 **Formula:**
+
 ```
 interference = min(
     num_similar_old * interference_per_item,
     max_interference
 )
 confidence_new = confidence_original * (1 - interference)
+
 ```
 
 **Example:**
+
 - 3 similar parking memories in past 6 hours
+
 - Each contributes 5% interference
+
 - Total: 15% interference
+
 - New memory confidence: 0.90 → 0.765
 
 #### Configuration
@@ -355,16 +398,23 @@ confidence_new = confidence_original * (1 - interference)
 #### Empirical Basis
 
 **Underwood (1957):** "Interference and forgetting"
+
 - Benchmark: 20-30% accuracy reduction with 5+ prior similar lists
+
 - Our implementation: 5% per item → 25% with 5 items
+
 - Within empirical range
 
 **Temporal Window (6 hours):**
+
 - Based on synaptic consolidation timescale (Dudai et al. 2015)
+
 - After consolidation, memories transfer from hippocampus to neocortex
+
 - Reduces interference (Complementary Learning Systems theory)
 
 **Validation:**
+
 - Interference validation suite (Task 010) confirms ±10% of empirical data
 
 #### API Reference
@@ -410,6 +460,7 @@ pub enum InterferenceType {
     Retroactive,
     FanEffect,
 }
+
 ```
 
 ### Retroactive Interference
@@ -438,6 +489,7 @@ let result = detector.detect_retroactive_interference(
 );
 
 // Old memory retrieval impaired by new learning
+
 ```
 
 #### Configuration
@@ -466,6 +518,7 @@ let slowdown = detector.compute_fan_effect_slowdown(num_associations);
 let base_latency_ms = 600.0;
 let actual_latency_ms = base_latency_ms * slowdown;
 // actual_latency_ms = 1050ms
+
 ```
 
 #### What It Does
@@ -473,9 +526,11 @@ let actual_latency_ms = base_latency_ms * slowdown;
 Models Anderson (1974) finding that retrieval time increases with number of facts associated with a concept. Each additional association adds ~50-150ms to retrieval (we use 80ms midpoint).
 
 **Formula:**
+
 ```
 retrieval_time = base_time + (num_associations - 1) * time_per_association
 time_per_association = 80ms (Anderson 1974)
+
 ```
 
 #### Configuration
@@ -488,8 +543,11 @@ time_per_association = 80ms (Anderson 1974)
 #### Empirical Validation
 
 **Anderson (1974) Table 3:**
+
 - 1 association: 600ms
+
 - 2 associations: 680ms (+80ms)
+
 - 3 associations: 760ms (+80ms)
 
 Our implementation matches within ±25ms (Task 005 validation).
@@ -553,6 +611,7 @@ match result {
         println!("Reconsolidation blocked: {:?}", e);
     }
 }
+
 ```
 
 #### Boundary Conditions (Exact)
@@ -568,19 +627,28 @@ Based on Nader et al. (2000) and Lee (2009):
 | Requires | Active recall | Not passive re-exposure |
 
 **Plasticity dynamics:**
+
 ```
 plasticity(t) = inverted_U_function(t, peak_at_3h)
+
 - At 1h: 0.2 (rising)
+
 - At 3h: 1.0 (peak)
+
 - At 6h: 0.1 (declining)
+
 ```
 
 #### What Reconsolidation Does
 
 When you recall a memory:
+
 1. Memory becomes labile (modifiable) for 1-6 hours
+
 2. During this window, you can update confidence or content
+
 3. Updates are weighted by plasticity (strongest at 3 hours post-recall)
+
 4. After 6 hours, memory re-stabilizes and updates are rejected
 
 **Real-world analogy:** Recalling childhood memory during therapy session. New perspective during session can modify the memory. But if you think about it again weeks later, the window has closed.
@@ -674,6 +742,7 @@ pub enum ReconsolidationError {
     NotActiveRecall,
     PlasticityTooLow,
 }
+
 ```
 
 #### Performance Characteristics
@@ -747,6 +816,7 @@ let adjusted_confidence = new_case.confidence().value()
 
 let new_case = new_case.with_confidence(adjusted_confidence.into());
 store.store(new_case);
+
 ```
 
 ### Example 2: Recommendation Engine
@@ -801,6 +871,7 @@ reconsolidation.attempt_reconsolidation(
     update,
     Utc::now(),
 )?;
+
 ```
 
 ### Example 3: Educational Platform
@@ -860,6 +931,7 @@ priming.activate_priming(&recalled);
 // Related facts now easier to recall
 let boost_for_fact_2 = priming.compute_priming_boost("fact_2");
 println!("Fact 2 priming: +{:.1}%", boost_for_fact_2 * 100.0);
+
 ```
 
 ---
@@ -871,25 +943,31 @@ Each cognitive pattern exposes metrics for production monitoring.
 ### Key Metrics
 
 **Semantic Priming:**
+
 ```
 engram_priming_activations_total - Counter of priming activations
 engram_active_primes_total - Gauge of currently active primes
 engram_priming_boost_magnitude - Histogram of boost strengths
 engram_priming_similarity_p50 - Median semantic similarity
+
 ```
 
 **Interference:**
+
 ```
 engram_interference_detections_total{type="proactive|retroactive|fan"}
 engram_interference_magnitude - Histogram of interference strength
 engram_interference_items_count - Histogram of interfering item counts
+
 ```
 
 **Reconsolidation:**
+
 ```
 engram_reconsolidation_attempts_total{result="success|outside_window|too_young|too_old"}
 engram_reconsolidation_plasticity - Histogram of plasticity at attempt time
 engram_reconsolidation_window_hits_rate - Success rate within window
+
 ```
 
 ### Alert Thresholds
@@ -903,18 +981,27 @@ See [Cognitive Metrics Tuning Guide](/docs/operations/cognitive_metrics_tuning.m
 ### Common Issues
 
 **Priming not activating:**
+
 - Check `engram_active_primes_total` - should be >0 after recalls
+
 - Verify similarity threshold not too high (>0.8)
+
 - Ensure embeddings are normalized (cosine similarity requires unit vectors)
 
 **Interference always zero:**
+
 - Check similarity threshold not too high
+
 - Verify temporal window covers relevant memories
+
 - Ensure episodes have timestamps
 
 **Reconsolidation always fails:**
+
 - Check time since recall (must be 1-6 hours)
+
 - Verify memory age (must be >24 hours, <365 days)
+
 - Ensure `is_active_recall=true` when recording recall
 
 For complete troubleshooting runbooks, see [Operations Guide](/docs/operations/cognitive_metrics_tuning.md).
@@ -926,35 +1013,42 @@ For complete troubleshooting runbooks, see [Operations Guide](/docs/operations/c
 ### If Metrics Overhead >1%
 
 Enable sampling:
+
 ```rust
 MetricsConfig {
     sampling_rate: 0.10, // 10% of operations
     ..Default::default()
 }
+
 ```
 
 Reduce histogram buckets:
+
 ```rust
 MetricsConfig {
     histogram_buckets: vec![0.01, 0.05, 0.10, 0.20, 0.50],
     ..Default::default()
 }
+
 ```
 
 ### If Priming Too Aggressive
 
 Reduce strength and increase decay:
+
 ```rust
 SemanticPrimingEngine::with_config(
     0.10,           // priming_strength (was 0.15)
     Duration::from_millis(200), // faster decay (was 300ms)
     0.65,           // higher threshold (was 0.6)
 )
+
 ```
 
 ### If Interference Too Sensitive
 
 Increase threshold and reduce per-item:
+
 ```rust
 ProactiveInterferenceDetector::new(
     0.75,                    // similarity_threshold (was 0.7)
@@ -962,6 +1056,7 @@ ProactiveInterferenceDetector::new(
     0.03,                    // interference_per_item (was 0.05)
     0.25,                    // max_interference (was 0.30)
 )
+
 ```
 
 ---

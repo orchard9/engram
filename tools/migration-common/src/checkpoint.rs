@@ -16,7 +16,7 @@ pub struct Checkpoint {
     pub timestamp: DateTime<Utc>,
     /// Path to checkpoint file
     #[serde(skip)]
-    pub checkpoint_file: PathBuf,
+    pub file: PathBuf,
 }
 
 impl Checkpoint {
@@ -27,16 +27,16 @@ impl Checkpoint {
             last_processed_id,
             records_migrated,
             timestamp: Utc::now(),
-            checkpoint_file,
+            file: checkpoint_file,
         }
     }
 
     /// Save checkpoint to disk
     pub fn save(&self) -> MigrationResult<()> {
         let json = serde_json::to_string_pretty(self)?;
-        std::fs::write(&self.checkpoint_file, json)?;
+        std::fs::write(&self.file, json)?;
         tracing::info!(
-            path = ?self.checkpoint_file,
+            path = ?self.file,
             records = self.records_migrated,
             "Checkpoint saved"
         );
@@ -46,8 +46,8 @@ impl Checkpoint {
     /// Load checkpoint from disk
     pub fn load(path: &Path) -> MigrationResult<Self> {
         let json = std::fs::read_to_string(path)?;
-        let mut checkpoint: Checkpoint = serde_json::from_str(&json)?;
-        checkpoint.checkpoint_file = path.to_path_buf();
+        let mut checkpoint = Self::deserialize(&json)?;
+        checkpoint.file = path.to_path_buf();
         tracing::info!(
             path = ?path,
             records = checkpoint.records_migrated,
@@ -55,6 +55,10 @@ impl Checkpoint {
             "Checkpoint loaded"
         );
         Ok(checkpoint)
+    }
+
+    fn deserialize(json: &str) -> MigrationResult<Self> {
+        Ok(serde_json::from_str(json)?)
     }
 }
 
@@ -68,7 +72,7 @@ pub struct CheckpointManager {
 impl CheckpointManager {
     /// Create a new checkpoint manager
     #[must_use]
-    pub fn new(checkpoint_file: PathBuf, checkpoint_interval: u64) -> Self {
+    pub const fn new(checkpoint_file: PathBuf, checkpoint_interval: u64) -> Self {
         Self {
             checkpoint_file,
             checkpoint_interval,
@@ -90,11 +94,11 @@ impl CheckpointManager {
     /// Check if a checkpoint should be saved based on interval
     #[must_use]
     pub fn should_checkpoint(&self, records_migrated: u64) -> bool {
-        if let Some(ref last) = self.last_checkpoint {
-            records_migrated - last.records_migrated >= self.checkpoint_interval
-        } else {
-            records_migrated >= self.checkpoint_interval
-        }
+        self.last_checkpoint
+            .as_ref()
+            .map_or(records_migrated >= self.checkpoint_interval, |last| {
+                records_migrated - last.records_migrated >= self.checkpoint_interval
+            })
     }
 
     /// Save a checkpoint

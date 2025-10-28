@@ -9,8 +9,11 @@
 **GPU acceleration infrastructure is under active development. This documentation describes the target architecture for Milestone 13+.**
 
 **CURRENT MILESTONE 12 STATUS**:
+
 - **IMPLEMENTED**: CPU SIMD fallback (production-ready, high performance)
+
 - **IMPLEMENTED**: Hybrid executor architecture and interfaces
+
 - **NOT IMPLEMENTED**: Actual CUDA kernels, GPU device detection, GPU-specific CLI flags
 
 **CURRENT DEPLOYMENT RECOMMENDATION**: Deploy using CPU SIMD implementation, which provides excellent performance for most workloads. GPU acceleration will be added in a future milestone.
@@ -38,13 +41,17 @@ cargo build --release
 
 # 3. Validate performance
 curl http://localhost:8080/metrics
+
 ```
 
 That's it! Engram uses high-performance CPU SIMD implementations that provide excellent throughput for most workloads.
 
 **CPU SIMD Performance** (current, production-ready):
+
 - Cosine similarity: ~2.1 us/vector (AVX-512)
+
 - Activation spreading: ~850 us for 1000 nodes
+
 - Throughput: 70K vectors/sec
 
 ---
@@ -71,6 +78,7 @@ cargo build --release --features gpu
 
 # 6. Validate GPU usage (PLANNED)
 curl http://localhost:8080/metrics | grep gpu
+
 ```
 
 **Current Status**: Steps above are not functional in Milestone 12. Use CPU SIMD Quick Start instead.
@@ -80,10 +88,13 @@ curl http://localhost:8080/metrics | grep gpu
 ### Hardware Requirements
 
 **Minimum GPU Specifications**:
+
 - NVIDIA GPU with compute capability 6.0 or higher
   - Consumer: GTX 1060, GTX 1660 Ti, RTX 2060 or newer
   - Datacenter: P40, V100, T4, A100, H100
+
 - 4GB VRAM (8GB recommended for production workloads)
+
 - PCIe 3.0 x16 slot (PCIe 4.0 recommended for bandwidth)
 
 **Check Your GPU Compute Capability**:
@@ -101,6 +112,7 @@ nvidia-smi --query-gpu=compute_cap --format=csv
 
 # Expected output: 6.0, 7.5, 8.0, 8.6, 9.0, etc.
 # If < 6.0, GPU acceleration not supported
+
 ```
 
 **Supported GPU Models**:
@@ -115,32 +127,49 @@ nvidia-smi --query-gpu=compute_cap --format=csv
 | Hopper     | - | H100, H200 | 9.0 |
 
 **System Requirements**:
+
 - x86_64 CPU with AVX2 support (fallback path)
+
 - 16GB+ system RAM (32GB+ recommended)
+
 - SSD storage for graph data
+
 - Linux kernel 3.10+ or Windows Server 2019+
 
 ### Software Requirements
 
 **Operating System**:
+
 - Ubuntu 20.04 LTS or newer
+
 - RHEL / Rocky Linux / AlmaLinux 8 or newer
+
 - Windows Server 2019 or newer
+
 - Other distributions with CUDA support (check NVIDIA docs)
 
 **CUDA Toolkit**:
+
 - Minimum: CUDA 11.0
+
 - Recommended: CUDA 11.8 or 12.x (latest stable)
+
 - Download: https://developer.nvidia.com/cuda-downloads
 
 **NVIDIA Driver**:
+
 - Minimum: 450.80.02 (Linux) / 452.39 (Windows)
+
 - Recommended: Latest stable driver for your GPU
+
 - Download: https://www.nvidia.com/drivers
 
 **Build Tools**:
+
 - Rust 1.75.0 or newer
+
 - GCC 9+ or LLVM 10+ (for linking CUDA code)
+
 - CMake 3.18+ (if building from source)
 
 ## Installation
@@ -160,6 +189,7 @@ lspci | grep -i nvidia
 # - GPU is properly seated in PCIe slot
 # - PCIe power cables connected (if required)
 # - BIOS/UEFI has PCIe enabled
+
 ```
 
 ### Step 2: Install NVIDIA Driver
@@ -184,6 +214,7 @@ sudo reboot
 nvidia-smi
 
 # Expected output shows GPU name, driver version, CUDA version
+
 ```
 
 #### RHEL / Rocky Linux / AlmaLinux
@@ -204,17 +235,22 @@ sudo reboot
 
 # Verify
 nvidia-smi
+
 ```
 
 #### Windows Server
 
 1. Download driver from https://www.nvidia.com/drivers
+
 2. Select "Data Center / Tesla" for datacenter GPUs
+
 3. Run installer (may require reboot)
+
 4. Verify in PowerShell:
 
 ```powershell
 nvidia-smi.exe
+
 ```
 
 ### Step 3: Install CUDA Toolkit
@@ -243,6 +279,7 @@ nvcc --version
 # Expected output:
 # nvcc: NVIDIA (R) Cuda compiler driver
 # Cuda compilation tools, release 11.8, ...
+
 ```
 
 #### RHEL / Rocky Linux / AlmaLinux
@@ -261,17 +298,22 @@ source ~/.bashrc
 
 # Verify
 nvcc --version
+
 ```
 
 #### Windows Server
 
 1. Download CUDA installer from https://developer.nvidia.com/cuda-downloads
+
 2. Select Windows > x86_64 > version > exe (network or local)
+
 3. Run installer (installs to `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v11.8`)
+
 4. Verify in PowerShell:
 
 ```powershell
 nvcc --version
+
 ```
 
 ### Step 4: Build Engram with GPU Support
@@ -286,6 +328,7 @@ cargo build --release --features gpu
 
 # Build time: 5-15 minutes depending on hardware
 # Watch for any compilation warnings or errors
+
 ```
 
 **Expected Build Output**:
@@ -294,23 +337,33 @@ cargo build --release --features gpu
    Compiling engram-core v0.1.0
    Compiling engram-cli v0.1.0
     Finished release [optimized] target(s) in 8m 23s
+
 ```
 
 **Troubleshooting Build Failures**:
 
 If build fails with "CUDA toolkit not found":
+
 1. Ensure `nvcc` is in PATH: `which nvcc`
+
 2. Check CUDA_PATH: `echo $CUDA_PATH` (should be `/usr/local/cuda-11.8` or similar)
+
 3. If not set: `export CUDA_PATH=/usr/local/cuda-11.8`
 
 If build fails with linker errors:
+
 1. Check LD_LIBRARY_PATH includes CUDA: `echo $LD_LIBRARY_PATH`
+
 2. Verify libcudart.so exists: `ls /usr/local/cuda-11.8/lib64/libcudart.so`
+
 3. If missing, reinstall CUDA toolkit
 
 If build succeeds but with warnings about missing CUDA:
+
 - This is expected on systems without GPU
+
 - Engram will compile with CPU-only support
+
 - No action needed unless you specifically want GPU
 
 ### Step 5: Verify GPU Detection (PLANNED)
@@ -336,6 +389,7 @@ If build succeeds but with warnings about missing CUDA:
 # Reason: No CUDA-capable devices found
 #
 # GPU acceleration: DISABLED (using CPU SIMD fallback)
+
 ```
 
 **Current Milestone 12**: No GPU detection command available. All operations use CPU SIMD.
@@ -343,18 +397,21 @@ If build succeeds but with warnings about missing CUDA:
 **If GPU Not Detected**:
 
 1. Check driver is loaded:
+
    ```bash
    nvidia-smi
    # If fails, driver not loaded - reboot or check installation
    ```
 
 2. Check CUDA libraries are accessible:
+
    ```bash
    ldd ./target/release/engram | grep cuda
    # Should show: libcudart.so => /usr/local/cuda-11.8/lib64/libcudart.so
    ```
 
 3. Check permissions:
+
    ```bash
    ls -l /dev/nvidia*
    # Should be readable by your user
@@ -389,6 +446,7 @@ let config = HybridConfig {
 };
 
 let executor = HybridExecutor::new(config);
+
 ```
 
 **Planned TOML Configuration** (not yet implemented):
@@ -409,6 +467,7 @@ performance_window_size = 100
 
 # Note: These parameters match HybridConfig struct field names
 # Note: vram_safety_margin, device_id, debug_kernels not in HybridConfig yet
+
 ```
 
 ### Multi-GPU Systems
@@ -431,6 +490,7 @@ device_id = 1
 # Or use environment variable
 export CUDA_VISIBLE_DEVICES=1
 ./target/release/engram start
+
 ```
 
 ### Environment Variables
@@ -449,6 +509,7 @@ export CUDA_VISIBLE_DEVICES=0
 
 # Enable verbose GPU logging
 export RUST_LOG=engram::activation::gpu=debug
+
 ```
 
 ## Deployment Scenarios
@@ -473,6 +534,7 @@ nvidia-smi dmon -s puct -c 10
 # gpu    pwr  temp    sm   mem   enc   dec
 #   0     75    65    90    80     0     0
 # (sm = GPU utilization, mem = memory utilization)
+
 ```
 
 ### Docker Deployment
@@ -514,6 +576,7 @@ EXPOSE 8080 50051
 
 # Run
 CMD ["engram", "start", "--config", "/etc/engram/config.toml"]
+
 ```
 
 **Build and Run**:
@@ -531,6 +594,7 @@ docker run --gpus all \
 
 # Verify GPU is accessible in container
 docker exec -it <container_id> nvidia-smi
+
 ```
 
 **Docker Compose**:
@@ -559,6 +623,7 @@ services:
 
 volumes:
   engram-data:
+
 ```
 
 ```bash
@@ -567,13 +632,17 @@ docker-compose up -d
 
 # View logs
 docker-compose logs -f engram
+
 ```
 
 ### Kubernetes Deployment
 
 **Prerequisites**:
+
 - Kubernetes 1.20+
+
 - NVIDIA GPU Operator or device plugin installed
+
 - Nodes labeled with GPU type
 
 **Install NVIDIA Device Plugin**:
@@ -584,6 +653,7 @@ kubectl apply -f https://raw.githubusercontent.com/NVIDIA/k8s-device-plugin/v0.1
 
 # Verify GPU nodes
 kubectl get nodes "-o=custom-columns=NAME:.metadata.name,GPU:.status.allocatable.nvidia\.com/gpu"
+
 ```
 
 **Deployment Manifest**:
@@ -658,6 +728,7 @@ spec:
     port: 50051
     targetPort: 50051
   type: LoadBalancer
+
 ```
 
 ```bash
@@ -672,6 +743,7 @@ kubectl describe pod <engram-pod-name> | grep nvidia.com/gpu
 
 # View logs
 kubectl logs -f deployment/engram-gpu
+
 ```
 
 ## Validation
@@ -693,6 +765,7 @@ curl http://localhost:8080/metrics | grep gpu
 # - GPU is not being used
 # - Check workload has batch sizes >= min_batch_size
 # - Check force_cpu_mode is false
+
 ```
 
 **Method 2: Monitor GPU Utilization**
@@ -710,6 +783,7 @@ nvidia-smi dmon -s puct -c 100
 # If sm (GPU utilization) stays at 0:
 # - GPU not being used
 # - Check configuration and logs
+
 ```
 
 **Method 3: Check Logs**
@@ -726,6 +800,7 @@ export RUST_LOG=engram::activation::gpu=debug
 # If you see "using CPU" for large batches:
 # - GPU disabled or unavailable
 # - Check configuration
+
 ```
 
 ### Functional Testing
@@ -746,6 +821,7 @@ cargo bench --bench gpu_performance_validation
 # If speedup < 3x:
 # - GPU not performing well
 # - See GPU Performance Tuning Guide
+
 ```
 
 ### Load Testing
@@ -768,6 +844,7 @@ nvidia-smi dmon -s puct
 
 # Monitor metrics
 watch -n 1 'curl -s http://localhost:8080/metrics | grep gpu'
+
 ```
 
 ## Production Checklist
@@ -775,25 +852,40 @@ watch -n 1 'curl -s http://localhost:8080/metrics | grep gpu'
 Before going to production, verify:
 
 **For Current Milestone 12 (CPU SIMD)**:
+
 - [ ] Engram built with `cargo build --release`
+
 - [ ] Engram starts successfully
+
 - [ ] Metrics endpoint accessible (`curl http://localhost:8080/metrics`)
+
 - [ ] Performance meets requirements using CPU SIMD
+
 - [ ] Monitoring configured for core metrics
+
 - [ ] Documentation shared with on-call team
 
 **For Future GPU Deployment (Milestone 13+)**:
+
 - [ ] GPU driver installed and working (`nvidia-smi` succeeds)
+
 - [ ] CUDA toolkit 11.0+ installed (`nvcc --version`)
+
 - [ ] Engram built with `--features gpu` flag
+
 - [ ] GPU detection works (`engram --gpu-info` - PLANNED, not yet available)
+
 - [ ] Configuration tuned for your GPU type (see Performance Tuning Guide)
+
 - [ ] Benchmark tests show expected speedup (>3x)
+
 - [ ] Load testing validates GPU utilization under production workload
+
 - [ ] Monitoring alerts configured for:
   - GPU failure rate > 5% (derived from `engram_gpu_launch_total` and `engram_gpu_fallback_total`)
   - GPU not being used when expected (`engram_gpu_launch_total` not increasing)
   - OOM events (`engram_gpu_oom_total` > 0)
+
 - [ ] Backup plan for CPU-only operation tested
 
 ## Monitoring and Observability
@@ -801,25 +893,31 @@ Before going to production, verify:
 ### Key Metrics to Track
 
 **GPU Dispatch Metrics** (when GPU features implemented):
+
 ```
 engram_gpu_launch_total         # How many operations sent to GPU
 engram_gpu_fallback_total       # How many GPU failures fell back to CPU
 # Note: success_rate = (launch_total - fallback_total) / launch_total (derived)
 # Note: speedup_ratio will be calculated from latency metrics (derived)
+
 ```
 
 **GPU Health Metrics**:
+
 ```
 engram_gpu_oom_total            # Out-of-memory events (target: 0)
 engram_gpu_error_total          # CUDA errors (target: <1% of launches)
 engram_gpu_available            # GPU availability (1=available, 0=unavailable)
+
 ```
 
 **Performance Metrics**:
+
 ```
 engram_spreading_latency_p50    # Median latency
 engram_spreading_latency_p99    # Tail latency
 engram_batch_size_histogram     # Distribution of batch sizes
+
 ```
 
 ### Grafana Dashboard
@@ -838,12 +936,14 @@ rate(engram_gpu_launch_total[5m] - engram_gpu_fallback_total[5m]) / rate(engram_
 
 # OOM rate
 rate(engram_gpu_oom_total[5m])
+
 ```
 
 ### Alerting Rules (PLANNED for future GPU implementation)
 
 ```yaml
 groups:
+
 - name: engram_gpu
   rules:
   # Alert if GPU success rate drops below 95%
@@ -876,6 +976,7 @@ groups:
     annotations:
       summary: "GPU out-of-memory events detected"
       description: "{{ $value }} OOM events in last 5min, reduce batch size or add GPU memory"
+
 ```
 
 ## Rollback Procedures
@@ -893,6 +994,7 @@ kill -HUP $(pgrep engram)
 
 # Or use API endpoint (if available)
 curl -X POST http://localhost:8080/admin/reload-config
+
 ```
 
 ### Option 2: Environment Variable (Requires Restart)
@@ -912,6 +1014,7 @@ docker restart engram
 
 # Or for Kubernetes:
 kubectl set env deployment/engram-gpu ENGRAM_GPU_ENABLED=false
+
 ```
 
 ### Option 3: Rebuild Without GPU (Full Rollback)
@@ -925,21 +1028,29 @@ sudo cp target/release/engram /usr/local/bin/engram
 
 # Restart service
 sudo systemctl restart engram
+
 ```
 
 ## Next Steps
 
 - **Performance Tuning**: See GPU Performance Tuning Guide to optimize configuration for your workload
+
 - **Troubleshooting**: If you encounter issues, consult GPU Troubleshooting Guide
+
 - **Advanced Features**: Learn about multi-GPU support, kernel tuning, and optimization in the GPU Architecture Reference
 
 ## Support
 
 For deployment issues:
+
 1. Check GPU Troubleshooting Guide
+
 2. Review logs with `RUST_LOG=engram::activation::gpu=debug`
+
 3. Run diagnostics: `nvidia-smi`, `nvcc --version` (GPU-related, for future use)
+
 4. Note: `engram --gpu-info` command is PLANNED for Milestone 13+, not yet available
+
 5. File an issue with diagnostics output
 
 ## Appendix A: Supported Configurations
@@ -957,8 +1068,11 @@ For deployment issues:
 ### Known Incompatibilities
 
 - Maxwell GPUs (GTX 900 series): Compute capability 5.x not supported
+
 - AMD GPUs: ROCm support not yet implemented
+
 - Intel GPUs: Not supported (CUDA-only)
+
 - ARM + NVIDIA Jetson: Not tested, may work with CUDA for ARM
 
 ## Appendix B: Cloud Provider Setup
@@ -979,6 +1093,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 git clone https://github.com/your-org/engram.git
 cd engram
 cargo build --release --features gpu
+
 ```
 
 ### Google Cloud Platform
@@ -995,6 +1110,7 @@ gcloud compute instances create engram-gpu \
 gcloud compute ssh engram-gpu
 
 # Follow Ubuntu installation steps above
+
 ```
 
 ### Azure
@@ -1018,4 +1134,5 @@ az vm extension set \
 az ssh vm --name engram-gpu
 
 # Follow Ubuntu installation steps above
+
 ```

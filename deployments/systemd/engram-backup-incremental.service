@@ -1,0 +1,33 @@
+[Unit]
+Description=Engram Incremental Backup Service (WAL-based)
+Documentation=https://github.com/orchard9/engram
+After=network.target
+Requires=engram.service
+
+[Service]
+Type=oneshot
+User=engram
+Group=engram
+Environment="ENGRAM_DATA_DIR=/var/lib/engram"
+Environment="BACKUP_DIR=/var/backups/engram"
+Environment="ENGRAM_SPACE_ID=default"
+ExecStart=/usr/local/bin/engram/scripts/backup_incremental.sh
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=engram-backup-incr
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/engram /var/backups/engram
+
+# Resource limits
+CPUQuota=25%
+MemoryLimit=512M
+
+[Install]
+WantedBy=multi-user.target

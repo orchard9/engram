@@ -16,5 +16,6 @@ pub use error::{MigrationError, MigrationResult};
 pub use progress::ProgressTracker;
 pub use streaming::{DataSource, MemoryTransformer, MigrationPipeline, SourceRecord};
 pub use validator::{
-    CountReport, EdgeReport, EmbeddingReport, MigrationValidator, SampleReport, SourceStatistics,
+    CountReport, EdgeReport, EmbeddingReport, MigrationReport, MigrationValidator, SampleReport,
+    SourceStatistics,
 };

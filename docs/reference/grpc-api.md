@@ -5,16 +5,27 @@ Complete gRPC API reference for Engram's cognitive memory operations. This guide
 ## Table of Contents
 
 - [Why gRPC?](#why-grpc)
+
 - [Getting Started](#getting-started)
+
 - [Service Overview](#service-overview)
+
 - [Core Memory Operations](#core-memory-operations)
+
 - [Episodic Operations](#episodic-operations)
+
 - [Consolidation Operations](#consolidation-operations)
+
 - [Pattern Operations](#pattern-operations)
+
 - [Monitoring Operations](#monitoring-operations)
+
 - [Streaming Operations](#streaming-operations)
+
 - [Connection Management](#connection-management)
+
 - [Error Handling](#error-handling)
+
 - [Performance Tuning](#performance-tuning)
 
 ## Why gRPC?
@@ -22,8 +33,11 @@ Complete gRPC API reference for Engram's cognitive memory operations. This guide
 Use gRPC when you need:
 
 - **High throughput**: 3-5x better performance than REST
+
 - **Streaming operations**: Dream consolidation, real-time monitoring
+
 - **Binary efficiency**: Smaller payloads for mobile/edge
+
 - **Type safety**: Proto definitions prevent API misuse
 
 Performance comparison (P99 latency):
@@ -45,6 +59,7 @@ For simple web frontends or occasional operations (<10/sec), use the [REST API](
 
 ```bash
 engram start --grpc-port 50051 --grpc-reflection
+
 ```
 
 2. Generate client stubs from proto definitions:
@@ -53,6 +68,7 @@ engram start --grpc-port 50051 --grpc-reflection
 # Proto definitions at proto/engram/v1/*.proto
 git clone https://github.com/engram/engram
 cd engram/proto
+
 ```
 
 Language-specific generation covered in each section below.
@@ -70,27 +86,37 @@ The `EngramService` provides cognitive memory operations organized by progressiv
 ### Level 1 (Essential) - 5 minutes
 
 Core operations covering 80% of use cases:
+
 - `Remember` - Store memories
+
 - `Recall` - Retrieve memories
 
 ### Level 2 (Episodic) - 15 minutes
 
 Rich contextual memories:
+
 - `Experience` - Record episodic memories
+
 - `Reminisce` - Query by context
 
 ### Level 3 (Advanced) - 45 minutes
 
 Streaming and complex operations:
+
 - `Dream` - Stream consolidation replay
+
 - `Complete` - Pattern completion
+
 - `Associate` - Create associations
+
 - `MemoryFlow` - Bidirectional streaming
 
 ### Monitoring
 
 System introspection:
+
 - `Introspect` - System statistics
+
 - `Stream` - Real-time activity
 
 ## Core Memory Operations
@@ -100,20 +126,30 @@ System introspection:
 Store a new memory with confidence scoring and automatic linking.
 
 **Method Signature:**
+
 ```protobuf
 rpc Remember(RememberRequest) returns (RememberResponse);
+
 ```
 
 **Request Fields:**
+
 - `memory_space_id` (string): Memory space for multi-tenant isolation
+
 - `memory` (Memory): Memory object with embedding and confidence
+
 - `auto_link` (bool): Automatically link to related memories
+
 - `link_threshold` (float): Similarity threshold for auto-linking
 
 **Response Fields:**
+
 - `memory_id` (string): Stored memory identifier
+
 - `storage_confidence` (Confidence): Storage success confidence
+
 - `linked_memories` (repeated string): Auto-linked memory IDs
+
 - `initial_state` (ConsolidationState): Initial consolidation state
 
 #### Examples
@@ -165,14 +201,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
+
 ```
 
 **Cargo.toml:**
+
 ```toml
 [dependencies]
 engram = "0.1"
 tonic = "0.12"
 tokio = { version = "1", features = ["full"] }
+
 ```
 
 </details>
@@ -218,14 +257,17 @@ async def remember_example():
 
 if __name__ == "__main__":
     asyncio.run(remember_example())
+
 ```
 
 **Setup:**
+
 ```bash
 pip install grpcio grpcio-tools
 python -m grpc_tools.protoc -I../../proto \
     --python_out=. --grpc_python_out=. \
     ../../proto/engram/v1/*.proto
+
 ```
 
 </details>
@@ -295,9 +337,11 @@ async function rememberExample() {
 }
 
 rememberExample().catch(console.error);
+
 ```
 
 **package.json:**
+
 ```json
 {
   "dependencies": {
@@ -305,6 +349,7 @@ rememberExample().catch(console.error);
     "@grpc/proto-loader": "^0.7.0"
   }
 }
+
 ```
 
 </details>
@@ -373,9 +418,11 @@ func main() {
     fmt.Printf("Storage confidence: %.2f\n", response.StorageConfidence.Value)
     fmt.Printf("Linked to %d memories\n", len(response.LinkedMemories))
 }
+
 ```
 
 **go.mod:**
+
 ```go
 module example
 
@@ -385,6 +432,7 @@ require (
     github.com/engram/engram v0.1.0
     google.golang.org/grpc v1.59.0
 )
+
 ```
 
 </details>
@@ -449,9 +497,11 @@ public class RememberExample {
         channel.shutdown();
     }
 }
+
 ```
 
 **pom.xml:**
+
 ```xml
 <dependencies>
     <dependency>
@@ -470,6 +520,7 @@ public class RememberExample {
         <version>1.59.0</version>
     </dependency>
 </dependencies>
+
 ```
 
 </details>
@@ -479,21 +530,32 @@ public class RememberExample {
 Retrieve memories using various cue types with spreading activation.
 
 **Method Signature:**
+
 ```protobuf
 rpc Recall(RecallRequest) returns (RecallResponse);
+
 ```
 
 **Request Fields:**
+
 - `memory_space_id` (string): Memory space identifier
+
 - `cue` (Cue): Retrieval cue (embedding, semantic, context, temporal, or pattern)
+
 - `max_results` (int32): Maximum memories to return
+
 - `include_metadata` (bool): Include recall statistics
+
 - `trace_activation` (bool): Include activation trace
 
 **Response Fields:**
+
 - `memories` (repeated Memory): Retrieved memories
+
 - `recall_confidence` (Confidence): Overall recall confidence
+
 - `metadata` (RecallMetadata): Recall statistics
+
 - `traces` (repeated ActivationTrace): Spreading activation traces
 
 #### Examples
@@ -543,6 +605,7 @@ async def recall_semantic():
             print(f"  Recall time: {response.metadata.recall_time_ms}ms")
 
 asyncio.run(recall_semantic())
+
 ```
 
 </details>
@@ -594,6 +657,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
+
 ```
 
 </details>
@@ -663,6 +727,7 @@ func main() {
             memory.Content, memory.Activation)
     }
 }
+
 ```
 
 </details>
@@ -672,13 +737,18 @@ func main() {
 Remove or suppress memories with reversible forgetting modes.
 
 **Method Signature:**
+
 ```protobuf
 rpc Forget(ForgetRequest) returns (ForgetResponse);
+
 ```
 
 **Forget Modes:**
+
 - `FORGET_MODE_SUPPRESS`: Reduce activation (reversible)
+
 - `FORGET_MODE_DELETE`: Permanent removal
+
 - `FORGET_MODE_OVERWRITE`: Replace with new memory
 
 #### Example (TypeScript)
@@ -706,6 +776,7 @@ async function forgetExample() {
         });
     });
 }
+
 ```
 
 ### Recognize
@@ -713,8 +784,10 @@ async function forgetExample() {
 Check if a memory pattern feels familiar (recognition vs recall).
 
 **Method Signature:**
+
 ```protobuf
 rpc Recognize(RecognizeRequest) returns (RecognizeResponse);
+
 ```
 
 #### Example (Java)
@@ -739,6 +812,7 @@ public void recognizeExample() {
         System.out.printf("  Similar: %s%n", similar.getContent());
     }
 }
+
 ```
 
 ## Episodic Operations
@@ -748,8 +822,10 @@ public void recognizeExample() {
 Record episodic memory with what/when/where/who/why/how context.
 
 **Method Signature:**
+
 ```protobuf
 rpc Experience(ExperienceRequest) returns (ExperienceResponse);
+
 ```
 
 #### Example (Python)
@@ -795,6 +871,7 @@ async def experience_example():
         print(f"Recorded episode: {response.episode_id}")
         print(f"Encoding quality: {response.encoding_quality.value:.2f}")
         print(f"Context links created: {response.context_links_created}")
+
 ```
 
 ### Reminisce
@@ -802,8 +879,10 @@ async def experience_example():
 Query episodic memories by context.
 
 **Method Signature:**
+
 ```protobuf
 rpc Reminisce(ReminisceRequest) returns (ReminisceResponse);
+
 ```
 
 #### Example (Rust)
@@ -853,6 +932,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
+
 ```
 
 ## Consolidation Operations
@@ -862,8 +942,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 Trigger memory consolidation with selective criteria.
 
 **Method Signature:**
+
 ```protobuf
 rpc Consolidate(ConsolidateRequest) returns (ConsolidateResponse);
+
 ```
 
 #### Example (Go)
@@ -899,6 +981,7 @@ func consolidateExample() {
     fmt.Printf("Next consolidation: %s\n",
         response.NextConsolidation.AsTime().Format(time.RFC3339))
 }
+
 ```
 
 ### Dream
@@ -906,8 +989,10 @@ func consolidateExample() {
 Stream dream-like memory replay with insights (server streaming).
 
 **Method Signature:**
+
 ```protobuf
 rpc Dream(DreamRequest) returns (stream DreamResponse);
+
 ```
 
 This is Engram's most cognitively interesting operation - watching memory consolidation happen in real-time.
@@ -957,6 +1042,7 @@ async def dream_example():
         print(f"\nDream complete: {replay_count} replays, {insight_count} insights")
 
 asyncio.run(dream_example())
+
 ```
 
 #### Example (Rust - Stream Processing)
@@ -1018,6 +1104,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
+
 ```
 
 ## Streaming Operations
@@ -1027,8 +1114,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 Interactive memory sessions with bidirectional communication.
 
 **Method Signature:**
+
 ```protobuf
 rpc MemoryFlow(stream MemoryFlowRequest) returns (stream MemoryFlowResponse);
+
 ```
 
 #### Example (Go - Bidirectional Stream)
@@ -1143,6 +1232,7 @@ func memoryFlowExample() {
 
     stream.CloseSend()
 }
+
 ```
 
 ## Connection Management
@@ -1170,6 +1260,7 @@ async fn create_pooled_client() -> Result<EngramServiceClient<Channel>, Box<dyn 
     let channel = endpoint.connect().await?;
     Ok(EngramServiceClient::new(channel))
 }
+
 ```
 
 #### Python (grpcio)
@@ -1189,6 +1280,7 @@ options = [
 
 channel = grpc.aio.insecure_channel('localhost:50051', options=options)
 client = engram_pb2_grpc.EngramServiceStub(channel)
+
 ```
 
 #### Go
@@ -1217,6 +1309,7 @@ func createClient() (*grpc.ClientConn, error) {
         ),
     )
 }
+
 ```
 
 ### Retry Logic
@@ -1266,6 +1359,7 @@ const response = await retryableCall(() =>
         });
     })
 );
+
 ```
 
 ## Error Handling
@@ -1315,6 +1409,7 @@ public void handleErrors() {
         }
     }
 }
+
 ```
 
 ## Performance Tuning
@@ -1349,6 +1444,7 @@ async def batch_remember(memories: list):
 memories = [create_memory(i) for i in range(100)]
 results = await batch_remember(memories)
 print(f"Stored {len(results)} memories via streaming")
+
 ```
 
 ### Message Size Limits
@@ -1361,6 +1457,7 @@ options = [
     ('grpc.max_send_message_length', 10 * 1024 * 1024),  # 10MB
     ('grpc.max_receive_message_length', 10 * 1024 * 1024),
 ]
+
 ```
 
 ```rust
@@ -1368,6 +1465,7 @@ options = [
 let endpoint = Endpoint::from_static("http://localhost:50051")
     .initial_connection_window_size(1024 * 1024)
     .initial_stream_window_size(1024 * 1024);
+
 ```
 
 ### Backpressure Handling
@@ -1429,20 +1527,27 @@ func streamWithBackpressure(client pb.EngramServiceClient) {
         // Process response...
     }
 }
+
 ```
 
 ## Next Steps
 
 - **Quick Start**: Try the [15-minute API Quickstart](/tutorials/api-quickstart.md)
+
 - **REST Alternative**: See [REST API Reference](/reference/rest-api.md) for simpler integration
+
 - **Error Handling**: Read [Error Codes Catalog](/reference/error-codes.md)
+
 - **Examples**: Explore complete [Multi-Language Examples](/reference/api-examples/)
+
 - **Production**: Check [Operations Guide](/operations/) for deployment
 
 ## Proto Definitions
 
 All message definitions are available at:
+
 - `proto/engram/v1/service.proto` - Service RPCs
+
 - `proto/engram/v1/memory.proto` - Core types
 
 Generate client stubs for your language using the proto compiler. See language-specific examples above for generation commands.

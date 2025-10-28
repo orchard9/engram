@@ -1,6 +1,5 @@
 //! Embedding generation with caching for migration
 
-use crate::error::MigrationResult;
 use dashmap::DashMap;
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
@@ -49,8 +48,8 @@ impl EmbeddingCache {
     }
 
     /// Insert embedding into cache
-    pub fn insert(&self, hash: ContentHash, embedding: [f32; 768]) {
-        self.cache.insert(hash, embedding);
+    pub fn insert(&self, hash: ContentHash, embedding: &[f32; 768]) {
+        self.cache.insert(hash, *embedding);
     }
 
     /// Get cache statistics
@@ -92,25 +91,27 @@ impl EmbeddingGenerator {
     }
 
     /// Generate embedding for a single text
-    pub fn generate(&self, text: &str) -> MigrationResult<[f32; 768]> {
+    #[must_use]
+    pub fn generate(&self, text: &str) -> [f32; 768] {
         let hash = ContentHash::from_text(text);
 
         // Check cache first
         if let Some(embedding) = self.cache.get(&hash) {
-            return Ok(embedding);
+            return embedding;
         }
 
         // Generate new embedding (simple implementation - in production would use actual model)
-        let embedding = self.generate_simple_embedding(text);
+        let embedding = Self::generate_simple_embedding(text);
 
         // Cache for future use
-        self.cache.insert(hash, embedding);
+        self.cache.insert(hash, &embedding);
 
-        Ok(embedding)
+        embedding
     }
 
     /// Generate embeddings for a batch of texts
-    pub fn generate_batch(&self, texts: &[String]) -> MigrationResult<Vec<[f32; 768]>> {
+    #[must_use]
+    pub fn generate_batch(&self, texts: &[String]) -> Vec<[f32; 768]> {
         let mut results = Vec::with_capacity(texts.len());
         let mut uncached = Vec::new();
         let mut uncached_indices = Vec::new();
@@ -129,8 +130,8 @@ impl EmbeddingGenerator {
 
         // Generate embeddings for uncached texts
         for (text, hash) in uncached {
-            let embedding = self.generate_simple_embedding(&text);
-            self.cache.insert(hash, embedding);
+            let embedding = Self::generate_simple_embedding(&text);
+            self.cache.insert(hash, &embedding);
 
             // Find and update the result
             for &idx in &uncached_indices {
@@ -142,17 +143,15 @@ impl EmbeddingGenerator {
         }
 
         // Convert Option<[f32; 768]> to [f32; 768]
-        let final_results: Vec<[f32; 768]> = results
+        results
             .into_iter()
             .map(|opt| opt.expect("All embeddings should be generated"))
-            .collect();
-
-        Ok(final_results)
+            .collect()
     }
 
     /// Simple embedding generation (placeholder - in production would use real model)
     #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
-    fn generate_simple_embedding(&self, text: &str) -> [f32; 768] {
+    fn generate_simple_embedding(text: &str) -> [f32; 768] {
         let mut embedding = [0.0f32; 768];
 
         // Create a deterministic but simple embedding based on text content
@@ -182,7 +181,7 @@ impl EmbeddingGenerator {
             .sqrt();
         if norm > 0.0 {
             for val in &mut embedding {
-                *val = (*val as f64 / norm) as f32;
+                *val = (f64::from(*val) / norm) as f32;
             }
         }
 

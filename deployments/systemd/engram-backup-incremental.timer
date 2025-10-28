@@ -1,0 +1,13 @@
+[Unit]
+Description=Engram Incremental Backup Timer
+Documentation=https://github.com/orchard9/engram
+Requires=engram-backup-incremental.service
+
+[Timer]
+# Run every 15 minutes for RPO of 15 minutes
+OnCalendar=*:00/15
+# Run on boot if last run was missed
+Persistent=true
+
+[Install]
+WantedBy=timers.target

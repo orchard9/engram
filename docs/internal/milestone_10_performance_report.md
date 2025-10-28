@@ -78,9 +78,13 @@ Based on milestone specifications and kernel design, the following performance i
 | p99 | 2.58 µs | 1.95 µs | 24.4% |
 
 **Optimization Techniques**:
+
 - SIMD vectorization (AVX2 on x86_64, NEON on ARM64)
+
 - Cache-aligned memory access
+
 - Fused multiply-add operations
+
 - Reduced memory bandwidth pressure
 
 #### Activation Spreading (1000 nodes, 100 iterations)
@@ -93,9 +97,13 @@ Based on milestone specifications and kernel design, the following performance i
 | p99 | 163.7 µs | 107.4 µs | 34.4% |
 
 **Optimization Techniques**:
+
 - Edge batching for cache locality
+
 - CSR (Compressed Sparse Row) graph layout
+
 - Prefetching for random access patterns
+
 - Reduced branch misprediction
 
 #### Memory Decay (10,000 memories)
@@ -108,9 +116,13 @@ Based on milestone specifications and kernel design, the following performance i
 | p99 | 104.5 µs | 76.8 µs | 26.5% |
 
 **Optimization Techniques**:
+
 - Vectorized exponential calculations
+
 - Lookup table approximations
+
 - Memory-aligned batch processing
+
 - Reduced function call overhead
 
 ## Target Achievement Status
@@ -130,25 +142,37 @@ Based on milestone specifications and kernel design, the following performance i
 ### ARM64 (Apple Silicon - Current Environment)
 
 **NEON SIMD Support**:
+
 - Vector width: 4 floats (128-bit registers)
+
 - Expected performance: 20-22% improvement (vs. 25% on x86_64 AVX2)
+
 - Thermal throttling consideration for sustained workloads
 
 **Memory Characteristics**:
+
 - Unified memory architecture benefits zero-copy design
+
 - Cache coherency simplifies concurrent kernel execution
+
 - Memory bandwidth: ~200 GB/s (M1 Pro)
 
 ### x86_64 (AVX2 - Target Deployment Platform)
 
 **AVX2 SIMD Support**:
+
 - Vector width: 8 floats (256-bit registers)
+
 - Expected performance: 25-30% improvement
+
 - FMA (Fused Multiply-Add) available for dot products
 
 **Memory Characteristics**:
+
 - NUMA considerations for multi-socket servers
+
 - Cache hierarchy optimization critical
+
 - Memory bandwidth varies by platform (DDR4/DDR5)
 
 ## Arena Allocator Performance
@@ -156,21 +180,30 @@ Based on milestone specifications and kernel design, the following performance i
 ### Expected Characteristics
 
 **Allocation Performance**:
+
 - Overhead: <1% of kernel runtime
+
 - Allocation latency: O(1) bump-pointer
+
 - Thread-local isolation: Zero contention
 
 **Memory Usage**:
+
 - Recommended sizing per workload:
   - Light (384d): 1 MB
   - Medium (768d): 2 MB
   - Heavy (1536d): 4 MB
+
 - Overflow rate: <0.1% with proper sizing
+
 - High water mark: 847 KB for 768d embeddings (measured in development)
 
 **Deallocation**:
+
 - Bulk reset after kernel completion
+
 - Zero fragmentation
+
 - Sub-microsecond reset time
 
 ## Numerical Correctness
@@ -178,13 +211,19 @@ Based on milestone specifications and kernel design, the following performance i
 ### Differential Testing Results
 
 **Test Coverage**:
+
 - Vector similarity: 10,000 property-based tests
+
 - Spreading activation: 10,000 random graph topologies
+
 - Memory decay: 10,000 random age distributions
 
 **Correctness Guarantee**:
+
 - Epsilon threshold: 1e-6 (single-precision float tolerance)
+
 - Test methodology: Bit-identical comparison where possible
+
 - Edge case coverage: NaN, infinity, denormals, zero handling
 
 **Validation Status**: ⏳ All differential tests implemented, awaiting Zig runtime validation
@@ -194,11 +233,15 @@ Based on milestone specifications and kernel design, the following performance i
 ### Zig Installation Requirement
 
 **Current Blocker**:
+
 - Zig 0.13.0 not installed in current environment
+
 - All runtime tests pending installation
+
 - Build system validated, execution pending
 
 **Installation Path**:
+
 ```bash
 # macOS
 brew install zig
@@ -207,27 +250,39 @@ brew install zig
 wget https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz
 tar xf zig-linux-x86_64-0.13.0.tar.xz
 export PATH=$PATH:$PWD/zig-linux-x86_64-0.13.0
+
 ```
 
 ### Clippy Warnings in Test Code
 
 **Status**:
+
 - Production code: Clean (zero warnings)
+
 - Test code: 100+ clippy warnings across test files
+
 - Examples: 34 clippy warnings in query_examples.rs
 
 **Impact**: Low - Test code quality warnings do not affect production runtime
 
 **Remediation Plan**:
+
 - Schedule post-milestone cleanup task
+
 - Add comprehensive #![allow(...)] attributes to test modules
+
 - Prioritize production code quality over test code style
 
 **Specific Files with Warnings**:
+
 - `engram-core/tests/query_integration_test.rs`: Format/style warnings
+
 - `engram-core/tests/error_message_validation.rs`: Format warnings
+
 - `engram-core/tests/zig_kernels_integration.rs`: Loop/collection warnings
+
 - `engram-core/tests/query_language_corpus.rs`: const fn warnings
+
 - `engram-core/benches/query_parser.rs`: Format/documentation warnings
 
 ### Performance Regression Detection
@@ -235,13 +290,19 @@ export PATH=$PATH:$PWD/zig-linux-x86_64-0.13.0
 **Regression Threshold**: 5% performance degradation triggers CI failure
 
 **Monitoring Approach**:
+
 - Baseline measurements captured per kernel
+
 - Automated benchmarking on every commit
+
 - Historical tracking for trend analysis
 
 **False Positive Mitigation**:
+
 - Multiple runs (min 10 iterations)
+
 - Outlier detection and removal
+
 - Platform-specific baselines
 
 ## Production Readiness Assessment
@@ -249,50 +310,79 @@ export PATH=$PATH:$PWD/zig-linux-x86_64-0.13.0
 ### Deployment Checklist
 
 - [x] Build system stable and reproducible
+
 - [⏳] All differential tests passing (pending Zig install)
+
 - [⏳] Performance targets met (pending validation)
+
 - [x] Documentation complete and reviewed
+
 - [x] Rollback procedure documented and designed
+
 - [⏳] Monitoring integration ready (framework in place)
+
 - [x] Arena configuration guidelines documented
+
 - [x] Platform-specific guidance provided
 
 ### Risk Assessment
 
 **Low Risk**:
+
 - ✅ FFI boundary designed for safety
+
 - ✅ Graceful fallback to Rust implementations
+
 - ✅ Comprehensive differential testing
+
 - ✅ Rollback procedures documented
 
 **Medium Risk**:
+
 - ⚠️ Arena overflow under extreme workloads
+
 - ⚠️ Platform-specific SIMD behavior differences
+
 - ⚠️ Thermal throttling on sustained loads
 
 **Mitigation Strategies**:
+
 - Arena sizing guidelines per workload
+
 - Platform-specific testing before deployment
+
 - Monitoring and alerting on kernel performance
 
 ### Gradual Rollout Recommendation
 
 **Phase 1: Canary** (10% traffic, 24h monitoring)
+
 - Deploy to non-critical workloads
+
 - Monitor arena overflow rate
+
 - Validate performance improvements
+
 - Check for unexpected errors
 
 **Phase 2: Staged Expansion** (50% traffic, 24h monitoring)
+
 - Expand to mixed workloads
+
 - Validate under production traffic patterns
+
 - Monitor p99 latency trends
+
 - Track memory usage patterns
 
 **Phase 3: Full Deployment** (100% traffic)
+
 - Complete migration to Zig kernels
+
 - Baseline performance characteristics
+
 - Establish SLOs for kernel operations
+
 - Document production behaviors
 
 ## Recommendations for Next Steps
@@ -358,8 +448,11 @@ export PATH=$PATH:$PWD/zig-linux-x86_64-0.13.0
 Milestone 10 has successfully completed all implementation and documentation work for Zig performance kernel integration. The system is architecturally ready for production deployment pending:
 
 1. Zig 0.13.0 installation on target platforms
+
 2. Full UAT execution with actual runtime validation
+
 3. Performance benchmark execution under production-like load
+
 4. Minor cleanup of test code quality warnings
 
 All core deliverables meet or exceed specifications. The framework is production-ready from an architectural standpoint, with comprehensive testing, documentation, and operational procedures in place.
@@ -367,9 +460,13 @@ All core deliverables meet or exceed specifications. The framework is production
 **Recommended Status**: APPROVED FOR STAGED DEPLOYMENT (post Zig installation)
 
 **Critical Dependencies**:
+
 - Zig 0.13.0 installation and validation
+
 - Staging environment validation
+
 - Production monitoring setup
+
 - Operator training on rollback procedures
 
 ---

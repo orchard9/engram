@@ -27,15 +27,14 @@ use tower_http::cors::{Any, CorsLayer};
 use tracing::{Level, error, info, warn};
 use tracing_subscriber::FmtSubscriber;
 
-// Import our CLI modules
-mod cli;
-mod config;
-use cli::{
-    Cli, Commands, ConfigAction, MemoryAction, OutputFormat, SpaceAction, create_memory,
+// Import from our library
+use engram_cli::cli::{
+    BackupAction, BenchmarkAction, Cli, Commands, ConfigAction, DiagnoseAction, MemoryAction,
+    MigrateAction, OutputFormat, RestoreAction, SpaceAction, ValidateAction, create_memory,
     create_space, delete_memory, get_memory, get_server_connection, list_memories, list_spaces,
     remove_pid_file, search_memories, show_status, stop_server, write_pid_file,
 };
-use config::ConfigManager;
+use engram_cli::config::ConfigManager;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -95,12 +94,7 @@ async fn main() -> Result<()> {
 
         Commands::Shell => start_interactive_shell().await,
 
-        Commands::Benchmark {
-            operations,
-            concurrent,
-            hyperfine,
-            operation,
-        } => handle_benchmark_command(operations, concurrent, hyperfine, operation).await,
+        Commands::Benchmark { action } => handle_benchmark_command(action).await,
 
         Commands::Docs {
             section,
@@ -114,6 +108,16 @@ async fn main() -> Result<()> {
             format,
             space,
         } => handle_query_command(query, limit, format, space, config_manager.config()).await,
+
+        Commands::Backup { action } => handle_backup_command(action),
+
+        Commands::Restore { action } => handle_restore_command(action),
+
+        Commands::Diagnose { action } => handle_diagnose_command(action),
+
+        Commands::Migrate { action } => handle_migrate_command(action),
+
+        Commands::Validate { action } => handle_validate_command(action),
     }
 }
 
@@ -182,7 +186,11 @@ async fn wait_for_grpc_ready(port: u16) -> Result<()> {
     ))
 }
 
-async fn start_server(port: u16, grpc_port: u16, cli_config: &config::CliConfig) -> Result<()> {
+async fn start_server(
+    port: u16,
+    grpc_port: u16,
+    cli_config: &engram_cli::config::CliConfig,
+) -> Result<()> {
     info!(" Starting Engram server...");
 
     // Create shutdown signal channel for graceful termination
@@ -562,7 +570,7 @@ fn resolve_data_directory() -> Result<PathBuf> {
 fn build_memory_space_store(
     space_id: &MemorySpaceId,
     directories: &SpaceDirectories,
-    feature_flags: &config::FeatureFlags,
+    feature_flags: &engram_cli::config::FeatureFlags,
 ) -> Result<Arc<MemoryStore>, MemorySpaceError> {
     #[allow(unused_mut)]
     let mut store = MemoryStore::for_space(space_id.clone(), 100_000);
@@ -626,7 +634,10 @@ fn build_memory_space_store(
     Ok(Arc::new(store))
 }
 
-async fn handle_memory_command(action: MemoryAction, config: &config::CliConfig) -> Result<()> {
+async fn handle_memory_command(
+    action: MemoryAction,
+    config: &engram_cli::config::CliConfig,
+) -> Result<()> {
     let (port, _grpc_port) = get_server_connection().await?;
 
     match action {
@@ -680,12 +691,14 @@ fn handle_config_command(action: ConfigAction, manager: &mut ConfigManager) -> R
         ConfigAction::List { section } => {
             match section.as_deref() {
                 Some("feature_flags") => {
-                    for line in config::format_feature_flags(&manager.config().feature_flags) {
+                    for line in
+                        engram_cli::config::format_feature_flags(&manager.config().feature_flags)
+                    {
                         println!("{line}");
                     }
                 }
                 None => {
-                    for line in config::format_sections(manager.config()) {
+                    for line in engram_cli::config::format_sections(manager.config()) {
                         println!("{line}");
                     }
                 }
@@ -805,30 +818,26 @@ async fn execute_shell_command(cmd: &str) -> Result<()> {
     }
 }
 
-async fn handle_benchmark_command(
-    operations: usize,
-    concurrent: usize,
-    hyperfine: bool,
-    operation: String,
-) -> Result<()> {
-    println!(
-        " Starting benchmark with {operations} operations, {concurrent} concurrent connections"
-    );
-
-    if hyperfine {
-        println!("  Hyperfine benchmarking not implemented for memory operations");
-        println!(" Use the built-in benchmark instead");
-        return Ok(());
+async fn handle_benchmark_command(action: BenchmarkAction) -> Result<()> {
+    match action {
+        BenchmarkAction::Latency {
+            operation,
+            iterations,
+            warmup,
+        } => {
+            engram_cli::cli::benchmark_ops::run_latency_benchmark(&operation, iterations, warmup)
+                .await
+        }
+        BenchmarkAction::Throughput { duration, clients } => {
+            engram_cli::cli::benchmark_ops::run_throughput_benchmark(duration, clients).await
+        }
+        BenchmarkAction::Spreading { nodes, depth } => {
+            engram_cli::cli::benchmark_ops::run_spreading_benchmark(nodes, depth).await
+        }
+        BenchmarkAction::Consolidation { load_test } => {
+            engram_cli::cli::benchmark_ops::run_consolidation_benchmark(load_test).await
+        }
     }
-
-    // For now, just validate that the server is running
-    let (_port, _grpc_port) = get_server_connection().await?;
-
-    println!(" Server connection verified");
-    println!("  Full memory operation benchmarking not yet implemented");
-    println!(" This would benchmark {operations} operations of type '{operation}'");
-
-    Ok(())
 }
 
 async fn shutdown_signal(shutdown_tx: Arc<tokio::sync::watch::Sender<bool>>) {
@@ -916,7 +925,7 @@ fn handle_docs_command(section: Option<String>, list: bool, export: Option<Strin
 }
 
 async fn show_status_json() -> Result<()> {
-    use cli::server::{is_process_running, pid_file_path, read_pid_file};
+    use engram_cli::cli::server::{is_process_running, pid_file_path, read_pid_file};
 
     let pid_path = pid_file_path();
 
@@ -974,7 +983,7 @@ async fn handle_query_command(
     limit: usize,
     format: OutputFormat,
     space: Option<String>,
-    config: &config::CliConfig,
+    config: &engram_cli::config::CliConfig,
 ) -> Result<()> {
     let (port, _grpc_port) = get_server_connection().await?;
     let space_id = resolve_memory_space(space, &config.memory_spaces.default_space)?;
@@ -1099,4 +1108,129 @@ fn print_probabilistic_compact(result: &serde_json::Value) {
 fn format_confidence(confidence: f64) -> String {
     let percentage = confidence * 100.0;
     format!("{percentage:.1}%")
+}
+
+// ============================================================================
+// New Operations CLI Handlers
+// ============================================================================
+
+fn handle_backup_command(action: BackupAction) -> Result<()> {
+    match action {
+        BackupAction::Create {
+            backup_type,
+            space,
+            output,
+            compression,
+            progress,
+        } => engram_cli::cli::backup::create_backup(
+            &backup_type,
+            &space,
+            output,
+            compression,
+            progress,
+        ),
+        BackupAction::List {
+            backup_type,
+            space,
+            format,
+        } => {
+            engram_cli::cli::backup::list_backups(backup_type.as_deref(), space.as_deref(), &format)
+        }
+        BackupAction::Verify {
+            backup_file,
+            level,
+            verbose,
+        } => engram_cli::cli::backup::verify_backup(&backup_file, &level, verbose),
+        BackupAction::Prune {
+            dry_run,
+            daily,
+            weekly,
+            monthly,
+            yes,
+        } => engram_cli::cli::backup::prune_backups(dry_run, daily, weekly, monthly, yes),
+    }
+}
+
+fn handle_restore_command(action: RestoreAction) -> Result<()> {
+    match action {
+        RestoreAction::Full {
+            backup_file,
+            target,
+            progress,
+        } => engram_cli::cli::restore::restore_full(&backup_file, target, progress),
+        RestoreAction::Incremental {
+            backup_file,
+            progress,
+        } => engram_cli::cli::restore::restore_incremental(&backup_file, progress),
+        RestoreAction::Pitr { timestamp, target } => {
+            engram_cli::cli::restore::restore_pitr(&timestamp, target)
+        }
+        RestoreAction::VerifyOnly { backup_file } => {
+            engram_cli::cli::restore::verify_restore(&backup_file)
+        }
+    }
+}
+
+fn handle_diagnose_command(action: DiagnoseAction) -> Result<()> {
+    match action {
+        DiagnoseAction::Health { output, strict } => {
+            engram_cli::cli::diagnose::run_health_check(output.as_ref(), strict)
+        }
+        DiagnoseAction::Collect {
+            include_dumps,
+            log_lines,
+        } => engram_cli::cli::diagnose::collect_debug_bundle(include_dumps, log_lines),
+        DiagnoseAction::AnalyzeLogs {
+            file,
+            window,
+            severity,
+        } => engram_cli::cli::diagnose::analyze_logs(file.as_ref(), &window, severity.as_deref()),
+        DiagnoseAction::Emergency { scenario, auto } => {
+            engram_cli::cli::diagnose::emergency_recovery(&scenario, auto)
+        }
+    }
+}
+
+fn handle_migrate_command(action: MigrateAction) -> Result<()> {
+    match action {
+        MigrateAction::Neo4j {
+            connection_uri,
+            target_space,
+            batch_size,
+        } => {
+            engram_cli::cli::migrate::migrate_from_neo4j(&connection_uri, &target_space, batch_size)
+        }
+        MigrateAction::Postgresql {
+            connection_uri,
+            target_space,
+            mappings,
+        } => engram_cli::cli::migrate::migrate_from_postgresql(
+            &connection_uri,
+            &target_space,
+            mappings.as_ref(),
+        ),
+        MigrateAction::Redis {
+            connection_uri,
+            target_space,
+            key_pattern,
+        } => engram_cli::cli::migrate::migrate_from_redis(
+            &connection_uri,
+            &target_space,
+            key_pattern.as_deref(),
+        ),
+    }
+}
+
+fn handle_validate_command(action: ValidateAction) -> Result<()> {
+    match action {
+        ValidateAction::Config { file, deployment } => {
+            engram_cli::cli::validate::validate_config(file, deployment.as_deref())
+        }
+        ValidateAction::Data { space, fix } => {
+            engram_cli::cli::validate::validate_data(&space, fix)
+        }
+        ValidateAction::Deployment { environment } => {
+            engram_cli::cli::validate::validate_deployment(&environment)
+        }
+    }
 }

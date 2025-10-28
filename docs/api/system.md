@@ -17,6 +17,7 @@ Quick health status for monitoring systems.
   "version": "0.1.0",
   "timestamp": "2025-09-17T01:30:00Z"
 }
+
 ```
 
 ## Detailed System Health
@@ -43,6 +44,7 @@ Comprehensive health information including memory statistics and performance met
   "status": "healthy",
   "system_message": "All cognitive processes functioning normally"
 }
+
 ```
 
 ## System Introspection
@@ -76,6 +78,7 @@ Internal statistics and performance metrics.
     "spreading_activation": "idle"
   }
 }
+
 ```
 
 ## CLI Status Command
@@ -84,6 +87,7 @@ For command-line monitoring:
 
 ```bash
 ./target/debug/engram status
+
 ```
 
 This provides a formatted view of the system health with visual indicators and helpful commands.

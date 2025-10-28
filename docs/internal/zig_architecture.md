@@ -11,10 +11,15 @@ This document describes the internal architecture of Zig performance kernels for
 ## Architectural Principles
 
 1. **Rust owns the graph**: All graph data structures, concurrency primitives, and API surfaces remain in Rust
+
 2. **Zig computes intensively**: Vector operations, activation spreading, decay calculations delegated to Zig
+
 3. **Zero-copy FFI**: Pass pointers to pre-allocated buffers, avoid serialization overhead
+
 4. **Caller allocates, callee computes**: Rust allocates all output buffers, Zig writes results
+
 5. **Thread-local arenas**: Each thread has isolated memory pool for kernel scratch space
+
 6. **Graceful degradation**: Runtime detection falls back to Rust if Zig unavailable
 
 ## FFI Boundary Design
@@ -48,13 +53,17 @@ The FFI boundary follows strict ownership rules to prevent memory safety violati
 │  5. NEVER free Rust-allocated memory                       │
 │                                                             │
 └─────────────────────────────────────────────────────────────┘
+
 ```
 
 **Key Invariants**:
 
 - **No ownership transfer**: Zig never takes ownership of Rust-allocated memory
+
 - **No cross-language freeing**: Rust frees what Rust allocates, Zig never calls free on Rust pointers
+
 - **Synchronous execution**: Kernels return only when computation complete (no async callbacks)
+
 - **No aliasing**: Input and output pointers never overlap
 
 ### Function Signatures
@@ -68,13 +77,17 @@ export fn engram_kernel_name(
     outputs: [*]OutputType,       // Write-only outputs
     count: usize,                 // Element counts for validation
 ) void;  // Never return errors (handle gracefully)
+
 ```
 
 **Design rationale**:
 
 - `export fn`: Generates C-compatible ABI (no name mangling)
+
 - `[*]const`: Many-item pointer, read-only (Rust: `*const T`)
+
 - `[*]`: Many-item pointer, mutable (Rust: `*mut T`)
+
 - `void` return: Errors handled internally via overflow strategies, never panic across FFI
 
 ### Example: Vector Similarity Kernel
@@ -105,6 +118,7 @@ export fn engram_vector_similarity(
         num_candidates,
     );
 }
+
 ```
 
 #### Rust Side
@@ -149,13 +163,17 @@ pub fn vector_similarity(query: &[f32], candidates: &[f32]) -> Vec<f32> {
 
     scores
 }
+
 ```
 
 **Safety invariants upheld**:
 
 1. Pointers valid for call duration (query, candidates, scores live until kernel returns)
+
 2. Slices have correct lengths (validated with assertions)
+
 3. No aliasing (query != candidates != scores)
+
 4. Output buffer pre-allocated with correct size
 
 ## Memory Management
@@ -196,13 +214,17 @@ pub const ArenaAllocator = struct {
         // Keep high_water_mark for diagnostics
     }
 };
+
 ```
 
 **Performance characteristics**:
 
 - Allocation: O(1) - pointer increment with alignment padding
+
 - Deallocation: O(1) - bulk reset
+
 - Space overhead: 0 bytes per allocation (no metadata)
+
 - Fragmentation: None (linear allocation pattern)
 
 ### Thread-Local Storage
@@ -233,13 +255,17 @@ pub fn resetThreadArena() void {
         arena.reset();
     }
 }
+
 ```
 
 **Design rationale**:
 
 - **Zero contention**: Each thread has isolated arena, no locking needed
+
 - **NUMA-aware**: Thread-local allocations happen on local memory node
+
 - **Lazy initialization**: Arena created on first kernel invocation per thread
+
 - **Bounded memory**: 1MB per thread (configurable), easy to reason about
 
 ### Overflow Handling
@@ -268,6 +294,7 @@ if (aligned_offset + size > self.buffer.len) {
         },
     }
 }
+
 ```
 
 **Production recommendation**: Use `error_return` strategy to prevent crashes.
@@ -299,6 +326,7 @@ pub fn dotProduct(a: []const f32, b: []const f32) f32 {
     // Scalar fallback
     return dotProductScalar(a, b);
 }
+
 ```
 
 ### AVX2 Implementation (x86_64)
@@ -332,6 +360,7 @@ fn dotProductAVX2(a: []const f32, b: []const f32) f32 {
 
     return sum;
 }
+
 ```
 
 **Performance**: Processes 8 floats per instruction vs. 1 in scalar code.
@@ -367,6 +396,7 @@ fn dotProductNEON(a: []const f32, b: []const f32) f32 {
 
     return sum;
 }
+
 ```
 
 **Performance**: Processes 4 floats per instruction vs. 1 in scalar code.
@@ -383,6 +413,7 @@ fn dotProductScalar(a: []const f32, b: []const f32) f32 {
 
     return sum;
 }
+
 ```
 
 **Note**: Used when SIMD unavailable or for remainder elements.
@@ -406,7 +437,9 @@ Based on profiling and benchmarking:
 **Primary bottleneck**: Memory bandwidth
 
 - Loading 768-dimensional embeddings from RAM dominates computation
+
 - SIMD accelerates compute, but memory bandwidth is the limiting factor
+
 - **Optimization**: Use smaller embeddings (384d) or prefetching
 
 #### Spreading Activation
@@ -414,7 +447,9 @@ Based on profiling and benchmarking:
 **Primary bottleneck**: Cache locality
 
 - Random graph access patterns cause cache misses
+
 - Edge traversal jumps across non-contiguous memory
+
 - **Optimization**: Graph edge reordering for sequential access patterns
 
 #### Decay Calculation
@@ -422,7 +457,9 @@ Based on profiling and benchmarking:
 **Primary bottleneck**: Exponential function
 
 - `exp()` is computationally expensive even with SIMD
+
 - Called once per memory (10k+ invocations)
+
 - **Optimization**: Lookup table for discrete time intervals
 
 ### Future Optimizations
@@ -430,9 +467,13 @@ Based on profiling and benchmarking:
 Potential improvements for future milestones:
 
 1. **FMA (Fused Multiply-Add)**: Use `vfmadd` instruction for dot products (x86_64)
+
 2. **Exponential LUT**: Replace `exp()` with lookup table for decay (10-20% faster)
+
 3. **Graph Edge Reordering**: Sort edges by access pattern for cache locality
+
 4. **GPU Offload**: Port kernels to CUDA/ROCm for massive parallelism (Milestone 14)
+
 5. **Prefetching**: Manual prefetch instructions for embedding loads
 
 ## Testing Strategy
@@ -460,12 +501,15 @@ proptest! {
         }
     }
 }
+
 ```
 
 **Property-based testing**:
 
 - Generates random inputs (embeddings, graphs, ages)
+
 - Compares Zig kernel output to Rust baseline
+
 - Fails if any divergence exceeds epsilon (1e-6)
 
 ### Performance Testing
@@ -492,12 +536,15 @@ fn regression_benchmark(c: &mut Criterion) {
     let result = extract_benchmark_result("vector_similarity_768d_1000c");
     baselines.check_regression("vector_similarity_768d_1000c", result.mean_ns)?;
 }
+
 ```
 
 **Regression detection**:
 
 - Compares current performance to stored baselines
+
 - Fails build if regression exceeds 5%
+
 - Runs automatically in CI on every commit
 
 ## Build System Integration
@@ -525,6 +572,7 @@ pub fn build(b: *std.Build) void {
 
     b.installArtifact(lib);
 }
+
 ```
 
 ### Cargo Integration
@@ -556,6 +604,7 @@ fn build_zig_library() {
     println!("cargo:rustc-link-search=native=zig/zig-out/lib");
     println!("cargo:rustc-link-lib=static=engram_kernels");
 }
+
 ```
 
 ## Error Handling
@@ -582,12 +631,15 @@ export fn engram_vector_similarity(...) void {
 
     // Continue with computation...
 }
+
 ```
 
 **Design rationale**:
 
 - FFI boundary cannot propagate Zig errors to Rust
+
 - Kernels write sentinel values (zeros) on error
+
 - Caller can detect anomalies and handle appropriately
 
 ### Rust-Side Validation
@@ -613,6 +665,7 @@ pub fn vector_similarity(query: &[f32], candidates: &[f32]) -> Vec<f32> {
 
     scores
 }
+
 ```
 
 ## Debugging and Profiling
@@ -626,6 +679,7 @@ zig build -Doptimize=Debug
 
 # Build Rust with debug info
 cargo build --features zig-kernels
+
 ```
 
 ### Profiling Tools
@@ -638,6 +692,7 @@ perf record -g ./target/release/engram-cli benchmark
 
 # View flamegraph
 perf script | stackcollapse-perf.pl | flamegraph.pl > flamegraph.svg
+
 ```
 
 #### macOS (Instruments)
@@ -648,6 +703,7 @@ xcrun xctrace record --template 'Time Profiler' \
   --launch ./target/release/engram-cli benchmark
 
 # Open in Instruments GUI
+
 ```
 
 ### Arena Utilization Tracking
@@ -661,11 +717,15 @@ pub fn getThreadArenaUtilization() f64 {
     }
     return 0.0;
 }
+
 ```
 
 ## See Also
 
 - [Operations Guide](../operations/zig_performance_kernels.md) - Deployment and configuration
+
 - [Rollback Procedures](../operations/zig_rollback_procedures.md) - Emergency and gradual rollback
+
 - [Performance Regression Guide](./performance_regression_guide.md) - Benchmarking framework
+
 - [Profiling Results](./profiling_results.md) - Hotspot analysis

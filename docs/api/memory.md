@@ -13,6 +13,7 @@ Store new information in Engram's cognitive memory system.
   "content": "The capital of France is Paris",
   "confidence": 0.9
 }
+
 ```
 
 ### Response
@@ -29,6 +30,7 @@ Store new information in Engram's cognitive memory system.
   "auto_links": [],
   "system_message": "Memory successfully stored with high confidence"
 }
+
 ```
 
 ## Recall Memories
@@ -40,13 +42,16 @@ Search and retrieve memories using natural language queries.
 ### Parameters
 
 - `query` (required) - Search terms or question
+
 - `confidence_threshold` (optional) - Minimum confidence (0.0-1.0)
+
 - `max_results` (optional) - Maximum number of results (default: 10)
 
 ### Example
 
 ```bash
 curl "http://localhost:7432/api/v1/memories/recall?query=capital+France"
+
 ```
 
 ### Response
@@ -78,6 +83,7 @@ curl "http://localhost:7432/api/v1/memories/recall?query=capital+France"
     "reasoning": "Strong query-memory alignment"
   }
 }
+
 ```
 
 ## Pattern Recognition
@@ -93,6 +99,7 @@ Recognize patterns in provided content.
   "content": "Paris is a beautiful city in Europe",
   "context": "geographical"
 }
+
 ```
 
 ### Response
@@ -108,4 +115,5 @@ Recognize patterns in provided content.
   ],
   "system_message": "Pattern recognition completed successfully"
 }
+
 ```

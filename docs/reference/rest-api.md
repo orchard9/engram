@@ -5,14 +5,23 @@ Complete REST API reference for Engram's cognitive memory operations. This guide
 ## Table of Contents
 
 - [Getting Started](#getting-started)
+
 - [Authentication](#authentication)
+
 - [Core Memory Operations](#core-memory-operations)
+
 - [Episodic Operations](#episodic-operations)
+
 - [Consolidation Operations](#consolidation-operations)
+
 - [Pattern Operations](#pattern-operations)
+
 - [Monitoring Operations](#monitoring-operations)
+
 - [Error Handling](#error-handling)
+
 - [Rate Limiting](#rate-limiting)
+
 - [Performance Characteristics](#performance-characteristics)
 
 ## Getting Started
@@ -26,8 +35,11 @@ All REST endpoints use JSON for request and response bodies. The API follows RES
 While gRPC offers better performance for high-throughput scenarios, REST provides:
 
 - Browser compatibility for web frontends
+
 - Human-readable debugging with curl
+
 - Simple integration for occasional API calls
+
 - Familiar HTTP semantics
 
 For high-throughput operations (>100/sec) or streaming consolidation, use the [gRPC API](/reference/grpc-api.md) instead.
@@ -40,6 +52,7 @@ All API requests require authentication via Bearer token:
 curl -H "Authorization: Bearer ${ENGRAM_API_KEY}" \
      -H "Content-Type: application/json" \
      http://localhost:8080/api/v1/memories/recall
+
 ```
 
 ### Obtaining an API Key
@@ -52,6 +65,7 @@ engram auth create-key --name "my-application"
 API Key: ek_live_1234567890abcdef
 Memory Space: default
 Permissions: read,write,consolidate
+
 ```
 
 For multi-tenant deployments, each API key is scoped to a specific memory space. See [Multi-Tenant Isolation](#multi-tenant-isolation) for details.
@@ -83,6 +97,7 @@ curl -X POST http://localhost:8080/api/v1/memories/remember \
     "auto_link": true,
     "link_threshold": 0.7
   }'
+
 ```
 
 #### Request Parameters
@@ -114,6 +129,7 @@ curl -X POST http://localhost:8080/api/v1/memories/remember \
   ],
   "initial_state": "CONSOLIDATION_STATE_RECENT"
 }
+
 ```
 
 #### What Just Happened?
@@ -138,6 +154,7 @@ MATCH (m1:Memory), (m2:Memory)
 WHERE id(m1) = $new_id
   AND vectorSimilarity(m1.embedding, m2.embedding) > 0.7
 CREATE (m1)-[:RELATED_TO]->(m2)
+
 ```
 
 Engram handles relationship creation automatically and includes confidence scoring on both storage and linking operations.
@@ -145,7 +162,9 @@ Engram handles relationship creation automatically and includes confidence scori
 #### Performance
 
 - P50 latency: 12ms
+
 - P99 latency: 45ms
+
 - Throughput: ~80 requests/sec (single instance)
 
 For batch operations, use gRPC streaming to achieve 4.9x better performance.
@@ -174,6 +193,7 @@ curl -X POST http://localhost:8080/api/v1/memories/recall \
     "include_metadata": true,
     "trace_activation": true
   }'
+
 ```
 
 #### Cue Types
@@ -191,6 +211,7 @@ Engram supports multiple retrieval cue types, each modeling different cognitive 
     }
   }
 }
+
 ```
 
 Like trying to remember something from a visual or sensory trigger.
@@ -208,6 +229,7 @@ Like trying to remember something from a visual or sensory trigger.
     }
   }
 }
+
 ```
 
 Like remembering from a verbal description or concept.
@@ -225,6 +247,7 @@ Like remembering from a verbal description or concept.
     }
   }
 }
+
 ```
 
 Like remembering "what happened last January at the office?"
@@ -250,6 +273,7 @@ Like remembering "what happened last January at the office?"
     }
   }
 }
+
 ```
 
 Like tip-of-the-tongue experiences where you know part of a memory.
@@ -309,11 +333,13 @@ Like tip-of-the-tongue experiences where you know part of a memory.
     }
   ]
 }
+
 ```
 
 #### Understanding Confidence vs Activation
 
 - **Confidence**: How certain we are that this memory is accurate (intrinsic property)
+
 - **Activation**: How accessible this memory is right now (dynamic, context-dependent)
 
 A memory can have high confidence (95% sure it's true) but low activation (0.3 - hard to access). Conversely, a recent but uncertain memory might have low confidence (0.6) but high activation (0.95).
@@ -321,7 +347,9 @@ A memory can have high confidence (95% sure it's true) but low activation (0.3 -
 #### Performance
 
 - P50 latency: 35ms
+
 - P99 latency: 120ms
+
 - Throughput: ~45 requests/sec
 
 Spreading activation adds 10-50ms depending on graph connectivity.
@@ -343,6 +371,7 @@ curl -X POST http://localhost:8080/api/v1/memories/forget \
     "memory_id": "mem_1698765432_a1b2c3d4",
     "mode": "FORGET_MODE_SUPPRESS"
   }'
+
 ```
 
 #### Forget Modes
@@ -376,6 +405,7 @@ curl -X POST http://localhost:8080/api/v1/memories/forget \
   },
   "reversible": true
 }
+
 ```
 
 #### Pattern Forgetting
@@ -392,6 +422,7 @@ Forget multiple memories matching a pattern:
   },
   "mode": "FORGET_MODE_SUPPRESS"
 }
+
 ```
 
 This reduces activation for all memories matching the pattern, useful for deprecating old information without deleting it permanently.
@@ -413,6 +444,7 @@ curl -X POST http://localhost:8080/api/v1/memories/recognize \
     "content": "Python was created by Guido van Rossum",
     "recognition_threshold": 0.8
   }'
+
 ```
 
 #### Response (200 OK)
@@ -434,12 +466,15 @@ curl -X POST http://localhost:8080/api/v1/memories/recognize \
   ],
   "familiarity_score": 0.94
 }
+
 ```
 
 Use recognition for:
 
 - Deduplication before storing new memories
+
 - "Have we seen this before?" checks
+
 - Validating memory accuracy
 
 ## Episodic Operations
@@ -472,6 +507,7 @@ curl -X POST http://localhost:8080/api/v1/episodes/experience \
     "immediate_consolidation": false,
     "context_links": ["mem_related_concept_1", "mem_related_concept_2"]
   }'
+
 ```
 
 #### Request Parameters
@@ -503,6 +539,7 @@ curl -X POST http://localhost:8080/api/v1/episodes/experience \
   "state": "CONSOLIDATION_STATE_RECENT",
   "context_links_created": 2
 }
+
 ```
 
 #### Why Episodic Encoding Matters
@@ -510,7 +547,9 @@ curl -X POST http://localhost:8080/api/v1/episodes/experience \
 Research shows episodic memories with rich context have:
 
 - 67% better retrieval success
+
 - 3x longer retention periods
+
 - More resistant to interference
 
 The what/when/where/who/why/how structure follows Tulving's episodic memory theory.
@@ -533,6 +572,7 @@ curl -X POST http://localhost:8080/api/v1/episodes/reminisce \
     "at_location": "lecture hall",
     "include_emotional": true
   }'
+
 ```
 
 #### Response (200 OK)
@@ -569,6 +609,7 @@ curl -X POST http://localhost:8080/api/v1/episodes/reminisce \
     "preparation"
   ]
 }
+
 ```
 
 #### Emotional Summary
@@ -576,7 +617,9 @@ curl -X POST http://localhost:8080/api/v1/episodes/reminisce \
 When `include_emotional: true`, Engram aggregates emotional valence across episodes:
 
 - **mean_valence**: Average emotion [-1.0 to 1.0]
+
 - **valence_variance**: How much emotions varied
+
 - **dominant_emotion**: Inferred emotional category
 
 #### Memory Themes
@@ -606,6 +649,7 @@ curl -X POST http://localhost:8080/api/v1/consolidation/consolidate \
     },
     "mode": "CONSOLIDATION_MODE_SYNAPTIC"
   }'
+
 ```
 
 #### Consolidation Modes
@@ -628,12 +672,15 @@ curl -X POST http://localhost:8080/api/v1/consolidation/consolidate \
   },
   "next_consolidation": "2024-10-27T18:00:00Z"
 }
+
 ```
 
 #### When to Consolidate
 
 - **Nightly**: Systems consolidation during low-traffic periods (like sleep)
+
 - **Hourly**: Synaptic consolidation for recent important memories
+
 - **On-demand**: After batch imports or major knowledge updates
 
 ### POST /api/v1/consolidation/dream
@@ -655,6 +702,7 @@ curl -X POST http://localhost:8080/api/v1/consolidation/dream \
     "creativity_factor": 0.7,
     "generate_insights": true
   }'
+
 ```
 
 #### Response (200 OK, streaming)
@@ -674,13 +722,17 @@ data: {"memory_ids": ["mem_4", "mem_6"], "sequence_novelty": 0.89, "narrative": 
 
 event: done
 data: {"total_replayed": 50, "total_insights": 3, "total_connections": 12}
+
 ```
 
 #### Stream Event Types
 
 - **replay**: Memory sequence being replayed
+
 - **insight**: Novel connection discovered
+
 - **progress**: Consolidation progress update
+
 - **done**: Stream completion summary
 
 #### Creativity Factor
@@ -688,7 +740,9 @@ data: {"total_replayed": 50, "total_insights": 3, "total_connections": 12}
 Controls how much dream replay explores novel vs familiar connections:
 
 - `0.0`: Conservative, strengthen existing connections
+
 - `0.5`: Balanced exploration and exploitation
+
 - `1.0`: Creative, maximize novel connections
 
 Higher creativity can discover unexpected insights but may create spurious associations.
@@ -726,6 +780,7 @@ curl -X POST http://localhost:8080/api/v1/patterns/complete \
     "creativity": 0.3,
     "max_completions": 5
   }'
+
 ```
 
 #### Response (200 OK)
@@ -757,6 +812,7 @@ curl -X POST http://localhost:8080/api/v1/patterns/complete \
     "creator_nationality": 0.87
   }
 }
+
 ```
 
 ### POST /api/v1/patterns/associate
@@ -777,6 +833,7 @@ curl -X POST http://localhost:8080/api/v1/patterns/associate \
     "strength": 0.75,
     "reason": "Both emerged in early 1990s"
   }'
+
 ```
 
 #### Association Types
@@ -800,6 +857,7 @@ curl -X POST http://localhost:8080/api/v1/patterns/associate \
     "mem_python_creation → mem_free_software → mem_open_source_movement"
   ]
 }
+
 ```
 
 ## Monitoring Operations
@@ -813,6 +871,7 @@ Get system self-awareness and statistics.
 ```bash
 curl -X GET "http://localhost:8080/api/v1/introspect?memory_space_id=default&include_health=true&include_statistics=true" \
   -H "Authorization: Bearer ${API_KEY}"
+
 ```
 
 #### Response (200 OK)
@@ -870,6 +929,7 @@ curl -X GET "http://localhost:8080/api/v1/introspect?memory_space_id=default&inc
     "activation_spreader"
   ]
 }
+
 ```
 
 ### GET /api/v1/stream/events
@@ -882,6 +942,7 @@ Stream real-time memory activity (Server-Sent Events).
 curl -X GET "http://localhost:8080/api/v1/stream/events?memory_space_id=default&event_types=ACTIVATION,STORAGE,RECALL&min_importance=0.5" \
   -H "Authorization: Bearer ${API_KEY}" \
   -H "Accept: text/event-stream"
+
 ```
 
 #### Response (streaming)
@@ -895,6 +956,7 @@ data: {"event_type": "STREAM_EVENT_TYPE_ACTIVATION", "timestamp": "2024-10-27T10
 
 event: recall
 data: {"event_type": "STREAM_EVENT_TYPE_RECALL", "timestamp": "2024-10-27T10:30:17.789Z", "description": "Memory recalled: mem_1698765001", "metadata": {"query": "Python history", "confidence": "0.89"}, "importance": 0.7}
+
 ```
 
 ## Error Handling
@@ -924,6 +986,7 @@ All errors follow a consistent structure with educational messages. See [Error C
     ]
   }
 }
+
 ```
 
 ### Common Errors
@@ -957,6 +1020,7 @@ Rate limits protect system performance and ensure fair resource allocation.
 X-RateLimit-Limit: 100
 X-RateLimit-Remaining: 87
 X-RateLimit-Reset: 1698765432
+
 ```
 
 When rate limited:
@@ -971,6 +1035,7 @@ When rate limited:
     "retry_after_seconds": 1
   }
 }
+
 ```
 
 ## Performance Characteristics
@@ -999,8 +1064,11 @@ When rate limited:
 Switch to [gRPC API](/reference/grpc-api.md) when:
 
 - Throughput requirement >100 req/sec
+
 - Batch operations (>10 memories)
+
 - Streaming consolidation needed
+
 - Mobile/edge deployments (binary efficiency)
 
 ## Multi-Tenant Isolation
@@ -1016,6 +1084,7 @@ curl -X POST http://localhost:8080/api/v1/memories/remember \
     "memory_space_id": "tenant_42_memories",
     "memory": {...}
   }'
+
 ```
 
 Server validates JWT claim matches `memory_space_id`. Returns `ERR-4004` if mismatch.
@@ -1030,14 +1099,19 @@ curl -X POST http://localhost:8080/api/v1/memories/remember \
   -d '{
     "memory": {...}
   }'
+
 ```
 
 ## Next Steps
 
 - **Learning**: Try the [15-minute API Quickstart](/tutorials/api-quickstart.md)
+
 - **Performance**: Read [gRPC API Reference](/reference/grpc-api.md) for high-throughput
+
 - **Troubleshooting**: See [Error Codes Catalog](/reference/error-codes.md)
+
 - **Examples**: Explore [Multi-Language Examples](/reference/api-examples/)
+
 - **Operations**: Check [Production Operations Guide](/operations/)
 
 ## Neo4j Migration Guide

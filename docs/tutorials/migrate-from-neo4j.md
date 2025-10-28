@@ -17,10 +17,13 @@ CREATE (bob)-[:WORKS_AT {since: 2021}]->(acme)
 CREATE (alice)-[:KNOWS {since: 2019}]->(bob)
 
 RETURN *
+
 ```
 
 This creates:
+
 - 3 nodes (2 Person, 1 Company)
+
 - 3 relationships (2 WORKS_AT, 1 KNOWS)
 
 ## Step 1: Prepare Environment
@@ -33,6 +36,7 @@ cd tools/migrate-neo4j
 cargo build --release
 
 # The binary will be at: target/release/migrate-neo4j
+
 ```
 
 ### Verify Neo4j Connectivity
@@ -41,6 +45,7 @@ cargo build --release
 # Test connection
 cypher-shell -a bolt://localhost:7687 -u neo4j -p yourpassword \
   "MATCH (n) RETURN count(n) as node_count"
+
 ```
 
 ### Start Engram
@@ -48,6 +53,7 @@ cypher-shell -a bolt://localhost:7687 -u neo4j -p yourpassword \
 ```bash
 # Start Engram instance
 engram server start --port 8080
+
 ```
 
 ## Step 2: Plan the Migration
@@ -57,11 +63,15 @@ engram server start --port 8080
 We have two approaches:
 
 **Option A: Automatic (label-based)**
+
 - `Person` nodes → `neo4j_person` memory space
+
 - `Company` nodes → `neo4j_company` memory space
 
 **Option B: Custom mapping**
+
 - `Person` nodes → `people` memory space
+
 - `Company` nodes → `organizations` memory space
 
 For this tutorial, we'll use Option B with custom mapping.
@@ -71,7 +81,9 @@ For this tutorial, we'll use Option B with custom mapping.
 For our small dataset (3 nodes), batch size doesn't matter much. For larger datasets:
 
 - **<10k nodes**: Use batch size 1000
+
 - **10k-1M nodes**: Use batch size 10000
+
 - **>1M nodes**: Use batch size 50000
 
 ## Step 3: Dry Run Migration
@@ -87,6 +99,7 @@ Always test with a dry run first:
   --label-to-space "Person:people,Company:organizations" \
   --batch-size 100 \
   --dry-run
+
 ```
 
 Expected output:
@@ -106,6 +119,7 @@ Total records: 3
 Elapsed time: 20ms
 Average rate: 150 records/sec
 Errors: 0
+
 ```
 
 ## Step 4: Run Full Migration
@@ -122,6 +136,7 @@ Now run the actual migration with validation:
   --batch-size 100 \
   --checkpoint-file /tmp/neo4j_migration.json \
   --validate
+
 ```
 
 ## Step 5: Verify Migration
@@ -133,6 +148,7 @@ Now run the actual migration with validation:
 engram query --space people --content "AI researcher"
 
 # Expected: Should find Alice and Bob with high similarity
+
 ```
 
 ### Check Memory Count
@@ -144,6 +160,7 @@ curl http://localhost:8080/api/v1/memory_spaces/people/count
 
 curl http://localhost:8080/api/v1/memory_spaces/organizations/count
 # Should return: {"count": 1}
+
 ```
 
 ### Verify Relationships
@@ -154,6 +171,7 @@ engram graph edges --source neo4j_node_alice
 
 # Expected: Should show edge to neo4j_node_acme (WORKS_AT)
 # and edge to neo4j_node_bob (KNOWS)
+
 ```
 
 ## Step 6: Run Validation Script
@@ -168,6 +186,7 @@ engram graph edges --source neo4j_node_alice
   bolt://localhost:7687 \
   http://localhost:8080 \
   organizations
+
 ```
 
 Expected output:
@@ -192,6 +211,7 @@ Step 5: Comparing query performance...
 
 === Migration Validation Complete ===
 All checks passed successfully!
+
 ```
 
 ## Step 7: Test Semantic Queries
@@ -207,6 +227,7 @@ engram query --space people \
 # Expected results:
 # 1. Bob (bio mentions "machine learning researcher")
 # 2. Alice (bio mentions "AI")
+
 ```
 
 ## Troubleshooting
@@ -216,12 +237,14 @@ engram query --space people \
 **Cause**: Neo4j not running or wrong credentials
 
 **Solution**:
+
 ```bash
 # Verify Neo4j is running
 systemctl status neo4j
 
 # Test credentials
 cypher-shell -a bolt://localhost:7687 -u neo4j -p yourpassword "RETURN 1"
+
 ```
 
 ### Issue: "No embeddings generated"
@@ -235,8 +258,11 @@ cypher-shell -a bolt://localhost:7687 -u neo4j -p yourpassword "RETURN 1"
 **Cause**: Batch size too small or network latency
 
 **Solution**:
+
 - Increase batch size to 10000
+
 - Run migration tool on same machine as Neo4j
+
 - Check network latency: `ping <neo4j-host>`
 
 ## Next Steps
@@ -246,7 +272,9 @@ cypher-shell -a bolt://localhost:7687 -u neo4j -p yourpassword "RETURN 1"
 For ongoing Neo4j databases, set up incremental migration:
 
 1. Use checkpoint file to track last migrated ID
+
 2. Schedule periodic migrations for new nodes
+
 3. Use change data capture (CDC) for real-time sync
 
 ### Schema Evolution
@@ -254,7 +282,9 @@ For ongoing Neo4j databases, set up incremental migration:
 If your Neo4j schema changes:
 
 1. Update `--label-to-space` mapping
+
 2. Re-run migration for new label types
+
 3. Consider data versioning in Engram
 
 ### Performance Optimization
@@ -262,17 +292,25 @@ If your Neo4j schema changes:
 For large graphs (>1M nodes):
 
 1. Use parallel migration (run multiple instances with different label filters)
+
 2. Increase batch size to 50000
+
 3. Use local Neo4j replica to avoid production load
+
 4. Consider partitioning by label type
 
 ## Summary
 
 You've successfully:
+
 - Migrated Neo4j nodes to Engram memories
+
 - Preserved relationships as edges
+
 - Generated semantic embeddings
+
 - Validated migration integrity
+
 - Tested semantic queries
 
 Your Neo4j data is now available in Engram's cognitive memory graph!
@@ -280,5 +318,7 @@ Your Neo4j data is now available in Engram's cognitive memory graph!
 ## See Also
 
 - [Neo4j Migration Guide](../operations/migration-neo4j.md)
+
 - [Embedding Generation](../explanation/embeddings.md)
+
 - [Memory Space Management](../howto/manage-memory-spaces.md)

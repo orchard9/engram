@@ -13,6 +13,7 @@ This reference mirrors the Rustdoc tables embedded directly into the codebase. U
 
 ```rust
 use engram_core::activation::ParallelSpreadingConfig;
+
 ```
 
 `ParallelSpreadingConfig` controls concurrency, hop limits, decay, determinism, and GPU thresholds. The Rustdoc table is sourced from `engram-core/src/activation/doc/parallel_spreading_config.md`.
@@ -20,15 +21,20 @@ use engram_core::activation::ParallelSpreadingConfig;
 Key highlights:
 
 - `num_threads` — worker count; set to `num_cpus::get()` for throughput, lower to constrain CPU usage.
+
 - `max_depth` — hop limit; aligns with semantic distance.
+
 - `threshold` — activation floor; increases latency when too low.
+
 - `deterministic` + `seed` — reproducible spreads for debugging.
+
 - `enable_gpu` / `gpu_threshold` — offload to GPU batch kernels when ready.
 
 ## `SpreadingConfig` (HNSW)
 
 ```rust
 use engram_core::activation::HnswSpreadingConfig;
+
 ```
 
 Only available when `hnsw_index` is enabled. The doc include lives in `engram-core/src/activation/doc/hnsw_spreading_config.md`.
@@ -36,15 +42,20 @@ Only available when `hnsw_index` is enabled. The doc include lives in `engram-co
 Fields:
 
 - `similarity_threshold` — minimum cosine similarity to propagate activation.
+
 - `distance_decay` — exponential decay per hop.
+
 - `max_hops` — HNSW layer traversal depth.
+
 - `use_hierarchical` — toggles multi-layer navigation.
+
 - `confidence_threshold` — minimum confidence for neighbours.
 
 ## `GPUSpreadingInterface`
 
 ```rust
 use engram_core::activation::GPUSpreadingInterface;
+
 ```
 
 The GPU trait documents supported capabilities in `engram-core/src/activation/doc/gpu_interface.md`. When compiled without GPU backends, Engram falls back to CPU processing.
@@ -52,8 +63,11 @@ The GPU trait documents supported capabilities in `engram-core/src/activation/do
 Methods:
 
 - `capabilities()` — inspect device limits (`GpuCapabilities`).
+
 - `is_available()` — runtime check for GPU readiness.
+
 - `launch()` — submit activation batches (returns `GpuLaunchFuture`).
+
 - `warm_up()` / `cleanup()` — manage device lifecycle hooks.
 
 ## CLI Hooks
@@ -75,12 +89,17 @@ Changing the feature flag writes to `~/.config/engram/config.toml`; restart the 
 ## Monitoring Endpoints
 
 - `GET /api/v1/monitoring/events` — SSE stream for activation summaries (`event_types=activation,spreading`).
+
 - `GET /api/v1/monitoring/activations` — Focused activation traces (`include_spreading=true`).
+
 - `GET /metrics` — JSON snapshot that exposes `engram_spreading_*` counters/gauges for Prometheus scraping.
 
 ## Additional Resources
 
 - [Spreading Activation Tutorial](../tutorials/spreading_getting_started.md)
+
 - [Spreading Performance Guide](../howto/spreading_performance.md)
+
 - [Spreading Monitoring Runbook](../howto/spreading_monitoring.md)
+
 - [Cognitive Spreading Explanation](../explanation/cognitive_spreading.md)

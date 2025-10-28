@@ -17,14 +17,19 @@ This document describes Engram's Server-Sent Events (SSE) streaming failure dete
 **Point 1 - False Fail-Fast Behavior**:
 
 - Original code logged warnings but continued execution when event delivery failed
+
 - HTTP/gRPC calls reported success even when events were silently dropped
+
 - No programmatic way to detect streaming failures
+
 - Return value didn't reflect actual operation outcome
 
 **Point 2 - Need for Integration Testing**:
 
 - No end-to-end test verifying SSE events actually arrive
+
 - Only background task logging warnings, no verification that real events deliver
+
 - Need integration test driving `/api/v1/stream/activities` after remember/recall
 
 ## Implementation
@@ -59,12 +64,14 @@ impl StoreResult {
         !self.streaming_delivered && self.activation.is_successful()
     }
 }
+
 ```
 
 **Public API Export** (`engram-core/src/lib.rs:290`):
 
 ```rust
 pub use store::{Activation, MemoryStore, StoreResult};
+
 ```
 
 ### 2. Store Method Update (`engram-core/src/store.rs:933`)
@@ -77,6 +84,7 @@ pub fn store(&self, episode: Episode) -> Activation
 
 // New (streaming failure visible):
 pub fn store(&self, episode: Episode) -> StoreResult
+
 ```
 
 **Streaming Status Tracking** (lines 1059-1086):
@@ -112,13 +120,17 @@ if let Some(ref tx) = self.event_tx {
 }
 
 StoreResult::new(Activation::new(activation), streaming_delivered)
+
 ```
 
 **Key Design Decisions**:
 
 - **Return value encodes status**: Streaming failure is visible to all callers
+
 - **No panics**: Graceful degradation - storage succeeds even if streaming fails
+
 - **ERROR logging**: Always logged when streaming fails
+
 - **Backward compatibility**: Callers use `.activation` field to access activation value
 
 ### 3. API Handler Updates
@@ -151,6 +163,7 @@ pub async fn remember_memory(
     let actual_confidence = store_result.activation.value();
     // ... return HTTP 201 CREATED ...
 }
+
 ```
 
 **gRPC API** (`engram-cli/src/grpc.rs:97-109`, `129-141`):
@@ -167,12 +180,15 @@ if !store_result.streaming_delivered {
 }
 
 (id, store_result.activation.value())
+
 ```
 
 **API Contract**:
 
 - HTTP 201 CREATED: Memory stored AND event delivered successfully
+
 - HTTP 500 Internal Server Error: Memory stored but event delivery failed
+
 - gRPC Status::internal: Same as HTTP 500 - partial failure
 
 ### 4. System Health Endpoint (`engram-cli/src/api.rs:566-589`)
@@ -195,6 +211,7 @@ The `/api/v1/system/health` endpoint provides basic health status:
   },
   "system_message": "Memory system operational with 142 stored memories."
 }
+
 ```
 
 **Note**: Detailed streaming health metrics (events_delivered, events_dropped, success_rate) are not currently implemented. Future work will add comprehensive streaming health monitoring via additional API endpoints.
@@ -217,6 +234,7 @@ curl -X POST http://127.0.0.1:${HTTP_PORT}/api/v1/memories/remember \
   "storage_confidence": {"value": 0.9, "category": "High"},
   ...
 }
+
 ```
 
 **Alert on streaming failures (HTTP 500)**:
@@ -228,6 +246,7 @@ curl -X POST http://127.0.0.1:${HTTP_PORT}/api/v1/memories/remember \
     "message": "Memory 'mem_abc123' was stored but event notification failed. SSE subscribers did not receive the storage event. Check /api/v1/system/health for streaming status."
   }
 }
+
 ```
 
 ### 2. Log Monitoring
@@ -236,6 +255,7 @@ curl -X POST http://127.0.0.1:${HTTP_PORT}/api/v1/memories/remember \
 
 ```bash
 journalctl -u engram --follow | grep "CRITICAL streaming failure"
+
 ```
 
 **Example log entry**:
@@ -244,6 +264,7 @@ journalctl -u engram --follow | grep "CRITICAL streaming failure"
 ERROR engram_core::store: CRITICAL streaming failure - event could not be delivered to SSE subscribers
   memory_id="mem_abc123"
   subscriber_count=0
+
 ```
 
 ### 3. Programmatic Detection
@@ -267,6 +288,7 @@ if store_result.is_fully_successful() {
 if store_result.is_partially_successful() {
     // Storage succeeded but streaming failed
 }
+
 ```
 
 **HTTP Client**:
@@ -285,6 +307,7 @@ try {
 } catch (error) {
   // Network or other error
 }
+
 ```
 
 ## Recovery Procedures
@@ -294,14 +317,19 @@ try {
 **Symptoms**:
 
 - API returns HTTP 500 Internal Server Error
+
 - Error message: "Memory was stored but event notification failed"
+
 - Logs show: `CRITICAL streaming failure`
+
 - Memory is stored but SSE subscribers don't receive event
 
 **Root Cause**:
 
 - Broadcast channel has no active subscribers (subscriber_count = 0)
+
 - Keepalive subscriber died or never started
+
 - Event streaming not enabled at startup
 
 **Recovery Steps**:
@@ -341,12 +369,15 @@ try {
 **Symptoms**:
 
 - API returns HTTP 201 CREATED (success)
+
 - But SSE clients don't receive events
+
 - No CRITICAL logs in server
 
 **Root Cause**:
 
 - This scenario should NOT happen with the new implementation
+
 - If it does, it's a bug in the StoreResult logic
 
 **Diagnostic Steps**:
@@ -376,13 +407,17 @@ try {
 **Symptoms**:
 
 - Some operations return HTTP 500, others succeed
+
 - Pattern may correlate with load or timing
+
 - Logs show intermittent subscriber_count = 0
 
 **Root Cause**:
 
 - Keepalive subscriber dying and restarting
+
 - Race condition in event streaming initialization
+
 - Broadcast channel being recreated
 
 **Recovery Steps**:
@@ -443,13 +478,16 @@ try {
 ### Commented Out Tests (future work)
 
 - Streaming health monitoring tests (8 tests)
+
 - These test `streaming_health_metrics()`, `is_streaming_healthy()` methods
+
 - Not currently implemented - placeholders for future health tracking system
 
 **Run active tests**:
 
 ```bash
 cargo test --test streaming_tests
+
 ```
 
 **Expected output**: 17 tests passing (16 endpoint/protocol tests + 1 end-to-end test)
@@ -482,47 +520,69 @@ cargo test --test streaming_tests
 **Server Startup**:
 
 - [ ] Verify "Event streaming enabled" log message
+
 - [ ] Test memory operation returns HTTP 201 (not 500)
+
 - [ ] Connect to `/api/v1/stream/activities` and verify events arrive
+
 - [ ] Check system health endpoint for basic status
 
 **Ongoing Monitoring**:
 
 - [ ] Monitor API error rates for HTTP 500 responses
+
 - [ ] Alert on "CRITICAL streaming failure" in logs
+
 - [ ] Watch for subscriber_count = 0 in error logs
+
 - [ ] Track HTTP 201 vs 500 ratio for memory operations
 
 **Incident Response**:
 
 - [ ] Check HTTP status codes from API operations
+
 - [ ] Capture last 100 log lines with "CRITICAL" or "subscriber"
+
 - [ ] Restart server if streaming failures persist
+
 - [ ] File issue if HTTP 500 errors occur without clear cause
+
 - [ ] Update runbook if new failure mode discovered
 
 **Testing**:
 
 - [ ] Run `cargo test --test streaming_tests` after changes
+
 - [ ] Verify end-to-end test passes: `test_end_to_end_sse_event_delivery_after_remember`
+
 - [ ] Manual test: store memory and verify HTTP 201 response
+
 - [ ] Manual test: connect SSE client and verify events arrive
 
 ## Related Documentation
 
 - **Metrics Streaming**: `docs/operations/metrics_streaming.md`
+
 - **API Reference**: `docs/api/memory.md`
+
 - **System Health**: `docs/api/system.md`
+
 - **Test Suite**: `engram-cli/tests/streaming_tests.rs`
 
 ## Implementation Files
 
 - `engram-core/src/store.rs:79-107`: `StoreResult` type definition
+
 - `engram-core/src/store.rs:933-1086`: Updated `store()` method with streaming tracking
+
 - `engram-core/src/lib.rs:290`: Public API export of `StoreResult`
+
 - `engram-cli/src/api.rs:497-512`: HTTP API handler updates (`remember_memory`)
+
 - `engram-cli/src/api.rs:622-639`: HTTP API handler updates (`remember_episode`)
+
 - `engram-cli/src/grpc.rs:97-109,129-141`: gRPC service handler updates
+
 - `engram-cli/tests/streaming_tests.rs:637-704`: End-to-end SSE delivery test
 
 ## Version History

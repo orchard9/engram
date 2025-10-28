@@ -13,8 +13,11 @@ Engram's testing strategy follows a multi-layered approach designed to validate 
 **Characteristics:**
 
 - Fast execution (< 1 second total)
+
 - Deterministic results
+
 - Pure function validation
+
 - Edge case coverage
 
 **Example:**
@@ -28,6 +31,7 @@ mod tests {
         assert_eq!(conf.raw(), 0.5);
     }
 }
+
 ```
 
 ### 2. Integration Tests (`cargo test --test <name>`)
@@ -39,8 +43,11 @@ mod tests {
 **Characteristics:**
 
 - Multiple components working together
+
 - Realistic data flows
+
 - API contract validation
+
 - Deterministic seeds for reproducibility
 
 **Example:**
@@ -53,12 +60,15 @@ async fn test_store_and_recall_integration() {
     let results = store.recall(&query, 10);
     assert_eq!(results.len(), 1);
 }
+
 ```
 
 **Long-running integration tests:**
 
 - Use `#[ignore]` attribute
+
 - Run with `cargo test --ignored`
+
 - Typically simulate server lifecycle (seconds to minutes)
 
 ### 3. Property-Based Tests (`cargo test`)
@@ -70,8 +80,11 @@ async fn test_store_and_recall_integration() {
 **Characteristics:**
 
 - Randomized inputs
+
 - Invariant checking
+
 - Shrinking on failure
+
 - Coverage of input space
 
 **Example:**
@@ -84,6 +97,7 @@ proptest! {
         assert!(conf.raw() >= 0.0 && conf.raw() <= 1.0);
     }
 }
+
 ```
 
 ### 4. Compile-Time Tests
@@ -95,7 +109,9 @@ proptest! {
 **Characteristics:**
 
 - Ensures invalid code doesn't compile
+
 - Documents API usage patterns
+
 - Zero runtime cost validation
 
 **Example:**
@@ -107,6 +123,7 @@ let memory = MemoryBuilder::new()
     .id("test")
     .embedding(vec![0.1; 768])
     .build(); // ERROR: missing confidence
+
 ```
 
 ### 5. Psychology Validation Tests (`cargo test --test psychology --ignored`)
@@ -118,8 +135,11 @@ let memory = MemoryBuilder::new()
 **Characteristics:**
 
 - Long-running (hours to days)
+
 - Empirical data baselines from published research
+
 - Tolerance-based validation (typically ±5%)
+
 - Citations for all empirical baselines
 
 **Example:**
@@ -133,14 +153,19 @@ async fn test_ebbinghaus_forgetting_curve() {
     let tolerance = 0.05; // 5% from Milestone 4
     assert!((actual - expected).abs() <= tolerance);
 }
+
 ```
 
 **Required validations:**
 
 - DRM paradigm (false memory formation)
+
 - Proactive/retroactive interference
+
 - Forgetting curves (Ebbinghaus replication)
+
 - Semantic priming (spreading activation)
+
 - Memory consolidation patterns
 
 ### 6. Benchmarks (`cargo bench`)
@@ -152,8 +177,11 @@ async fn test_ebbinghaus_forgetting_curve() {
 **Characteristics:**
 
 - Criterion.rs framework
+
 - Statistical analysis
+
 - Comparison against baseline
+
 - Tracks allocations and time
 
 **Example:**
@@ -164,13 +192,17 @@ fn benchmark_recall(c: &mut Criterion) {
         b.iter(|| store.recall(&query, 10));
     });
 }
+
 ```
 
 **Performance requirements:**
 
 - All merges require benchmark comparison
+
 - P50, P95, P99 latency tracking
+
 - Allocation count monitoring
+
 - Flamegraphs for hot paths
 
 ### 7. Cognitive Workflow Scenarios (`cargo run --example scenarios/*`)
@@ -182,9 +214,13 @@ fn benchmark_recall(c: &mut Criterion) {
 **Characteristics:**
 
 - Multi-phase operations
+
 - Human-readable output
+
 - Performance expectations documented
+
 - Artifact generation
+
 - Not part of `cargo test`
 
 **Example:**
@@ -200,6 +236,7 @@ fn main() {
     // Query memories
     println!("Summary: All phases completed in {:?}", total_time);
 }
+
 ```
 
 ### 8. Soak Tests (`cargo run --example soak/*`)
@@ -211,9 +248,13 @@ fn main() {
 **Characteristics:**
 
 - Hours to days of execution
+
 - Memory leak detection
+
 - Performance degradation monitoring
+
 - Snapshot capture at intervals
+
 - Not part of `cargo test`
 
 **Example:**
@@ -227,6 +268,7 @@ for i in 0..ITERATIONS {
         capture_snapshot();
     }
 }
+
 ```
 
 ### 9. Differential Testing (`cargo test --test differential_testing`)
@@ -238,8 +280,11 @@ for i in 0..ITERATIONS {
 **Characteristics:**
 
 - Bit-identical output validation
+
 - Million-operation traces
+
 - Cross-language correctness
+
 - Performance comparison
 
 **Example:**
@@ -251,6 +296,7 @@ fn test_rust_zig_equivalence() {
     let zig_result = zig_impl.compute(&input);
     assert_eq!(rust_result, zig_result, "Implementations must be bit-identical");
 }
+
 ```
 
 ## Testing Infrastructure
@@ -261,6 +307,7 @@ fn test_rust_zig_equivalence() {
 
 ```bash
 cargo test --features long_running_tests
+
 ```
 
 **`monitoring`** - Enable metrics collection (default):
@@ -268,6 +315,7 @@ cargo test --features long_running_tests
 ```bash
 cargo test  # Monitoring enabled
 cargo test --no-default-features  # Minimal build without monitoring
+
 ```
 
 ### Test Organization
@@ -289,6 +337,7 @@ engram/
     └── examples/
         ├── scenarios/   # End-to-end workflows
         └── soak/        # Long-running stability tests
+
 ```
 
 ### Running All Tests
@@ -316,6 +365,7 @@ valgrind --leak-check=full cargo test
 cargo test --test psychology --ignored  # Psychology validations
 cargo run --example cognitive_workflow   # Scenarios
 cargo run --example memory_pool_soak     # Soak tests
+
 ```
 
 ## Milestone-Specific Requirements
@@ -323,11 +373,17 @@ cargo run --example memory_pool_soak     # Soak tests
 Each milestone specifies validation criteria:
 
 - **Milestone 1:** Type-state prevents invalid construction
+
 - **Milestone 2:** 90% recall@10, <1ms query time vs. FAISS
+
 - **Milestone 4:** Forgetting curves within 5% of empirical data
+
 - **Milestone 9:** Bit-identical Rust/Zig outputs
+
 - **Milestone 10:** 100K observations/second sustained
+
 - **Milestone 12:** Replicate DRM, interference patterns
+
 - **Milestone 13:** Jepsen-style distributed consistency testing
 
 ## Continuous Integration
@@ -338,6 +394,7 @@ Each milestone specifies validation criteria:
 cargo test --workspace
 cargo clippy --all-targets
 cargo fmt -- --check
+
 ```
 
 ### Nightly Tests
@@ -346,6 +403,7 @@ cargo fmt -- --check
 cargo test --ignored
 cargo bench
 cargo run --example memory_pool_soak
+
 ```
 
 ### Weekly Tests
@@ -355,6 +413,7 @@ cargo test --features long_running_tests --ignored
 # 24-hour soak tests
 # Full benchmark suite
 # Psychology validations
+
 ```
 
 ## Debugging Failed Tests
@@ -370,28 +429,41 @@ cargo test test_name -- --exact --nocapture
 
 # With backtraces
 RUST_BACKTRACE=1 cargo test test_name
+
 ```
 
 ### For psychology test failures
 
 1. Check tolerance levels (5% from Milestone 4)
+
 2. Verify empirical baseline is correct
+
 3. Check for randomness/seed issues
+
 4. Compare against cited research
+
 5. Document deviations in test output
 
 ### For soak test failures
 
 1. Check for memory leaks with valgrind
+
 2. Monitor resource usage (htop, Activity Monitor)
+
 3. Review snapshot outputs for anomalies
+
 4. Check for performance degradation over time
+
 5. Verify metrics accuracy
 
 ## References
 
 - **Coding Guidelines:** See `coding_guidelines.md` for testing conventions
+
 - **Milestones:** See `milestones.md` for validation requirements
+
 - **Psychology Tests:** See `engram-core/tests/psychology/README.md`
+
 - **Scenarios:** See `engram-cli/examples/scenarios/README.md`
+
 - **Soak Tests:** See `engram-cli/examples/soak/README.md`

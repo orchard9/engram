@@ -27,6 +27,7 @@ cd engram-core
 cargo flamegraph --bench query_parser -- --bench
 
 # Output: flamegraph.svg
+
 ```
 
 ### 2. Criterion Benchmarks
@@ -42,6 +43,7 @@ cargo bench --bench query_parser -- --save-baseline optimized
 
 # Compare against baseline
 cargo bench --bench query_parser -- --baseline optimized
+
 ```
 
 ### 3. Performance Analysis (Linux)
@@ -58,6 +60,7 @@ perf stat -e branch-misses,branch-instructions cargo bench --bench query_parser
 # Detailed CPU profiling
 perf record cargo bench --bench query_parser
 perf report
+
 ```
 
 ### 4. macOS Instruments
@@ -70,6 +73,7 @@ cargo build --release --bench query_parser
 
 # Profile with Instruments
 instruments -t "Time Profiler" target/release/deps/query_parser-*
+
 ```
 
 ## Optimization Techniques Applied
@@ -85,6 +89,7 @@ fn expect_token(&mut self, expected: TokenKind) -> Result<Token>
 fn advance(&mut self) -> Option<Token>
 #[inline]
 fn peek(&self) -> Option<&Token>
+
 ```
 
 ### 2. Zero-Copy String Handling
@@ -96,6 +101,7 @@ pub struct Token<'a> {
     pub text: &'a str,  // Zero-copy slice
     // ...
 }
+
 ```
 
 ### 3. PHF Keyword Lookup
@@ -108,6 +114,7 @@ static KEYWORDS: phf::Map<&'static str, TokenKind> = phf_map! {
     "SPREAD" => TokenKind::Spread,
     // ...
 };
+
 ```
 
 ### 4. Arena Allocation (Future Enhancement)
@@ -123,6 +130,7 @@ pub fn parse_with_arena(source: &str) -> Result<Query<'_>> {
     let mut parser = Parser::new(source, &arena);
     parser.parse_query()
 }
+
 ```
 
 Expected improvement: 30% reduction in allocation overhead.
@@ -130,11 +138,13 @@ Expected improvement: 30% reduction in allocation overhead.
 ## Profiling Workflow
 
 1. **Establish Baseline**
+
    ```bash
    cargo bench --bench query_parser -- --save-baseline before
    ```
 
 2. **Generate Flamegraph**
+
    ```bash
    cargo flamegraph --bench query_parser
    open flamegraph.svg
@@ -150,11 +160,13 @@ Expected improvement: 30% reduction in allocation overhead.
    - Prefer algorithmic improvements over micro-optimizations
 
 5. **Measure Impact**
+
    ```bash
    cargo bench --bench query_parser -- --baseline before
    ```
 
 6. **Verify Correctness**
+
    ```bash
    cargo test --lib query::parser
    ```
@@ -173,8 +185,11 @@ Expected improvement: 30% reduction in allocation overhead.
 Performance regression detection is automated via GitHub Actions:
 
 - Benchmarks run on every PR affecting parser code
+
 - Compares against main branch baseline
+
 - Fails if regression >10%
+
 - Posts benchmark results as PR comment
 
 See `.github/workflows/performance.yml` for configuration.
@@ -182,6 +197,9 @@ See `.github/workflows/performance.yml` for configuration.
 ## References
 
 - "Performance Matters" - Emery Berger, UMass Amherst
+
 - "The Rust Performance Book" - Nicholas Matsakis
+
 - "Systems Performance" - Brendan Gregg
+
 - Criterion.rs documentation: https://bheisler.github.io/criterion.rs/

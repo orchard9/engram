@@ -11,14 +11,19 @@ When running locally: `http://localhost:7432`
 ### Memory Operations
 
 - `POST /api/v1/memories/remember` - Store a memory
+
 - `GET /api/v1/memories/recall` - Search and recall memories
+
 - `POST /api/v1/memories/recognize` - Pattern recognition
+
 - `POST /api/v1/complete` - Pattern completion (Beta) - Reconstruct missing details from partial memories
 
 ### System Endpoints
 
 - `GET /health` - Simple health check
+
 - `GET /api/v1/system/health` - Detailed system health
+
 - `GET /api/v1/system/introspect` - System statistics
 
 ### Interactive Documentation
@@ -43,6 +48,7 @@ curl -X POST http://localhost:7432/api/v1/memories/remember \
   -H "Content-Type: application/json" \
   -H "X-Memory-Space: production" \
   -d '{"content": "Important data", "confidence": 0.95}'
+
 ```
 
 ### Space Routing Precedence
@@ -50,7 +56,9 @@ curl -X POST http://localhost:7432/api/v1/memories/remember \
 When multiple sources specify a memory space, the following precedence applies:
 
 1. **Header**: `X-Memory-Space` header (highest priority)
+
 2. **Query Parameter**: `?space=<space_id>` in URL
+
 3. **Request Body**: `"memory_space"` field in JSON payload
 
 If no space is specified, requests default to the `default` space for backward compatibility.
@@ -62,12 +70,14 @@ Using header (recommended):
 ```bash
 curl -H "X-Memory-Space: research" \
   http://localhost:7432/api/v1/memories/recall?query=CRISPR
+
 ```
 
 Using query parameter:
 
 ```bash
 curl http://localhost:7432/api/v1/memories/recall?space=research&query=CRISPR
+
 ```
 
 Using request body:
@@ -76,6 +86,7 @@ Using request body:
 curl -X POST http://localhost:7432/api/v1/memories/remember \
   -H "Content-Type: application/json" \
   -d '{"content": "Data", "confidence": 0.9, "memory_space": "research"}'
+
 ```
 
 ### Space Management
@@ -84,12 +95,14 @@ List available spaces:
 
 ```bash
 curl http://localhost:7432/api/v1/spaces
+
 ```
 
 Get per-space health metrics:
 
 ```bash
 curl http://localhost:7432/api/v1/system/health
+
 ```
 
 Response includes metrics for all spaces:
@@ -113,6 +126,7 @@ Response includes metrics for all spaces:
     }
   ]
 }
+
 ```
 
 ## Error Handling
@@ -125,6 +139,7 @@ All errors return JSON with a consistent structure:
   "code": "ERROR_CODE",
   "details": {}
 }
+
 ```
 
 ## Response Format
@@ -141,4 +156,5 @@ Successful responses include cognitive context and system messages:
     "reasoning": "Why this confidence level"
   }
 }
+
 ```

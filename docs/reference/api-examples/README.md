@@ -9,8 +9,11 @@ Instead of showing "here's how to use Engram in Python," we show "here's how to 
 ## Quick Start
 
 1. **Choose an operation** that matches your use case
+
 2. **Read the README** in that operation's directory
+
 3. **Pick your language** and run the example
+
 4. **Understand the pattern**, then adapt to your needs
 
 ## Example Categories
@@ -22,13 +25,19 @@ Instead of showing "here's how to use Engram in Python," we show "here's how to 
 The "Hello World" of Engram. Store a memory and retrieve it.
 
 **Key Concepts**:
+
 - Confidence scoring on storage
+
 - Semantic retrieval cues
+
 - Understanding activation vs confidence
 
 **When to use**:
+
 - First time using Engram
+
 - Building CRUD operations
+
 - Testing connectivity
 
 **Languages**: Rust | Python | TypeScript | Go | Java
@@ -44,13 +53,19 @@ The "Hello World" of Engram. Store a memory and retrieve it.
 Store experiences with full episodic context, then query by temporal or spatial cues.
 
 **Key Concepts**:
+
 - Episodic encoding structure
+
 - Context-based retrieval
+
 - Emotional valence tracking
 
 **When to use**:
+
 - Event logging systems
+
 - Personal memory assistants
+
 - Timeline reconstruction
 
 **Languages**: Rust | Python | TypeScript | Go | Java
@@ -66,13 +81,19 @@ Store experiences with full episodic context, then query by temporal or spatial 
 Demonstrates server streaming (dream consolidation), client streaming (batch uploads), and bidirectional streaming (interactive sessions).
 
 **Key Concepts**:
+
 - Server-sent events vs gRPC streaming
+
 - Backpressure management
+
 - Flow control
 
 **When to use**:
+
 - Batch imports (>100 memories)
+
 - Real-time consolidation monitoring
+
 - Interactive memory sessions
 
 **Languages**: Rust | Python | TypeScript | Go | Java
@@ -88,13 +109,19 @@ Demonstrates server streaming (dream consolidation), client streaming (batch upl
 Like tip-of-the-tongue experiences - you know part of a memory and want to complete it.
 
 **Key Concepts**:
+
 - Pattern cues vs semantic cues
+
 - Creativity vs accuracy tradeoff
+
 - Field-level confidence
 
 **When to use**:
+
 - Autocomplete features
+
 - Memory reconstruction
+
 - Fuzzy matching
 
 **Languages**: Rust | Python | TypeScript | Go | Java
@@ -110,13 +137,19 @@ Like tip-of-the-tongue experiences - you know part of a memory and want to compl
 Demonstrates retry logic, graceful degradation, and interpreting Engram's educational error format.
 
 **Key Concepts**:
+
 - Retriable vs non-retriable errors
+
 - Progressive confidence thresholds
+
 - Educational error messages
 
 **When to use**:
+
 - Production resilience
+
 - Debugging failed operations
+
 - Understanding error semantics
 
 **Languages**: Rust | Python | TypeScript | Go | Java
@@ -130,13 +163,19 @@ Demonstrates retry logic, graceful degradation, and interpreting Engram's educat
 **Learning Goal**: Secure API access with JWT and API keys
 
 **Key Concepts**:
+
 - API key generation
+
 - JWT token authentication
+
 - Multi-tenant memory space isolation
 
 **When to use**:
+
 - Production deployments
+
 - Multi-tenant applications
+
 - Secure API access
 
 **Languages**: Rust | Python | TypeScript | Go | Java
@@ -150,14 +189,21 @@ Demonstrates retry logic, graceful degradation, and interpreting Engram's educat
 **Learning Goal**: Achieve maximum throughput and minimum latency
 
 **Key Concepts**:
+
 - Connection pooling
+
 - Batch operations
+
 - Streaming vs unary calls
+
 - Caching strategies
 
 **When to use**:
+
 - High-throughput requirements (>100 req/sec)
+
 - Latency-sensitive applications
+
 - Optimizing production deployments
 
 **Languages**: Rust | Python | TypeScript | Go | Java
@@ -171,13 +217,19 @@ Demonstrates retry logic, graceful degradation, and interpreting Engram's educat
 **Learning Goal**: Isolate memories across tenants with memory spaces
 
 **Key Concepts**:
+
 - Memory space creation
+
 - Tenant-scoped authentication
+
 - Cross-space queries (admin only)
 
 **When to use**:
+
 - SaaS applications
+
 - Multi-customer deployments
+
 - Isolated data requirements
 
 **Languages**: Rust | Python | TypeScript | Go | Java
@@ -191,13 +243,19 @@ Demonstrates retry logic, graceful degradation, and interpreting Engram's educat
 **Learning Goal**: Efficiently process large volumes of memories
 
 **Key Concepts**:
+
 - Streaming remember for bulk uploads
+
 - Pagination for large recalls
+
 - Rate limiting strategies
 
 **When to use**:
+
 - Data imports
+
 - Migrations
+
 - Bulk processing
 
 **Languages**: Rust | Python | TypeScript | Go | Java
@@ -211,13 +269,19 @@ Demonstrates retry logic, graceful degradation, and interpreting Engram's educat
 **Learning Goal**: Migrate from traditional databases to Engram
 
 **Key Concepts**:
+
 - Neo4j graph migration
+
 - PostgreSQL table migration
+
 - Generating embeddings from existing data
 
 **When to use**:
+
 - Moving from Neo4j
+
 - Upgrading from SQL databases
+
 - Hybrid deployments
 
 **Languages**: Rust | Python | TypeScript | Go | Java
@@ -233,12 +297,16 @@ Demonstrates retry logic, graceful degradation, and interpreting Engram's educat
 Each language has specific requirements. See individual example READMEs for setup.
 
 **Common requirements**:
+
 - Engram server running on `localhost:50051` (gRPC) or `localhost:8080` (REST)
+
 - Embedding model for production examples (test examples use simplified embeddings)
 
 **Quick server start**:
+
 ```bash
 engram start --grpc-port 50051 --http-port 8080
+
 ```
 
 ### Example Structure
@@ -255,40 +323,51 @@ Each example directory contains:
 ├── java.java              # Java implementation
 ├── expected_output.txt    # What successful run looks like
 └── common_errors.md       # Troubleshooting guide
+
 ```
 
 ### Quick Run Commands
 
 **Python**:
+
 ```bash
 cd 01-basic-remember-recall
 pip install -r requirements.txt
 python python.py
+
 ```
 
 **Rust**:
+
 ```bash
 cd 01-basic-remember-recall
 cargo run --release
+
 ```
 
 **TypeScript**:
+
 ```bash
 cd 01-basic-remember-recall
 npm install
 npx ts-node typescript.ts
+
 ```
 
 **Go**:
+
 ```bash
 cd 01-basic-remember-recall
 go run go.go
+
 ```
 
 **Java**:
+
 ```bash
 cd 01-basic-remember-recall
 mvn compile exec:java
+
 ```
 
 ## Learning Path
@@ -296,19 +375,25 @@ mvn compile exec:java
 ### For Beginners
 
 1. Start with [01-basic-remember-recall](./01-basic-remember-recall/) - understand core concepts
+
 2. Try [02-episodic-memory](./02-episodic-memory/) - learn contextual encoding
+
 3. Explore [05-error-handling](./05-error-handling/) - build resilience
 
 ### For Production Deployments
 
 1. Review [06-authentication](./06-authentication/) - secure your API
+
 2. Study [07-performance-optimization](./07-performance-optimization/) - maximize throughput
+
 3. Implement [08-multi-tenant](./08-multi-tenant/) - isolate customer data
 
 ### For Advanced Users
 
 1. Master [03-streaming-operations](./03-streaming-operations/) - bidirectional communication
+
 2. Deep-dive [04-pattern-completion](./04-pattern-completion/) - cognitive pattern matching
+
 3. Execute [10-migration-examples](./10-migration-examples/) - migrate existing systems
 
 ## Cognitive Patterns Reference
@@ -350,6 +435,7 @@ embedding = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]  # 8-dim
 from sentence_transformers import SentenceTransformer
 model = SentenceTransformer('all-mpnet-base-v2')
 embedding = model.encode("text here")  # 768-dim
+
 ```
 
 ### Confidence is Always Required
@@ -366,6 +452,7 @@ memory = Memory(
     embedding=[...],
     confidence=Confidence(value=0.8, reasoning="Source: Wikipedia")
 )
+
 ```
 
 ### REST vs gRPC Performance
@@ -376,6 +463,7 @@ For <10 requests/sec, either works. For >100 requests/sec, use gRPC:
 Single requests: REST is fine (simpler)
 Batch operations: gRPC 4-5x faster
 Streaming: gRPC only option
+
 ```
 
 ## IDE Integration
@@ -389,6 +477,7 @@ Each example directory includes `.vscode/launch.json` for one-click debugging:
 code 01-basic-remember-recall
 
 # Press F5 to run with debugging
+
 ```
 
 ### IntelliJ IDEA
@@ -404,10 +493,15 @@ Examples are optimized for AI-assisted learning with clear comments and cognitiv
 Want to add an example? Follow this template:
 
 1. **Choose an operation** not yet covered
+
 2. **Write README** explaining cognitive pattern
+
 3. **Implement in 5 languages** (Rust, Python, TypeScript, Go, Java)
+
 4. **Include expected output** and common errors
+
 5. **Test with fresh environment** (15-minute rule)
+
 6. **Submit PR** with runnable examples
 
 See [Contributing Guide](../../../CONTRIBUTING.md) for details.
@@ -415,26 +509,39 @@ See [Contributing Guide](../../../CONTRIBUTING.md) for details.
 ## Support
 
 - **Documentation**: [REST API](/reference/rest-api.md) | [gRPC API](/reference/grpc-api.md)
+
 - **Errors**: [Error Codes Catalog](/reference/error-codes.md)
+
 - **Tutorial**: [15-Minute Quickstart](/tutorials/api-quickstart.md)
+
 - **Operations**: [Production Guide](/operations/)
 
 ## Example Quality Standards
 
 Every example in this directory:
+
 - ✅ Runs successfully on clean Engram installation
+
 - ✅ Completes within stated time estimate
+
 - ✅ Includes educational comments explaining cognitive concepts
+
 - ✅ Handles errors gracefully with remediation hints
+
 - ✅ Uses idiomatic patterns for each language
+
 - ✅ Demonstrates one clear concept (not kitchen sink)
+
 - ✅ Includes expected output for verification
 
 ## Next Steps
 
 1. **Start learning**: Pick [01-basic-remember-recall](./01-basic-remember-recall/)
+
 2. **Explore patterns**: Browse by use case, not language
+
 3. **Build production**: Study [07-performance-optimization](./07-performance-optimization/)
+
 4. **Get help**: Check [Error Codes](/reference/error-codes.md) if stuck
 
 **Time investment**: 2-4 hours to try all examples

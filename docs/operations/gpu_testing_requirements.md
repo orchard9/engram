@@ -24,12 +24,15 @@ fn test_gpu_feature() {
     }
     // Test code never executes in CI
 }
+
 ```
 
 **Reality**: Standard CI runners do not have CUDA-capable GPUs. The `cuda_available` flag is never set, and `cuda::is_available()` returns false. This means:
 
 - GPU tests compile but do not execute on GPU hardware in CI
+
 - Test passing in CI does not validate GPU functionality
+
 - Manual validation on GPU hardware is required for production readiness
 
 ### CI vs. GPU Hardware Testing
@@ -47,19 +50,29 @@ fn test_gpu_feature() {
 ### Minimum Requirements
 
 For validation testing:
+
 - **GPU**: NVIDIA Tesla T4, A10, or better
+
 - **CUDA Compute Capability**: 7.0+ (Volta architecture)
+
 - **VRAM**: 16GB minimum
+
 - **CUDA Toolkit**: 11.0 or later
+
 - **Driver Version**: 450.80.02 or later
 
 ### Production Recommendations
 
 For production deployment:
+
 - **GPU**: NVIDIA A100, H100, or L40S
+
 - **CUDA Compute Capability**: 8.0+ (Ampere/Hopper)
+
 - **VRAM**: 40GB or more for multi-tenant workloads
+
 - **CUDA Toolkit**: 12.0 or later
+
 - **Driver Version**: 525.60.13 or later
 
 ### Cloud GPU Instance Options
@@ -77,17 +90,20 @@ For production deployment:
 ### Prerequisites
 
 1. **Verify CUDA Installation**:
+
    ```bash
    nvidia-smi
    nvcc --version
    ```
 
 2. **Build with GPU Support**:
+
    ```bash
    cargo build --release --features gpu
    ```
 
 3. **Verify GPU Detection**:
+
    ```bash
    cargo test --features gpu test_cuda_device_detection -- --nocapture
    ```
@@ -106,11 +122,15 @@ cargo test --features gpu gpu_acceleration_test -- --nocapture
 cargo test --features gpu gpu_differential_cosine -- --nocapture
 cargo test --features gpu gpu_differential_hnsw -- --nocapture
 cargo test --features gpu gpu_differential_spreading -- --nocapture
+
 ```
 
 **Acceptance Criteria**:
+
 - All differential tests pass with <1e-6 divergence
+
 - GPU memory allocations succeed
+
 - No CUDA errors in logs
 
 #### Phase 2: Integration Tests (15-20 minutes)
@@ -119,12 +139,17 @@ Execute main GPU integration test suite:
 
 ```bash
 cargo test --features gpu gpu_integration -- --nocapture
+
 ```
 
 **Acceptance Criteria**:
+
 - All 12 integration tests pass
+
 - Multi-tenant isolation verified
+
 - GPU memory pressure handled gracefully
+
 - CPU fallback works correctly
 
 #### Phase 3: Sustained Load Test (60+ minutes)
@@ -133,12 +158,17 @@ Execute long-running throughput validation:
 
 ```bash
 cargo test --features gpu test_sustained_throughput -- --ignored --nocapture
+
 ```
 
 **Acceptance Criteria**:
+
 - Throughput ≥10,000 ops/sec sustained
+
 - Performance degradation <10% over duration
+
 - No memory leaks detected
+
 - GPU temperature remains stable
 
 #### Phase 4: Production Workload Validation (30-60 minutes)
@@ -149,12 +179,17 @@ Execute realistic workload tests:
 cargo test --features gpu test_production_workload -- --nocapture
 cargo test --features gpu test_multi_tenant_security -- --nocapture
 cargo test --features gpu test_confidence_calibration -- --nocapture
+
 ```
 
 **Acceptance Criteria**:
+
 - Power-law degree distribution handled efficiently
+
 - GPU speedup >3x on realistic graphs
+
 - Multi-tenant security boundaries enforced
+
 - Confidence scores remain calibrated
 
 ### Logging and Diagnostics
@@ -164,11 +199,14 @@ After each test phase:
 ```bash
 ./scripts/engram_diagnostics.sh
 cat tmp/engram_diagnostics.log
+
 ```
 
 Monitor GPU-specific metrics:
+
 ```bash
 nvidia-smi dmon -s pucvmet -i 0 -c 60
+
 ```
 
 ## Test Coverage Requirements
@@ -264,16 +302,27 @@ These tests MUST pass on GPU hardware before production:
 Before deploying GPU-accelerated Engram to production:
 
 - [ ] Execute Phase 1 foundation tests on target GPU hardware
+
 - [ ] Execute Phase 2 integration tests successfully
+
 - [ ] Run Phase 3 sustained load test for full 60 minutes
+
 - [ ] Execute Phase 4 production workload validation
+
 - [ ] Run 24-hour soak test in staging environment
+
 - [ ] Validate multi-tenant security boundaries
+
 - [ ] Verify confidence score calibration
+
 - [ ] Document GPU temperature and throttling behavior
+
 - [ ] Establish baseline performance SLIs
+
 - [ ] Configure GPU monitoring and alerting
+
 - [ ] Document fallback behavior and CPU requirements
+
 - [ ] Create GPU operations runbook
 
 ## Operational Monitoring
@@ -283,10 +332,15 @@ Before deploying GPU-accelerated Engram to production:
 Monitor these metrics in production:
 
 - **GPU Utilization**: Target 60-80% for cost efficiency
+
 - **GPU Memory Usage**: Alert at 85% to prevent OOM
+
 - **GPU Temperature**: Alert at 80°C, throttle at 83°C
+
 - **CUDA Errors**: Alert on any error, failover to CPU
+
 - **Fallback Rate**: Alert if >5% of operations fall back to CPU
+
 - **Throughput**: Alert if <10K ops/sec sustained
 
 ### Diagnostic Commands
@@ -303,13 +357,17 @@ dmesg | grep -i cuda
 
 # Engram GPU diagnostics
 ./scripts/engram_diagnostics.sh
+
 ```
 
 ## References
 
 - [CUDA Programming Guide](https://docs.nvidia.com/cuda/cuda-c-programming-guide/)
+
 - [NVIDIA GPU Architecture Documentation](https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/)
+
 - [Engram GPU Acceleration Implementation](../explanation/gpu_acceleration.md)
+
 - [Engram Deployment Guide](./deployment.md)
 
 ## Document History

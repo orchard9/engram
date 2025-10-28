@@ -1,0 +1,15 @@
+[Unit]
+Description=Engram Backup Timer
+Documentation=https://github.com/orchard9/engram
+Requires=engram-backup.service
+
+[Timer]
+# Run every 4 hours for RPO of 4 hours
+OnCalendar=*-*-* 00,04,08,12,16,20:00:00
+# Run on boot if last run was missed
+Persistent=true
+# Randomize start time by up to 15 minutes to avoid load spikes
+RandomizedDelaySec=900
+
+[Install]
+WantedBy=timers.target

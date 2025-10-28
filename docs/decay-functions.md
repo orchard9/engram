@@ -17,19 +17,25 @@ Complete mathematical specifications and usage guidance for all temporal decay f
 
 ```
 R(t) = e^(-t/τ)
+
 ```
 
 Where:
 
 - `R(t)` = retention at time t (0.0 to 1.0)
+
 - `t` = elapsed time in hours
+
 - `τ` (tau) = time constant in hours
 
 ### When to Use
 
 - Short-term episodic memories (hours to days)
+
 - Events, conversations, temporary data
+
 - Fast forgetting expected (e.g., chat logs)
+
 - Hippocampal-style memory systems
 
 ### Configuration
@@ -41,6 +47,7 @@ let config = DecayConfigBuilder::new()
     .exponential(1.96)  // τ = 1.96 hours (Ebbinghaus replication)
     .enabled(true)
     .build();
+
 ```
 
 ### Parameters
@@ -65,8 +72,11 @@ Determines how quickly memories decay:
 ### Mathematical Properties
 
 - **Half-life**: `t_half = τ * ln(2) ≈ 0.693 * τ`
+
 - **Derivative**: `dR/dt = -(1/τ) * e^(-t/τ)`
+
 - **Always decreasing**: Monotonic decline, no recovery
+
 - **Asymptotic**: Approaches 0 as t → ∞, never reaches it
 
 ### Psychological Basis
@@ -74,18 +84,23 @@ Determines how quickly memories decay:
 **Ebbinghaus (1885)**:
 
 - Original forgetting curve from nonsense syllable experiments
+
 - Found exponential drop: 58% at 20 min, 44% at 1 hr, 28% at 9 hrs
 
 **Murre & Dros (2015)**:
 
 - Modern replication with 200+ participants
+
 - Confirmed exponential pattern: τ = 1.96 hours ± 0.3
+
 - Best fit for initial hours to days
 
 ### Performance
 
 - **Computation time**: ~40-60μs
+
 - **Operations**: One `exp()` call, one multiplication
+
 - **Memory**: Zero extra storage
 
 ---
@@ -96,19 +111,25 @@ Determines how quickly memories decay:
 
 ```
 R(t) = (1 + t)^(-β)
+
 ```
 
 Where:
 
 - `R(t)` = retention at time t (0.0 to 1.0)
+
 - `t` = elapsed time in hours
+
 - `β` (beta) = decay exponent
 
 ### When to Use
 
 - Long-term semantic knowledge (weeks to years)
+
 - Facts, skills, procedures
+
 - Slow forgetting expected (e.g., learned languages)
+
 - Neocortical-style memory systems
 
 ### Configuration
@@ -117,6 +138,7 @@ Where:
 let config = DecayConfigBuilder::new()
     .power_law(0.18)  // β = 0.18 (Bahrick permastore)
     .build();
+
 ```
 
 ### Parameters
@@ -148,8 +170,11 @@ Controls decay speed across all time scales:
 ### Mathematical Properties
 
 - **No half-life**: Decay rate changes over time (scale-free)
+
 - **Derivative**: `dR/dt = -β * (1 + t)^(-β-1)`
+
 - **Long tail**: Slower decline at long intervals than exponential
+
 - **Scale-free**: Looks similar at different time scales
 
 ### Psychological Basis
@@ -157,25 +182,33 @@ Controls decay speed across all time scales:
 **Wickelgren (1974)**:
 
 - Proposed power-law as alternative to exponential
+
 - Better fit for retention intervals > 1 day
+
 - Mathematical framework for long-term forgetting
 
 **Bahrick (1984)**:
 
 - 50-year longitudinal study of Spanish language
+
 - Found power-law with β ≈ 0.15-0.20
+
 - Coined term "permastore" for very slow decay
 
 **Wixted & Ebbesen (1991)**:
 
 - Comprehensive comparison of exponential vs power-law
+
 - Power-law superior for retention intervals > 24 hours
+
 - Exponential better for < 24 hours
 
 ### Performance
 
 - **Computation time**: ~70-90μs
+
 - **Operations**: One `pow()` call (slightly slower than `exp()`)
+
 - **Memory**: Zero extra storage
 
 ---
@@ -193,13 +226,17 @@ R(t) = {
 where:
   hippocampal(t) = e^(-t/τ_fast)      // Exponential, fast decay
   neocortical(t) = e^(-t/τ_slow)      // Exponential, slow decay
+
 ```
 
 ### When to Use
 
 - **Recommended default** for most applications
+
 - Spaced repetition systems (e.g., Anki, SuperMemo)
+
 - Adaptive learning environments
+
 - Systems where retrieval strengthens memories
 
 ### Configuration
@@ -211,6 +248,7 @@ let config = DecayConfigBuilder::new()
 
 // Or with the default:
 let config = DecayConfig::default();  // Uses two-component with threshold=3
+
 ```
 
 ### Parameters
@@ -248,6 +286,7 @@ let retention_1 = e^(-6.0 / 1.0) = 0.0025  // 6 hours, τ=1h
 // Uses slow neocortical decay
 let retention_2 = e^(-6.0 / 10.0) = 0.549  // 6 hours, τ=10h
 // Result: 54.9% retention after 6 hours (218x more!)
+
 ```
 
 ### Psychological Basis
@@ -255,26 +294,35 @@ let retention_2 = e^(-6.0 / 10.0) = 0.549  // 6 hours, τ=10h
 **McClelland, McNaughton & O'Reilly (1995)**:
 
 - Complementary Learning Systems (CLS) theory
+
 - Hippocampus: fast learning, pattern separation
+
 - Neocortex: slow learning, schema extraction
+
 - Systems consolidation: gradual transfer over time
 
 **Squire & Alvarez (1995)**:
 
 - Retrograde amnesia gradients support dual systems
+
 - Recent memories (hippocampal) more vulnerable
+
 - Remote memories (neocortical) more resilient
 
 **Roediger & Karpicke (2006)**:
 
 - Testing effect: retrieval strengthens memories
+
 - Repeated testing → better long-term retention
+
 - Models consolidation through practice
 
 ### Performance
 
 - **Computation time**: ~50-70μs
+
 - **Operations**: One comparison, one `exp()` call
+
 - **Memory**: 8 bytes (access_count)
 
 ---
@@ -288,13 +336,17 @@ R(t) = {
   e^(-t/τ)        if t < transition_point
   (1 + t)^(-β)    if t >= transition_point
 }
+
 ```
 
 ### When to Use
 
 - Best empirical fit to Ebbinghaus (1885) original data
+
 - When you want both exponential initial drop and power-law tail
+
 - Academic/research applications requiring mathematical accuracy
+
 - Modeling human memory across full time range (minutes to years)
 
 ### Configuration
@@ -307,6 +359,7 @@ let config = DecayConfigBuilder::new()
         86400,    // Transition at 24 hours
     )
     .build();
+
 ```
 
 ### Parameters
@@ -316,6 +369,7 @@ let config = DecayConfigBuilder::new()
 Controls exponential decay before transition:
 
 - **Typical range**: 0.5 - 2.0 hours
+
 - **Default**: 0.8 hours (matches Ebbinghaus initial drop)
 
 #### long_term_beta (β)
@@ -323,6 +377,7 @@ Controls exponential decay before transition:
 Controls power-law decay after transition:
 
 - **Typical range**: 0.15 - 0.35
+
 - **Default**: 0.25 (balanced long-term forgetting)
 
 #### transition_point (seconds)
@@ -330,7 +385,9 @@ Controls power-law decay after transition:
 When to switch from exponential to power-law:
 
 - **Typical values**: 3600 (1h), 86400 (24h), 604800 (1 week)
+
 - **Default**: 86400 seconds (24 hours)
+
 - **Rationale**: Ebbinghaus data shows inflection around 24h
 
 ### Behavior Example
@@ -344,6 +401,7 @@ let retention_long = (1 + 48)^(-0.25) = 0.461  // 46.1% retention
 
 // Note: Power-law gives HIGHER retention at 48h than exponential at 2h!
 // This is the hybrid model's key advantage: better long-term retention
+
 ```
 
 ### Psychological Basis
@@ -351,25 +409,33 @@ let retention_long = (1 + 48)^(-0.25) = 0.461  // 46.1% retention
 **Ebbinghaus (1885)**:
 
 - Original data shows two regimes
+
 - Fast initial drop (first hours)
+
 - Slower long-term decline (days to weeks)
 
 **Rubin & Wenzel (1996)**:
 
 - Multi-process forgetting theory
+
 - Different mechanisms at different time scales
+
 - Hybrid model captures both processes
 
 **Wixted (2004)**:
 
 - Reviewed 100+ years of forgetting curve data
+
 - Concluded: exponential short-term, power-law long-term
+
 - Transition typically 1-3 days post-encoding
 
 ### Performance
 
 - **Computation time**: ~60-80μs
+
 - **Operations**: One comparison, one `exp()` or `pow()` call
+
 - **Memory**: Zero extra storage
 
 ---
@@ -415,6 +481,7 @@ Do you need temporal decay?
     │
     └─ Unsure / general purpose
         └─ Use Two-Component (recommended default)
+
 ```
 
 ### Quick Recommendations
@@ -463,5 +530,7 @@ All functions validated to <5% error against empirical data:
 ## See Also
 
 - [Temporal Dynamics Architecture](temporal-dynamics.md) - High-level design
+
 - [Configuration Tutorial](tutorials/temporal-configuration.md) - Usage examples
+
 - [Module README](../engram-core/src/decay/README.md) - Code organization

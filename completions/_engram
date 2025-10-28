@@ -1,0 +1,2124 @@
+#compdef engram
+
+autoload -U is-at-least
+
+_engram() {
+    typeset -A opt_args
+    typeset -a _arguments_options
+    local ret=1
+
+    if is-at-least 5.2; then
+        _arguments_options=(-s -S -C)
+    else
+        _arguments_options=(-s -C)
+    fi
+
+    local context curcontext="$curcontext" state line
+    _arguments "${_arguments_options[@]}" : \
+'-l+[Set the log level]:LOG_LEVEL:_default' \
+'--log-level=[Set the log level]:LOG_LEVEL:_default' \
+'-h[Print help]' \
+'--help[Print help]' \
+'-V[Print version]' \
+'--version[Print version]' \
+":: :_engram_commands" \
+"*::: :->engram-cli" \
+&& ret=0
+    case $state in
+    (engram-cli)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:engram-command-$line[1]:"
+        case $line[1] in
+            (start)
+_arguments "${_arguments_options[@]}" : \
+'-p+[Server port (automatically finds free port if default occupied)]:PORT:_default' \
+'--port=[Server port (automatically finds free port if default occupied)]:PORT:_default' \
+'-g+[gRPC server port (automatically finds free port if default occupied)]:GRPC_PORT:_default' \
+'--grpc-port=[gRPC server port (automatically finds free port if default occupied)]:GRPC_PORT:_default' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(stop)
+_arguments "${_arguments_options[@]}" : \
+'--force[Force shutdown without graceful cleanup]' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(status)
+_arguments "${_arguments_options[@]}" : \
+'--space=[Memory space to query (overrides ENGRAM_MEMORY_SPACE)]:SPACE:_default' \
+'--json[Output in JSON format]' \
+'--watch[Watch status continuously]' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(memory)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+":: :_engram__memory_commands" \
+"*::: :->memory" \
+&& ret=0
+
+    case $state in
+    (memory)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:engram-memory-command-$line[1]:"
+        case $line[1] in
+            (create)
+_arguments "${_arguments_options[@]}" : \
+'-c+[Confidence level (0.0 to 1.0)]:CONFIDENCE:_default' \
+'--confidence=[Confidence level (0.0 to 1.0)]:CONFIDENCE:_default' \
+'--space=[Memory space to store in (overrides ENGRAM_MEMORY_SPACE)]:SPACE:_default' \
+'-h[Print help]' \
+'--help[Print help]' \
+':content -- Memory content:_default' \
+&& ret=0
+;;
+(get)
+_arguments "${_arguments_options[@]}" : \
+'--space=[Memory space to query (overrides ENGRAM_MEMORY_SPACE)]:SPACE:_default' \
+'-h[Print help]' \
+'--help[Print help]' \
+':id -- Memory ID:_default' \
+&& ret=0
+;;
+(search)
+_arguments "${_arguments_options[@]}" : \
+'-l+[Maximum number of results]:LIMIT:_default' \
+'--limit=[Maximum number of results]:LIMIT:_default' \
+'--space=[Memory space to query (overrides ENGRAM_MEMORY_SPACE)]:SPACE:_default' \
+'-h[Print help]' \
+'--help[Print help]' \
+':query -- Search query:_default' \
+&& ret=0
+;;
+(list)
+_arguments "${_arguments_options[@]}" : \
+'-l+[Maximum number of results]:LIMIT:_default' \
+'--limit=[Maximum number of results]:LIMIT:_default' \
+'-o+[Skip number of results]:OFFSET:_default' \
+'--offset=[Skip number of results]:OFFSET:_default' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(delete)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+':id -- Memory ID:_default' \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+":: :_engram__memory__help_commands" \
+"*::: :->help" \
+&& ret=0
+
+    case $state in
+    (help)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:engram-memory-help-command-$line[1]:"
+        case $line[1] in
+            (create)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(get)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(search)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(list)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(delete)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+        esac
+    ;;
+esac
+;;
+(space)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+":: :_engram__space_commands" \
+"*::: :->space" \
+&& ret=0
+
+    case $state in
+    (space)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:engram-space-command-$line[1]:"
+        case $line[1] in
+            (list)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(create)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+':id -- Identifier for the memory space:_default' \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+":: :_engram__space__help_commands" \
+"*::: :->help" \
+&& ret=0
+
+    case $state in
+    (help)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:engram-space-help-command-$line[1]:"
+        case $line[1] in
+            (list)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(create)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+        esac
+    ;;
+esac
+;;
+(config)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+":: :_engram__config_commands" \
+"*::: :->config" \
+&& ret=0
+
+    case $state in
+    (config)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:engram-config-command-$line[1]:"
+        case $line[1] in
+            (get)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+':key -- Configuration key:_default' \
+&& ret=0
+;;
+(set)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+':key -- Configuration key:_default' \
+':value -- Configuration value:_default' \
+&& ret=0
+;;
+(list)
+_arguments "${_arguments_options[@]}" : \
+'--section=[Show only specified section]:SECTION:_default' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(path)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+":: :_engram__config__help_commands" \
+"*::: :->help" \
+&& ret=0
+
+    case $state in
+    (help)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:engram-config-help-command-$line[1]:"
+        case $line[1] in
+            (get)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(set)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(list)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(path)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+        esac
+    ;;
+esac
+;;
+(shell)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(benchmark)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+":: :_engram__benchmark_commands" \
+"*::: :->benchmark" \
+&& ret=0
+
+    case $state in
+    (benchmark)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:engram-benchmark-command-$line[1]:"
+        case $line[1] in
+            (latency)
+_arguments "${_arguments_options[@]}" : \
+'-i+[Number of iterations]:ITERATIONS:_default' \
+'--iterations=[Number of iterations]:ITERATIONS:_default' \
+'-w+[Warmup iterations]:WARMUP:_default' \
+'--warmup=[Warmup iterations]:WARMUP:_default' \
+'-h[Print help]' \
+'--help[Print help]' \
+':operation -- Operation to benchmark\: create, get, search:_default' \
+&& ret=0
+;;
+(throughput)
+_arguments "${_arguments_options[@]}" : \
+'-d+[Duration to run benchmark (seconds)]:DURATION:_default' \
+'--duration=[Duration to run benchmark (seconds)]:DURATION:_default' \
+'-c+[Number of concurrent clients]:CLIENTS:_default' \
+'--clients=[Number of concurrent clients]:CLIENTS:_default' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(spreading)
+_arguments "${_arguments_options[@]}" : \
+'-n+[Number of nodes to activate]:NODES:_default' \
+'--nodes=[Number of nodes to activate]:NODES:_default' \
+'-d+[Activation spread depth]:DEPTH:_default' \
+'--depth=[Activation spread depth]:DEPTH:_default' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(consolidation)
+_arguments "${_arguments_options[@]}" : \
+'-l[Simulate consolidation load]' \
+'--load-test[Simulate consolidation load]' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+":: :_engram__benchmark__help_commands" \
+"*::: :->help" \
+&& ret=0
+
+    case $state in
+    (help)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:engram-benchmark-help-command-$line[1]:"
+        case $line[1] in
+            (latency)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(throughput)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(spreading)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(consolidation)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+        esac
+    ;;
+esac
+;;
+(docs)
+_arguments "${_arguments_options[@]}" : \
+'--export=[Export documentation to file]:EXPORT:_default' \
+'--list[Show all available sections]' \
+'-h[Print help]' \
+'--help[Print help]' \
+'::section -- Documentation section to show Available\: emergency, common, advanced, troubleshooting, incident, reference:_default' \
+&& ret=0
+;;
+(query)
+_arguments "${_arguments_options[@]}" : \
+'-l+[Maximum number of results]:LIMIT:_default' \
+'--limit=[Maximum number of results]:LIMIT:_default' \
+'-f+[Output format (json, table, compact)]:FORMAT:_default' \
+'--format=[Output format (json, table, compact)]:FORMAT:_default' \
+'--space=[Memory space to query (overrides ENGRAM_MEMORY_SPACE)]:SPACE:_default' \
+'-h[Print help]' \
+'--help[Print help]' \
+':query -- Query text:_default' \
+&& ret=0
+;;
+(backup)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+":: :_engram__backup_commands" \
+"*::: :->backup" \
+&& ret=0
+
+    case $state in
+    (backup)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:engram-backup-command-$line[1]:"
+        case $line[1] in
+            (create)
+_arguments "${_arguments_options[@]}" : \
+'-t+[Backup type\: full or incremental]:BACKUP_TYPE:_default' \
+'--backup-type=[Backup type\: full or incremental]:BACKUP_TYPE:_default' \
+'-s+[Memory space to backup (or "all")]:SPACE:_default' \
+'--space=[Memory space to backup (or "all")]:SPACE:_default' \
+'-o+[Output directory for backup]:OUTPUT:_files' \
+'--output=[Output directory for backup]:OUTPUT:_files' \
+'-c+[Compression level (1-9, default\: 3)]:COMPRESSION:_default' \
+'--compression=[Compression level (1-9, default\: 3)]:COMPRESSION:_default' \
+'--progress[Show progress bar]' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(list)
+_arguments "${_arguments_options[@]}" : \
+'-t+[Filter by backup type]:BACKUP_TYPE:_default' \
+'--backup-type=[Filter by backup type]:BACKUP_TYPE:_default' \
+'-s+[Filter by memory space]:SPACE:_default' \
+'--space=[Filter by memory space]:SPACE:_default' \
+'-f+[Output format]:FORMAT:_default' \
+'--format=[Output format]:FORMAT:_default' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(verify)
+_arguments "${_arguments_options[@]}" : \
+'-l+[Verification level\: L1 (manifest), L2 (checksums), L3 (structure), L4 (full restore test)]:LEVEL:_default' \
+'--level=[Verification level\: L1 (manifest), L2 (checksums), L3 (structure), L4 (full restore test)]:LEVEL:_default' \
+'-v[Show detailed output]' \
+'--verbose[Show detailed output]' \
+'-h[Print help]' \
+'--help[Print help]' \
+':backup_file -- Backup file path:_files' \
+&& ret=0
+;;
+(prune)
+_arguments "${_arguments_options[@]}" : \
+'--daily=[Retention\: daily backups to keep]:DAILY:_default' \
+'--weekly=[Retention\: weekly backups to keep]:WEEKLY:_default' \
+'--monthly=[Retention\: monthly backups to keep]:MONTHLY:_default' \
+'--dry-run[Dry run (show what would be deleted without deleting)]' \
+'-y[Confirm deletion without prompt]' \
+'--yes[Confirm deletion without prompt]' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+":: :_engram__backup__help_commands" \
+"*::: :->help" \
+&& ret=0
+
+    case $state in
+    (help)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:engram-backup-help-command-$line[1]:"
+        case $line[1] in
+            (create)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(list)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(verify)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(prune)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+        esac
+    ;;
+esac
+;;
+(restore)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+":: :_engram__restore_commands" \
+"*::: :->restore" \
+&& ret=0
+
+    case $state in
+    (restore)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:engram-restore-command-$line[1]:"
+        case $line[1] in
+            (full)
+_arguments "${_arguments_options[@]}" : \
+'-t+[Target directory for restore]:TARGET:_files' \
+'--target=[Target directory for restore]:TARGET:_files' \
+'--progress[Show progress bar]' \
+'-h[Print help]' \
+'--help[Print help]' \
+':backup_file -- Backup file path:_files' \
+&& ret=0
+;;
+(incremental)
+_arguments "${_arguments_options[@]}" : \
+'--progress[Show progress bar]' \
+'-h[Print help]' \
+'--help[Print help]' \
+':backup_file -- Backup file path:_files' \
+&& ret=0
+;;
+(pitr)
+_arguments "${_arguments_options[@]}" : \
+'-t+[Target directory for restore]:TARGET:_files' \
+'--target=[Target directory for restore]:TARGET:_files' \
+'-h[Print help]' \
+'--help[Print help]' \
+':timestamp -- Timestamp for recovery (YYYY-MM-DD HH\:MM\:SS or YYYYMMDD-HHMMSS):_default' \
+&& ret=0
+;;
+(verify-only)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+':backup_file -- Backup file path:_files' \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+":: :_engram__restore__help_commands" \
+"*::: :->help" \
+&& ret=0
+
+    case $state in
+    (help)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:engram-restore-help-command-$line[1]:"
+        case $line[1] in
+            (full)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(incremental)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(pitr)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(verify-only)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+        esac
+    ;;
+esac
+;;
+(diagnose)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+":: :_engram__diagnose_commands" \
+"*::: :->diagnose" \
+&& ret=0
+
+    case $state in
+    (diagnose)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:engram-diagnose-command-$line[1]:"
+        case $line[1] in
+            (health)
+_arguments "${_arguments_options[@]}" : \
+'-o+[Output file for report]:OUTPUT:_files' \
+'--output=[Output file for report]:OUTPUT:_files' \
+'--strict[Fail with non-zero exit code on warnings]' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(collect)
+_arguments "${_arguments_options[@]}" : \
+'--log-lines=[Include full logs (last N lines)]:LOG_LINES:_default' \
+'--include-dumps[Include memory dumps]' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(analyze-logs)
+_arguments "${_arguments_options[@]}" : \
+'-f+[Log file path (default\: system logs)]:FILE:_files' \
+'--file=[Log file path (default\: system logs)]:FILE:_files' \
+'-w+[Time window\: 1h, 24h, 7d]:WINDOW:_default' \
+'--window=[Time window\: 1h, 24h, 7d]:WINDOW:_default' \
+'-s+[Filter by severity\: ERROR, WARN, INFO]:SEVERITY:_default' \
+'--severity=[Filter by severity\: ERROR, WARN, INFO]:SEVERITY:_default' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(emergency)
+_arguments "${_arguments_options[@]}" : \
+'--auto[Automatic recovery without prompts]' \
+'-h[Print help]' \
+'--help[Print help]' \
+':scenario -- Recovery scenario\: corruption, oom, deadlock, disk-full:_default' \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+":: :_engram__diagnose__help_commands" \
+"*::: :->help" \
+&& ret=0
+
+    case $state in
+    (help)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:engram-diagnose-help-command-$line[1]:"
+        case $line[1] in
+            (health)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(collect)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(analyze-logs)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(emergency)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+        esac
+    ;;
+esac
+;;
+(migrate)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+":: :_engram__migrate_commands" \
+"*::: :->migrate" \
+&& ret=0
+
+    case $state in
+    (migrate)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:engram-migrate-command-$line[1]:"
+        case $line[1] in
+            (neo4j)
+_arguments "${_arguments_options[@]}" : \
+'-t+[Target memory space]:TARGET_SPACE:_default' \
+'--target-space=[Target memory space]:TARGET_SPACE:_default' \
+'-b+[Batch size for migration]:BATCH_SIZE:_default' \
+'--batch-size=[Batch size for migration]:BATCH_SIZE:_default' \
+'-h[Print help]' \
+'--help[Print help]' \
+':connection_uri -- Connection URI:_default' \
+&& ret=0
+;;
+(postgresql)
+_arguments "${_arguments_options[@]}" : \
+'-t+[Target memory space]:TARGET_SPACE:_default' \
+'--target-space=[Target memory space]:TARGET_SPACE:_default' \
+'-m+[Table mappings configuration file]:MAPPINGS:_files' \
+'--mappings=[Table mappings configuration file]:MAPPINGS:_files' \
+'-h[Print help]' \
+'--help[Print help]' \
+':connection_uri -- Connection URI:_default' \
+&& ret=0
+;;
+(redis)
+_arguments "${_arguments_options[@]}" : \
+'-t+[Target memory space]:TARGET_SPACE:_default' \
+'--target-space=[Target memory space]:TARGET_SPACE:_default' \
+'-k+[Key pattern to migrate]:KEY_PATTERN:_default' \
+'--key-pattern=[Key pattern to migrate]:KEY_PATTERN:_default' \
+'-h[Print help]' \
+'--help[Print help]' \
+':connection_uri -- Connection URI:_default' \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+":: :_engram__migrate__help_commands" \
+"*::: :->help" \
+&& ret=0
+
+    case $state in
+    (help)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:engram-migrate-help-command-$line[1]:"
+        case $line[1] in
+            (neo4j)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(postgresql)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(redis)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+        esac
+    ;;
+esac
+;;
+(validate)
+_arguments "${_arguments_options[@]}" : \
+'-h[Print help]' \
+'--help[Print help]' \
+":: :_engram__validate_commands" \
+"*::: :->validate" \
+&& ret=0
+
+    case $state in
+    (validate)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:engram-validate-command-$line[1]:"
+        case $line[1] in
+            (config)
+_arguments "${_arguments_options[@]}" : \
+'-f+[Path to config file]:FILE:_files' \
+'--file=[Path to config file]:FILE:_files' \
+'-d+[Check deployment-specific settings]:DEPLOYMENT:_default' \
+'--deployment=[Check deployment-specific settings]:DEPLOYMENT:_default' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(data)
+_arguments "${_arguments_options[@]}" : \
+'-s+[Memory space to validate]:SPACE:_default' \
+'--space=[Memory space to validate]:SPACE:_default' \
+'--fix[Fix issues automatically]' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(deployment)
+_arguments "${_arguments_options[@]}" : \
+'-e+[Target environment\: dev, staging, production]:ENVIRONMENT:_default' \
+'--environment=[Target environment\: dev, staging, production]:ENVIRONMENT:_default' \
+'-h[Print help]' \
+'--help[Print help]' \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+":: :_engram__validate__help_commands" \
+"*::: :->help" \
+&& ret=0
+
+    case $state in
+    (help)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:engram-validate-help-command-$line[1]:"
+        case $line[1] in
+            (config)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(data)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(deployment)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+        esac
+    ;;
+esac
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+":: :_engram__help_commands" \
+"*::: :->help" \
+&& ret=0
+
+    case $state in
+    (help)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:engram-help-command-$line[1]:"
+        case $line[1] in
+            (start)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(stop)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(status)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(memory)
+_arguments "${_arguments_options[@]}" : \
+":: :_engram__help__memory_commands" \
+"*::: :->memory" \
+&& ret=0
+
+    case $state in
+    (memory)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:engram-help-memory-command-$line[1]:"
+        case $line[1] in
+            (create)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(get)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(search)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(list)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(delete)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+(space)
+_arguments "${_arguments_options[@]}" : \
+":: :_engram__help__space_commands" \
+"*::: :->space" \
+&& ret=0
+
+    case $state in
+    (space)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:engram-help-space-command-$line[1]:"
+        case $line[1] in
+            (list)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(create)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+(config)
+_arguments "${_arguments_options[@]}" : \
+":: :_engram__help__config_commands" \
+"*::: :->config" \
+&& ret=0
+
+    case $state in
+    (config)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:engram-help-config-command-$line[1]:"
+        case $line[1] in
+            (get)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(set)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(list)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(path)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+(shell)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(benchmark)
+_arguments "${_arguments_options[@]}" : \
+":: :_engram__help__benchmark_commands" \
+"*::: :->benchmark" \
+&& ret=0
+
+    case $state in
+    (benchmark)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:engram-help-benchmark-command-$line[1]:"
+        case $line[1] in
+            (latency)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(throughput)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(spreading)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(consolidation)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+(docs)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(query)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(backup)
+_arguments "${_arguments_options[@]}" : \
+":: :_engram__help__backup_commands" \
+"*::: :->backup" \
+&& ret=0
+
+    case $state in
+    (backup)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:engram-help-backup-command-$line[1]:"
+        case $line[1] in
+            (create)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(list)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(verify)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(prune)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+(restore)
+_arguments "${_arguments_options[@]}" : \
+":: :_engram__help__restore_commands" \
+"*::: :->restore" \
+&& ret=0
+
+    case $state in
+    (restore)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:engram-help-restore-command-$line[1]:"
+        case $line[1] in
+            (full)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(incremental)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(pitr)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(verify-only)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+(diagnose)
+_arguments "${_arguments_options[@]}" : \
+":: :_engram__help__diagnose_commands" \
+"*::: :->diagnose" \
+&& ret=0
+
+    case $state in
+    (diagnose)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:engram-help-diagnose-command-$line[1]:"
+        case $line[1] in
+            (health)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(collect)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(analyze-logs)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(emergency)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+(migrate)
+_arguments "${_arguments_options[@]}" : \
+":: :_engram__help__migrate_commands" \
+"*::: :->migrate" \
+&& ret=0
+
+    case $state in
+    (migrate)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:engram-help-migrate-command-$line[1]:"
+        case $line[1] in
+            (neo4j)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(postgresql)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(redis)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+(validate)
+_arguments "${_arguments_options[@]}" : \
+":: :_engram__help__validate_commands" \
+"*::: :->validate" \
+&& ret=0
+
+    case $state in
+    (validate)
+        words=($line[1] "${words[@]}")
+        (( CURRENT += 1 ))
+        curcontext="${curcontext%:*:*}:engram-help-validate-command-$line[1]:"
+        case $line[1] in
+            (config)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(data)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+(deployment)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+(help)
+_arguments "${_arguments_options[@]}" : \
+&& ret=0
+;;
+        esac
+    ;;
+esac
+;;
+        esac
+    ;;
+esac
+}
+
+(( $+functions[_engram_commands] )) ||
+_engram_commands() {
+    local commands; commands=(
+'start:Start the Engram server with automatic configuration' \
+'stop:Stop the Engram server gracefully' \
+'status:Show current status' \
+'memory:Memory operations' \
+'space:Memory space registry operations' \
+'config:Configuration management' \
+'shell:Interactive shell mode' \
+'benchmark:Benchmark server performance' \
+'docs:Show embedded documentation' \
+'query:Query with probabilistic confidence intervals' \
+'backup:Backup operations' \
+'restore:Restore operations' \
+'diagnose:Diagnostic operations' \
+'migrate:Migration operations' \
+'validate:Validation operations' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'engram commands' commands "$@"
+}
+(( $+functions[_engram__backup_commands] )) ||
+_engram__backup_commands() {
+    local commands; commands=(
+'create:Create a new backup' \
+'list:List available backups' \
+'verify:Verify backup integrity' \
+'prune:Prune old backups according to retention policy' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'engram backup commands' commands "$@"
+}
+(( $+functions[_engram__backup__create_commands] )) ||
+_engram__backup__create_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram backup create commands' commands "$@"
+}
+(( $+functions[_engram__backup__help_commands] )) ||
+_engram__backup__help_commands() {
+    local commands; commands=(
+'create:Create a new backup' \
+'list:List available backups' \
+'verify:Verify backup integrity' \
+'prune:Prune old backups according to retention policy' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'engram backup help commands' commands "$@"
+}
+(( $+functions[_engram__backup__help__create_commands] )) ||
+_engram__backup__help__create_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram backup help create commands' commands "$@"
+}
+(( $+functions[_engram__backup__help__help_commands] )) ||
+_engram__backup__help__help_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram backup help help commands' commands "$@"
+}
+(( $+functions[_engram__backup__help__list_commands] )) ||
+_engram__backup__help__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram backup help list commands' commands "$@"
+}
+(( $+functions[_engram__backup__help__prune_commands] )) ||
+_engram__backup__help__prune_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram backup help prune commands' commands "$@"
+}
+(( $+functions[_engram__backup__help__verify_commands] )) ||
+_engram__backup__help__verify_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram backup help verify commands' commands "$@"
+}
+(( $+functions[_engram__backup__list_commands] )) ||
+_engram__backup__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram backup list commands' commands "$@"
+}
+(( $+functions[_engram__backup__prune_commands] )) ||
+_engram__backup__prune_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram backup prune commands' commands "$@"
+}
+(( $+functions[_engram__backup__verify_commands] )) ||
+_engram__backup__verify_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram backup verify commands' commands "$@"
+}
+(( $+functions[_engram__benchmark_commands] )) ||
+_engram__benchmark_commands() {
+    local commands; commands=(
+'latency:Measure operation latency (P50, P95, P99)' \
+'throughput:Measure throughput (operations per second)' \
+'spreading:Benchmark spreading activation performance' \
+'consolidation:Benchmark memory consolidation' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'engram benchmark commands' commands "$@"
+}
+(( $+functions[_engram__benchmark__consolidation_commands] )) ||
+_engram__benchmark__consolidation_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram benchmark consolidation commands' commands "$@"
+}
+(( $+functions[_engram__benchmark__help_commands] )) ||
+_engram__benchmark__help_commands() {
+    local commands; commands=(
+'latency:Measure operation latency (P50, P95, P99)' \
+'throughput:Measure throughput (operations per second)' \
+'spreading:Benchmark spreading activation performance' \
+'consolidation:Benchmark memory consolidation' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'engram benchmark help commands' commands "$@"
+}
+(( $+functions[_engram__benchmark__help__consolidation_commands] )) ||
+_engram__benchmark__help__consolidation_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram benchmark help consolidation commands' commands "$@"
+}
+(( $+functions[_engram__benchmark__help__help_commands] )) ||
+_engram__benchmark__help__help_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram benchmark help help commands' commands "$@"
+}
+(( $+functions[_engram__benchmark__help__latency_commands] )) ||
+_engram__benchmark__help__latency_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram benchmark help latency commands' commands "$@"
+}
+(( $+functions[_engram__benchmark__help__spreading_commands] )) ||
+_engram__benchmark__help__spreading_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram benchmark help spreading commands' commands "$@"
+}
+(( $+functions[_engram__benchmark__help__throughput_commands] )) ||
+_engram__benchmark__help__throughput_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram benchmark help throughput commands' commands "$@"
+}
+(( $+functions[_engram__benchmark__latency_commands] )) ||
+_engram__benchmark__latency_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram benchmark latency commands' commands "$@"
+}
+(( $+functions[_engram__benchmark__spreading_commands] )) ||
+_engram__benchmark__spreading_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram benchmark spreading commands' commands "$@"
+}
+(( $+functions[_engram__benchmark__throughput_commands] )) ||
+_engram__benchmark__throughput_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram benchmark throughput commands' commands "$@"
+}
+(( $+functions[_engram__config_commands] )) ||
+_engram__config_commands() {
+    local commands; commands=(
+'get:Get a configuration value' \
+'set:Set a configuration value' \
+'list:Manage configuration settings' \
+'path:Show configuration file location' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'engram config commands' commands "$@"
+}
+(( $+functions[_engram__config__get_commands] )) ||
+_engram__config__get_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram config get commands' commands "$@"
+}
+(( $+functions[_engram__config__help_commands] )) ||
+_engram__config__help_commands() {
+    local commands; commands=(
+'get:Get a configuration value' \
+'set:Set a configuration value' \
+'list:Manage configuration settings' \
+'path:Show configuration file location' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'engram config help commands' commands "$@"
+}
+(( $+functions[_engram__config__help__get_commands] )) ||
+_engram__config__help__get_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram config help get commands' commands "$@"
+}
+(( $+functions[_engram__config__help__help_commands] )) ||
+_engram__config__help__help_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram config help help commands' commands "$@"
+}
+(( $+functions[_engram__config__help__list_commands] )) ||
+_engram__config__help__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram config help list commands' commands "$@"
+}
+(( $+functions[_engram__config__help__path_commands] )) ||
+_engram__config__help__path_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram config help path commands' commands "$@"
+}
+(( $+functions[_engram__config__help__set_commands] )) ||
+_engram__config__help__set_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram config help set commands' commands "$@"
+}
+(( $+functions[_engram__config__list_commands] )) ||
+_engram__config__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram config list commands' commands "$@"
+}
+(( $+functions[_engram__config__path_commands] )) ||
+_engram__config__path_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram config path commands' commands "$@"
+}
+(( $+functions[_engram__config__set_commands] )) ||
+_engram__config__set_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram config set commands' commands "$@"
+}
+(( $+functions[_engram__diagnose_commands] )) ||
+_engram__diagnose_commands() {
+    local commands; commands=(
+'health:Run comprehensive health check' \
+'collect:Collect debug bundle for support' \
+'analyze-logs:Analyze logs for patterns and errors' \
+'emergency:Emergency recovery procedures' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'engram diagnose commands' commands "$@"
+}
+(( $+functions[_engram__diagnose__analyze-logs_commands] )) ||
+_engram__diagnose__analyze-logs_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram diagnose analyze-logs commands' commands "$@"
+}
+(( $+functions[_engram__diagnose__collect_commands] )) ||
+_engram__diagnose__collect_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram diagnose collect commands' commands "$@"
+}
+(( $+functions[_engram__diagnose__emergency_commands] )) ||
+_engram__diagnose__emergency_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram diagnose emergency commands' commands "$@"
+}
+(( $+functions[_engram__diagnose__health_commands] )) ||
+_engram__diagnose__health_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram diagnose health commands' commands "$@"
+}
+(( $+functions[_engram__diagnose__help_commands] )) ||
+_engram__diagnose__help_commands() {
+    local commands; commands=(
+'health:Run comprehensive health check' \
+'collect:Collect debug bundle for support' \
+'analyze-logs:Analyze logs for patterns and errors' \
+'emergency:Emergency recovery procedures' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'engram diagnose help commands' commands "$@"
+}
+(( $+functions[_engram__diagnose__help__analyze-logs_commands] )) ||
+_engram__diagnose__help__analyze-logs_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram diagnose help analyze-logs commands' commands "$@"
+}
+(( $+functions[_engram__diagnose__help__collect_commands] )) ||
+_engram__diagnose__help__collect_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram diagnose help collect commands' commands "$@"
+}
+(( $+functions[_engram__diagnose__help__emergency_commands] )) ||
+_engram__diagnose__help__emergency_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram diagnose help emergency commands' commands "$@"
+}
+(( $+functions[_engram__diagnose__help__health_commands] )) ||
+_engram__diagnose__help__health_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram diagnose help health commands' commands "$@"
+}
+(( $+functions[_engram__diagnose__help__help_commands] )) ||
+_engram__diagnose__help__help_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram diagnose help help commands' commands "$@"
+}
+(( $+functions[_engram__docs_commands] )) ||
+_engram__docs_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram docs commands' commands "$@"
+}
+(( $+functions[_engram__help_commands] )) ||
+_engram__help_commands() {
+    local commands; commands=(
+'start:Start the Engram server with automatic configuration' \
+'stop:Stop the Engram server gracefully' \
+'status:Show current status' \
+'memory:Memory operations' \
+'space:Memory space registry operations' \
+'config:Configuration management' \
+'shell:Interactive shell mode' \
+'benchmark:Benchmark server performance' \
+'docs:Show embedded documentation' \
+'query:Query with probabilistic confidence intervals' \
+'backup:Backup operations' \
+'restore:Restore operations' \
+'diagnose:Diagnostic operations' \
+'migrate:Migration operations' \
+'validate:Validation operations' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'engram help commands' commands "$@"
+}
+(( $+functions[_engram__help__backup_commands] )) ||
+_engram__help__backup_commands() {
+    local commands; commands=(
+'create:Create a new backup' \
+'list:List available backups' \
+'verify:Verify backup integrity' \
+'prune:Prune old backups according to retention policy' \
+    )
+    _describe -t commands 'engram help backup commands' commands "$@"
+}
+(( $+functions[_engram__help__backup__create_commands] )) ||
+_engram__help__backup__create_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram help backup create commands' commands "$@"
+}
+(( $+functions[_engram__help__backup__list_commands] )) ||
+_engram__help__backup__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram help backup list commands' commands "$@"
+}
+(( $+functions[_engram__help__backup__prune_commands] )) ||
+_engram__help__backup__prune_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram help backup prune commands' commands "$@"
+}
+(( $+functions[_engram__help__backup__verify_commands] )) ||
+_engram__help__backup__verify_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram help backup verify commands' commands "$@"
+}
+(( $+functions[_engram__help__benchmark_commands] )) ||
+_engram__help__benchmark_commands() {
+    local commands; commands=(
+'latency:Measure operation latency (P50, P95, P99)' \
+'throughput:Measure throughput (operations per second)' \
+'spreading:Benchmark spreading activation performance' \
+'consolidation:Benchmark memory consolidation' \
+    )
+    _describe -t commands 'engram help benchmark commands' commands "$@"
+}
+(( $+functions[_engram__help__benchmark__consolidation_commands] )) ||
+_engram__help__benchmark__consolidation_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram help benchmark consolidation commands' commands "$@"
+}
+(( $+functions[_engram__help__benchmark__latency_commands] )) ||
+_engram__help__benchmark__latency_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram help benchmark latency commands' commands "$@"
+}
+(( $+functions[_engram__help__benchmark__spreading_commands] )) ||
+_engram__help__benchmark__spreading_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram help benchmark spreading commands' commands "$@"
+}
+(( $+functions[_engram__help__benchmark__throughput_commands] )) ||
+_engram__help__benchmark__throughput_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram help benchmark throughput commands' commands "$@"
+}
+(( $+functions[_engram__help__config_commands] )) ||
+_engram__help__config_commands() {
+    local commands; commands=(
+'get:Get a configuration value' \
+'set:Set a configuration value' \
+'list:Manage configuration settings' \
+'path:Show configuration file location' \
+    )
+    _describe -t commands 'engram help config commands' commands "$@"
+}
+(( $+functions[_engram__help__config__get_commands] )) ||
+_engram__help__config__get_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram help config get commands' commands "$@"
+}
+(( $+functions[_engram__help__config__list_commands] )) ||
+_engram__help__config__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram help config list commands' commands "$@"
+}
+(( $+functions[_engram__help__config__path_commands] )) ||
+_engram__help__config__path_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram help config path commands' commands "$@"
+}
+(( $+functions[_engram__help__config__set_commands] )) ||
+_engram__help__config__set_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram help config set commands' commands "$@"
+}
+(( $+functions[_engram__help__diagnose_commands] )) ||
+_engram__help__diagnose_commands() {
+    local commands; commands=(
+'health:Run comprehensive health check' \
+'collect:Collect debug bundle for support' \
+'analyze-logs:Analyze logs for patterns and errors' \
+'emergency:Emergency recovery procedures' \
+    )
+    _describe -t commands 'engram help diagnose commands' commands "$@"
+}
+(( $+functions[_engram__help__diagnose__analyze-logs_commands] )) ||
+_engram__help__diagnose__analyze-logs_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram help diagnose analyze-logs commands' commands "$@"
+}
+(( $+functions[_engram__help__diagnose__collect_commands] )) ||
+_engram__help__diagnose__collect_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram help diagnose collect commands' commands "$@"
+}
+(( $+functions[_engram__help__diagnose__emergency_commands] )) ||
+_engram__help__diagnose__emergency_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram help diagnose emergency commands' commands "$@"
+}
+(( $+functions[_engram__help__diagnose__health_commands] )) ||
+_engram__help__diagnose__health_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram help diagnose health commands' commands "$@"
+}
+(( $+functions[_engram__help__docs_commands] )) ||
+_engram__help__docs_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram help docs commands' commands "$@"
+}
+(( $+functions[_engram__help__help_commands] )) ||
+_engram__help__help_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram help help commands' commands "$@"
+}
+(( $+functions[_engram__help__memory_commands] )) ||
+_engram__help__memory_commands() {
+    local commands; commands=(
+'create:Create a new memory' \
+'get:Get a memory by ID' \
+'search:Search for memories' \
+'list:List all memories' \
+'delete:Delete a memory by ID' \
+    )
+    _describe -t commands 'engram help memory commands' commands "$@"
+}
+(( $+functions[_engram__help__memory__create_commands] )) ||
+_engram__help__memory__create_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram help memory create commands' commands "$@"
+}
+(( $+functions[_engram__help__memory__delete_commands] )) ||
+_engram__help__memory__delete_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram help memory delete commands' commands "$@"
+}
+(( $+functions[_engram__help__memory__get_commands] )) ||
+_engram__help__memory__get_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram help memory get commands' commands "$@"
+}
+(( $+functions[_engram__help__memory__list_commands] )) ||
+_engram__help__memory__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram help memory list commands' commands "$@"
+}
+(( $+functions[_engram__help__memory__search_commands] )) ||
+_engram__help__memory__search_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram help memory search commands' commands "$@"
+}
+(( $+functions[_engram__help__migrate_commands] )) ||
+_engram__help__migrate_commands() {
+    local commands; commands=(
+'neo4j:Migrate from Neo4j' \
+'postgresql:Migrate from PostgreSQL' \
+'redis:Migrate from Redis' \
+    )
+    _describe -t commands 'engram help migrate commands' commands "$@"
+}
+(( $+functions[_engram__help__migrate__neo4j_commands] )) ||
+_engram__help__migrate__neo4j_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram help migrate neo4j commands' commands "$@"
+}
+(( $+functions[_engram__help__migrate__postgresql_commands] )) ||
+_engram__help__migrate__postgresql_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram help migrate postgresql commands' commands "$@"
+}
+(( $+functions[_engram__help__migrate__redis_commands] )) ||
+_engram__help__migrate__redis_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram help migrate redis commands' commands "$@"
+}
+(( $+functions[_engram__help__query_commands] )) ||
+_engram__help__query_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram help query commands' commands "$@"
+}
+(( $+functions[_engram__help__restore_commands] )) ||
+_engram__help__restore_commands() {
+    local commands; commands=(
+'full:Restore from full backup' \
+'incremental:Apply incremental backup' \
+'pitr:Point-in-time recovery' \
+'verify-only:Verify restore without applying' \
+    )
+    _describe -t commands 'engram help restore commands' commands "$@"
+}
+(( $+functions[_engram__help__restore__full_commands] )) ||
+_engram__help__restore__full_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram help restore full commands' commands "$@"
+}
+(( $+functions[_engram__help__restore__incremental_commands] )) ||
+_engram__help__restore__incremental_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram help restore incremental commands' commands "$@"
+}
+(( $+functions[_engram__help__restore__pitr_commands] )) ||
+_engram__help__restore__pitr_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram help restore pitr commands' commands "$@"
+}
+(( $+functions[_engram__help__restore__verify-only_commands] )) ||
+_engram__help__restore__verify-only_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram help restore verify-only commands' commands "$@"
+}
+(( $+functions[_engram__help__shell_commands] )) ||
+_engram__help__shell_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram help shell commands' commands "$@"
+}
+(( $+functions[_engram__help__space_commands] )) ||
+_engram__help__space_commands() {
+    local commands; commands=(
+'list:List all registered memory spaces' \
+'create:Create (or retrieve) a memory space by identifier' \
+    )
+    _describe -t commands 'engram help space commands' commands "$@"
+}
+(( $+functions[_engram__help__space__create_commands] )) ||
+_engram__help__space__create_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram help space create commands' commands "$@"
+}
+(( $+functions[_engram__help__space__list_commands] )) ||
+_engram__help__space__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram help space list commands' commands "$@"
+}
+(( $+functions[_engram__help__start_commands] )) ||
+_engram__help__start_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram help start commands' commands "$@"
+}
+(( $+functions[_engram__help__status_commands] )) ||
+_engram__help__status_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram help status commands' commands "$@"
+}
+(( $+functions[_engram__help__stop_commands] )) ||
+_engram__help__stop_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram help stop commands' commands "$@"
+}
+(( $+functions[_engram__help__validate_commands] )) ||
+_engram__help__validate_commands() {
+    local commands; commands=(
+'config:Validate configuration file' \
+'data:Validate data integrity' \
+'deployment:Pre-deployment validation checklist' \
+    )
+    _describe -t commands 'engram help validate commands' commands "$@"
+}
+(( $+functions[_engram__help__validate__config_commands] )) ||
+_engram__help__validate__config_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram help validate config commands' commands "$@"
+}
+(( $+functions[_engram__help__validate__data_commands] )) ||
+_engram__help__validate__data_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram help validate data commands' commands "$@"
+}
+(( $+functions[_engram__help__validate__deployment_commands] )) ||
+_engram__help__validate__deployment_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram help validate deployment commands' commands "$@"
+}
+(( $+functions[_engram__memory_commands] )) ||
+_engram__memory_commands() {
+    local commands; commands=(
+'create:Create a new memory' \
+'get:Get a memory by ID' \
+'search:Search for memories' \
+'list:List all memories' \
+'delete:Delete a memory by ID' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'engram memory commands' commands "$@"
+}
+(( $+functions[_engram__memory__create_commands] )) ||
+_engram__memory__create_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram memory create commands' commands "$@"
+}
+(( $+functions[_engram__memory__delete_commands] )) ||
+_engram__memory__delete_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram memory delete commands' commands "$@"
+}
+(( $+functions[_engram__memory__get_commands] )) ||
+_engram__memory__get_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram memory get commands' commands "$@"
+}
+(( $+functions[_engram__memory__help_commands] )) ||
+_engram__memory__help_commands() {
+    local commands; commands=(
+'create:Create a new memory' \
+'get:Get a memory by ID' \
+'search:Search for memories' \
+'list:List all memories' \
+'delete:Delete a memory by ID' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'engram memory help commands' commands "$@"
+}
+(( $+functions[_engram__memory__help__create_commands] )) ||
+_engram__memory__help__create_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram memory help create commands' commands "$@"
+}
+(( $+functions[_engram__memory__help__delete_commands] )) ||
+_engram__memory__help__delete_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram memory help delete commands' commands "$@"
+}
+(( $+functions[_engram__memory__help__get_commands] )) ||
+_engram__memory__help__get_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram memory help get commands' commands "$@"
+}
+(( $+functions[_engram__memory__help__help_commands] )) ||
+_engram__memory__help__help_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram memory help help commands' commands "$@"
+}
+(( $+functions[_engram__memory__help__list_commands] )) ||
+_engram__memory__help__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram memory help list commands' commands "$@"
+}
+(( $+functions[_engram__memory__help__search_commands] )) ||
+_engram__memory__help__search_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram memory help search commands' commands "$@"
+}
+(( $+functions[_engram__memory__list_commands] )) ||
+_engram__memory__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram memory list commands' commands "$@"
+}
+(( $+functions[_engram__memory__search_commands] )) ||
+_engram__memory__search_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram memory search commands' commands "$@"
+}
+(( $+functions[_engram__migrate_commands] )) ||
+_engram__migrate_commands() {
+    local commands; commands=(
+'neo4j:Migrate from Neo4j' \
+'postgresql:Migrate from PostgreSQL' \
+'redis:Migrate from Redis' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'engram migrate commands' commands "$@"
+}
+(( $+functions[_engram__migrate__help_commands] )) ||
+_engram__migrate__help_commands() {
+    local commands; commands=(
+'neo4j:Migrate from Neo4j' \
+'postgresql:Migrate from PostgreSQL' \
+'redis:Migrate from Redis' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'engram migrate help commands' commands "$@"
+}
+(( $+functions[_engram__migrate__help__help_commands] )) ||
+_engram__migrate__help__help_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram migrate help help commands' commands "$@"
+}
+(( $+functions[_engram__migrate__help__neo4j_commands] )) ||
+_engram__migrate__help__neo4j_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram migrate help neo4j commands' commands "$@"
+}
+(( $+functions[_engram__migrate__help__postgresql_commands] )) ||
+_engram__migrate__help__postgresql_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram migrate help postgresql commands' commands "$@"
+}
+(( $+functions[_engram__migrate__help__redis_commands] )) ||
+_engram__migrate__help__redis_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram migrate help redis commands' commands "$@"
+}
+(( $+functions[_engram__migrate__neo4j_commands] )) ||
+_engram__migrate__neo4j_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram migrate neo4j commands' commands "$@"
+}
+(( $+functions[_engram__migrate__postgresql_commands] )) ||
+_engram__migrate__postgresql_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram migrate postgresql commands' commands "$@"
+}
+(( $+functions[_engram__migrate__redis_commands] )) ||
+_engram__migrate__redis_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram migrate redis commands' commands "$@"
+}
+(( $+functions[_engram__query_commands] )) ||
+_engram__query_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram query commands' commands "$@"
+}
+(( $+functions[_engram__restore_commands] )) ||
+_engram__restore_commands() {
+    local commands; commands=(
+'full:Restore from full backup' \
+'incremental:Apply incremental backup' \
+'pitr:Point-in-time recovery' \
+'verify-only:Verify restore without applying' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'engram restore commands' commands "$@"
+}
+(( $+functions[_engram__restore__full_commands] )) ||
+_engram__restore__full_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram restore full commands' commands "$@"
+}
+(( $+functions[_engram__restore__help_commands] )) ||
+_engram__restore__help_commands() {
+    local commands; commands=(
+'full:Restore from full backup' \
+'incremental:Apply incremental backup' \
+'pitr:Point-in-time recovery' \
+'verify-only:Verify restore without applying' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'engram restore help commands' commands "$@"
+}
+(( $+functions[_engram__restore__help__full_commands] )) ||
+_engram__restore__help__full_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram restore help full commands' commands "$@"
+}
+(( $+functions[_engram__restore__help__help_commands] )) ||
+_engram__restore__help__help_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram restore help help commands' commands "$@"
+}
+(( $+functions[_engram__restore__help__incremental_commands] )) ||
+_engram__restore__help__incremental_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram restore help incremental commands' commands "$@"
+}
+(( $+functions[_engram__restore__help__pitr_commands] )) ||
+_engram__restore__help__pitr_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram restore help pitr commands' commands "$@"
+}
+(( $+functions[_engram__restore__help__verify-only_commands] )) ||
+_engram__restore__help__verify-only_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram restore help verify-only commands' commands "$@"
+}
+(( $+functions[_engram__restore__incremental_commands] )) ||
+_engram__restore__incremental_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram restore incremental commands' commands "$@"
+}
+(( $+functions[_engram__restore__pitr_commands] )) ||
+_engram__restore__pitr_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram restore pitr commands' commands "$@"
+}
+(( $+functions[_engram__restore__verify-only_commands] )) ||
+_engram__restore__verify-only_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram restore verify-only commands' commands "$@"
+}
+(( $+functions[_engram__shell_commands] )) ||
+_engram__shell_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram shell commands' commands "$@"
+}
+(( $+functions[_engram__space_commands] )) ||
+_engram__space_commands() {
+    local commands; commands=(
+'list:List all registered memory spaces' \
+'create:Create (or retrieve) a memory space by identifier' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'engram space commands' commands "$@"
+}
+(( $+functions[_engram__space__create_commands] )) ||
+_engram__space__create_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram space create commands' commands "$@"
+}
+(( $+functions[_engram__space__help_commands] )) ||
+_engram__space__help_commands() {
+    local commands; commands=(
+'list:List all registered memory spaces' \
+'create:Create (or retrieve) a memory space by identifier' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'engram space help commands' commands "$@"
+}
+(( $+functions[_engram__space__help__create_commands] )) ||
+_engram__space__help__create_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram space help create commands' commands "$@"
+}
+(( $+functions[_engram__space__help__help_commands] )) ||
+_engram__space__help__help_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram space help help commands' commands "$@"
+}
+(( $+functions[_engram__space__help__list_commands] )) ||
+_engram__space__help__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram space help list commands' commands "$@"
+}
+(( $+functions[_engram__space__list_commands] )) ||
+_engram__space__list_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram space list commands' commands "$@"
+}
+(( $+functions[_engram__start_commands] )) ||
+_engram__start_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram start commands' commands "$@"
+}
+(( $+functions[_engram__status_commands] )) ||
+_engram__status_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram status commands' commands "$@"
+}
+(( $+functions[_engram__stop_commands] )) ||
+_engram__stop_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram stop commands' commands "$@"
+}
+(( $+functions[_engram__validate_commands] )) ||
+_engram__validate_commands() {
+    local commands; commands=(
+'config:Validate configuration file' \
+'data:Validate data integrity' \
+'deployment:Pre-deployment validation checklist' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'engram validate commands' commands "$@"
+}
+(( $+functions[_engram__validate__config_commands] )) ||
+_engram__validate__config_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram validate config commands' commands "$@"
+}
+(( $+functions[_engram__validate__data_commands] )) ||
+_engram__validate__data_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram validate data commands' commands "$@"
+}
+(( $+functions[_engram__validate__deployment_commands] )) ||
+_engram__validate__deployment_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram validate deployment commands' commands "$@"
+}
+(( $+functions[_engram__validate__help_commands] )) ||
+_engram__validate__help_commands() {
+    local commands; commands=(
+'config:Validate configuration file' \
+'data:Validate data integrity' \
+'deployment:Pre-deployment validation checklist' \
+'help:Print this message or the help of the given subcommand(s)' \
+    )
+    _describe -t commands 'engram validate help commands' commands "$@"
+}
+(( $+functions[_engram__validate__help__config_commands] )) ||
+_engram__validate__help__config_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram validate help config commands' commands "$@"
+}
+(( $+functions[_engram__validate__help__data_commands] )) ||
+_engram__validate__help__data_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram validate help data commands' commands "$@"
+}
+(( $+functions[_engram__validate__help__deployment_commands] )) ||
+_engram__validate__help__deployment_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram validate help deployment commands' commands "$@"
+}
+(( $+functions[_engram__validate__help__help_commands] )) ||
+_engram__validate__help__help_commands() {
+    local commands; commands=()
+    _describe -t commands 'engram validate help help commands' commands "$@"
+}
+
+if [ "$funcstack[1]" = "_engram" ]; then
+    _engram "$@"
+else
+    compdef _engram engram
+fi

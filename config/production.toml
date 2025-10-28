@@ -1,0 +1,98 @@
+# Production Configuration Template
+# High-capacity, multi-tenant deployment with full observability
+#
+# This configuration is optimized for:
+# - Multiple memory spaces (multi-tenancy)
+# - High throughput (500K ops/sec target)
+# - Moderate latency (P99 < 50ms)
+# - 64GB RAM, 32 cores, 1TB SSD + 4TB HDD
+#
+# Capacity planning:
+# - Hot tier: 500K * 12KB * 3 spaces = 18GB RAM
+# - Warm tier: 5M * 10KB * 3 spaces = 150GB disk (SSD)
+# - Cold tier: 50M * 8KB * 3 spaces = 1.2TB disk (HDD)
+# - Total: 18GB RAM + 1.35TB disk
+
+[feature_flags]
+# Enable spreading activation API (stable for production)
+spreading_api_beta = true
+
+[memory_spaces]
+# Default space for operations without explicit space header
+default_space = "default"
+
+# Pre-provision spaces for known tenants to avoid cold-start latency
+# Add your tenant IDs here before deployment
+bootstrap_spaces = ["default", "tenant-a", "tenant-b"]
+
+[persistence]
+# Production data root (mounted volume recommended)
+# Ensure this path has adequate IOPS for warm tier access
+data_root = "/var/lib/engram"
+
+# Hot tier: 500K memories = 6GB RAM per space
+# This is your working set - frequently accessed memories stay in RAM
+# Tuning: Increase if hit rate < 0.95 or working set grows
+hot_capacity = 500_000
+
+# Warm tier: 5M memories = 50GB disk per space
+# Recently accessed but evicted from hot tier
+# Recommend: Fast SSD (NVMe) for optimal latency
+warm_capacity = 5_000_000
+
+# Cold tier: 50M memories = 400GB disk per space
+# Long-term archival storage
+# Acceptable: Standard HDD with good sequential throughput
+cold_capacity = 50_000_000
+
+# Spreading activation configuration (future TOML support)
+# Current defaults via code:
+# - decay_rate: 0.85 (balanced spreading)
+# - threshold: 0.15 (moderate filtering)
+# - max_hops: 5 (standard depth)
+# - max_workers: 16 (adjust to match CPU cores)
+
+# Consolidation configuration (future TOML support)
+# Current defaults via code:
+# - interval: 5 minutes (frequent consolidation)
+# - min_episode_age: 1 day (daily pattern extraction)
+# - pattern_detection.min_cluster_size: 3
+# - pattern_detection.similarity_threshold: 0.80
+
+# Monitoring configuration
+# Prometheus metrics exposed on port 9090
+# Grafana dashboard available at /grafana/
+# Alert rules in /etc/engram/alerts.yml
+
+# Security configuration
+# TLS certificates in /etc/engram/certs/
+# API authentication via JWT tokens
+# See: /docs/operations/security.md
+
+# Backup configuration
+# Daily snapshots to S3: /var/lib/engram/backups/
+# Retention: 7 daily, 4 weekly, 12 monthly
+# See: /docs/operations/backup-restore.md
+
+# Resource limits (systemd)
+# MemoryMax=64G
+# CPUQuota=3200%  (32 cores)
+# IOWeight=500
+
+# Performance tuning
+# See: /docs/operations/performance-tuning.md
+# - NUMA node affinity
+# - Transparent huge pages
+# - File descriptor limits
+
+# Scaling recommendations
+# When to scale up:
+# - Hot tier hit rate < 0.90
+# - P99 latency > 100ms
+# - CPU utilization > 80%
+# - Memory pressure warnings
+#
+# When to scale out:
+# - >10 memory spaces
+# - >100M total memories
+# - Geographic distribution needed

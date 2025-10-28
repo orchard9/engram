@@ -5,7 +5,9 @@ This runbook captures the full validation surface for the spreading activation e
 ## Golden Snapshots
 
 - Regenerate fixtures with `cargo xtask update-spreading-snapshots` (runs in deterministic mode with per-fixture overrides from `tests/support/graph_builders.rs`).
+
 - Review changes interactively via `cargo insta review` before committing.
+
 - Reference seeds/effect sizes in `tests/data/spreading_snapshots/README.md` when interpreting diffs.
 
 ## Property-Based Coverage
@@ -74,14 +76,21 @@ This runbook captures the full validation surface for the spreading activation e
   ```
 
   Results land in `docs/assets/benchmarks/spreading/` with Criterion’s JSON output.
+
 - Compare against prior baseline via `cargo bench ... --baseline <previous-tag>`.
+
 - Treat >10% movement in median/P95 as a regression candidate; attach deltas to review notes.
+
 - Use `cargo xtask check-spreading-benchmarks` to compare the latest run against `docs/assets/benchmarks/spreading/baseline.json`; CI fails when drift exceeds the configured tolerance.
 
 ## Quick Review Checklist
 
 - [ ] Snapshots updated (or explicitly unchanged) with reviewer approval.
+
 - [ ] Property tests (fast + nightly) exercised, seeds recorded for new failures.
+
 - [ ] Stress/concurrency suite green (include soak evidence if modified).
+
 - [ ] Loom + sanitizer sweeps issue-free, or follow-up ticket filed.
+
 - [ ] Latest benchmark JSON archived and compared to baseline.

@@ -9,7 +9,9 @@
 **This troubleshooting guide describes issues for FUTURE GPU implementation (Milestone 13+).**
 
 **CURRENT MILESTONE 12 STATUS**:
+
 - **IMPLEMENTED**: CPU SIMD fallback (production-ready)
+
 - **NOT IMPLEMENTED**: CUDA kernels, GPU detection, GPU-specific errors
 
 **CURRENT BEHAVIOR**: All operations use CPU SIMD. The troubleshooting steps below will be relevant when CUDA kernels are implemented in Milestone 13+.
@@ -53,6 +55,7 @@ journalctl -u engram | grep -i cuda
 nvidia-smi dmon -s puct -c 10
 # If sm% is 0: GPU not active (see Section: Low GPU Utilization)
 # If mem% is 100%: OOM issue (see Section: Out of Memory)
+
 ```
 
 ## Common Issues
@@ -62,9 +65,11 @@ nvidia-smi dmon -s puct -c 10
 **Symptom**: `nvidia-smi` command fails or shows no GPUs
 
 **Diagnostic Output**:
+
 ```
 NVIDIA-SMI has failed because it couldn't communicate with the NVIDIA driver.
 Make sure that the latest NVIDIA driver is installed and running.
+
 ```
 
 **Causes and Solutions**:
@@ -81,6 +86,7 @@ sudo ubuntu-drivers autoinstall  # Ubuntu
 sudo dnf install nvidia-driver   # RHEL
 
 sudo reboot
+
 ```
 
 #### Cause 2: Driver Not Loaded
@@ -100,6 +106,7 @@ dmesg | grep -i nvidia
 uname -r  # Check kernel version
 sudo apt install linux-headers-$(uname -r)  # Install matching headers
 sudo apt install --reinstall nvidia-driver-535
+
 ```
 
 #### Cause 3: Secure Boot Enabled
@@ -111,6 +118,7 @@ mokutil --sb-state
 # If "SecureBoot enabled":
 # Option 1: Disable Secure Boot in BIOS/UEFI (recommended)
 # Option 2: Sign NVIDIA driver modules (complex, see NVIDIA docs)
+
 ```
 
 #### Cause 4: GPU Not Detected by Hardware
@@ -128,6 +136,7 @@ lspci | grep -i nvidia
 #    - Resize BAR enabled (for newer GPUs)
 # 4. Try GPU in different PCIe slot
 # 5. Test GPU in different machine (hardware failure?)
+
 ```
 
 ### CUDA Toolkit Issues
@@ -135,8 +144,10 @@ lspci | grep -i nvidia
 **Symptom**: `nvcc --version` fails or wrong version
 
 **Diagnostic Output**:
+
 ```
 bash: nvcc: command not found
+
 ```
 
 **Solutions**:
@@ -153,6 +164,7 @@ sudo apt install cuda-toolkit-11-8
 # RHEL/Rocky/AlmaLinux
 sudo dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel8/x86_64/cuda-rhel8.repo
 sudo dnf install cuda-toolkit-11-8
+
 ```
 
 #### Solution 2: CUDA Not in PATH
@@ -173,6 +185,7 @@ source ~/.bashrc
 # Verify
 nvcc --version
 which nvcc
+
 ```
 
 #### Solution 3: Wrong CUDA Version
@@ -196,6 +209,7 @@ export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
 
 # Verify
 nvcc --version
+
 ```
 
 ### Engram Cannot Detect GPU
@@ -203,9 +217,11 @@ nvcc --version
 **Symptom**: `engram --gpu-info` shows "GPU Status: Not Available"
 
 **Diagnostic Output**:
+
 ```
 GPU Status: Not Available
 Reason: CUDA initialization failed
+
 ```
 
 **Diagnostic Steps**:
@@ -226,6 +242,7 @@ nvidia-smi | grep "CUDA Version"
 # If driver too old, update:
 sudo apt install nvidia-driver-535  # Ubuntu
 sudo dnf install nvidia-driver-latest  # RHEL
+
 ```
 
 #### Step 2: Check Library Linking
@@ -243,6 +260,7 @@ ldconfig  # Update library cache (may need sudo)
 
 # Try again
 ./target/release/engram --gpu-info
+
 ```
 
 #### Step 3: Check Permissions
@@ -268,6 +286,7 @@ sudo udevadm trigger
 
 # Reboot
 sudo reboot
+
 ```
 
 #### Step 4: Check for Conflicting Processes
@@ -283,6 +302,7 @@ nvidia-smi
 # Solution: Stop exclusive process or configure GPU for shared mode
 # Set compute mode to default (shared)
 sudo nvidia-smi -c 0
+
 ```
 
 #### Step 5: Verify CUDA Initialization
@@ -296,6 +316,7 @@ export CUDA_VISIBLE_DEVICES=0
 RUST_LOG=engram::activation::gpu=debug ./target/release/engram --gpu-info
 
 # Look for specific error messages in output
+
 ```
 
 ### GPU Not Being Used
@@ -320,6 +341,7 @@ cat /etc/engram/gpu.toml | grep force_cpu_mode
 # force_cpu_mode = false
 
 # If force_cpu_mode = true, GPU is intentionally disabled
+
 ```
 
 #### Step 2: Check Batch Sizes
@@ -335,6 +357,7 @@ curl http://localhost:8080/metrics | grep batch_size_histogram
 
 # If all batches are smaller than min_batch_size, GPU won't be used
 # Solution: Lower min_batch_size or increase batch sizes in application
+
 ```
 
 #### Step 3: Check GPU Success Rate
@@ -351,6 +374,7 @@ journalctl -u engram | grep "GPU launch failed"
 # Common causes:
 # - OOM errors (see Section: Out of Memory)
 # - CUDA errors (see Section: CUDA Error Codes)
+
 ```
 
 #### Step 4: Enable Debug Logging
@@ -367,6 +391,7 @@ journalctl -u engram -f
 # "Batch size 64 < min 128, using CPU" <- Batch too small
 # "GPU success rate 0.85 < threshold 0.95, using CPU" <- Too many failures
 # "GPU not available, using CPU" <- GPU disabled or not detected
+
 ```
 
 ### Out of Memory (OOM)
@@ -374,9 +399,11 @@ journalctl -u engram -f
 **Symptom**: `cudaErrorMemoryAllocation` errors in logs
 
 **Diagnostic Output**:
+
 ```
 ERROR engram::activation::gpu: GPU launch failed: OutOfMemory
 WARN  engram::activation::gpu: GPU OOM at batch size 4096, falling back to CPU
+
 ```
 
 **Diagnostic Steps**:
@@ -400,6 +427,7 @@ nvidia-smi
 # If other processes exist:
 # - Stop them if possible
 # - Or reduce Engram batch sizes
+
 ```
 
 #### Step 2: Check Batch Size
@@ -421,6 +449,7 @@ journalctl -u engram | grep "OOM at batch size"
 min_batch_size = 2048  # Reduce from 4096
 
 systemctl restart engram
+
 ```
 
 #### Step 3: Adjust VRAM Safety Margin
@@ -433,6 +462,7 @@ vram_safety_margin = 0.7  # Was 0.8, now only use 70% of VRAM
 
 # This reserves more VRAM for system and reduces OOM risk
 systemctl restart engram
+
 ```
 
 #### Step 4: Check for Memory Leaks
@@ -448,6 +478,7 @@ watch -n 1 nvidia-smi
 systemctl restart engram
 
 # If memory immediately climbs again, file a bug report
+
 ```
 
 ### CUDA Error Codes (FOR FUTURE GPU IMPLEMENTATION)
@@ -462,14 +493,19 @@ systemctl restart engram
 
 ```
 ERROR: CUDA error 1: invalid argument
+
 ```
 
 **Causes**:
+
 - Null pointer passed to kernel
+
 - Invalid dimension (batch size 0, negative values)
+
 - Misaligned memory
 
 **Solution**:
+
 ```bash
 # Enable CUDA error checking
 export CUDA_LAUNCH_BLOCKING=1
@@ -479,6 +515,7 @@ RUST_LOG=debug ./target/release/engram start
 
 # Look for exact line where error occurs
 # File bug report with backtrace
+
 ```
 
 #### cudaErrorMemoryAllocation (Error 2)
@@ -489,14 +526,19 @@ See "Out of Memory" section above.
 
 ```
 ERROR: CUDA error 3: initialization error
+
 ```
 
 **Causes**:
+
 - Driver/CUDA version mismatch
+
 - GPU in bad state
+
 - Insufficient permissions
 
 **Solution**:
+
 ```bash
 # Reset GPU
 sudo nvidia-smi --gpu-reset
@@ -509,17 +551,20 @@ nvidia-smi | grep "CUDA Version"
 nvcc --version
 
 # Ensure driver supports CUDA version
+
 ```
 
 #### cudaErrorInsufficientDriver (Error 35)
 
 ```
 ERROR: CUDA error 35: insufficient driver
+
 ```
 
 **Cause**: NVIDIA driver is too old for CUDA version
 
 **Solution**:
+
 ```bash
 # Check current driver version
 nvidia-smi | grep "Driver Version"
@@ -533,19 +578,24 @@ sudo apt install nvidia-driver-535  # Ubuntu
 sudo dnf install nvidia-driver-latest  # RHEL
 
 sudo reboot
+
 ```
 
 #### cudaErrorNoDevice (Error 100)
 
 ```
 ERROR: CUDA error 100: no CUDA-capable device detected
+
 ```
 
 **Causes**:
+
 - GPU not detected by system
+
 - Wrong CUDA_VISIBLE_DEVICES setting
 
 **Solution**:
+
 ```bash
 # Check if GPU is visible
 nvidia-smi
@@ -558,6 +608,7 @@ export CUDA_VISIBLE_DEVICES=0
 
 # Or unset it to use all GPUs
 unset CUDA_VISIBLE_DEVICES
+
 ```
 
 ### Low GPU Utilization
@@ -577,6 +628,7 @@ curl http://localhost:8080/metrics | grep batch_size_histogram
 
 # Solution: Increase batch sizes in application
 # Or lower min_batch_size to use CPU for small batches
+
 ```
 
 #### Step 2: Check Launch Frequency
@@ -593,6 +645,7 @@ curl http://localhost:8080/metrics | grep gpu_launches_total
 # If QPS is high but GPU launches are low:
 # - Batches may be too small (below min_batch_size)
 # - Check logs for why GPU isn't being used
+
 ```
 
 #### Step 3: Check for CPU Bottleneck
@@ -608,6 +661,7 @@ top
 # - Increase CPU cores
 # - Optimize data preparation code
 # - Use batch pipelining (future feature)
+
 ```
 
 #### Step 4: Profile Kernel Execution
@@ -626,6 +680,7 @@ nsys stats --report cuda_gpu_kern_sum timeline.qdrep
 # - Kernel execution time vs idle time
 # - Memory transfer overhead
 # - Launch frequency
+
 ```
 
 ### Performance Regression
@@ -642,6 +697,7 @@ cargo bench --bench gpu_performance_validation
 
 # Compare results to baseline (see performance_report.md)
 # If speedup < 3x, investigate:
+
 ```
 
 #### Step 2: Check GPU Clock Speed
@@ -664,6 +720,7 @@ nvidia-smi --query-gpu=temperature.gpu,power.draw,power.limit --format=csv
 # - Improve cooling (clean fans, better case airflow)
 # - Increase power limit (if supported):
 sudo nvidia-smi -pl 250  # Set power limit to 250W (check max for your GPU)
+
 ```
 
 #### Step 3: Check for PCIe Bottleneck
@@ -688,6 +745,7 @@ nvidia-smi --query-gpu=pcie.link.gen.current,pcie.link.width.current --format=cs
 # Check PCIe in BIOS:
 # - Enable "Gen 4" or "Gen 3" (not "Auto" or "Gen 1")
 # - Enable "x16" mode
+
 ```
 
 #### Step 4: Check Driver/CUDA Optimization
@@ -706,6 +764,7 @@ echo $CUDA_LAUNCH_BLOCKING  # Should be unset or 0
 
 # If set to 1, kernels run synchronously (slow)
 unset CUDA_LAUNCH_BLOCKING
+
 ```
 
 ## Diagnostic Commands Reference
@@ -715,6 +774,7 @@ unset CUDA_LAUNCH_BLOCKING
 ```bash
 # One-liner to check entire CUDA stack
 nvidia-smi && nvcc --version && ./target/release/engram --gpu-info && curl -s http://localhost:8080/metrics | grep -E "gpu_(launches|fallbacks|success_rate)"
+
 ```
 
 ### Detailed GPU Information
@@ -731,6 +791,7 @@ nvidia-smi dmon -s puct -c 100
 
 # Export to file for analysis
 nvidia-smi --query-gpu=timestamp,utilization.gpu,utilization.memory,memory.used,temperature.gpu --format=csv -l 1 > gpu_metrics.csv
+
 ```
 
 ### CUDA Profiling
@@ -747,6 +808,7 @@ ncu --metrics dram__throughput.avg.pct_of_peak_sustained_elapsed ./target/releas
 
 # Warp efficiency
 ncu --metrics smsp__average_warps_issue_stalled_per_issue_active.pct ./target/release/engram start
+
 ```
 
 ### Engram Diagnostics (PLANNED for Milestone 13+)
@@ -765,6 +827,7 @@ ncu --metrics smsp__average_warps_issue_stalled_per_issue_active.pct ./target/re
 
 # Check metrics (currently available, but GPU metrics will be 0 or absent)
 curl http://localhost:8080/metrics | grep -E "gpu|spreading"
+
 ```
 
 **Current Milestone 12**: No GPU-specific CLI commands available.
@@ -794,6 +857,7 @@ nvidia-smi works?
                 - Power cables connected
                 - BIOS settings
                 - Try different PCIe slot
+
 ```
 
 ### Performance Issues - Diagnosis Flow
@@ -816,6 +880,7 @@ Expected speedup achieved?
 │               - Run nsys profiling
 └─ YES: Working as expected
     └─ Monitor for regressions
+
 ```
 
 ## When to File a Bug Report
@@ -862,12 +927,17 @@ curl http://localhost:8080/metrics | grep -E "gpu|spreading"
 
 # Benchmark results
 cargo bench --bench gpu_performance_validation 2>&1 | grep Speedup
+
 ```
 
 ## Additional Resources
 
 - **NVIDIA Documentation**: https://docs.nvidia.com/cuda/
+
 - **CUDA Troubleshooting**: https://docs.nvidia.com/cuda/cuda-installation-guide-linux/index.html#troubleshooting
+
 - **GPU Architecture Reference**: See GPU Architecture Reference doc
+
 - **Performance Tuning**: See GPU Performance Tuning Guide
+
 - **Community Support**: GitHub Discussions (link TBD)

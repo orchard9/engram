@@ -143,4 +143,4 @@ graph-systems-acceptance-tester: Use for validating graph database functionality
 ### Rules
 
 Never use emojis. Remove all emojis from any files.
-Never use github workflows.
+Never use .github workflows, actions, or CI - all quality checks run via make quality and git hooks.

@@ -3,14 +3,19 @@
 Get from zero to first successful memory operation in 15 minutes. Research shows developers who succeed quickly are 3x more likely to adopt a technology in production.
 
 This tutorial builds three "aha!" moments:
+
 1. **"It just works"** - Store and retrieve your first memory
+
 2. **"This is different"** - See how confidence scores work
+
 3. **"This is powerful"** - Watch dream consolidation create insights
 
 ## Prerequisites
 
 - Engram server running (see [Installation Guide](/guide/installation.md))
+
 - curl or Python 3.8+ installed
+
 - 15 minutes of focused time
 
 ## Part 1: Your First Memory (5 minutes)
@@ -26,11 +31,14 @@ Store a memory and retrieve it. Experience the core remember/recall cycle.
 curl http://localhost:8080/api/v1/introspect
 
 # Should return JSON with "healthy": true
+
 ```
 
 If this fails, start Engram:
+
 ```bash
 engram start --grpc-port 50051 --http-port 8080
+
 ```
 
 ### Step 2: Store Your First Memory
@@ -51,6 +59,7 @@ curl -X POST http://localhost:8080/api/v1/memories/remember \
     },
     "auto_link": true
   }'
+
 ```
 
 **Note**: In production, use proper 768-dimensional embeddings from models like `sentence-transformers`. This shortened example is for learning.
@@ -68,13 +77,17 @@ curl -X POST http://localhost:8080/api/v1/memories/remember \
   "linked_memories": [],
   "initial_state": "CONSOLIDATION_STATE_RECENT"
 }
+
 ```
 
 **What just happened?**
 
 - Engram stored your memory with ID `mem_1698765432_a1b2c3d4`
+
 - Storage confidence (0.98) is even higher than your input confidence (0.95) - Engram is certain the write succeeded
+
 - The memory starts in "recent" state - it'll be consolidated later
+
 - No linked memories yet (your memory space is empty)
 
 ### Step 3: Retrieve Your Memory
@@ -92,6 +105,7 @@ curl -X POST http://localhost:8080/api/v1/memories/recall \
     },
     "max_results": 5
   }'
+
 ```
 
 ### Expected Response
@@ -120,6 +134,7 @@ curl -X POST http://localhost:8080/api/v1/memories/recall \
     "recall_time_ms": 12
   }
 }
+
 ```
 
 **Aha! Moment #1: "It just works"**
@@ -127,7 +142,9 @@ curl -X POST http://localhost:8080/api/v1/memories/recall \
 You stored a memory and retrieved it with a semantic query. The system understood "cell biology" relates to your mitochondria memory - even though the exact words don't match.
 
 Notice two confidence scores:
+
 - **Memory confidence** (0.95): How sure we are the fact is correct
+
 - **Recall confidence** (0.89): How sure we are we found the right memories
 
 This cognitive approach means you always know how certain your results are.
@@ -175,6 +192,7 @@ curl -X POST http://localhost:8080/api/v1/memories/remember \
       "confidence": {"value": 0.4, "reasoning": "Uncertain memory from years ago"}
     }
   }'
+
 ```
 
 ### Step 5: Recall with Confidence Threshold
@@ -193,6 +211,7 @@ curl -X POST http://localhost:8080/api/v1/memories/recall \
     "max_results": 10,
     "confidence_threshold": 0.8
   }'
+
 ```
 
 **Response**: You'll get only the high-confidence memories (mitochondria, DNA), not the uncertain ones.
@@ -211,6 +230,7 @@ curl -X POST http://localhost:8080/api/v1/memories/recall \
     "max_results": 10,
     "confidence_threshold": 0.3
   }'
+
 ```
 
 **Response**: Now you'll get all memories, including the uncertain "I think ribosomes..." one.
@@ -220,8 +240,11 @@ curl -X POST http://localhost:8080/api/v1/memories/recall \
 Traditional databases give you everything or nothing. Engram gives you *gradated results* - choose how certain you need to be.
 
 This is powerful for:
+
 - **Research**: Lower threshold to explore possibilities
+
 - **Production**: High threshold for reliable facts only
+
 - **Learning**: See what you're uncertain about
 
 ## Part 3: Dream Consolidation (5 minutes)
@@ -247,6 +270,7 @@ for i in {1..5}; do
       }
     }"
 done
+
 ```
 
 ### Step 7: Trigger Dream Consolidation
@@ -263,6 +287,7 @@ curl -X POST http://localhost:8080/api/v1/consolidation/dream \
     "creativity_factor": 0.7,
     "generate_insights": true
   }'
+
 ```
 
 ### Expected Stream
@@ -282,19 +307,27 @@ data: {"memory_ids": ["mem_1698765001_x1y2z3", "mem_1698764890_p4q5r6"], "sequen
 
 event: done
 data: {"total_replayed": 8, "total_insights": 2, "total_connections": 5}
+
 ```
 
 **Aha! Moment #3: "This is like sleep!"**
 
 You just watched Engram:
+
 1. Replay memories in sequences
+
 2. Find connections between related concepts
+
 3. Generate insights you didn't explicitly program
+
 4. Strengthen associations (like sleep strengthens learning)
 
 This consolidation:
+
 - Makes future recalls faster (spreading activation uses these connections)
+
 - Discovers patterns you didn't explicitly encode
+
 - Mirrors how biological memory actually works
 
 ## What You Just Learned
@@ -302,7 +335,9 @@ This consolidation:
 In 15 minutes, you:
 
 1. **Stored and retrieved** memories with semantic queries
+
 2. **Used confidence scores** for graceful degradation
+
 3. **Watched consolidation** create emergent connections
 
 ### Key Differences from Traditional Databases
@@ -319,19 +354,25 @@ In 15 minutes, you:
 ### Dive Deeper
 
 - **REST API**: [Complete REST API Reference](/reference/rest-api.md)
+
 - **gRPC API**: [High-Performance gRPC Guide](/reference/grpc-api.md)
+
 - **Error Handling**: [Error Codes Catalog](/reference/error-codes.md)
 
 ### Common Use Cases
 
 - **Semantic Search**: [Embedding-Based Retrieval Tutorial](/tutorials/semantic-search.md)
+
 - **Episodic Memory**: [Recording Events with Context](/tutorials/episodic-memory.md)
+
 - **Knowledge Graphs**: [Building Interconnected Knowledge](/tutorials/knowledge-graphs.md)
 
 ### Production Deployment
 
 - **Authentication**: [API Keys and JWT](/operations/authentication.md)
+
 - **Performance**: [Tuning for High Throughput](/operations/performance-tuning.md)
+
 - **Monitoring**: [Health Checks and Metrics](/operations/monitoring.md)
 
 ## Troubleshooting
@@ -347,12 +388,15 @@ engram start --grpc-port 50051 --http-port 8080
 
 # Check logs
 journalctl -u engram -f
+
 ```
 
 ### "My recall returns nothing"
 
 - Lower your confidence threshold: `"confidence_threshold": 0.3`
+
 - Check if memories were actually stored: `curl http://localhost:8080/api/v1/introspect | jq '.statistics.total_memories'`
+
 - Verify your embedding similarity: Use same embedding model for store and recall
 
 ### "Embeddings are confusing"
@@ -369,6 +413,7 @@ from sentence_transformers import SentenceTransformer
 model = SentenceTransformer('all-mpnet-base-v2')
 embedding = model.encode("The mitochondria is the powerhouse of the cell")
 # embedding.shape: (768,) - full-dimensional vector
+
 ```
 
 ### "Where do I get API keys?"
@@ -382,6 +427,7 @@ engram auth create-key --name "my-app"
 # Use in requests
 curl -H "Authorization: Bearer ek_live_1234567890abcdef" \
   http://localhost:8080/api/v1/memories/recall
+
 ```
 
 ## Real-World Example: Personal Knowledge Assistant
@@ -463,9 +509,11 @@ assistant.learn("Django is a Python web framework", confidence=0.85, source="Tut
 assistant.recall("Who created Python?")
 assistant.recall("What makes Python special?")
 assistant.recall("Python web development")
+
 ```
 
 Run this and you'll see:
+
 ```
 Learned: Python was created by Guido van Rossum in 1991
   Confidence: 0.98
@@ -497,15 +545,19 @@ Recall confidence: 0.85
 Relevant facts (2):
   [0.90] Python emphasizes code readability
   [0.85] Django is a Python web framework
+
 ```
 
-## Congratulations!
+## Congratulations
 
 You've completed the API quickstart. You now understand:
 
 - How to store memories with confidence
+
 - How recall works with semantic queries
+
 - How consolidation creates emergent connections
+
 - How this differs from traditional databases
 
 **Time spent**: ~15 minutes

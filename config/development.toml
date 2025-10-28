@@ -1,0 +1,104 @@
+# Development Configuration Template
+# Minimal resources for local development
+#
+# This configuration is optimized for:
+# - Local development on laptop/workstation
+# - Fast iteration and testing
+# - Minimal resource footprint
+# - 8GB RAM available, 4 cores, 50GB disk
+#
+# Capacity planning:
+# - Hot tier: 10K * 12KB = 120MB RAM
+# - Warm tier: 100K * 10KB = 1GB disk
+# - Cold tier: 1M * 8KB = 8GB disk
+# - Total: 120MB RAM + 9GB disk
+
+[feature_flags]
+# Enable all beta features for development testing
+spreading_api_beta = true
+
+[memory_spaces]
+# Use dev namespace to avoid conflicts with other environments
+default_space = "dev"
+
+# Create separate test space for integration tests
+bootstrap_spaces = ["dev", "test"]
+
+[persistence]
+# Local user directory (automatically created on first run)
+# Use tilde expansion for portability across different users
+data_root = "~/.local/share/engram-dev"
+
+# Hot tier: 10K memories = 120MB RAM
+# Small footprint for laptop development
+# Increase to 50K (600MB) if testing larger datasets
+hot_capacity = 10_000
+
+# Warm tier: 100K memories = 1GB disk
+# Sufficient for testing tier migrations
+warm_capacity = 100_000
+
+# Cold tier: 1M memories = 8GB disk
+# Adequate for testing consolidation and archival
+cold_capacity = 1_000_000
+
+# Spreading activation configuration (future TOML support)
+# Development-tuned settings:
+# - decay_rate: 0.85 (match production for consistency)
+# - threshold: 0.10 (standard setting)
+# - max_hops: 3 (reduced for faster interactive testing)
+# - max_workers: 4 (half of typical laptop cores)
+
+# Consolidation configuration (future TOML support)
+# Development-tuned settings:
+# - interval: 1 minute (rapid testing)
+# - min_episode_age: 1 second (immediate consolidation for tests)
+# - pattern_detection.min_cluster_size: 2 (detect patterns quickly)
+# - pattern_detection.similarity_threshold: 0.80
+
+# Monitoring configuration
+# Prometheus metrics on port 9092 (avoid conflicts)
+# Log level: debug (verbose logging)
+# Tracing: disabled (reduce overhead for interactive development)
+
+# Development workflow tips:
+# 1. Quick start: Run `engram server --config config/development.toml`
+# 2. Clear data: Remove `~/.local/share/engram-dev/` to reset
+# 3. Test fixtures: Load sample data with `engram load fixtures/sample.json`
+# 4. API testing: Use http://localhost:8080/api/v1/ with curl or Postman
+# 5. Logs: Tail logs with `engram logs --follow`
+
+# Testing strategies:
+# - Unit tests: Run `cargo test` for fast feedback
+# - Integration tests: Run `cargo test --test '*'` for end-to-end
+# - Manual testing: Use Engram CLI for interactive exploration
+# - Benchmarks: Run `cargo bench` for performance validation
+
+# Performance expectations (development):
+# - Hot tier hit rate: >0.80 (lower acceptable for small working set)
+# - Spreading latency P99: <50ms (laptop performance)
+# - Consolidation cycle: Complete within 1 minute
+# - Memory usage: Stable around 200MB total
+
+# Resource optimization:
+# - Reduce hot_capacity to 5K (60MB) if memory constrained
+# - Reduce max_workers to 2 for low-power laptops
+# - Disable consolidation during active development (set interval to 1 hour)
+# - Use warm tier only (set cold_capacity = warm_capacity)
+
+# IDE integration:
+# - VS Code: Use rust-analyzer for autocomplete and inline docs
+# - IntelliJ: Use Rust plugin with cargo integration
+# - Vim/Neovim: Use rust.vim + coc-rust-analyzer
+
+# Debugging:
+# - Enable verbose logging: Set RUST_LOG=engram=debug
+# - Attach debugger: Use lldb (Mac) or gdb (Linux)
+# - Profile performance: Use cargo-flamegraph
+# - Memory profiling: Use valgrind or heaptrack
+
+# Common issues:
+# - "Address already in use": Change port in config or kill existing process
+# - "Permission denied" on data_root: Ensure directory is writable
+# - Slow startup: Reduce bootstrap_spaces or hot_capacity
+# - High memory usage: Reduce hot_capacity or max_workers

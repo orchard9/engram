@@ -7,25 +7,37 @@ Complete guide for deploying Engram in production environments using Docker, Kub
 ### System Requirements
 
 - 2+ CPU cores (4+ recommended for production)
+
 - 4GB RAM minimum (8GB+ recommended)
+
 - 20GB disk space for data storage
+
 - Network access for container registry (if using pre-built images)
 
 ### Software Requirements
 
 **For Docker deployment:**
+
 - Docker 24.0+ with BuildKit support
+
 - docker-compose 2.0+ (optional, for stack deployment)
 
 **For Kubernetes deployment:**
+
 - Kubernetes 1.28+
+
 - kubectl configured with cluster access
+
 - StorageClass with ReadWriteOnce support
+
 - Minimum 20Gi persistent volume capacity
 
 **For Helm deployment:**
+
 - Helm 3.0+
+
 - Kubernetes 1.28+
+
 - kubectl configured with cluster access
 
 ## Docker Deployment
@@ -45,6 +57,7 @@ DOCKER_BUILDKIT=1 docker build \
 
 # Verify image size (<60MB target)
 docker images engram:latest
+
 ```
 
 ### Run Container
@@ -70,6 +83,7 @@ docker run -d \
 docker ps
 curl http://localhost:7432/health/alive
 curl http://localhost:7432/api/v1/system/health | jq .
+
 ```
 
 ### Production Configuration
@@ -103,6 +117,7 @@ docker logs -f engram
 
 # Check resource usage
 docker stats engram
+
 ```
 
 ## docker-compose Deployment
@@ -124,6 +139,7 @@ docker-compose logs -f engram
 
 # Health check
 curl http://localhost:7432/health | jq .
+
 ```
 
 ### With Monitoring
@@ -140,6 +156,7 @@ docker-compose --profile monitoring up -d
 # Verify monitoring
 curl http://localhost:9090/-/healthy
 curl http://localhost:3000/api/health
+
 ```
 
 ### Configuration Override
@@ -159,6 +176,7 @@ docker-compose up -d
 # Test graceful shutdown
 docker-compose stop -t 30
 docker-compose logs engram | grep "shutdown"
+
 ```
 
 ## Kubernetes Deployment
@@ -182,6 +200,7 @@ kubectl get pods -n engram -w
 kubectl get statefulset -n engram
 kubectl get svc -n engram
 kubectl get pvc -n engram
+
 ```
 
 ### Verify Deployment
@@ -209,6 +228,7 @@ curl -X POST http://localhost:7432/api/v1/memories/remember \
 kubectl delete pod engram-0 -n engram
 kubectl wait --for=condition=ready pod/engram-0 -n engram --timeout=60s
 curl http://localhost:7432/api/v1/memories/search?q=test | jq .
+
 ```
 
 ### Access Service
@@ -222,6 +242,7 @@ kubectl get svc engram -n engram
 # Wait for EXTERNAL-IP to be assigned
 export ENGRAM_URL=$(kubectl get svc engram -n engram -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
 curl http://$ENGRAM_URL:7432/health
+
 ```
 
 ### Update Configuration
@@ -235,6 +256,7 @@ kubectl rollout restart statefulset engram -n engram
 
 # Watch rollout status
 kubectl rollout status statefulset engram -n engram
+
 ```
 
 ## Helm Deployment
@@ -282,6 +304,7 @@ helm install engram engram \
   --create-namespace \
   -f values-production.yaml \
   --wait --timeout 5m
+
 ```
 
 ### Verify Installation
@@ -300,6 +323,7 @@ kubectl logs -f -n engram -l app.kubernetes.io/name=engram
 # Test health
 kubectl port-forward -n engram service/engram 7432:7432 &
 curl http://localhost:7432/api/v1/system/health | jq .
+
 ```
 
 ### Upgrade Deployment
@@ -324,6 +348,7 @@ helm upgrade engram engram \
 # Verify upgrade
 helm history engram -n engram
 kubectl get pods -n engram
+
 ```
 
 ### Rollback
@@ -335,6 +360,7 @@ helm rollback engram 1 -n engram
 # Verify rollback
 helm history engram -n engram
 kubectl get pods -n engram
+
 ```
 
 ### Uninstall
@@ -345,6 +371,7 @@ helm uninstall engram -n engram --wait
 
 # Delete PVCs if needed
 kubectl delete pvc -n engram -l app.kubernetes.io/name=engram
+
 ```
 
 ## Bare-Metal Deployment
@@ -360,6 +387,7 @@ cargo build --release -p engram-cli
 
 # Binary location
 ls -lh target/release/engram
+
 ```
 
 ### Install as systemd Service
@@ -410,6 +438,7 @@ sudo systemctl start engram
 # Check status
 sudo systemctl status engram
 sudo journalctl -u engram -f
+
 ```
 
 ## Configuration
@@ -425,6 +454,7 @@ sudo journalctl -u engram -f
 
 # Bare-metal
 ENGRAM_DATA_DIR=/var/lib/engram
+
 ```
 
 ### Port Configuration
@@ -439,18 +469,22 @@ ENGRAM_HTTP_PORT=7432
 --grpc-port 50051
 # or
 ENGRAM_GRPC_PORT=50051
+
 ```
 
 ### Resource Limits
 
 **Docker:**
+
 ```bash
 --memory=4g
 --memory-reservation=2g
 --cpus=2.0
+
 ```
 
 **Kubernetes (via Helm):**
+
 ```yaml
 resources:
   requests:
@@ -459,6 +493,7 @@ resources:
   limits:
     cpu: 2000m
     memory: 4Gi
+
 ```
 
 ### Logging Configuration
@@ -474,6 +509,7 @@ RUST_BACKTRACE=1
 --log-driver json-file
 --log-opt max-size=10m
 --log-opt max-file=3
+
 ```
 
 ## Verification
@@ -492,6 +528,7 @@ curl http://localhost:7432/health
 # Comprehensive health with metrics
 curl http://localhost:7432/api/v1/system/health | jq .
 # Expected: {"status": "healthy", "checks": [...], "spaces": [...]}
+
 ```
 
 ### Store Test Memory
@@ -506,6 +543,7 @@ curl -X POST http://localhost:7432/api/v1/memories/remember \
   }' | jq .
 
 # Expected: {"id": "...", "confidence": 0.95, ...}
+
 ```
 
 ### Recall Test Memory
@@ -515,23 +553,30 @@ curl -X POST http://localhost:7432/api/v1/memories/remember \
 curl http://localhost:7432/api/v1/memories/search?q=deployment | jq .
 
 # Expected: {"memories": [...], "count": 1}
+
 ```
 
 ### Monitor Logs
 
 **Docker:**
+
 ```bash
 docker logs -f engram
+
 ```
 
 **Kubernetes:**
+
 ```bash
 kubectl logs -f engram-0 -n engram
+
 ```
 
 **Bare-metal:**
+
 ```bash
 sudo journalctl -u engram -f
+
 ```
 
 ## Troubleshooting
@@ -546,6 +591,7 @@ docker logs engram
 # - Port already in use (change with --http-port)
 # - Insufficient memory (increase --memory limit)
 # - Permission denied on /data (check volume permissions)
+
 ```
 
 ### Health Check Failing
@@ -559,6 +605,7 @@ docker exec engram curl http://localhost:7432/health/alive
 
 # Review startup logs
 docker logs engram | grep -E "started|error|failed"
+
 ```
 
 ### Port Conflicts
@@ -571,6 +618,7 @@ lsof -i :7432
 docker run ... -p 8432:8432 \
   -e ENGRAM_HTTP_PORT=8432 \
   engram:latest
+
 ```
 
 ### Permission Errors
@@ -582,6 +630,7 @@ sudo chown -R 65534:65534 ./engram-data
 # Or use Docker volume
 docker volume create engram-data
 docker run ... -v engram-data:/data ...
+
 ```
 
 ### Kubernetes Pod Not Ready
@@ -597,6 +646,7 @@ kubectl get pod engram-0 -n engram -o yaml | grep -A 10 "conditions:"
 # - PVC not bound (check storageClass)
 # - Init container failed (check permissions)
 # - Startup timeout (increase failureThreshold)
+
 ```
 
 ### StatefulSet Update Stuck
@@ -610,6 +660,7 @@ kubectl delete pod engram-0 -n engram
 
 # Wait for pod to recreate
 kubectl wait --for=condition=ready pod/engram-0 -n engram
+
 ```
 
 ## Security Best Practices
@@ -617,24 +668,35 @@ kubectl wait --for=condition=ready pod/engram-0 -n engram
 ### Container Security
 
 - Use distroless base image (no shell access)
+
 - Run as non-root user (uid 65534)
+
 - Read-only root filesystem
+
 - Drop all Linux capabilities except NET_BIND_SERVICE
+
 - Enable AppArmor/SELinux profiles
+
 - Scan images for vulnerabilities (Trivy, Snyk)
 
 ### Network Security
 
 - Use LoadBalancer with source IP restrictions
+
 - Configure NetworkPolicies in Kubernetes
+
 - Enable TLS for production traffic (Task 008)
+
 - Implement firewall rules for bare-metal
 
 ### Data Security
 
 - Encrypt data at rest (storage-level encryption)
+
 - Secure volume mounts with proper permissions
+
 - Use Kubernetes Secrets for sensitive data
+
 - Regular backup procedures (Task 002)
 
 ## Performance Tuning
@@ -648,12 +710,14 @@ MIMALLOC_RESERVE_HUGE_OS_PAGES=4
 
 # NUMA awareness
 MIMALLOC_USE_NUMA_NODES=4
+
 ```
 
 ### Cache Configuration
 
 ```bash
 ENGRAM_CACHE_SIZE_MB=2048
+
 ```
 
 ### Resource Reservation
@@ -665,11 +729,15 @@ resources:
   requests:
     cpu: 1000m
     memory: 2Gi
+
 ```
 
 ## Next Steps
 
 - [Setup Monitoring](monitoring.md) - Configure Prometheus and Grafana (Task 003)
+
 - [Configure Backups](backup-restore.md) - Setup automated backups (Task 002)
+
 - [Performance Tuning](performance-tuning.md) - Optimize for production workloads (Task 004)
+
 - [Scaling Guide](scaling.md) - Horizontal and vertical scaling strategies (Milestone 14)

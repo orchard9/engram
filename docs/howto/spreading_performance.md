@@ -28,6 +28,7 @@ curl -X POST http://localhost:7432/api/v1/system/runtime \
           "priority_hot_tier": true
         }
       }'
+
 ```
 
 > Runtime overrides are tracked in Task 014. Until the HTTP endpoint lands, apply equivalent settings via deployment configuration or by rebuilding the CLI with updated `ParallelSpreadingConfig` defaults.
@@ -37,7 +38,9 @@ curl -X POST http://localhost:7432/api/v1/system/runtime \
 ### Latency
 
 - `engram_spreading_latency_hot_seconds_bucket` (and warm/cold) – histogram buckets by storage tier
+
 - `SpreadingMetrics::average_latency` – internal EWMA (available via the metrics snapshot API)
+
 - `SpreadingMetrics::latency_budget_violations` – incremented when spreads exceed time budgets
 
 ### Pool Utilization
@@ -55,7 +58,9 @@ curl -X POST http://localhost:7432/api/v1/system/runtime \
 Task 010’s adaptive batcher exposes counters to confirm convergence:
 
 - `adaptive_batch_updates` – increases when EWMA recomputes sizes
+
 - `adaptive_guardrail_hits` – spikes indicate oscillation; widen hysteresis if frequent
+
 - `adaptive_latency_ewma_ns` – trending upward signals the need to reduce `batch_size`
 
 ## Troubleshooting Playbook
@@ -72,19 +77,27 @@ Task 010’s adaptive batcher exposes counters to confirm convergence:
 Import the Grafana JSON from Task 012 (`docs/operations/spreading_dashboard.json`) and focus on:
 
 - Latency heatmap per tier
+
 - Pool utilization overlayed with `batch_size`
+
 - Circuit breaker state panel paired with fallback counts
 
 ## Rollout Strategy
 
 1. Start in Hybrid mode with the Low Latency preset.
+
 2. Monitor fallback ratios (`RecallMetrics::fallback_rate`) for 24 hours.
+
 3. Enable the Balanced preset once latency stabilizes.
+
 4. Use High Recall mode for dedicated analytics tenants or offline backfills.
+
 5. Document every preset change in `docs/changelog.md` and notify operators via release notes.
 
 ## Further Reading
 
 - [Spreading Monitoring How-To](spreading_monitoring.md)
+
 - [Cognitive Spreading Explanation](../explanation/cognitive_spreading.md)
+
 - [Spreading API Reference](../reference/spreading_api.md)

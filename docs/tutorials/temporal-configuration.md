@@ -5,12 +5,19 @@ Complete guide to configuring temporal decay in Engram for different use cases.
 ## Table of Contents
 
 1. [Quick Start](#quick-start)
+
 2. [System-Wide Configuration](#system-wide-configuration)
+
 3. [Per-Memory Configuration](#per-memory-configuration)
+
 4. [Common Use Cases](#common-use-cases)
+
 5. [Advanced Configuration](#advanced-configuration)
+
 6. [Monitoring Decay](#monitoring-decay)
+
 7. [Performance Tuning](#performance-tuning)
+
 8. [Troubleshooting](#troubleshooting)
 
 ---
@@ -37,13 +44,17 @@ let recall = CognitiveRecallBuilder::new()
     .spreading_engine(engine)
     .decay_system(decay_system)
     .build()?;
+
 ```
 
 This gives you:
 
 - Hippocampal decay (fast) for new memories (access_count < 3)
+
 - Neocortical decay (slow) for consolidated memories (access_count >= 3)
+
 - Minimum confidence threshold of 0.1
+
 - Enabled by default
 
 ### Disable Decay Entirely
@@ -57,6 +68,7 @@ let config = DecayConfigBuilder::new()
     .enabled(false)
     .build();
 let decay_system = Arc::new(BiologicalDecaySystem::with_config(config));
+
 ```
 
 ---
@@ -77,6 +89,7 @@ let config = DecayConfigBuilder::new()
     .build();
 
 let decay_system = Arc::new(BiologicalDecaySystem::with_config(config));
+
 ```
 
 **Configuration parameters:**
@@ -89,8 +102,11 @@ let decay_system = Arc::new(BiologicalDecaySystem::with_config(config));
 **Memory retention examples (tau = 2.0):**
 
 - After 1 hour: ~60% retention
+
 - After 2 hours: ~37% retention (one tau)
+
 - After 6 hours: ~5% retention
+
 - After 24 hours: <1% retention
 
 ### Power-Law Decay (Long-Term Knowledge)
@@ -105,6 +121,7 @@ let config = DecayConfigBuilder::new()
     .build();
 
 let decay_system = Arc::new(BiologicalDecaySystem::with_config(config));
+
 ```
 
 **Configuration parameters:**
@@ -118,8 +135,11 @@ let decay_system = Arc::new(BiologicalDecaySystem::with_config(config));
 **Memory retention examples (beta = 0.15):**
 
 - After 1 day: ~77% retention
+
 - After 1 week: ~53% retention
+
 - After 1 month: ~37% retention
+
 - After 1 year: ~17% retention
 
 ### Two-Component Decay (Adaptive Learning)
@@ -133,6 +153,7 @@ let config = DecayConfigBuilder::new()
     .build();
 
 let decay_system = Arc::new(BiologicalDecaySystem::with_config(config));
+
 ```
 
 **Configuration parameters:**
@@ -146,6 +167,7 @@ let decay_system = Arc::new(BiologicalDecaySystem::with_config(config));
 **Behavior:**
 
 - `access_count < threshold`: Uses hippocampal decay (exponential, tau=1h)
+
 - `access_count >= threshold`: Uses neocortical decay (exponential, tau=10h)
 
 **Example with threshold=3:**
@@ -157,6 +179,7 @@ let decay_system = Arc::new(BiologicalDecaySystem::with_config(config));
 // Memory accessed 5 times (consolidated)
 // 6 hours later: ~54.9% retention (neocortical, slow decay)
 // That's 218x more retention!
+
 ```
 
 ### Hybrid Decay (Best Empirical Fit)
@@ -174,22 +197,27 @@ let config = DecayConfigBuilder::new()
     .build();
 
 let decay_system = Arc::new(BiologicalDecaySystem::with_config(config));
+
 ```
 
 **Configuration parameters:**
 
 - `short_term_tau`: Exponential tau before transition (typical: 0.5-2.0 hours)
+
 - `long_term_beta`: Power-law beta after transition (typical: 0.15-0.35)
+
 - `transition_point`: When to switch (typical: 3600s=1h, 86400s=24h, 604800s=1week)
 
 **Behavior:**
 
 - Before transition: Exponential decay (fast initial drop)
+
 - After transition: Power-law decay (slow long-term forgetting)
 
 **Example with default parameters:**
 
 - At 2 hours (<24h): Exponential gives ~8.2% retention
+
 - At 48 hours (>24h): Power-law gives ~46.1% retention
 
 ---
@@ -215,6 +243,7 @@ let mut episode = Episode::new(
 episode.decay_function = Some(DecayFunction::PowerLaw { beta: 0.1 });
 
 store.store(episode);
+
 ```
 
 **Common override patterns:**
@@ -223,12 +252,14 @@ store.store(episode);
 
 ```rust
 episode.decay_function = Some(DecayFunction::PowerLaw { beta: 0.05 });
+
 ```
 
 2. **Temporary cache** (forget quickly):
 
 ```rust
 episode.decay_function = Some(DecayFunction::Exponential { tau_hours: 0.5 });
+
 ```
 
 3. **Disable decay for specific memory**:
@@ -236,6 +267,7 @@ episode.decay_function = Some(DecayFunction::Exponential { tau_hours: 0.5 });
 ```rust
 // System has decay enabled, but this memory won't decay
 episode.decay_function = Some(DecayFunction::Disabled);
+
 ```
 
 ---
@@ -247,7 +279,9 @@ episode.decay_function = Some(DecayFunction::Disabled);
 **Requirements:**
 
 - Long-term retention (years)
+
 - Slow forgetting of facts
+
 - Frequently accessed items should be very stable
 
 **Configuration:**
@@ -258,12 +292,15 @@ let config = DecayConfigBuilder::new()
     .min_confidence(0.2)  // Higher minimum (keep quality memories)
     .enabled(true)
     .build();
+
 ```
 
 **Why this works:**
 
 - Power-law decay matches human semantic memory
+
 - Beta=0.15 gives excellent long-term retention
+
 - Higher min_confidence ensures only quality information remains
 
 ### Use Case 2: Chat History / Conversation Logs
@@ -271,7 +308,9 @@ let config = DecayConfigBuilder::new()
 **Requirements:**
 
 - Short-term retention (hours to days)
+
 - Fast forgetting of old conversations
+
 - Recent chats should be easily accessible
 
 **Configuration:**
@@ -282,12 +321,15 @@ let config = DecayConfigBuilder::new()
     .min_confidence(0.1)  // Low minimum (keep older context if needed)
     .enabled(true)
     .build();
+
 ```
 
 **Why this works:**
 
 - Exponential decay matches episodic memory
+
 - Tau=2h gives ~37% retention after 2 hours, ~5% after 6 hours
+
 - Recent messages stay highly confident, old ones fade quickly
 
 ### Use Case 3: Spaced Repetition Flashcards
@@ -295,7 +337,9 @@ let config = DecayConfigBuilder::new()
 **Requirements:**
 
 - Adaptive to user performance
+
 - Well-practiced cards should be stable
+
 - New cards should be tested frequently
 
 **Configuration:**
@@ -305,13 +349,17 @@ let config = DecayConfigBuilder::new()
     .two_component(3)  // Consolidate after 3 correct recalls
     .enabled(true)
     .build();
+
 ```
 
 **Why this works:**
 
 - Two-component models the testing effect from cognitive psychology
+
 - New cards (access_count < 3) decay quickly → shown frequently
+
 - Mastered cards (access_count >= 3) decay slowly → shown rarely
+
 - Matches SuperMemo algorithm principles
 
 ### Use Case 4: Temporary Session Cache
@@ -319,7 +367,9 @@ let config = DecayConfigBuilder::new()
 **Requirements:**
 
 - Very fast forgetting (minutes)
+
 - No long-term retention needed
+
 - Reduce memory footprint quickly
 
 **Configuration:**
@@ -330,13 +380,17 @@ let config = DecayConfigBuilder::new()
     .min_confidence(0.05)  // Very low minimum
     .enabled(true)
     .build();
+
 ```
 
 **Why this works:**
 
 - Tau=0.25 hours (15 minutes) gives rapid decay
+
 - After 30 minutes: ~13.5% retention
+
 - After 1 hour: ~1.8% retention
+
 - After 2 hours: ~0.03% retention (effectively forgotten)
 
 ### Use Case 5: Critical Long-Term Documentation
@@ -344,7 +398,9 @@ let config = DecayConfigBuilder::new()
 **Requirements:**
 
 - Never forget important docs
+
 - Extremely slow decay
+
 - High confidence retention
 
 **System-wide configuration:**
@@ -355,6 +411,7 @@ let config = DecayConfigBuilder::new()
     .min_confidence(0.3)
     .enabled(true)
     .build();
+
 ```
 
 **Or use per-memory override for critical docs:**
@@ -362,6 +419,7 @@ let config = DecayConfigBuilder::new()
 ```rust
 // System uses default, but critical docs get special treatment
 doc_episode.decay_function = Some(DecayFunction::PowerLaw { beta: 0.05 });
+
 ```
 
 ### Use Case 6: Mixed Content (General Purpose)
@@ -369,7 +427,9 @@ doc_episode.decay_function = Some(DecayFunction::PowerLaw { beta: 0.05 });
 **Requirements:**
 
 - Handle both short-term and long-term memories
+
 - Adapt based on usage patterns
+
 - Good default for unknown memory types
 
 **Configuration:**
@@ -384,13 +444,17 @@ let config = DecayConfigBuilder::new()
     .min_confidence(0.1)
     .enabled(true)
     .build();
+
 ```
 
 **Why this works:**
 
 - Automatically adapts to usage patterns
+
 - New/rarely-used memories decay quickly (don't clutter the system)
+
 - Frequently-accessed memories become stable (important content persists)
+
 - Best general-purpose configuration
 
 ---
@@ -406,19 +470,25 @@ let config = DecayConfigBuilder::new()
     .exponential(1.0)
     .min_confidence(0.2)  // Never go below 20% confidence
     .build();
+
 ```
 
 **Choosing min_confidence:**
 
 - `0.05`: Allow very low confidence (keeps more memories, lower quality)
+
 - `0.1`: Default (good balance)
+
 - `0.2`: Higher quality threshold (fewer but more confident memories)
+
 - `0.3`: Very strict (only high-confidence memories remain)
 
 **Use cases:**
 
 - Low (0.05-0.1): Large knowledge bases, exploratory systems
+
 - Medium (0.1-0.2): General applications
+
 - High (0.2-0.3): Critical systems, high-precision requirements
 
 ### Individual Differences Calibration
@@ -428,7 +498,9 @@ The decay system automatically applies individual differences calibration to acc
 **Effect:**
 
 - Adds realistic variance to retention (~10-15% variation)
+
 - Prevents overfitting to exact mathematical curves
+
 - Models human memory variability
 
 **No configuration needed** - this happens automatically.
@@ -457,6 +529,7 @@ store.store(critical_episode);
 let mut temp_episode = Episode::new(...);
 temp_episode.decay_function = Some(DecayFunction::Exponential { tau_hours: 0.5 });
 store.store(temp_episode);
+
 ```
 
 ---
@@ -484,6 +557,7 @@ let current_confidence = decay_system.compute_decayed_confidence(
 println!("Original: {:.3}", episode.encoding_confidence.raw());
 println!("Current:  {:.3}", current_confidence.raw());
 println!("Decay:    {:.1}%", (1.0 - current_confidence.raw() / episode.encoding_confidence.raw()) * 100.0);
+
 ```
 
 ### Monitoring Access Patterns
@@ -505,6 +579,7 @@ if let Some(DecayFunction::TwoComponent { consolidation_threshold }) =
         println!("Stable long-term memory");
     }
 }
+
 ```
 
 ### Batch Decay Analysis
@@ -532,6 +607,7 @@ for episode in all_episodes {
                  episode.id, decay_pct);
     }
 }
+
 ```
 
 ---
@@ -560,6 +636,7 @@ If you need maximum performance and don't want decay:
 let config = DecayConfigBuilder::new()
     .enabled(false)
     .build();
+
 ```
 
 This gives ~2μs overhead (early return check only).
@@ -569,13 +646,17 @@ This gives ~2μs overhead (early return check only).
 When processing many memories, the cost is linear:
 
 - 100 memories: ~5-8ms
+
 - 1,000 memories: ~50-80ms
+
 - 10,000 memories: ~500-800ms
 
 If you need to process very large batches:
 
 1. **Filter before decay**: Only compute decay for top-K results
+
 2. **Parallelize**: Decay computation is thread-safe and parallelizable
+
 3. **Cache recent results**: If querying same memories repeatedly
 
 ### Thread Safety
@@ -596,6 +677,7 @@ thread::spawn(move || {
 thread::spawn(move || {
     // Use system2 in thread 2
 });
+
 ```
 
 No locks, no contention - pure computation.
@@ -609,6 +691,7 @@ No locks, no contention - pure computation.
 **Symptoms:**
 
 - Important memories disappear after a few hours
+
 - Confidence drops too fast
 
 **Solutions:**
@@ -619,6 +702,7 @@ No locks, no contention - pure computation.
 let config = DecayConfigBuilder::new()
     .exponential(5.0)  // Increase from default 1.96 to 5.0
     .build();
+
 ```
 
 2. **Switch to power-law decay:**
@@ -627,12 +711,14 @@ let config = DecayConfigBuilder::new()
 let config = DecayConfigBuilder::new()
     .power_law(0.18)  // Much slower long-term decay
     .build();
+
 ```
 
 3. **Use per-memory override for critical data:**
 
 ```rust
 episode.decay_function = Some(DecayFunction::PowerLaw { beta: 0.1 });
+
 ```
 
 ### Problem: Memories Not Decaying At All
@@ -640,6 +726,7 @@ episode.decay_function = Some(DecayFunction::PowerLaw { beta: 0.1 });
 **Symptoms:**
 
 - Old, unused memories remain at high confidence
+
 - System doesn't forget anything
 
 **Solutions:**
@@ -652,6 +739,7 @@ let config = DecayConfigBuilder::new()
     .exponential(1.0)
     .enabled(true)  // Check this!
     .build();
+
 ```
 
 2. **Verify last_recall is being updated:**
@@ -660,6 +748,7 @@ let config = DecayConfigBuilder::new()
 // After retrieval, update last_recall
 episode.last_recall = Utc::now();
 store.store(episode);
+
 ```
 
 3. **Check min_confidence isn't too high:**
@@ -670,6 +759,7 @@ let config = DecayConfigBuilder::new()
     .exponential(1.0)
     .min_confidence(0.1)  // Lower this if needed
     .build();
+
 ```
 
 ### Problem: Inconsistent Decay Behavior
@@ -677,6 +767,7 @@ let config = DecayConfigBuilder::new()
 **Symptoms:**
 
 - Two similar memories decay differently
+
 - Decay seems random
 
 **Solutions:**
@@ -690,6 +781,7 @@ if let Some(override_fn) = episode.decay_function {
 } else {
     println!("Memory uses system default");
 }
+
 ```
 
 2. **Individual differences calibration:**
@@ -706,6 +798,7 @@ println!("Memory B accesses: {}", episode_b.recall_count);
 
 // If A has recall_count=2 and B has recall_count=4 with threshold=3,
 // they use different decay functions!
+
 ```
 
 ### Problem: Performance Issues
@@ -713,6 +806,7 @@ println!("Memory B accesses: {}", episode_b.recall_count);
 **Symptoms:**
 
 - Slow query times
+
 - High CPU usage during recall
 
 **Solutions:**
@@ -729,6 +823,7 @@ let duration = start.elapsed();
 if duration.as_micros() > 100 {
     println!("Warning: Decay took {}μs (expected <100μs)", duration.as_micros());
 }
+
 ```
 
 2. **Consider disabling decay temporarily:**
@@ -738,6 +833,7 @@ if duration.as_micros() > 100 {
 let config = DecayConfigBuilder::new()
     .enabled(false)
     .build();
+
 ```
 
 3. **Verify you're not recomputing unnecessarily:**
@@ -753,6 +849,7 @@ let conf = decay_system.compute_decayed_confidence(...);
 for _ in 0..100 {
     use_confidence(conf);  // Reuse computed value
 }
+
 ```
 
 ### Problem: Testing Effect Not Working (Two-Component)
@@ -760,6 +857,7 @@ for _ in 0..100 {
 **Symptoms:**
 
 - Memories don't consolidate even after many accesses
+
 - All memories decay quickly
 
 **Solutions:**
@@ -771,6 +869,7 @@ for _ in 0..100 {
 episode.recall_count += 1;
 episode.last_recall = Utc::now();
 store.store(episode);
+
 ```
 
 2. **Check consolidation threshold:**
@@ -780,6 +879,7 @@ store.store(episode);
 let config = DecayConfigBuilder::new()
     .two_component(3)  // Not too high (e.g., not 100)
     .build();
+
 ```
 
 3. **Verify you're using two-component:**
@@ -794,6 +894,7 @@ match decay_system.config.default_function {
         println!("Warning: Not using two-component! Using {:?}", other);
     }
 }
+
 ```
 
 ---
@@ -801,5 +902,7 @@ match decay_system.config.default_function {
 ## See Also
 
 - [Decay Functions Reference](../decay-functions.md) - Mathematical specifications
+
 - [Temporal Dynamics Architecture](../temporal-dynamics.md) - Design principles
+
 - [Module README](../../engram-core/src/decay/README.md) - Code organization

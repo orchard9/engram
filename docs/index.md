@@ -40,6 +40,7 @@ cargo build
 
 # Run tests
 cargo test
+
 ```
 
 Ready to dive deeper? Check out the [Getting Started](/getting-started) guide.

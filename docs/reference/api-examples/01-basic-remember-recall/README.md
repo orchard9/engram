@@ -16,18 +16,25 @@ ENCODE → STORE → RETRIEVE → USE
 Remember  Storage  Recall
           (with     (with
          confidence) confidence)
+
 ```
 
 Unlike traditional databases where writes either succeed or fail, Engram acknowledges that:
+
 1. **Storage has confidence** - how certain are we the write succeeded?
+
 2. **Memories have intrinsic confidence** - how certain are we this fact is true?
+
 3. **Retrieval has confidence** - how certain are we we found the right memories?
 
 ## What You'll Learn
 
 - Store a memory with `remember()` and confidence scoring
+
 - Retrieve memories with `recall()` using semantic cues
+
 - Understand activation vs confidence
+
 - See auto-linking create connections
 
 ## Code Examples
@@ -89,12 +96,15 @@ async def main():
 if __name__ == "__main__":
     import asyncio
     asyncio.run(main())
+
 ```
 
 **Run**:
+
 ```bash
 pip install grpcio grpcio-tools
 python python.py
+
 ```
 
 ### Rust
@@ -166,11 +176,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
+
 ```
 
 **Run**:
+
 ```bash
 cargo run --release
+
 ```
 
 ### Complete examples for TypeScript, Go, and Java
@@ -189,6 +202,7 @@ Found 1 memories:
   - The Eiffel Tower is located in Paris, France
     Activation: 0.87
     Confidence: 0.95
+
 ```
 
 ## Key Concepts Explained
@@ -196,7 +210,9 @@ Found 1 memories:
 ### Confidence vs Activation
 
 - **Confidence (0.95)**: How certain the memory is correct (intrinsic property)
+
 - **Activation (0.87)**: How accessible the memory is right now (dynamic, context-dependent)
+
 - **Recall confidence (0.89)**: How certain the retrieval operation succeeded
 
 A memory can be highly confident (0.95) but low activation (0.3) if it hasn't been accessed recently.
@@ -217,48 +233,60 @@ The query "Paris landmarks" doesn't contain the exact words "Eiffel Tower", but 
 ### ERR-1001: Embedding Dimension Mismatch
 
 **Error**:
+
 ```
 Expected 768 dimensions, received 8 dimensions
+
 ```
 
 **Fix**:
+
 ```python
 # Production: Use proper 768-dim embeddings
 from sentence_transformers import SentenceTransformer
 model = SentenceTransformer('all-mpnet-base-v2')
 embedding = model.encode("The Eiffel Tower is in Paris")  # 768-dim
+
 ```
 
 ### ERR-1002: Invalid Confidence Value
 
 **Error**:
+
 ```
 Confidence must be in range [0.0, 1.0], received: 1.5
+
 ```
 
 **Fix**:
+
 ```python
 # Wrong
 confidence = Confidence(value=1.5)  # Out of range
 
 # Correct
 confidence = Confidence(value=0.95)  # In [0.0, 1.0]
+
 ```
 
 ### Connection Refused
 
 **Error**:
+
 ```
 grpc._channel._InactiveRpcError: connect failed
+
 ```
 
 **Fix**:
+
 ```bash
 # Check if Engram is running
 curl http://localhost:8080/api/v1/introspect
 
 # If not, start it
 engram start --grpc-port 50051
+
 ```
 
 ## Variations to Try
@@ -282,6 +310,7 @@ response = await client.Recall(RecallRequest(
     cue=Cue(semantic=SemanticCue(query="Eiffel Tower"))
 ))
 print(f"Found {len(response.memories)} linked memories")
+
 ```
 
 ### 2. Vary Confidence Levels
@@ -310,6 +339,7 @@ response = await client.Recall(RecallRequest(
     cue=...,
     confidence_threshold=0.8  # Only memory1 and memory2 returned
 ))
+
 ```
 
 ### 3. Trace Activation Spread
@@ -325,6 +355,7 @@ for trace in response.traces:
     print(f"Memory {trace.memory_id}")
     print(f"  Activation level: {trace.activation_level:.2f}")
     print(f"  Path: {' → '.join(trace.activation_path)}")
+
 ```
 
 ## Next Steps
@@ -332,27 +363,39 @@ for trace in response.traces:
 **After mastering this example:**
 
 1. Try [02-episodic-memory](../02-episodic-memory/) - Add rich contextual information
+
 2. Explore [04-pattern-completion](../04-pattern-completion/) - Reconstruct partial memories
+
 3. Study [05-error-handling](../05-error-handling/) - Build production resilience
 
 **Related documentation:**
+
 - [REST API Reference](/reference/rest-api.md#core-memory-operations)
+
 - [gRPC API Reference](/reference/grpc-api.md#remember)
+
 - [Confidence Scoring Guide](/explanation/confidence-scoring.md)
 
 ## Time to Complete
 
 - **First run**: 10 minutes (reading + running)
+
 - **With variations**: 20 minutes (try all 3 variations)
+
 - **Deep understanding**: 30 minutes (read code + docs)
 
 ## Success Criteria
 
 You've mastered this example when you can:
+
 - [ ] Store a memory with confidence and explain what confidence means
+
 - [ ] Retrieve memories using semantic queries
+
 - [ ] Explain the difference between confidence and activation
+
 - [ ] Understand when auto-linking is beneficial
+
 - [ ] Vary confidence thresholds to filter results
 
 **Congratulations!** You now understand 80% of Engram's core functionality. The remember/recall cycle is the foundation for all other operations.

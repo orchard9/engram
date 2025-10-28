@@ -10,7 +10,9 @@ Diagnose spreading activation issues by combining API overrides, deterministic t
 ## Prerequisites
 
 - Engram built with the default feature set (`cargo build --workspace --features full`)
+
 - CLI compiled with `hnsw_index` enabled
+
 - `spreading_api_beta` set to `true` in `~/.config/engram/config.toml`
   - Run `engram config set feature_flags.spreading_api_beta true`
   - Restart the server (`engram stop && engram start`) so the flag is applied
@@ -25,6 +27,7 @@ engram config get feature_flags.spreading_api_beta
 
 # Issue a spreading recall (falls back to similarity if the flag is off)
 curl "http://localhost:7432/api/v1/memories/recall?query=dr+harmon&max_results=5&mode=spreading"
+
 ```
 
 If you receive a 400 response mentioning the feature flag, restart the daemon after enabling it or switch to `mode=hybrid` while you investigate.
@@ -36,12 +39,15 @@ Use the monitoring SSE endpoint to observe how activation propagates. Each event
 ```bash
 curl "http://localhost:7432/api/v1/monitoring/events?event_types=activation,spreading&include_causality=true&max_frequency=5" \
   --no-buffer | jq '.activation // .spreading'
+
 ```
 
 Look for:
 
 - Missing activation entries for expected nodes (indicates sparse edges or low thresholds)
+
 - High `latency_ms` or repeated `caused_by` IDs (suggests cycle pressure)
+
 - Causality chains referencing old sequences (potentially stale recall results)
 
 ## 3. Generate Deterministic Traces
@@ -53,12 +59,15 @@ cargo run -p engram-cli --example spreading_visualizer --features hnsw_index \
   -- --input-trace docs/assets/spreading/trace_samples/seed_42_trace.json \
      --output target/debug-spreading.dot \
      --render-png target/debug-spreading.png
+
 ```
 
 Open the generated PNG to verify:
 
 - Activation fades with depth (`distance_decay` working)
+
 - Confidence narrows along intended paths
+
 - No isolated nodes remain bright after the spread completes
 
 To diagnose a live issue, replace `--input-trace` with a trace captured from SSE and diff the resulting DOT against the baseline.
@@ -79,6 +88,7 @@ Fetch a quick snapshot:
 
 ```bash
 curl http://localhost:7432/metrics | rg "engram_spreading_"
+
 ```
 
 ## 5. Apply Fixes or Roll Back
@@ -94,5 +104,7 @@ Document any parameter changes in `docs/changelog.md` and notify operators when 
 ## Next Steps
 
 - [Spreading Monitoring Runbook](spreading_monitoring.md)
+
 - [Performance Tuning Guide](spreading_performance.md)
+
 - [API Reference](../reference/spreading_api.md)

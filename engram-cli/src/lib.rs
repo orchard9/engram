@@ -12,7 +12,9 @@ pub mod config;
 pub mod docs;
 pub mod grpc;
 pub mod handlers;
+pub mod interactive;
 pub mod openapi;
+pub mod output;
 
 use anyhow::Result;
 use std::time::Duration;
