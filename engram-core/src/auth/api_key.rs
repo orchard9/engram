@@ -297,6 +297,6 @@ mod tests {
     fn test_secure_id_generation() {
         let id = generate_secure_id(24);
         assert_eq!(id.len(), 24);
-        assert!(id.chars().all(|c| c.is_alphanumeric()));
+        assert!(id.chars().all(char::is_alphanumeric));
     }
 }

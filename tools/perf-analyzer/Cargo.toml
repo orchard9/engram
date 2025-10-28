@@ -1,0 +1,14 @@
+[package]
+name = "perf-analyzer"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Performance analysis CLI tool for Engram operators"
+readme = "README.md"
+
+[dependencies]

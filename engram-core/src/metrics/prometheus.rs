@@ -4,7 +4,7 @@
 //! This enables compatibility with Prometheus scrapers while preserving the
 //! streaming-first architecture and JSON endpoint for SSE consumers.
 
-use super::streaming::{AggregatedMetrics, MetricAggregate, WindowSnapshot};
+use super::streaming::{AggregatedMetrics, WindowSnapshot};
 use std::fmt::Write as FmtWrite;
 
 /// Convert aggregated metrics snapshot to Prometheus text format
@@ -506,6 +506,7 @@ fn export_summary(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::metrics::MetricAggregate;
     use std::collections::BTreeMap;
 
     #[test]
