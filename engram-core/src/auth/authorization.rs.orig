@@ -90,7 +90,6 @@ mod tests {
     use crate::auth::{Principal, RateLimit};
 
     #[test]
-    #[allow(clippy::expect_used)]
     fn test_authorization_with_permission() {
         let engine = AuthorizationEngine::new();
 
@@ -107,7 +106,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::expect_used)]
     fn test_authorization_without_permission() {
         let engine = AuthorizationEngine::new();
 
@@ -124,7 +122,6 @@ mod tests {
     }
 
     #[test]
-    #[allow(clippy::expect_used)]
     fn test_authorization_with_admin() {
         let engine = AuthorizationEngine::new();
 

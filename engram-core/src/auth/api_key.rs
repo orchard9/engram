@@ -119,10 +119,10 @@ impl ApiKeyValidator {
         let key = parse_api_key(auth_header)?;
 
         // Check cache first (with TTL)
-        if let Some(cached) = self.cache.get(&key.key_id) {
-            if !cached.is_expired() {
-                return Ok(cached.context.clone());
-            }
+        if let Some(cached) = self.cache.get(&key.key_id)
+            && !cached.is_expired()
+        {
+            return Ok(cached.context.clone());
         }
 
         // Load from store
@@ -285,6 +285,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[allow(clippy::unwrap_used)]
     fn test_parse_api_key() {
         let header = "Bearer engram_key_abc123_secret456";
         let parsed = parse_api_key(header).unwrap();

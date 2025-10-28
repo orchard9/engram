@@ -37,12 +37,13 @@ impl AwsSecretsManager {
     /// # Errors
     ///
     /// Returns `SecurityError` if secret retrieval fails
+    #[allow(clippy::unused_async)]
     pub async fn get_secret(&self, secret_id: &str) -> Result<SecretString, SecurityError> {
         // Check cache
-        if let Some(cached) = self.cache.get(secret_id) {
-            if !cached.is_expired() {
-                return Ok(cached.value.clone());
-            }
+        if let Some(cached) = self.cache.get(secret_id)
+            && !cached.is_expired()
+        {
+            return Ok(cached.value.clone());
         }
 
         // For now, return placeholder

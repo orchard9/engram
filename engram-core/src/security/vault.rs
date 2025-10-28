@@ -37,7 +37,9 @@ pub struct VaultConfig {
 
 /// Vault secrets manager
 pub struct VaultSecretsManager {
+    #[allow(dead_code)]
     client: VaultClient,
+    #[allow(dead_code)]
     mount_path: String,
     cache: Arc<DashMap<String, CachedSecret>>,
 }
@@ -48,6 +50,7 @@ impl VaultSecretsManager {
     /// # Errors
     ///
     /// Returns `SecurityError` if Vault initialization or authentication fails
+    #[allow(clippy::unused_async)]
     pub async fn new(config: VaultConfig) -> Result<Self, SecurityError> {
         let client = VaultClient::new(
             vaultrs::client::VaultClientSettingsBuilder::default()
@@ -69,12 +72,13 @@ impl VaultSecretsManager {
     /// # Errors
     ///
     /// Returns `SecurityError` if secret retrieval fails
+    #[allow(clippy::unused_async)]
     pub async fn get_secret(&self, key: &str) -> Result<SecretString, SecurityError> {
         // Check cache
-        if let Some(cached) = self.cache.get(key) {
-            if !cached.is_expired() {
-                return Ok(cached.value.clone());
-            }
+        if let Some(cached) = self.cache.get(key)
+            && !cached.is_expired()
+        {
+            return Ok(cached.value.clone());
         }
 
         // For now, return placeholder

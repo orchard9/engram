@@ -75,16 +75,16 @@ pub struct Jwk {
 impl Jwk {
     /// Convert JWK to PEM format
     #[must_use]
-    #[allow(clippy::unused_self)]
-    pub fn to_pem(&self) -> Option<Vec<u8>> {
+    #[allow(clippy::unused_self, clippy::missing_const_for_fn)]
+    pub const fn to_pem(&self) -> Option<Vec<u8>> {
         // Simplified - real implementation would decode n and e
         None
     }
 
     /// Convert to bytes representation
     #[must_use]
-    #[allow(clippy::unused_self)]
-    pub fn as_bytes(&self) -> Vec<u8> {
+    #[allow(clippy::unused_self, clippy::missing_const_for_fn)]
+    pub const fn as_bytes(&self) -> Vec<u8> {
         // Simplified - would encode properly
         vec![]
     }
@@ -136,8 +136,10 @@ impl JwtValidator {
         let kid = header.kid.ok_or(AuthError::MissingKeyId)?;
 
         // Get public key for verification
-        let keys = self.keys.read().await;
-        let _key = keys.find(&kid).ok_or(AuthError::UnknownKey)?;
+        {
+            let keys = self.keys.read().await;
+            let _key = keys.find(&kid).ok_or(AuthError::UnknownKey)?;
+        }
 
         // For now, use a placeholder decoding key
         // Real implementation would properly decode the JWK
@@ -195,6 +197,7 @@ impl JwtValidator {
     ///
     /// Returns `AuthError` if JWKS refresh fails
     #[cfg(all(feature = "security", feature = "reqwest"))]
+    #[allow(clippy::unused_async)]
     pub async fn refresh_keys(&self, _jwks_uri: &str) -> Result<(), AuthError> {
         // Real implementation would use reqwest
         // For now, return placeholder

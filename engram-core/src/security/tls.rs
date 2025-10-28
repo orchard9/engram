@@ -40,7 +40,8 @@ pub struct TlsConfig {
 impl TlsConfig {
     /// Create a new TLS configuration
     #[must_use]
-    pub fn new(cert_chain_path: PathBuf, private_key_path: PathBuf) -> Self {
+    #[allow(clippy::missing_const_for_fn)]
+    pub const fn new(cert_chain_path: PathBuf, private_key_path: PathBuf) -> Self {
         Self {
             cert_chain_path,
             private_key_path,
