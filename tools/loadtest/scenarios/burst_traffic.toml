@@ -1,0 +1,36 @@
+name = "Burst Traffic Pattern"
+description = "Periodic load spikes simulating real-world traffic patterns"
+
+[duration]
+total_seconds = 1800
+
+[arrival]
+pattern = "periodic_burst"
+base_rate = 2000.0
+burst_rate = 15000.0
+burst_duration_sec = 30
+burst_period_sec = 300
+
+[operations]
+store_weight = 40.0
+recall_weight = 50.0
+embedding_search_weight = 10.0
+pattern_completion_weight = 0.0
+
+[data]
+num_nodes = 500_000
+embedding_dim = 768
+memory_spaces = 4
+
+[data.embedding_distribution]
+type = "clustered"
+num_clusters = 10
+std_dev = 0.1
+
+[validation]
+expected_p99_latency_ms = 15.0
+expected_throughput_ops_sec = 10000.0
+max_error_rate = 0.005
+
+[chaos]
+enabled = false

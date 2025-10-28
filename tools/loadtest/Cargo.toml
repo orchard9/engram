@@ -1,0 +1,49 @@
+[package]
+name = "loadtest"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+description = "Load testing tool for Engram cognitive graph database"
+readme = "README.md"
+
+[dependencies]
+# Core dependencies
+anyhow.workspace = true
+thiserror.workspace = true
+clap.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+# Statistics and distributions
+rand.workspace = true
+rand_distr = "0.4"
+rand_chacha = "0.3"
+
+# Time handling
+chrono.workspace = true
+
+# Configuration
+toml = "0.8"
+
+# Metrics and monitoring
+hdrhistogram = "7.5"
+
+# Logging
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+# HTTP client for load testing
+reqwest = { version = "0.12", features = ["json"] }
+
+# Progress display
+indicatif = "0.17"
+
+[[bin]]
+name = "loadtest"
+path = "src/main.rs"

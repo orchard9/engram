@@ -1,0 +1,33 @@
+name = "Read-Heavy Workload"
+description = "20% store, 80% recall - simulates query-heavy production usage"
+
+[duration]
+total_seconds = 3600
+
+[arrival]
+pattern = "constant"
+rate = 12000.0
+
+[operations]
+store_weight = 20.0
+recall_weight = 60.0
+embedding_search_weight = 20.0
+pattern_completion_weight = 0.0
+
+[data]
+num_nodes = 1_000_000
+embedding_dim = 768
+memory_spaces = 1
+
+[data.embedding_distribution]
+type = "clustered"
+num_clusters = 10
+std_dev = 0.1
+
+[validation]
+expected_p99_latency_ms = 10.0
+expected_throughput_ops_sec = 12000.0
+max_error_rate = 0.001
+
+[chaos]
+enabled = false

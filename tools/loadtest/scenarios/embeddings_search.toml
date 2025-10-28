@@ -1,0 +1,33 @@
+name = "Embeddings Search Focused"
+description = "Heavy similarity search workload - vector database stress test"
+
+[duration]
+total_seconds = 1800
+
+[arrival]
+pattern = "constant"
+rate = 5000.0
+
+[operations]
+store_weight = 10.0
+recall_weight = 20.0
+embedding_search_weight = 70.0
+pattern_completion_weight = 0.0
+
+[data]
+num_nodes = 1_000_000
+embedding_dim = 768
+memory_spaces = 1
+
+[data.embedding_distribution]
+type = "clustered"
+num_clusters = 20
+std_dev = 0.15
+
+[validation]
+expected_p99_latency_ms = 12.0
+expected_throughput_ops_sec = 5000.0
+max_error_rate = 0.001
+
+[chaos]
+enabled = false
