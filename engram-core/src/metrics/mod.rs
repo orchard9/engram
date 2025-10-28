@@ -16,6 +16,7 @@ pub mod completion_metrics;
 pub mod hardware;
 pub mod health;
 pub mod lockfree;
+pub mod prometheus;
 pub mod streaming;
 
 #[cfg(feature = "monitoring")]

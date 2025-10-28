@@ -1,0 +1,44 @@
+# Headless service for StatefulSet
+apiVersion: v1
+kind: Service
+metadata:
+  name: engram-headless
+  labels:
+    app: engram
+spec:
+  clusterIP: None
+  selector:
+    app: engram
+  ports:
+  - name: http
+    port: 7432
+  - name: grpc
+    port: 50051
+
+---
+# Regular service for client access
+apiVersion: v1
+kind: Service
+metadata:
+  name: engram
+  labels:
+    app: engram
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+spec:
+  type: LoadBalancer
+  selector:
+    app: engram
+  ports:
+  - name: http
+    port: 7432
+    targetPort: http
+    protocol: TCP
+  - name: grpc
+    port: 50051
+    targetPort: grpc
+    protocol: TCP
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 10800

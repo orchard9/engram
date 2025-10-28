@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "engram.fullname" . }}-config
+  labels:
+    {{- include "engram.labels" . | nindent 4 }}
+data:
+  engram.toml: |
+    [feature_flags]
+    spreading_api_beta = {{ .Values.config.featureFlags.spreadingApiBeta }}
+
+    [memory_spaces]
+    default_space = {{ .Values.config.memorySpaces.defaultSpace | quote }}
+    bootstrap_spaces = {{ toJson .Values.config.memorySpaces.bootstrapSpaces }}
+
+    [persistence]
+    data_root = {{ .Values.config.dataDir | quote }}
+    hot_capacity = {{ .Values.config.persistence.hotCapacity }}
+    warm_capacity = {{ .Values.config.persistence.warmCapacity }}
+    cold_capacity = {{ .Values.config.persistence.coldCapacity }}
+    flush_interval_sec = {{ .Values.config.persistence.flushIntervalSec }}
+    compression_enabled = {{ .Values.config.persistence.compressionEnabled }}
+
+    [consolidation]
+    enabled = {{ .Values.config.consolidation.enabled }}
+    interval_sec = {{ .Values.config.consolidation.intervalSec }}
+    batch_size = {{ .Values.config.consolidation.batchSize }}
+    parallel_workers = {{ .Values.config.consolidation.parallelWorkers }}
+
+    [cache]
+    size_mb = {{ .Values.config.cache.sizeMb }}
+    ttl_sec = {{ .Values.config.cache.ttlSec }}
+
+    [performance]
+    max_concurrent_queries = {{ .Values.config.performance.maxConcurrentQueries }}
+    query_timeout_sec = {{ .Values.config.performance.queryTimeoutSec }}

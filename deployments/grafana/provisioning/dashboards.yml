@@ -1,0 +1,15 @@
+# Grafana dashboard provisioning for Engram monitoring
+
+apiVersion: 1
+
+providers:
+  - name: 'Engram Dashboards'
+    orgId: 1
+    folder: 'Engram'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: true

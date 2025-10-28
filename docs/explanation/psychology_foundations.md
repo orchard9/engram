@@ -25,6 +25,7 @@ Ever notice how thinking about "doctor" makes "nurse" pop into your head, even t
 Collins & Loftus (1975) proposed spreading activation theory to explain this phenomenon. When you activate a concept in semantic memory, activation spreads along associative links to related concepts, temporarily lowering their retrieval threshold.
 
 Neely (1977) measured semantic priming precisely in landmark experiments:
+
 - People recognize "nurse" about 50-80ms faster after seeing "doctor"
 - Compared to unrelated prime like "car": 600ms baseline → 520-550ms primed
 - Effect peaks at 200-400ms stimulus-onset-asynchrony (SOA)
@@ -32,6 +33,7 @@ Neely (1977) measured semantic priming precisely in landmark experiments:
 - Occurs automatically (not strategic) for closely related concepts
 
 **Quantitative findings from Neely (1977) Table 2:**
+
 - Automatic processing (SOA <400ms): 50-80ms facilitation
 - Strategic processing (SOA >400ms): Can produce inhibition for unexpected targets
 - Related prime, related target: -75ms (facilitation)
@@ -101,6 +103,7 @@ RT_primed = RT_baseline × (1 - activation_boost)
 ```
 
 If baseline RT = 600ms and primed RT = 510ms:
+
 ```
 510 = 600 × (1 - activation_boost)
 activation_boost = (600 - 510) / 600 = 0.15 (15%)
@@ -111,17 +114,20 @@ This transformation lets us apply psychology findings (RT in ms) to our activati
 ### What This Means for Your Application
 
 **If you're building a recommendation system:**
+
 - Priming = "Users who viewed X often view Y"
 - Decay = "Recency matters: recent views prime more strongly"
 - Threshold = "Only recommend highly similar items"
 - Pruning = "Clear old browsing history periodically"
 
 **Configuration guidance:**
+
 - **E-commerce:** Lower threshold (0.5) for discovery, shorter decay (200ms) for impulse
 - **Medical:** Higher threshold (0.7) for precision, longer decay (500ms) for thoroughness
 - **Social:** Fastest decay (150ms) for trending content, moderate threshold (0.6)
 
 **Debugging tips:**
+
 - Too many unrelated recommendations → increase `similarity_threshold`
 - Related items not appearing → decrease `similarity_threshold` or check embeddings
 - Priming persists too long → reduce `decay_half_life`
@@ -138,6 +144,7 @@ Ever struggle to remember where you parked today because yesterday's parking spo
 ### The Psychology
 
 Underwood (1957) discovered that forgetting isn't just passive decay - most forgetting is active interference from competing memories. In his classic study:
+
 - After learning 1 list: 75% retention after 24 hours
 - After learning 10 lists: 25% retention after 24 hours
 - Each additional similar list increases interference
@@ -145,12 +152,14 @@ Underwood (1957) discovered that forgetting isn't just passive decay - most forg
 McGeoch (1942) established that interference increases with similarity between memories. Unrelated new learning causes little interference, but highly similar new learning can devastate retention.
 
 Anderson (1974) demonstrated the **fan effect**: retrieval time increases linearly with the number of facts associated with a concept.
+
 - 1 fact about person: 600ms retrieval time
 - 2 facts: 680ms (+80ms per additional fact)
 - 3 facts: 760ms
 - Formula: RT = base + (n_facts - 1) × 80ms
 
 Anderson & Neely (1996) synthesized interference research, showing:
+
 - **Proactive interference:** Old memories disrupt new learning
 - **Retroactive interference:** New learning disrupts old memory recall
 - Both mediated by similarity (higher similarity → more interference)
@@ -232,6 +241,7 @@ pub fn compute_fan_effect_slowdown(&self, num_associations: usize) -> f32 {
 **Why 6-hour window (not 24 hours)?**
 
 Dudai et al. (2015) and McClelland et al. (1995) Complementary Learning Systems theory:
+
 - First 6 hours: Memories in hippocampus (synaptic consolidation)
 - After 6 hours: Transfer to neocortex begins (systems consolidation)
 - Hippocampal memories show high interference (overlapping representations)
@@ -264,11 +274,13 @@ if interference_result.interference_magnitude > 0.15 {
 ```
 
 **Configuration guidance:**
+
 - **Flashcard apps:** Use interference detection to identify confusable cards, schedule them apart
 - **Knowledge bases:** Monitor fan effect - concepts with >20 associations may need restructuring
 - **Medical diagnosis:** High interference between similar conditions → require higher confidence thresholds
 
 **Debugging tips:**
+
 - Interference always 0% → check `similarity_threshold` not too high (try 0.6 instead of 0.7)
 - Excessive interference → increase `similarity_threshold` or reduce `interference_per_item`
 - Fan effect not appearing → ensure association counts accurately tracked
@@ -286,23 +298,27 @@ Remembering isn't like playing a recording - it's reconstruction. And here's the
 Nader, Schafe, & Le Doux (2000) revolutionized memory science with a shocking discovery: fear memories in rats became labile (modifiable) after recall. If they blocked protein synthesis during a 6-hour window post-recall, the memory was disrupted. Outside that window, the same manipulation had no effect.
 
 **Key findings from Nader et al. (2000):**
+
 - Memories require protein synthesis for reconsolidation after retrieval
 - Critical window: 1-6 hours post-recall (matches original consolidation timeframe)
 - Only recently-retrieved memories are labile
 - Window timing matches protein synthesis kinetics in amygdala
 
 Lee (2009) reviewed reconsolidation boundaries:
+
 - Memories must be consolidated (>24 hours old) before they can reconsolidate
 - Very remote memories (>1 year) show reduced but not absent plasticity
 - Requires active recall, not passive re-exposure
 - Window length varies by brain region and memory type
 
 Schiller et al. (2010) demonstrated human applications:
+
 - Updating fear memories during reconsolidation window prevented fear return
 - Timing critical: 10 min post-recall worked, 6 hours didn't
 - Therapeutic implications for PTSD and addiction
 
 Nader & Einarsson (2010) characterized plasticity dynamics:
+
 - Protein synthesis shows non-linear kinetics
 - Rapid rise (0-2h post-recall)
 - Plateau at peak (2-4h) - MAXIMUM PLASTICITY
@@ -314,6 +330,7 @@ Nader & Einarsson (2010) characterized plasticity dynamics:
 Think of consolidated memory as a book on a library shelf. Normally, you can't edit it - it's fixed text. But when you take the book off the shelf (recall), for the next few hours it becomes editable manuscript. You can add notes, revise passages, update information. After 6 hours, the manuscript becomes a printed book again and returns to the shelf, now incorporating your edits.
 
 But there are rules:
+
 - The book must have been on the shelf at least 24 hours (consolidated)
 - Very old books (>1 year) are harder to edit (remote memories less plastic)
 - You must actively read it (active recall), not just see it sitting there (passive re-exposure)
@@ -423,6 +440,7 @@ pub fn compute_plasticity(&self, time_since_recall: Duration) -> f32 {
 | `reconsolidation_plasticity` | 0.5 (50%) | Maximum modification allowed during window | Tune based on application needs |
 
 **Plasticity dynamics (inverted-U):**
+
 - **1 hour:** 0.20 plasticity (early, protein synthesis ramping up)
 - **3 hours:** 1.00 plasticity (peak, maximum modification possible)
 - **6 hours:** 0.10 plasticity (late, window closing)
@@ -487,11 +505,13 @@ if age > Duration::hours(24) &&
 ```
 
 **Configuration guidance:**
+
 - **Therapeutic apps:** Use full 50% plasticity for meaningful reframing
 - **Factual knowledge:** Reduce plasticity to 20% to prevent corruption
 - **Collaborative editing:** Track who made reconsolidation updates (audit trail)
 
 **Debugging tips:**
+
 - Always `OutsideWindow` → check system clock, verify timestamps in UTC
 - Always `MemoryTooYoung` → ensure >24h between creation and recall
 - Updates too weak → check plasticity at attempt time (should peak at 3h)
@@ -514,6 +534,7 @@ People study related words ("bed, rest, awake, tired, dream...") and falsely "re
 Validates that our semantic network density and pattern completion generate plausible false memories, just like human memory. If Engram couldn't do this, it wouldn't faithfully model cognitive reconstruction.
 
 **Our results:**
+
 - **Target:** 55-65% false recall (Roediger & McDermott 1995)
 - **Achieved:** 62% false recall (n=100 trials)
 - **Statistical significance:** Chi-square test p < 0.05
@@ -525,12 +546,14 @@ Validates that our semantic network density and pattern completion generate plau
 Engram's semantic associations have human-like strength. Pattern completion activates critical lures at rates matching psychology literature. Our priming + consolidation produces the same false memory phenomenon humans show.
 
 **What to watch:**
+
 - **Too high (>75%):** Pattern completion too aggressive → hallucination risk
   - **Fix:** Increase `pattern_completion_threshold` from 0.6 to 0.7
 - **Too low (<45%):** Semantic connections too weak → won't generalize
   - **Fix:** Increase `consolidation_strength` or reduce `similarity_threshold`
 
 **How to reproduce:**
+
 ```bash
 cargo test --test drm_paradigm --release -- --nocapture
 # Shows trial-by-trial results and statistical summary
@@ -549,6 +572,7 @@ Distributed practice (3 study sessions spaced apart) produces 20-40% better rete
 Validates that our temporal dynamics and consolidation timing produce biologically realistic learning curves. The spacing effect is one of the most robust findings in psychology - failing to replicate it would indicate fundamental problems with our decay and consolidation mechanisms.
 
 **Our results:**
+
 - **Target:** 20-40% retention improvement (Cepeda et al. 2006)
 - **Achieved:** 28% retention improvement (distributed vs massed)
 - **Statistical significance:** Paired t-test p < 0.01
@@ -560,12 +584,14 @@ Validates that our temporal dynamics and consolidation timing produce biological
 Engram's decay functions and consolidation processes replicate human spacing effects. Distributed practice allows consolidation between sessions, strengthening memory traces. Our temporal dynamics match published retention curves.
 
 **What to watch:**
+
 - **Too high (>50%):** Massed practice not penalized enough → decay too slow
   - **Fix:** Decrease `decay_half_life` or increase `consolidation_threshold`
 - **Too low (<10%):** Spacing not beneficial → consolidation not working
   - **Fix:** Check consolidation triggers, ensure time advancement in tests
 
 **How to reproduce:**
+
 ```bash
 cargo test --test spacing_effect --release -- --nocapture
 # Shows retention curves for massed vs distributed conditions
@@ -586,16 +612,19 @@ Validates that our interference detection and fan effect modeling match human me
 **Our results:**
 
 **Proactive Interference:**
+
 - **Target:** 20-30% reduction with 5 similar lists
 - **Achieved:** 25% reduction with 5 similar items
 - **Within:** ±10% of empirical data
 
 **Retroactive Interference:**
+
 - **Target:** Similar magnitude, opposite direction
 - **Achieved:** 23% reduction when 5 new items learned
 - **Within:** ±10% of empirical data
 
 **Fan Effect:**
+
 - **Target:** ~80ms per association (Anderson 1974)
 - **Achieved:** Within ±25ms across 1-10 associations
 - **Scaling:** Linear as predicted by ACT-R model
@@ -605,12 +634,14 @@ Validates that our interference detection and fan effect modeling match human me
 Engram's similarity-based interference matches human data. Our 6-hour temporal window captures the high-interference period before systems consolidation. Fan effect scaling confirms associative competition works correctly.
 
 **What to watch:**
+
 - **Interference always 0%:** Similarity threshold too high or temporal window wrong
   - **Fix:** Reduce `similarity_threshold` to 0.6, verify timestamps
 - **Excessive interference (>40%):** Too sensitive to similarity
   - **Fix:** Increase `similarity_threshold` to 0.75, reduce `interference_per_item`
 
 **How to reproduce:**
+
 ```bash
 cargo test --test interference_validation --release -- --nocapture
 # Shows interference magnitude across varying similarity and temporal distance
@@ -627,6 +658,7 @@ Engram makes deliberate simplifications for engineering tractability. Here's wha
 ### 1. Simplified Decay Function
 
 **Biology:** Complex multi-timescale processes
+
 - Synaptic decay (milliseconds to hours)
 - Cellular consolidation (hours to days)
 - Systems consolidation (days to years)
@@ -635,11 +667,13 @@ Engram makes deliberate simplifications for engineering tractability. Here's wha
 **Engram:** Single exponential decay with configurable half-life
 
 **Justification:**
+
 - Captures behavioral effects (forgetting curves match)
 - Remains mathematically tractable
 - Parameters can be tuned per memory type
 
 **Impact:**
+
 - May not model very long-term memory (>1 year) accurately
 - Doesn't capture sudden transitions at consolidation boundaries
 - Good enough for most applications (web/mobile/enterprise)
@@ -650,6 +684,7 @@ If building systems modeling lifelong learning or alzheimer's disease, may need 
 ### 2. Discrete Reconsolidation Window
 
 **Biology:** Gradual transition from labile to stable state
+
 - Protein synthesis ramps up over hours
 - Window boundaries are fuzzy, not sharp
 - Individual differences in window timing
@@ -657,11 +692,13 @@ If building systems modeling lifelong learning or alzheimer's disease, may need 
 **Engram:** Hard boundaries at 1h and 6h post-recall
 
 **Justification:**
+
 - Engineering clarity (no ambiguity about whether update allowed)
 - Matches experimental protocols (studies use discrete time points)
 - Inverted-U plasticity function approximates gradual transition
 
 **Impact:**
+
 - Edge cases near boundaries may not match human data
 - E.g., update at 59 min vs 61 min shows discontinuous jump in plasticity
 - Real biology has smooth transitions
@@ -672,6 +709,7 @@ If boundary precision critical (e.g., therapeutic timing), may need fuzzy bounda
 ### 3. Uniform Embedding Space
 
 **Biology:** Different semantic categories have different neural substrates
+
 - Visual memories in occipital cortex
 - Auditory memories in temporal cortex
 - Emotional memories involve amygdala
@@ -680,11 +718,13 @@ If boundary precision critical (e.g., therapeutic timing), may need fuzzy bounda
 **Engram:** Single 768-dimensional embedding space for all content
 
 **Justification:**
+
 - Practical for vector similarity operations
 - Transformer embeddings capture multiple modalities reasonably
 - Most applications don't require brain region fidelity
 
 **Impact:**
+
 - May not capture domain-specific memory effects
 - E.g., visual false memories vs verbal false memories show different patterns
 - Cross-modal priming may be over/under-estimated
@@ -695,6 +735,7 @@ If building multimodal systems (vision + language + audio), may need separate em
 ### 4. Simplified Interference Mechanisms
 
 **Biology:** Multiple interference types with different neural substrates
+
 - Response competition (frontal cortex)
 - Attentional competition (parietal cortex)
 - Associative competition (hippocampus)
@@ -703,11 +744,13 @@ If building multimodal systems (vision + language + audio), may need separate em
 **Engram:** Single similarity-based interference score
 
 **Justification:**
+
 - Similarity captures most variance in interference studies
 - Remains computationally tractable at scale
 - Aligns with spreading activation framework
 
 **Impact:**
+
 - May miss non-similarity-based interference (e.g., output interference)
 - Doesn't model strategic retrieval processes
 - Good for automatic processes, less so for controlled retrieval
@@ -718,6 +761,7 @@ If modeling problem-solving or reasoning (System 2), may need explicit strategy/
 ### 5. No Sleep/Offline Consolidation
 
 **Biology:** Sleep actively reorganizes memories
+
 - Hippocampal replay during slow-wave sleep
 - Selective strengthening/weakening
 - Overnight improvements on some tasks
@@ -725,11 +769,13 @@ If modeling problem-solving or reasoning (System 2), may need explicit strategy/
 **Engram:** Consolidation triggered by time/density thresholds, not sleep cycles
 
 **Justification:**
+
 - Production systems run 24/7 (no sleep)
 - Time-based consolidation approximates offline periods
 - Can simulate sleep with explicit consolidation triggers
 
 **Impact:**
+
 - Doesn't capture sleep-dependent memory reorganization
 - May miss optimal consolidation timing
 - No distinction between sleep vs wake consolidation
@@ -1021,6 +1067,7 @@ Classic paper, APA PsycNet or Google Scholar.
 ## Summary
 
 Engram's cognitive patterns are grounded in 70+ years of memory research:
+
 - **Priming** validated against Neely (1977) and Collins & Loftus (1975)
 - **Interference** matches Underwood (1957) and Anderson (1974)
 - **Reconsolidation** implements Nader et al. (2000) and Lee (2009)

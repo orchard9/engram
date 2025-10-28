@@ -6,6 +6,10 @@ members = [
     "engram-cli",
     "engram-proto",
     "xtask",
+    "tools/migration-common",
+    "tools/migrate-neo4j",
+    "tools/migrate-postgresql",
+    "tools/migrate-redis",
 ]
 exclude = [
     "engram-core/fuzz",

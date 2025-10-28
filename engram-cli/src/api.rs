@@ -2543,6 +2543,50 @@ pub async fn metrics_snapshot(
     })))
 }
 
+/// GET /metrics/prometheus - Prometheus text format exporter
+#[utoipa::path(
+    get,
+    path = "/metrics/prometheus",
+    tag = "system",
+    responses(
+        (status = 200, description = "Metrics in Prometheus text format", content_type = "text/plain")
+    )
+)]
+pub async fn metrics_prometheus(
+    State(state): State<ApiState>,
+) -> Result<impl IntoResponse, ApiError> {
+    use engram_core::metrics::prometheus::to_prometheus_text;
+
+    // Get current metrics snapshot
+    let aggregator = state.metrics.streaming_aggregator();
+    aggregator.set_export_enabled(false);
+    let mut snapshot = state.metrics.streaming_snapshot();
+    loop {
+        let next = state.metrics.streaming_snapshot();
+        if serde_json::to_value(&next).ok() == serde_json::to_value(&snapshot).ok() {
+            snapshot = next;
+            break;
+        }
+        snapshot = next;
+    }
+    let aggregator_clone = Arc::clone(&aggregator);
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        aggregator_clone.set_export_enabled(true);
+    });
+
+    // Convert to Prometheus text format
+    let prometheus_text = to_prometheus_text(&snapshot);
+
+    Ok((
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "text/plain; version=0.0.4",
+        )],
+        prometheus_text,
+    ))
+}
+
 /// GET /api/v1/episodes/replay - Replay episode memories
 #[utoipa::path(
     get,
@@ -3787,6 +3831,7 @@ pub fn create_api_routes() -> Router<ApiState> {
         .route("/api/v1/system/spreading/config", get(spreading_config))
         .route("/api/v1/system/introspect", get(system_introspect))
         .route("/metrics", get(metrics_snapshot))
+        .route("/metrics/prometheus", get(metrics_prometheus))
         // Episode-specific operations
         .route("/api/v1/episodes/remember", post(remember_episode))
         .route("/api/v1/episodes/replay", get(replay_episodes))

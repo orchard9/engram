@@ -1,0 +1,86 @@
+# Prometheus recording rules for Engram
+# Pre-compute frequently-used aggregations for dashboard performance
+
+groups:
+  # ========== Spreading Activation Rate Metrics ==========
+  - name: engram_spreading_rates
+    interval: 30s
+    rules:
+      - record: engram:spreading_activations:rate5m
+        expr: rate(engram_spreading_activations_total[5m])
+
+      - record: engram:spreading_failures:rate5m
+        expr: rate(engram_spreading_failures_total[5m])
+
+      - record: engram:spreading_gpu_fallback:rate5m
+        expr: rate(engram_spreading_gpu_fallback_total[5m])
+
+  # ========== Consolidation Metrics ==========
+  - name: engram_consolidation_rates
+    interval: 30s
+    rules:
+      - record: engram:consolidation_runs:rate5m
+        expr: rate(engram_consolidation_runs_total[5m])
+
+      - record: engram:consolidation_failures:rate5m
+        expr: rate(engram_consolidation_failures_total[5m])
+
+      - record: engram:consolidation_success_ratio
+        expr: |
+          rate(engram_consolidation_runs_total[5m])
+          /
+          (rate(engram_consolidation_runs_total[5m]) + rate(engram_consolidation_failures_total[5m]))
+
+  # ========== Storage Compaction Metrics ==========
+  - name: engram_compaction_rates
+    interval: 30s
+    rules:
+      - record: engram:compaction_success:rate5m
+        expr: rate(engram_compaction_success_total[5m])
+
+      - record: engram:compaction_rollback:rate5m
+        expr: rate(engram_compaction_rollback_total[5m])
+
+      - record: engram:compaction_episodes_removed:rate5m
+        expr: rate(engram_compaction_episodes_removed[5m])
+
+      - record: engram:compaction_storage_saved:rate5m
+        expr: rate(engram_compaction_storage_saved_bytes[5m])
+
+  # ========== WAL Metrics ==========
+  - name: engram_wal_rates
+    interval: 30s
+    rules:
+      - record: engram:wal_recovery_success:rate5m
+        expr: rate(engram_wal_recovery_successes_total[5m])
+
+      - record: engram:wal_recovery_failures:rate5m
+        expr: rate(engram_wal_recovery_failures_total[5m])
+
+      - record: engram:wal_compaction:rate5m
+        expr: rate(engram_wal_compaction_runs_total[5m])
+
+  # ========== Activation Pool Efficiency ==========
+  - name: engram_activation_pool_efficiency
+    interval: 30s
+    rules:
+      - record: engram:activation_pool:efficiency_score
+        expr: |
+          activation_pool_hit_rate * 0.7 + activation_pool_utilization * 0.3
+
+      - record: engram:activation_pool:reuse_ratio
+        expr: |
+          activation_pool_total_reused
+          /
+          (activation_pool_total_created + activation_pool_total_reused)
+
+  # ========== Adaptive Batching Convergence ==========
+  - name: engram_adaptive_batching_health
+    interval: 30s
+    rules:
+      - record: engram:adaptive_batch:overall_confidence
+        expr: |
+          (adaptive_batch_hot_confidence + adaptive_batch_warm_confidence + adaptive_batch_cold_confidence) / 3
+
+      - record: engram:adaptive_batch:guardrail_hit_rate
+        expr: rate(adaptive_guardrail_hits_total[5m])

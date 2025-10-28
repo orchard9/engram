@@ -1,0 +1,186 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: engram
+  labels:
+    app: engram
+    component: database
+    version: "0.1.0"
+spec:
+  serviceName: engram-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: engram
+  updateStrategy:
+    type: OnDelete
+  template:
+    metadata:
+      labels:
+        app: engram
+        component: database
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "7432"
+        prometheus.io/path: "/metrics"
+    spec:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values: [engram]
+            topologyKey: kubernetes.io/hostname
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+              - key: node.kubernetes.io/instance-type
+                operator: In
+                values: ["memory-optimized", "compute-optimized"]
+
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+        fsGroupChangePolicy: "OnRootMismatch"
+
+      initContainers:
+      - name: init-permissions
+        image: busybox:1.36
+        command: ['sh', '-c', 'chown -R 65534:65534 /data']
+        volumeMounts:
+        - name: data
+          mountPath: /data
+        securityContext:
+          runAsUser: 0
+
+      containers:
+      - name: engram
+        image: engram/engram:0.1.0
+        imagePullPolicy: IfNotPresent
+
+        command: ["/usr/local/bin/engram"]
+        args:
+        - "start"
+        - "--http-port=7432"
+        - "--grpc-port=50051"
+
+        ports:
+        - containerPort: 7432
+          name: http
+          protocol: TCP
+        - containerPort: 50051
+          name: grpc
+          protocol: TCP
+
+        env:
+        - name: ENGRAM_DATA_DIR
+          value: "/data"
+        - name: ENGRAM_NODE_ID
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: ENGRAM_POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: RUST_LOG
+          value: "info"
+        - name: MIMALLOC_LARGE_OS_PAGES
+          value: "1"
+
+        startupProbe:
+          httpGet:
+            path: /health/alive
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 2
+          successThreshold: 1
+          failureThreshold: 12
+
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 0
+          periodSeconds: 30
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 3
+
+        readinessProbe:
+          httpGet:
+            path: /api/v1/system/health
+            port: http
+            httpHeaders:
+            - name: Accept
+              value: application/json
+          initialDelaySeconds: 0
+          periodSeconds: 10
+          timeoutSeconds: 3
+          successThreshold: 1
+          failureThreshold: 3
+
+        resources:
+          requests:
+            cpu: "1000m"
+            memory: "2Gi"
+            ephemeral-storage: "1Gi"
+          limits:
+            cpu: "2000m"
+            memory: "4Gi"
+            ephemeral-storage: "2Gi"
+
+        volumeMounts:
+        - name: data
+          mountPath: /data
+        - name: config
+          mountPath: /config
+          readOnly: true
+        - name: tmp
+          mountPath: /tmp
+
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+            add: ["NET_BIND_SERVICE"]
+          readOnlyRootFilesystem: true
+          seccompProfile:
+            type: RuntimeDefault
+
+      volumes:
+      - name: config
+        configMap:
+          name: engram-config
+          defaultMode: 0444
+      - name: tmp
+        emptyDir:
+          sizeLimit: 100Mi
+
+      serviceAccountName: engram
+      terminationGracePeriodSeconds: 30
+
+      dnsPolicy: ClusterFirst
+      dnsConfig:
+        options:
+        - name: ndots
+          value: "2"
+
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+      labels:
+        app: engram
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: fast-ssd
+      resources:
+        requests:
+          storage: 20Gi

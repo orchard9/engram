@@ -1,0 +1,198 @@
+# Prometheus alert rules for Engram
+# Alert thresholds derived from empirical baselines and cognitive constraints
+
+global:
+  evaluation_interval: 30s
+
+groups:
+  # ========== Service Availability ==========
+  - name: engram_availability
+    interval: 30s
+    rules:
+      - alert: EngramDown
+        expr: up{job="engram"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: service
+        annotations:
+          summary: "Engram instance is down"
+          description: "Engram has been unreachable for 1 minute. Check container logs and liveness probe."
+          runbook: "https://docs.engram.io/operations/troubleshooting#engram-down"
+          threshold_rationale: "1m delay prevents flapping during rolling restarts while ensuring rapid detection"
+
+      - alert: HealthProbeFailure
+        expr: engram_health_status{probe="spreading"} == 2
+        for: 2m
+        labels:
+          severity: warning
+          component: spreading
+        annotations:
+          summary: "Spreading activation health probe reporting critical state"
+          description: "Spreading health probe has been critical for 2 minutes. Check activation pool metrics."
+          runbook: "https://docs.engram.io/operations/spreading#health-probe-critical"
+          threshold_rationale: "2m allows hysteresis to filter transient spikes (see SpreadingHealthProbe::hysteresis)"
+
+  # ========== Cognitive Performance SLOs ==========
+  - name: engram_cognitive_slos
+    interval: 30s
+    rules:
+      - alert: SpreadingLatencySLOBreach
+        expr: |
+          engram_spreading_latency_hot_seconds{quantile="0.9"} > 0.100
+        for: 5m
+        labels:
+          severity: warning
+          component: spreading
+          tier: hot
+        annotations:
+          summary: "Hot tier spreading P90 latency exceeds 100ms SLO"
+          description: "P90 spreading latency is above target. Expected: <100ms for cognitive plausibility."
+          runbook: "https://docs.engram.io/operations/spreading#latency-tuning"
+          threshold_rationale: "100ms aligns with hippocampal retrieval timescales. P90 chosen to reduce alert noise while catching systematic slowdowns."
+          validation: "Validated via chaos test: inject 150ms delays in spreading path, confirm alert fires within 5m30s"
+
+      - alert: ConsolidationStaleness
+        expr: engram_consolidation_freshness_seconds > 900
+        for: 5m
+        labels:
+          severity: warning
+          component: consolidation
+        annotations:
+          summary: "Consolidation snapshot is stale (>15 minutes old)"
+          description: "Last consolidation snapshot is over 15 minutes old. Target: <450s (1.5x scheduler interval)."
+          runbook: "https://docs.engram.io/operations/consolidation#stale-snapshots"
+          threshold_rationale: "900s = 2x health contract threshold (450s). Allows one missed consolidation cycle before alerting (scheduler default: 300s interval)."
+          validation: "Stop consolidation scheduler, confirm alert fires after 15m"
+
+      - alert: ConsolidationNoveltyStagnation
+        expr: |
+          avg_over_time(engram_consolidation_novelty_gauge[30m]) < 0.01
+        for: 30m
+        labels:
+          severity: info
+          component: consolidation
+        annotations:
+          summary: "Consolidation novelty has stagnated (<0.01 for 30 minutes)"
+          description: "Novelty gauge is very low. System may have reached steady state or inputs have stopped."
+          runbook: "https://docs.engram.io/operations/consolidation#novelty-stagnation"
+          threshold_rationale: "<0.01 indicates minimal belief updates. 30m window filters out short quiescent periods. Info-level to avoid false alarms during normal steady-state operation."
+
+      - alert: ConsolidationFailureStreak
+        expr: |
+          increase(engram_consolidation_failures_total[15m]) >= 3
+        for: 0m
+        labels:
+          severity: critical
+          component: consolidation
+        annotations:
+          summary: "3 consecutive consolidation failures in 15 minutes"
+          description: "Consolidation has failed multiple times. Check scheduler logs and storage tier health."
+          runbook: "https://docs.engram.io/operations/consolidation#failure-streak"
+          threshold_rationale: "3 failures = systematic issue, not transient error. 15m window captures multiple consolidation cycles (5min default interval). Fire immediately (for: 0m) to enable fast remediation."
+          validation: "Inject storage write failures, confirm alert fires after 3rd consecutive failure"
+
+  # ========== Storage and Capacity ==========
+  - name: engram_storage_capacity
+    interval: 60s
+    rules:
+      - alert: WALLagHigh
+        expr: engram_wal_lag_seconds > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: wal
+        annotations:
+          summary: "WAL replay lag exceeds 10 seconds"
+          description: "Current lag is high. May impact durability guarantees."
+          runbook: "https://docs.engram.io/operations/troubleshooting#wal-lag"
+          threshold_rationale: "10s lag = risk of data loss beyond durability SLO (target: <1s lag). 5m for: filters transient lag spikes during compaction."
+
+  # ========== Activation Pool Health ==========
+  - name: engram_activation_pool
+    interval: 30s
+    rules:
+      - alert: ActivationPoolExhaustion
+        expr: activation_pool_available_records < 10
+        for: 2m
+        labels:
+          severity: critical
+          component: activation_pool
+        annotations:
+          summary: "Activation pool nearly exhausted (<10 available records)"
+          description: "Available records are very low. Spreading operations may block or fail."
+          runbook: "https://docs.engram.io/operations/spreading#pool-exhaustion"
+          threshold_rationale: "<10 records = imminent resource exhaustion. 2m for: allows brief exhaustion during burst traffic without alerting."
+          validation: "Trigger concurrent spreading activations until pool exhausted, confirm alert fires"
+
+      - alert: ActivationPoolLowHitRate
+        expr: activation_pool_hit_rate < 0.50
+        for: 15m
+        labels:
+          severity: warning
+          component: activation_pool
+        annotations:
+          summary: "Activation pool hit rate below 50%"
+          description: "Hit rate is low. May indicate pool sizing issue or workload change."
+          runbook: "https://docs.engram.io/operations/spreading#low-hit-rate"
+          threshold_rationale: "50% hit rate = inefficient pool utilization (target: >80%). 15m window filters cold-start periods."
+
+  # ========== Circuit Breaker Health ==========
+  - name: engram_circuit_breakers
+    interval: 30s
+    rules:
+      - alert: SpreadingCircuitBreakerOpen
+        expr: engram_spreading_breaker_state == 1
+        for: 5m
+        labels:
+          severity: warning
+          component: spreading
+        annotations:
+          summary: "Spreading activation circuit breaker is open"
+          description: "Circuit breaker has been open for 5 minutes. Spreading operations are failing fast."
+          runbook: "https://docs.engram.io/operations/spreading#circuit-breaker-open"
+          threshold_rationale: "5m open = sustained failures, not transient spike. Breaker auto-recovers to half-open, so prolonged open state indicates root cause issue."
+
+      - alert: SpreadingCircuitBreakerFlapping
+        expr: |
+          rate(engram_spreading_breaker_transitions_total[10m]) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+          component: spreading
+        annotations:
+          summary: "Spreading circuit breaker is flapping (>3 transitions in 10 minutes)"
+          description: "Transition rate is high. Indicates unstable spreading layer."
+          runbook: "https://docs.engram.io/operations/spreading#breaker-flapping"
+          threshold_rationale: "0.5 transitions/min = ~5 state changes in 10m = flapping behavior. Suggests threshold tuning needed."
+
+  # ========== Adaptive Batching Performance ==========
+  - name: engram_adaptive_batching
+    interval: 30s
+    rules:
+      - alert: AdaptiveBatchingNotConverging
+        expr: |
+          avg_over_time(adaptive_batch_hot_confidence[10m]) < 0.3
+        for: 30m
+        labels:
+          severity: info
+          component: adaptive_batching
+          tier: hot
+        annotations:
+          summary: "Adaptive batch controller not converging (hot tier confidence <30%)"
+          description: "Convergence confidence is low. May indicate unstable workload or misconfiguration."
+          runbook: "https://docs.engram.io/operations/adaptive-batching#low-confidence"
+          threshold_rationale: "<30% confidence after 30m = controller unable to find stable batch size. Info-level to monitor without paging."
+
+      - alert: AdaptiveGuardrailHitRateHigh
+        expr: |
+          rate(adaptive_guardrail_hits_total[5m]) > 0.1
+        for: 15m
+        labels:
+          severity: info
+          component: adaptive_batching
+        annotations:
+          summary: "Adaptive guardrails triggering frequently (>0.1/sec)"
+          description: "Hit rate is high. Controller may be hitting configuration limits."
+          runbook: "https://docs.engram.io/operations/adaptive-batching#frequent-guardrails"
+          threshold_rationale: "0.1 hits/sec = controller constrained by guardrails. Info-level for capacity planning, not immediate action."

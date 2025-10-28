@@ -1,0 +1,39 @@
+[package]
+name = "migration-common"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Shared migration infrastructure for Engram database migration tools"
+keywords = ["database", "migration", "graph", "cognitive"]
+categories = ["database"]
+readme = "README.md"
+
+[lib]
+name = "migration_common"
+path = "src/lib.rs"
+
+[dependencies]
+engram-core = { path = "../../engram-core" }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+dashmap = { workspace = true }
+rand = { workspace = true }
+parking_lot = { workspace = true }
+
+# Hashing
+sha2 = "0.10"
+hex = "0.4"
+
+[dev-dependencies]
+tokio = { workspace = true }
+
+[lints]
+workspace = true

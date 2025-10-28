@@ -197,17 +197,16 @@ pub struct CognitiveTracer {
 #[cfg(not(feature = "cognitive_tracing"))]
 impl CognitiveTracer {
     /// Create a no-op tracer when feature is disabled
-    #[inline(always)]
     #[must_use]
-    pub fn new(_config: ()) -> Self {
+    pub const fn new(_config: ()) -> Self {
         Self {
             _phantom: core::marker::PhantomData,
         }
     }
 
     /// No-op when tracing disabled
-    #[inline(always)]
-    pub fn trace_priming(
+    #[allow(clippy::unused_self)]
+    pub const fn trace_priming(
         &self,
         _priming_type: u8,
         _strength: f32,
@@ -218,8 +217,8 @@ impl CognitiveTracer {
     }
 
     /// No-op when tracing disabled
-    #[inline(always)]
-    pub fn trace_interference(
+    #[allow(clippy::unused_self)]
+    pub const fn trace_interference(
         &self,
         _interference_type: u8,
         _magnitude: f32,
@@ -230,8 +229,8 @@ impl CognitiveTracer {
     }
 
     /// No-op when tracing disabled
-    #[inline(always)]
-    pub fn trace_reconsolidation(
+    #[allow(clippy::unused_self)]
+    pub const fn trace_reconsolidation(
         &self,
         _episode_id: u64,
         _window_position: f32,
@@ -242,8 +241,8 @@ impl CognitiveTracer {
     }
 
     /// No-op when tracing disabled
-    #[inline(always)]
-    pub fn trace_false_memory(
+    #[allow(clippy::unused_self)]
+    pub const fn trace_false_memory(
         &self,
         _critical_lure_hash: u64,
         _source_list_size: u32,

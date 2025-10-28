@@ -21,6 +21,8 @@
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 pub mod activation;
+#[cfg(feature = "security")]
+pub mod auth;
 pub mod batch;
 pub mod cognitive;
 #[cfg(feature = "pattern_completion")]
@@ -46,6 +48,8 @@ pub mod metrics;
 mod numeric;
 pub mod query;
 pub mod registry;
+#[cfg(feature = "security")]
+pub mod security;
 #[cfg(feature = "memory_mapped_persistence")]
 pub mod storage;
 pub mod store;

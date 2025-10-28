@@ -1,0 +1,62 @@
+# Build artifacts
+target/
+**/*.rs.bk
+*.pdb
+
+# Test and benchmark data
+/tests/
+/benches/
+/uat-results/
+/tmp/
+engram-data/
+
+# Documentation
+/docs/
+*.md
+!README.md
+
+# Git and CI
+.git/
+.github/
+.gitignore
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs and temporary files
+*.log
+*.tmp
+clippy*.log
+
+# Development tools
+.cargo/
+.watch-now.yaml
+
+# Content and roadmap
+/content/
+/roadmap/
+
+# Examples and demos
+/examples/
+/demos/
+
+# Third party
+/third_party/
+
+# Prometheus data
+/prometheus/
+
+# Build scripts (not needed in container)
+/scripts/
+/xtask/
+
+# Deployment files (not needed in container)
+/deployments/
+/deploy/
+
+# Zig source (not needed for Rust build)
+/zig/

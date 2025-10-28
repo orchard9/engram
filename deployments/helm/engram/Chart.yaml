@@ -1,0 +1,15 @@
+apiVersion: v2
+name: engram
+description: Cognitive graph database for episodic and semantic memory
+version: 0.1.0
+appVersion: "0.1.0"
+type: application
+keywords:
+  - database
+  - graph
+  - memory
+  - cognitive
+  - probabilistic
+maintainers:
+  - name: Engram Contributors
+    email: maintainers@engram.io

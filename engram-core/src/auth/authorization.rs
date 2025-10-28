@@ -1,0 +1,135 @@
+//! Authorization engine with memory space access control.
+
+use super::{AuthContext, AuthError, Operation, Permission};
+use crate::MemorySpaceId;
+use dashmap::DashMap;
+use std::sync::Arc;
+
+/// Cached permissions
+#[allow(dead_code)]
+struct CachedPermissions {
+    allowed: bool,
+}
+
+/// Authorization engine
+pub struct AuthorizationEngine {
+    /// Permission cache
+    #[allow(dead_code)]
+    cache: Arc<DashMap<String, CachedPermissions>>,
+}
+
+impl AuthorizationEngine {
+    /// Create a new authorization engine
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            cache: Arc::new(DashMap::new()),
+        }
+    }
+
+    /// Check if operation is authorized
+    ///
+    /// # Errors
+    ///
+    /// Returns `AuthError` if:
+    /// - Space access is denied
+    /// - Required permission is missing
+    /// - Rate limit is exceeded
+    pub fn authorize(
+        &self,
+        ctx: &AuthContext,
+        space_id: &MemorySpaceId,
+        operation: &Operation,
+    ) -> Result<(), AuthError> {
+        // Check space access
+        if !ctx.allowed_spaces.contains(space_id) {
+            // Check wildcard access
+            let has_wildcard = ctx.allowed_spaces.iter().any(|s| s.as_str() == "*");
+            if !has_wildcard {
+                return Err(AuthError::SpaceAccessDenied);
+            }
+        }
+
+        // Check permission
+        let required_perm = operation.required_permission();
+        if !ctx.permissions.contains(&required_perm) {
+            // Check admin override
+            if !ctx.permissions.contains(&Permission::AdminAll) {
+                return Err(AuthError::PermissionDenied(required_perm));
+            }
+        }
+
+        // Apply rate limiting
+        self.apply_rate_limit(ctx)?;
+
+        Ok(())
+    }
+
+    /// Apply rate limiting
+    #[allow(clippy::unnecessary_wraps, clippy::unused_self)]
+    fn apply_rate_limit(&self, _ctx: &AuthContext) -> Result<(), AuthError> {
+        // Implementation would use token bucket or sliding window
+        // For now, always allow
+        Ok(())
+    }
+}
+
+impl Default for AuthorizationEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::auth::{Principal, RateLimit};
+
+    #[test]
+    fn test_authorization_with_permission() {
+        let engine = AuthorizationEngine::new();
+
+        let space_id = MemorySpaceId::try_from("test_space").expect("valid space ID");
+        let ctx = AuthContext {
+            principal: Principal::ApiKey("key1".to_string()),
+            allowed_spaces: vec![space_id.clone()],
+            permissions: vec![Permission::MemoryRead],
+            rate_limit: RateLimit::default(),
+        };
+
+        let result = engine.authorize(&ctx, &space_id, &Operation::Recall);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_authorization_without_permission() {
+        let engine = AuthorizationEngine::new();
+
+        let space_id = MemorySpaceId::try_from("test_space").expect("valid space ID");
+        let ctx = AuthContext {
+            principal: Principal::ApiKey("key1".to_string()),
+            allowed_spaces: vec![space_id.clone()],
+            permissions: vec![Permission::MemoryRead],
+            rate_limit: RateLimit::default(),
+        };
+
+        let result = engine.authorize(&ctx, &space_id, &Operation::Remember);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_authorization_with_admin() {
+        let engine = AuthorizationEngine::new();
+
+        let space_id = MemorySpaceId::try_from("test_space").expect("valid space ID");
+        let ctx = AuthContext {
+            principal: Principal::ApiKey("key1".to_string()),
+            allowed_spaces: vec![space_id.clone()],
+            permissions: vec![Permission::AdminAll],
+            rate_limit: RateLimit::default(),
+        };
+
+        let result = engine.authorize(&ctx, &space_id, &Operation::Remember);
+        assert!(result.is_ok());
+    }
+}

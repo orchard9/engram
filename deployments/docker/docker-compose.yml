@@ -1,0 +1,156 @@
+version: '3.8'
+
+services:
+  engram:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile
+      cache_from:
+        - engram/engram:deps-cache
+      args:
+        BUILDKIT_INLINE_CACHE: 1
+    image: engram/engram:latest
+    container_name: engram-db
+    hostname: engram-primary
+    ports:
+      - "7432:7432"    # HTTP API
+      - "50051:50051"  # gRPC
+    volumes:
+      - type: volume
+        source: engram-data
+        target: /data
+        volume:
+          nocopy: true
+      - type: bind
+        source: ./config
+        target: /config
+        read_only: true
+    environment:
+      # Core configuration
+      ENGRAM_DATA_DIR: /data
+      ENGRAM_HTTP_PORT: 7432
+      ENGRAM_GRPC_PORT: 50051
+      RUST_LOG: ${RUST_LOG:-info}
+      RUST_BACKTRACE: ${RUST_BACKTRACE:-1}
+
+      # Performance tuning
+      ENGRAM_CACHE_SIZE_MB: ${CACHE_SIZE_MB:-2048}
+      ENGRAM_CONSOLIDATION_INTERVAL_SEC: 60
+      ENGRAM_FLUSH_INTERVAL_SEC: 30
+
+      # Memory allocator tuning for containers
+      MIMALLOC_LARGE_OS_PAGES: 1
+      MIMALLOC_RESERVE_HUGE_OS_PAGES: 4
+
+    # Resource limits and reservations
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+        reservations:
+          cpus: '1.0'
+          memory: 2G
+
+    # Security options
+    security_opt:
+      - no-new-privileges:true
+      - apparmor:docker-default
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,size=100M
+
+    # Health monitoring
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/engram", "status", "--json"]
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+
+    # Restart policy
+    restart: unless-stopped
+
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        compress: "true"
+
+    # Network configuration
+    networks:
+      engram-net:
+        aliases:
+          - engram-db
+
+    # Signal handling
+    stop_signal: SIGTERM
+    stop_grace_period: 30s
+
+  # Optional: Prometheus for metrics collection
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    container_name: engram-prometheus
+    profiles: ["monitoring"]
+    ports:
+      - "9090:9090"
+    volumes:
+      - prometheus-data:/prometheus
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--storage.tsdb.retention.time=7d'
+    networks:
+      - engram-net
+    restart: unless-stopped
+    depends_on:
+      - engram
+
+  # Optional: Grafana for visualization
+  grafana:
+    image: grafana/grafana:10.0.0
+    container_name: engram-grafana
+    profiles: ["monitoring"]
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_INSTALL_PLUGINS: ${GRAFANA_PLUGINS:-}
+    networks:
+      - engram-net
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
+volumes:
+  engram-data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${ENGRAM_DATA_PATH:-./data}
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local
+
+networks:
+  engram-net:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.28.0.0/16
