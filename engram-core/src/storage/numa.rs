@@ -92,32 +92,32 @@ impl NumaTopology {
             let file_name = entry.file_name();
             let name_str = file_name.to_string_lossy();
 
-            if let Some(stripped) = name_str.strip_prefix("node")
-                && let Ok(node_id) = stripped.parse::<usize>()
-            {
-                node_count = node_count.max(node_id + 1);
+            if let Some(stripped) = name_str.strip_prefix("node") {
+                if let Ok(node_id) = stripped.parse::<usize>() {
+                    node_count = node_count.max(node_id + 1);
 
-                // Read memory info for this node
-                let meminfo_path = entry.path().join("meminfo");
-                if let Ok(meminfo) = std::fs::read_to_string(&meminfo_path) {
-                    let memory_mb = Self::parse_memory_mb(&meminfo);
-                    memory_per_node_mb.push(memory_mb);
-                } else {
-                    memory_per_node_mb.push(1024); // Default 1GB
-                }
+                    // Read memory info for this node
+                    let meminfo_path = entry.path().join("meminfo");
+                    if let Ok(meminfo) = std::fs::read_to_string(&meminfo_path) {
+                        let memory_mb = Self::parse_memory_mb(&meminfo);
+                        memory_per_node_mb.push(memory_mb);
+                    } else {
+                        memory_per_node_mb.push(1024); // Default 1GB
+                    }
 
-                // Map to socket (simplified - assume node == socket for now)
-                socket_to_nodes
-                    .entry(node_id)
-                    .or_insert_with(Vec::new)
-                    .push(node_id);
+                    // Map to socket (simplified - assume node == socket for now)
+                    socket_to_nodes
+                        .entry(node_id)
+                        .or_insert_with(Vec::new)
+                        .push(node_id);
 
-                // Read CPU list for this node
-                let cpulist_path = entry.path().join("cpulist");
-                if let Ok(cpulist) = std::fs::read_to_string(&cpulist_path) {
-                    let cpus = Self::parse_cpu_list(&cpulist);
-                    for cpu in cpus {
-                        cpu_to_socket.insert(cpu, node_id);
+                    // Read CPU list for this node
+                    let cpulist_path = entry.path().join("cpulist");
+                    if let Ok(cpulist) = std::fs::read_to_string(&cpulist_path) {
+                        let cpus = Self::parse_cpu_list(&cpulist);
+                        for cpu in cpus {
+                            cpu_to_socket.insert(cpu, node_id);
+                        }
                     }
                 }
             }
@@ -155,10 +155,10 @@ impl NumaTopology {
         for line in meminfo.lines() {
             if line.contains("MemTotal:") {
                 let parts: Vec<&str> = line.split_whitespace().collect();
-                if parts.len() >= 3
-                    && let Ok(kb) = parts[parts.len() - 2].parse::<usize>()
-                {
-                    return kb / 1024; // Convert KB to MB
+                if parts.len() >= 3 {
+                    if let Ok(kb) = parts[parts.len() - 2].parse::<usize>() {
+                        return kb / 1024; // Convert KB to MB
+                    }
                 }
             }
         }
@@ -173,12 +173,13 @@ impl NumaTopology {
             if part.contains('-') {
                 // Range like "0-7"
                 let range: Vec<&str> = part.split('-').collect();
-                if range.len() == 2
-                    && let (Ok(start), Ok(end)) =
+                if range.len() == 2 {
+                    if let (Ok(start), Ok(end)) =
                         (range[0].parse::<usize>(), range[1].parse::<usize>())
-                {
-                    for cpu in start..=end {
-                        cpus.push(cpu);
+                    {
+                        for cpu in start..=end {
+                            cpus.push(cpu);
+                        }
                     }
                 }
             } else {

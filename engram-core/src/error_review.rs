@@ -237,26 +237,26 @@ impl ErrorReviewer {
         }
 
         // Check quality issues
-        if let Some(suggestion) = &error_def.suggestion
-            && (suggestion.len() < 20 || is_vague_suggestion(suggestion))
-        {
-            quality_issues.push(QualityIssue {
-                issue_type: IssueType::VagueSuggestion,
-                severity: Severity::Error,
-                description: format!("Suggestion '{suggestion}' is too vague"),
-                suggested_fix: "Provide specific, actionable steps".to_string(),
-            });
+        if let Some(suggestion) = &error_def.suggestion {
+            if suggestion.len() < 20 || is_vague_suggestion(suggestion) {
+                quality_issues.push(QualityIssue {
+                    issue_type: IssueType::VagueSuggestion,
+                    severity: Severity::Error,
+                    description: format!("Suggestion '{suggestion}' is too vague"),
+                    suggested_fix: "Provide specific, actionable steps".to_string(),
+                });
+            }
         }
 
-        if let Some(example) = &error_def.example
-            && example.len() < self.config.min_example_length
-        {
-            quality_issues.push(QualityIssue {
-                issue_type: IssueType::PoorExample,
-                severity: Severity::Warning,
-                description: "Example code is too short".to_string(),
-                suggested_fix: "Provide complete, runnable code example".to_string(),
-            });
+        if let Some(example) = &error_def.example {
+            if example.len() < self.config.min_example_length {
+                quality_issues.push(QualityIssue {
+                    issue_type: IssueType::PoorExample,
+                    severity: Severity::Warning,
+                    description: "Example code is too short".to_string(),
+                    suggested_fix: "Provide complete, runnable code example".to_string(),
+                });
+            }
         }
 
         if error_def.summary.len() > self.config.max_summary_length {
@@ -272,15 +272,15 @@ impl ErrorReviewer {
             });
         }
 
-        if let Some(confidence) = error_def.confidence
-            && confidence < self.config.min_confidence
-        {
-            quality_issues.push(QualityIssue {
-                issue_type: IssueType::LowConfidence,
-                severity: Severity::Info,
-                description: format!("Confidence {confidence} is below threshold"),
-                suggested_fix: "Improve error detection to increase confidence".to_string(),
-            });
+        if let Some(confidence) = error_def.confidence {
+            if confidence < self.config.min_confidence {
+                quality_issues.push(QualityIssue {
+                    issue_type: IssueType::LowConfidence,
+                    severity: Severity::Info,
+                    description: format!("Confidence {confidence} is below threshold"),
+                    suggested_fix: "Improve error detection to increase confidence".to_string(),
+                });
+            }
         }
 
         // Calculate cognitive load
@@ -352,10 +352,10 @@ impl ErrorReviewer {
         }
 
         // Clarity factors
-        if let Some(suggestion) = &error_def.suggestion
-            && (suggestion.contains("try") || suggestion.contains("maybe"))
-        {
-            score += 2; // Uncertain language increases cognitive load
+        if let Some(suggestion) = &error_def.suggestion {
+            if suggestion.contains("try") || suggestion.contains("maybe") {
+                score += 2; // Uncertain language increases cognitive load
+            }
         }
 
         // Technical jargon
@@ -667,11 +667,11 @@ impl ErrorVisitor {
 
 impl<'ast> Visit<'ast> for ErrorVisitor {
     fn visit_expr_macro(&mut self, node: &'ast ExprMacro) {
-        if let Some(ident) = node.mac.path.get_ident()
-            && ident == "cognitive_error"
-        {
-            // Extract line number (simplified - would need span info in practice)
-            self.extract_error_from_macro(&node.mac, 0);
+        if let Some(ident) = node.mac.path.get_ident() {
+            if ident == "cognitive_error" {
+                // Extract line number (simplified - would need span info in practice)
+                self.extract_error_from_macro(&node.mac, 0);
+            }
         }
         syn::visit::visit_expr_macro(self, node);
     }

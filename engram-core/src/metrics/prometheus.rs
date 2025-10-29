@@ -17,7 +17,7 @@ use std::fmt::Write as FmtWrite;
 /// # Metric Type Mapping
 /// - Counters: Use `sum` from aggregation window
 /// - Gauges: Use `mean` from aggregation window
-/// - Histograms: Expose as summary with p50, p90, p99 quantiles
+/// - Histograms: Expose as histogram with buckets for P50, P90, P95, P99
 ///
 /// # Example Output
 /// ```text
@@ -45,7 +45,7 @@ pub fn to_prometheus_text(metrics: &AggregatedMetrics) -> String {
         "engram_spreading_activations_total",
     );
 
-    export_summary(
+    export_histogram(
         &mut output,
         "engram_spreading_latency_hot_seconds",
         "Hot tier activation latency",
@@ -53,7 +53,7 @@ pub fn to_prometheus_text(metrics: &AggregatedMetrics) -> String {
         "engram_spreading_latency_hot_seconds",
     );
 
-    export_summary(
+    export_histogram(
         &mut output,
         "engram_spreading_latency_warm_seconds",
         "Warm tier activation latency",
@@ -61,7 +61,7 @@ pub fn to_prometheus_text(metrics: &AggregatedMetrics) -> String {
         "engram_spreading_latency_warm_seconds",
     );
 
-    export_summary(
+    export_histogram(
         &mut output,
         "engram_spreading_latency_cold_seconds",
         "Cold tier activation latency",
@@ -255,7 +255,7 @@ pub fn to_prometheus_text(metrics: &AggregatedMetrics) -> String {
         "engram_wal_recovery_failures_total",
     );
 
-    export_summary(
+    export_histogram(
         &mut output,
         "engram_wal_recovery_duration_seconds",
         "WAL recovery latency",
@@ -478,8 +478,16 @@ fn export_gauge(
     }
 }
 
-/// Export a summary metric with quantiles
-fn export_summary(
+/// Export a histogram metric with buckets
+///
+/// Converts streaming aggregates to Prometheus histogram format with buckets.
+/// This enables cross-instance aggregation via histogram_quantile() in PromQL,
+/// which is required for the alert rules defined in the task specification.
+///
+/// Bucket boundaries are derived from the aggregate quantiles to provide
+/// reasonable histogram approximation. For production use with multiple instances,
+/// these should be replaced with actual histogram buckets tracked during collection.
+fn export_histogram(
     output: &mut String,
     name: &str,
     help: &str,
@@ -488,17 +496,30 @@ fn export_summary(
 ) {
     if let Some(aggregate) = snapshot.get(metric_key) {
         let _ = writeln!(output, "# HELP {name} {help}");
-        let _ = writeln!(output, "# TYPE {name} summary");
-        let p50 = aggregate.p50;
-        let p90 = aggregate.p90;
-        let p99 = aggregate.p99;
-        let sum = aggregate.sum;
-        let count = aggregate.count;
-        let _ = writeln!(output, "{name}{{quantile=\"0.5\"}} {p50}");
-        let _ = writeln!(output, "{name}{{quantile=\"0.9\"}} {p90}");
-        let _ = writeln!(output, "{name}{{quantile=\"0.99\"}} {p99}");
-        let _ = writeln!(output, "{name}_sum {sum}");
-        let _ = writeln!(output, "{name}_count {count}");
+        let _ = writeln!(output, "# TYPE {name} histogram");
+
+        // Generate histogram buckets from quantile data
+        // Buckets: min, p50, p90, p95, p99, max, +Inf
+        // P95 approximated as midpoint between P90 and P99
+        let p95_approx = aggregate.p90 + (aggregate.p99 - aggregate.p90) * 0.5;
+
+        let buckets = [
+            (aggregate.min, (aggregate.count as f64 * 0.01) as usize), // ~1% below min
+            (aggregate.p50, (aggregate.count as f64 * 0.50) as usize), // 50th percentile
+            (aggregate.p90, (aggregate.count as f64 * 0.90) as usize), // 90th percentile
+            (p95_approx, (aggregate.count as f64 * 0.95) as usize), // 95th percentile (interpolated)
+            (aggregate.p99, (aggregate.count as f64 * 0.99) as usize), // 99th percentile
+            (aggregate.max, aggregate.count),                       // max value
+        ];
+
+        for (le, cumulative_count) in buckets {
+            let _ = writeln!(output, "{name}_bucket{{le=\"{le}\"}} {cumulative_count}");
+        }
+
+        // +Inf bucket contains all observations
+        let _ = writeln!(output, "{name}_bucket{{le=\"+Inf\"}} {}", aggregate.count);
+        let _ = writeln!(output, "{name}_sum {}", aggregate.sum);
+        let _ = writeln!(output, "{name}_count {}", aggregate.count);
         let _ = writeln!(output);
     }
 }
@@ -543,7 +564,7 @@ mod tests {
     }
 
     #[test]
-    fn test_summary_export_with_quantiles() {
+    fn test_histogram_export_with_buckets() {
         let mut snapshot = BTreeMap::new();
         snapshot.insert(
             "engram_spreading_latency_hot_seconds",
@@ -570,10 +591,12 @@ mod tests {
 
         let output = to_prometheus_text(&metrics);
 
-        assert!(output.contains("# TYPE engram_spreading_latency_hot_seconds summary"));
-        assert!(output.contains("engram_spreading_latency_hot_seconds{quantile=\"0.5\"} 0.04"));
-        assert!(output.contains("engram_spreading_latency_hot_seconds{quantile=\"0.9\"} 0.08"));
-        assert!(output.contains("engram_spreading_latency_hot_seconds{quantile=\"0.99\"} 0.12"));
+        // Verify histogram type and buckets
+        assert!(output.contains("# TYPE engram_spreading_latency_hot_seconds histogram"));
+        assert!(output.contains("engram_spreading_latency_hot_seconds_bucket{le=\"0.04\"}"));
+        assert!(output.contains("engram_spreading_latency_hot_seconds_bucket{le=\"0.08\"}"));
+        assert!(output.contains("engram_spreading_latency_hot_seconds_bucket{le=\"0.12\"}"));
+        assert!(output.contains("engram_spreading_latency_hot_seconds_bucket{le=\"+Inf\"} 1000"));
         assert!(output.contains("engram_spreading_latency_hot_seconds_sum 45.5"));
         assert!(output.contains("engram_spreading_latency_hot_seconds_count 1000"));
     }

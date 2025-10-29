@@ -61,22 +61,22 @@ impl PatternReconstructor {
         let similar_episodes = self.find_similar_episodes(partial);
 
         // Aggregate missing fields from similar episodes
-        if !partial.known_fields.contains_key("what")
-            && let Some(what) = self.aggregate_field(&similar_episodes, "what")
-        {
-            reconstructed.insert("what".to_string(), what);
+        if !partial.known_fields.contains_key("what") {
+            if let Some(what) = self.aggregate_field(&similar_episodes, "what") {
+                reconstructed.insert("what".to_string(), what);
+            }
         }
 
-        if !partial.known_fields.contains_key("where")
-            && let Some(where_loc) = self.aggregate_field(&similar_episodes, "where")
-        {
-            reconstructed.insert("where".to_string(), where_loc);
+        if !partial.known_fields.contains_key("where") {
+            if let Some(where_loc) = self.aggregate_field(&similar_episodes, "where") {
+                reconstructed.insert("where".to_string(), where_loc);
+            }
         }
 
-        if !partial.known_fields.contains_key("who")
-            && let Some(who) = self.aggregate_field(&similar_episodes, "who")
-        {
-            reconstructed.insert("who".to_string(), who);
+        if !partial.known_fields.contains_key("who") {
+            if let Some(who) = self.aggregate_field(&similar_episodes, "who") {
+                reconstructed.insert("who".to_string(), who);
+            }
         }
 
         reconstructed
@@ -243,10 +243,10 @@ impl PatternReconstructor {
         similar_episodes: &[&Episode],
     ) -> [f32; 768] {
         let cache_key = Self::cache_key(partial);
-        if let Ok(cache) = self.pattern_cache.lock()
-            && let Some(cached) = cache.get(&cache_key)
-        {
-            return *cached;
+        if let Ok(cache) = self.pattern_cache.lock() {
+            if let Some(cached) = cache.get(&cache_key) {
+                return *cached;
+            }
         }
 
         let mut embedding = [0.0f32; 768];

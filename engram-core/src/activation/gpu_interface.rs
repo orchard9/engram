@@ -366,10 +366,10 @@ impl AdaptiveSpreadingEngine {
             );
 
             // Warm up GPU context if available
-            if self.gpu_available_cached == Some(true)
-                && let Some(ref gpu) = self.gpu_interface
-            {
-                let _ = gpu.warm_up();
+            if self.gpu_available_cached == Some(true) {
+                if let Some(ref gpu) = self.gpu_interface {
+                    let _ = gpu.warm_up();
+                }
             }
         }
 

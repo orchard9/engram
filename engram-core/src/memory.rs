@@ -382,15 +382,15 @@ impl Episode {
         if mask_percentage < 0.25 {
             known_fields.insert("what".to_string(), self.what.clone());
         }
-        if mask_percentage < 0.5
-            && let Some(ref loc) = self.where_location
-        {
-            known_fields.insert("where".to_string(), loc.clone());
+        if mask_percentage < 0.5 {
+            if let Some(ref loc) = self.where_location {
+                known_fields.insert("where".to_string(), loc.clone());
+            }
         }
-        if mask_percentage < 0.75
-            && let Some(ref who) = self.who
-        {
-            known_fields.insert("who".to_string(), who.join(", "));
+        if mask_percentage < 0.75 {
+            if let Some(ref who) = self.who {
+                known_fields.insert("who".to_string(), who.join(", "));
+            }
         }
 
         // Mask embedding dimensions

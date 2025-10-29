@@ -293,10 +293,10 @@ impl BiologicalAccumulator {
         current_time: u64,
     ) -> bool {
         // Check refractory period
-        if let Some(refractory_until) = self.refractory_periods.get(node_id)
-            && current_time < *refractory_until
-        {
-            return false; // Still in refractory period
+        if let Some(refractory_until) = self.refractory_periods.get(node_id) {
+            if current_time < *refractory_until {
+                return false; // Still in refractory period
+            }
         }
 
         // Apply synaptic fatigue

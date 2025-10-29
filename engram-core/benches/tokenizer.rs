@@ -132,12 +132,12 @@ fn bench_zero_copy_verification(c: &mut Criterion) {
         b.iter(|| {
             let query_ptr = black_box(query).as_ptr();
             let mut tokenizer = Tokenizer::new(black_box(query));
-            if let Ok(token) = tokenizer.next_token()
-                && let Token::Identifier(ident) = token.value
-            {
-                // Verify it's a slice, not a copy
-                assert_eq!(ident.as_ptr(), query_ptr);
-                black_box(ident);
+            if let Ok(token) = tokenizer.next_token() {
+                if let Token::Identifier(ident) = token.value {
+                    // Verify it's a slice, not a copy
+                    assert_eq!(ident.as_ptr(), query_ptr);
+                    black_box(ident);
+                }
             }
         });
     });

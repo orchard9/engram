@@ -124,14 +124,14 @@ impl PatternDetector {
         // Phase 2: Extract common patterns from clusters
         let mut patterns = Vec::new();
         for cluster in clusters {
-            if cluster.len() >= self.config.min_cluster_size
-                && let Some(pattern) = self.extract_pattern(&cluster)
-            {
-                patterns.push(pattern);
+            if cluster.len() >= self.config.min_cluster_size {
+                if let Some(pattern) = self.extract_pattern(&cluster) {
+                    patterns.push(pattern);
 
-                // Stop if we've hit the max patterns limit
-                if patterns.len() >= self.config.max_patterns {
-                    break;
+                    // Stop if we've hit the max patterns limit
+                    if patterns.len() >= self.config.max_patterns {
+                        break;
+                    }
                 }
             }
         }

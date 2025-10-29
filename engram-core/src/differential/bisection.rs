@@ -348,19 +348,19 @@ impl BisectionSession {
         let execution_times: Vec<u64> = results.values().map(|r| r.execution_time_nanos).collect();
         if let (Some(&min_time), Some(&max_time)) =
             (execution_times.iter().min(), execution_times.iter().max())
-            && max_time > min_time * 2
         {
-            insights.push(format!(
-                "Performance varies significantly ({min_time}ns to {max_time}ns)"
-            ));
+            if max_time > min_time * 2 {
+                insights.push(format!(
+                    "Performance varies significantly ({min_time}ns to {max_time}ns)"
+                ));
+            }
         }
 
         // Try to decode results for value comparison
-        if let Some(ref_result) = results.values().next()
-            && ref_result.success
-            && ref_result.result_data.is_some()
-        {
-            insights.push("Results differ in computed values".to_string());
+        if let Some(ref_result) = results.values().next() {
+            if ref_result.success && ref_result.result_data.is_some() {
+                insights.push("Results differ in computed values".to_string());
+            }
         }
 
         if insights.is_empty() {
@@ -421,10 +421,10 @@ impl BisectionSession {
     fn generate_followup_tests(&mut self, operation: &DifferentialOperation, divergent: bool) {
         if divergent {
             // If we found divergence, try to narrow it down further
-            if let Some(simplified) = operation.simplify()
-                && !self.test_queue.contains(&simplified)
-            {
-                self.test_queue.push_back(simplified);
+            if let Some(simplified) = operation.simplify() {
+                if !self.test_queue.contains(&simplified) {
+                    self.test_queue.push_back(simplified);
+                }
             }
         } else {
             // If equivalent, we might have narrowed down the issue

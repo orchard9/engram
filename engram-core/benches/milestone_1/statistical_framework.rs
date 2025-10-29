@@ -9,7 +9,7 @@ const fn usize_to_f64(value: usize) -> f64 {
     }
 }
 
-const fn ceil_to_usize(value: f64) -> usize {
+fn ceil_to_usize(value: f64) -> usize {
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     {
         value.max(0.0).ceil() as usize

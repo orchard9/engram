@@ -469,8 +469,7 @@ fn test_modification_type_affects_vividness_differently() {
     let recon_time = recall_time + Duration::hours(3);
 
     // Test Update (should increase vividness)
-    let episode_update = base_episode.clone();
-    engine.record_recall(&episode_update, recall_time, true);
+    engine.record_recall(&base_episode, recall_time, true);
 
     let update_mods = EpisodeModifications {
         what: None,
@@ -481,7 +480,7 @@ fn test_modification_type_affects_vividness_differently() {
     };
 
     let result_update = engine
-        .attempt_reconsolidation(&episode_update.id, &update_mods, recon_time)
+        .attempt_reconsolidation(&base_episode.id, &update_mods, recon_time)
         .expect("Update should succeed");
 
     // Test Corruption (should decrease vividness)
@@ -543,7 +542,7 @@ fn test_original_episode_preserved() {
     // Original episode should be preserved in result for auditing
     let engine = ReconsolidationEngine::new();
     let episode = create_test_episode(48);
-    let original_what = episode.what.clone();
+    let original_what = &episode.what;
 
     let recall_time = Utc::now();
     engine.record_recall(&episode, recall_time, true);
@@ -563,7 +562,7 @@ fn test_original_episode_preserved() {
 
     // Original should be preserved
     assert_eq!(
-        result.original_episode.what, original_what,
+        &result.original_episode.what, original_what,
         "Original episode should be preserved"
     );
 

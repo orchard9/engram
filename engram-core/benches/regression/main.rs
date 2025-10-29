@@ -100,9 +100,10 @@ impl Baselines {
                 .arg("-n")
                 .arg("machdep.cpu.brand_string")
                 .output()
-                && let Ok(cpu) = String::from_utf8(output.stdout)
             {
-                return cpu.trim().to_string();
+                if let Ok(cpu) = String::from_utf8(output.stdout) {
+                    return cpu.trim().to_string();
+                }
             }
         }
 
@@ -386,17 +387,17 @@ fn regression_benchmarks(c: &mut Criterion) {
         println!("  Review changes with: git diff benches/regression/baselines.json");
     } else {
         // Check if any regressions were detected
-        if let Ok(errors) = REGRESSION_ERRORS.lock()
-            && !errors.is_empty()
-        {
-            eprintln!("\n❌ PERFORMANCE REGRESSIONS DETECTED:\n");
-            for error in errors.iter() {
-                eprintln!("{error}");
+        if let Ok(errors) = REGRESSION_ERRORS.lock() {
+            if !errors.is_empty() {
+                eprintln!("\n❌ PERFORMANCE REGRESSIONS DETECTED:\n");
+                for error in errors.iter() {
+                    eprintln!("{error}");
+                }
+                eprintln!("\nBuild failed due to performance regressions.");
+                eprintln!("To update baselines after intentional changes:");
+                eprintln!("  UPDATE_BASELINES=1 cargo bench --bench regression\n");
+                std::process::exit(1);
             }
-            eprintln!("\nBuild failed due to performance regressions.");
-            eprintln!("To update baselines after intentional changes:");
-            eprintln!("  UPDATE_BASELINES=1 cargo bench --bench regression\n");
-            std::process::exit(1);
         }
         println!("\n✓ All performance regression checks passed\n");
     }

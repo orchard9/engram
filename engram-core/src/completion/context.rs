@@ -191,10 +191,10 @@ impl EntorhinalContext {
         let mut context_memories = Vec::new();
 
         for memory in memories {
-            if let Some(ref content) = memory.content
-                && (content.contains(target_content) || target_content.contains(content.as_str()))
-            {
-                context_memories.push(memory.clone());
+            if let Some(ref content) = memory.content {
+                if content.contains(target_content) || target_content.contains(content.as_str()) {
+                    context_memories.push(memory.clone());
+                }
             }
         }
 

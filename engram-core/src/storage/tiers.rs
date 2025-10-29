@@ -531,12 +531,13 @@ impl TierCoordinator {
                 let candidates = hot_tier.get_lru_candidates(target);
 
                 for memory_id in candidates {
-                    if let Some(memory) = hot_tier.get_memory(&memory_id)
-                        && let Some(warm) = &self.warm_tier
-                        && warm.store(memory).await.is_ok()
-                    {
-                        let _ = hot_tier.evict_memory(&memory_id);
-                        evicted += 1;
+                    if let Some(memory) = hot_tier.get_memory(&memory_id) {
+                        if let Some(warm) = &self.warm_tier {
+                            if warm.store(memory).await.is_ok() {
+                                let _ = hot_tier.evict_memory(&memory_id);
+                                evicted += 1;
+                            }
+                        }
                     }
                 }
             }
@@ -576,10 +577,10 @@ impl TierCoordinator {
         }
 
         // Check and handle memory pressure first
-        if let Ok(evicted) = self.handle_memory_pressure().await
-            && evicted > 0
-        {
-            report.hot_to_warm += evicted;
+        if let Ok(evicted) = self.handle_memory_pressure().await {
+            if evicted > 0 {
+                report.hot_to_warm += evicted;
+            }
         }
 
         // Process migrations for each tier

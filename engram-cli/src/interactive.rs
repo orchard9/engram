@@ -52,11 +52,10 @@ pub fn select_from_list<T: std::fmt::Display>(message: &str, options: &[T]) -> R
         let mut input = String::new();
         io::stdin().read_line(&mut input)?;
 
-        if let Ok(choice) = input.trim().parse::<usize>()
-            && choice > 0
-            && choice <= options.len()
-        {
-            return Ok(choice - 1);
+        if let Ok(choice) = input.trim().parse::<usize>() {
+            if choice > 0 && choice <= options.len() {
+                return Ok(choice - 1);
+            }
         }
 
         println!("Invalid selection. Please try again.");

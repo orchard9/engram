@@ -320,16 +320,16 @@ impl<'a> SpreadQuery<'a> {
     pub fn validate(&self) -> Result<(), ValidationError> {
         self.source.validate()?;
 
-        if let Some(rate) = self.decay_rate
-            && !(0.0..=1.0).contains(&rate)
-        {
-            return Err(ValidationError::InvalidDecayRate(rate));
+        if let Some(rate) = self.decay_rate {
+            if !(0.0..=1.0).contains(&rate) {
+                return Err(ValidationError::InvalidDecayRate(rate));
+            }
         }
 
-        if let Some(threshold) = self.activation_threshold
-            && !(0.0..=1.0).contains(&threshold)
-        {
-            return Err(ValidationError::InvalidActivationThreshold(threshold));
+        if let Some(threshold) = self.activation_threshold {
+            if !(0.0..=1.0).contains(&threshold) {
+                return Err(ValidationError::InvalidActivationThreshold(threshold));
+            }
         }
 
         Ok(())

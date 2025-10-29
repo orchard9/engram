@@ -59,15 +59,15 @@ impl LocalContextExtractor {
                 };
 
                 // Convert to Duration for comparison
-                if let Ok(duration) = time_diff.to_std()
-                    && duration <= self.temporal_window
-                {
-                    let recency_weight = self.recency_weight(duration);
-                    return Some(TemporalNeighbor {
-                        episode: ep.clone(),
-                        temporal_distance: duration,
-                        recency_weight,
-                    });
+                if let Ok(duration) = time_diff.to_std() {
+                    if duration <= self.temporal_window {
+                        let recency_weight = self.recency_weight(duration);
+                        return Some(TemporalNeighbor {
+                            episode: ep.clone(),
+                            temporal_distance: duration,
+                            recency_weight,
+                        });
+                    }
                 }
                 None
             })

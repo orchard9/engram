@@ -223,6 +223,7 @@ mod tests {
             Duration::from_secs(1),
         );
 
+        #[allow(clippy::redundant_clone)]
         let cloned = context.clone();
         assert_eq!(context, cloned);
     }

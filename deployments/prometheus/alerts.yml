@@ -39,17 +39,19 @@ groups:
     rules:
       - alert: SpreadingLatencySLOBreach
         expr: |
-          engram_spreading_latency_hot_seconds{quantile="0.9"} > 0.100
+          histogram_quantile(0.95,
+            rate(engram_spreading_latency_hot_seconds_bucket[5m])
+          ) > 0.100
         for: 5m
         labels:
           severity: warning
           component: spreading
           tier: hot
         annotations:
-          summary: "Hot tier spreading P90 latency exceeds 100ms SLO"
-          description: "P90 spreading latency is above target. Expected: <100ms for cognitive plausibility."
+          summary: "Hot tier spreading P95 latency exceeds 100ms SLO"
+          description: "P95 spreading latency is above target. Expected: <100ms for cognitive plausibility."
           runbook: "https://docs.engram.io/operations/spreading#latency-tuning"
-          threshold_rationale: "100ms aligns with hippocampal retrieval timescales. P90 chosen to reduce alert noise while catching systematic slowdowns."
+          threshold_rationale: "100ms aligns with hippocampal retrieval timescales. P95 chosen over P99 to reduce alert noise while catching systematic slowdowns."
           validation: "Validated via chaos test: inject 150ms delays in spreading path, confirm alert fires within 5m30s"
 
       - alert: ConsolidationStaleness
@@ -92,10 +94,61 @@ groups:
           threshold_rationale: "3 failures = systematic issue, not transient error. 15m window captures multiple consolidation cycles (5min default interval). Fire immediately (for: 0m) to enable fast remediation."
           validation: "Inject storage write failures, confirm alert fires after 3rd consecutive failure"
 
+  # ========== Memory Operation Performance ==========
+  - name: engram_operation_performance
+    interval: 30s
+    rules:
+      - alert: HighMemoryOperationLatency
+        expr: |
+          histogram_quantile(0.95,
+            rate(engram_memory_operation_duration_seconds_bucket[5m])
+          ) > 0.01
+        for: 5m
+        labels:
+          severity: warning
+          component: memory_operations
+        annotations:
+          summary: "High memory operation latency"
+          description: "P95 latency for {{ $labels.operation }} is {{ $value }}s"
+          runbook: "https://docs.engram.io/operations/performance-tuning#high-operation-latency"
+          threshold_rationale: "10ms P95 latency target for memory operations. 5m for: period filters transient spikes."
+          validation: "Inject artificial 15ms delays in operation path, confirm alert fires within 5m30s"
+
+      - alert: HighErrorRate
+        expr: |
+          (
+            sum(rate(engram_operation_errors_total[5m])) by (operation)
+            /
+            sum(rate(engram_operation_total[5m])) by (operation)
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          component: memory_operations
+        annotations:
+          summary: "High error rate detected"
+          description: "Error rate for {{ $labels.operation }} is {{ $value | humanizePercentage }}"
+          runbook: "https://docs.engram.io/operations/troubleshooting#high-error-rate"
+          threshold_rationale: "5% error rate indicates systematic failure. 5m window balances fast detection with noise reduction."
+          validation: "Return validation errors for 10% of requests, confirm alert fires within 5m30s"
+
   # ========== Storage and Capacity ==========
   - name: engram_storage_capacity
     interval: 60s
     rules:
+      - alert: StorageTierNearCapacity
+        expr: engram_tier_size_bytes / engram_tier_capacity_bytes > 0.80
+        for: 10m
+        labels:
+          severity: warning
+          component: storage
+        annotations:
+          summary: "Storage tier {{ $labels.tier }} near capacity"
+          description: "Tier is {{ $value | humanizePercentage }} full"
+          runbook: "https://docs.engram.io/operations/scaling#storage-capacity"
+          threshold_rationale: "80% provides headroom for write bursts before hitting hard capacity limits. 10m for: prevents alerts during transient tier migrations."
+          validation: "Fill storage tier to 85%, confirm alert fires within 10m30s"
+
       - alert: WALLagHigh
         expr: engram_wal_lag_seconds > 10
         for: 5m
@@ -107,6 +160,22 @@ groups:
           description: "Current lag is high. May impact durability guarantees."
           runbook: "https://docs.engram.io/operations/troubleshooting#wal-lag"
           threshold_rationale: "10s lag = risk of data loss beyond durability SLO (target: <1s lag). 5m for: filters transient lag spikes during compaction."
+
+      - alert: ActiveMemoryGrowthUnbounded
+        expr: |
+          rate(engram_episodes_total[1h]) > 1000
+          and
+          deriv(engram_episodes_total[1h]) > 0
+        for: 30m
+        labels:
+          severity: warning
+          component: storage
+        annotations:
+          summary: "Unbounded memory growth detected"
+          description: "Memory growing at {{ $value }} episodes/sec with no consolidation"
+          runbook: "https://docs.engram.io/operations/capacity-planning#memory-growth"
+          threshold_rationale: "1000 episodes/hour sustained growth indicates potential issue. Info-level to avoid false alarms during legitimate high-write workloads."
+          validation: "Generate sustained write traffic >1000 episodes/hour, confirm alert fires after 30m"
 
   # ========== Activation Pool Health ==========
   - name: engram_activation_pool

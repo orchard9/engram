@@ -691,20 +691,21 @@ impl DifferentialTestReport {
                 times
                     .iter()
                     .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)),
-            ) && max_time > min_time * 2.0
-            {
-                insights.push(Insight {
-                    category: InsightCategory::Performance,
-                    description: format!(
-                        "Significant performance variation detected ({:.0}x difference)",
-                        max_time / min_time
-                    ),
-                    confidence: Confidence::HIGH,
-                    impact: InsightImpact::Medium,
-                    suggested_actions: vec![
-                        "Profile slow implementations to identify bottlenecks".to_string(),
-                    ],
-                });
+            ) {
+                if max_time > min_time * 2.0 {
+                    insights.push(Insight {
+                        category: InsightCategory::Performance,
+                        description: format!(
+                            "Significant performance variation detected ({:.0}x difference)",
+                            max_time / min_time
+                        ),
+                        confidence: Confidence::HIGH,
+                        impact: InsightImpact::Medium,
+                        suggested_actions: vec![
+                            "Profile slow implementations to identify bottlenecks".to_string(),
+                        ],
+                    });
+                }
             }
         }
 

@@ -1011,9 +1011,10 @@ impl WalWriter {
 
             if path.extension().is_some_and(|ext| ext == "log")
                 && !path.to_str().unwrap_or("").contains(".tmp")
-                && let Ok(metadata) = path.metadata()
             {
-                old_bytes += metadata.len();
+                if let Ok(metadata) = path.metadata() {
+                    old_bytes += metadata.len();
+                }
             }
         }
 

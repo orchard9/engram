@@ -359,14 +359,14 @@ impl MemoryStore {
     fn persist_episode(&self, memory_arc: &Arc<Memory>, episode: &Episode) {
         use std::convert::TryFrom;
 
-        if let Some(ref wal_writer) = self.wal_writer
-            && let Ok(wal_entry) = crate::storage::wal::WalEntry::new_episode(episode)
-        {
-            wal_writer.write_async(wal_entry);
-            let episode_size = std::mem::size_of::<Episode>() as u64
-                + u64::try_from(episode.id.len()).unwrap_or(0)
-                + u64::try_from(episode.what.len()).unwrap_or(0);
-            self.storage_metrics.record_write(episode_size);
+        if let Some(ref wal_writer) = self.wal_writer {
+            if let Ok(wal_entry) = crate::storage::wal::WalEntry::new_episode(episode) {
+                wal_writer.write_async(wal_entry);
+                let episode_size = std::mem::size_of::<Episode>() as u64
+                    + u64::try_from(episode.id.len()).unwrap_or(0)
+                    + u64::try_from(episode.what.len()).unwrap_or(0);
+                self.storage_metrics.record_write(episode_size);
+            }
         }
 
         if let Some(ref backend) = self.persistent_backend {
@@ -1099,13 +1099,9 @@ impl MemoryStore {
             tracing::info!("Starting WAL compaction to remove corrupt entries");
 
             // Collect all episodes currently in memory
-            let episodes: Vec<Episode> = self
-                .wal_buffer
-                .iter()
-                .map(|entry| entry.value().clone())
-                .collect();
-
-            match wal_writer.compact_from_memory(episodes.into_iter()) {
+            match wal_writer
+                .compact_from_memory(self.wal_buffer.iter().map(|entry| entry.value().clone()))
+            {
                 Ok(stats) => {
                     tracing::info!(
                         entries_written = stats.entries_written,
@@ -2090,11 +2086,11 @@ impl MemoryStore {
         // 1. Try HNSW index for embedding cues if available
         #[cfg(feature = "hnsw_index")]
         {
-            if let CueType::Embedding { vector, threshold } = &cue.cue_type
-                && let Some(ref hnsw) = self.hnsw_index
-            {
-                self.flush_pending_hnsw_updates();
-                return self.recall_with_hnsw(cue, hnsw, vector, *threshold).results;
+            if let CueType::Embedding { vector, threshold } = &cue.cue_type {
+                if let Some(ref hnsw) = self.hnsw_index {
+                    self.flush_pending_hnsw_updates();
+                    return self.recall_with_hnsw(cue, hnsw, vector, *threshold).results;
+                }
             }
         }
 
@@ -2676,18 +2672,19 @@ impl MemoryStore {
                         crate::compute::cosine_similarity_768(embedding, &memory.embedding);
 
                     if similarity > 0.8 {
-                    let episode = Episode::new(
-                        memory.id.clone(),
-                        memory.created_at,
-                        memory
-                            .content
-                            .clone()
-                            .unwrap_or_else(|| format!("Memory {}", memory.id)),
-                        memory.embedding,
-                        memory.confidence,
-                    );
+                        let episode = Episode::new(
+                            memory.id.clone(),
+                            memory.created_at,
+                            memory
+                                .content
+                                .clone()
+                                .unwrap_or_else(|| format!("Memory {}", memory.id)),
+                            memory.embedding,
+                            memory.confidence,
+                        );
 
-                    results.push((episode, Confidence::exact(similarity)));
+                        results.push((episode, Confidence::exact(similarity)));
+                    }
                 }
             }
         }

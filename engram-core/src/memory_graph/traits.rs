@@ -120,10 +120,10 @@ pub trait MemoryBackend: Send + Sync {
                 let results = self.search(vector, cue.max_results)?;
                 let mut memories = Vec::new();
                 for (id, score) in results {
-                    if score >= cue.result_threshold.raw()
-                        && let Some(memory) = self.retrieve(&id)?
-                    {
-                        memories.push(memory);
+                    if score >= cue.result_threshold.raw() {
+                        if let Some(memory) = self.retrieve(&id)? {
+                            memories.push(memory);
+                        }
                     }
                 }
                 Ok(memories)
