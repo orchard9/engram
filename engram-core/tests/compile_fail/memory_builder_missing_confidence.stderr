@@ -6,7 +6,7 @@ error[E0599]: no method named `build` found for struct `MemoryBuilder<engram_cor
 12 | |         .id("test_memory".to_string())
 13 | |         .embedding([0.1f32; 768])
 14 | |         .build(); //~ ERROR: method `build` not found for this value
-   | |         -^^^^^ method not found in `MemoryBuilder<engram_core::memory::memory_builder_states::NoConfidence>`
+   | |         -^^^^^ method not found in `MemoryBuilder<NoConfidence>`
    | |_________|
    |
    |

@@ -98,11 +98,11 @@ async fn test_cli_start_single_node() {
     let port = match find_available_port(0).await {
         Ok(port) => port,
         Err(err) => {
-            if let Some(io_err) = err.downcast_ref::<std::io::Error>()
-                && io_err.kind() == std::io::ErrorKind::PermissionDenied
-            {
-                eprintln!("skipping test_cli_start_single_node: {io_err}");
-                return;
+            if let Some(io_err) = err.downcast_ref::<std::io::Error>() {
+                if io_err.kind() == std::io::ErrorKind::PermissionDenied {
+                    eprintln!("skipping test_cli_start_single_node: {io_err}");
+                    return;
+                }
             }
             panic!("find_available_port failed: {err}");
         }
@@ -147,11 +147,11 @@ async fn test_port_discovery_timeout() {
     let port = match port_result {
         Ok(port) => port,
         Err(err) => {
-            if let Some(io_err) = err.downcast_ref::<std::io::Error>()
-                && io_err.kind() == std::io::ErrorKind::PermissionDenied
-            {
-                eprintln!("skipping test_port_discovery_timeout: {io_err}");
-                return;
+            if let Some(io_err) = err.downcast_ref::<std::io::Error>() {
+                if io_err.kind() == std::io::ErrorKind::PermissionDenied {
+                    eprintln!("skipping test_port_discovery_timeout: {io_err}");
+                    return;
+                }
             }
             panic!("find_available_port failed: {err}");
         }

@@ -137,10 +137,10 @@ fn generate_calibration_dataset(seed: u64) -> (Vec<Episode>, Vec<PartialEpisode>
             known_fields.insert("what".to_string(), episode.what.clone());
         }
 
-        if rng.gen_bool(0.4)
-            && let Some(ref loc) = episode.where_location
-        {
-            known_fields.insert("where".to_string(), loc.clone());
+        if rng.gen_bool(0.4) {
+            if let Some(ref loc) = episode.where_location {
+                known_fields.insert("where".to_string(), loc.clone());
+            }
         }
 
         test_partials.push(PartialEpisode {

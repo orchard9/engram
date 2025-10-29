@@ -490,14 +490,14 @@ async fn test_system_health() {
     assert!(response["checks"].is_array());
 
     // Verify per-space metrics structure
-    if let Some(spaces) = response["spaces"].as_array()
-        && let Some(first_space) = spaces.first()
-    {
-        assert!(first_space["space"].is_string());
-        assert!(first_space["memories"].is_number());
-        assert!(first_space["pressure"].is_number());
-        assert!(first_space["wal_lag_ms"].is_number());
-        assert!(first_space["consolidation_rate"].is_number());
+    if let Some(spaces) = response["spaces"].as_array() {
+        if let Some(first_space) = spaces.first() {
+            assert!(first_space["space"].is_string());
+            assert!(first_space["memories"].is_number());
+            assert!(first_space["pressure"].is_number());
+            assert!(first_space["wal_lag_ms"].is_number());
+            assert!(first_space["consolidation_rate"].is_number());
+        }
     }
 }
 

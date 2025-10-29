@@ -7,7 +7,7 @@ error[E0599]: no method named `confidence` found for struct `EpisodeBuilder<engr
 14 | |         .when(Utc::now())
 15 | |         .what("Something happened".to_string())
 16 | |         .confidence(Confidence::HIGH)
-   | |         -^^^^^^^^^^ method not found in `EpisodeBuilder<engram_core::memory::episode_builder_states::NoEmbedding>`
+   | |         -^^^^^^^^^^ method not found in `EpisodeBuilder<NoEmbedding>`
    | |_________|
    |
    |

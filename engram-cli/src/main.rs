@@ -274,10 +274,7 @@ async fn start_server(
     // subscriber the broadcast channel drops events, so we immediately attach
     // a keepalive receiver after enabling the stream within the registry.
     let mut event_rx = memory_store.subscribe_to_events().ok_or_else(|| {
-        anyhow!(
-            "Event streaming not initialised for memory space {}",
-            default_space_id
-        )
+        anyhow!("Event streaming not initialised for memory space {default_space_id}")
     })?;
     info!(space = %default_space_id, " Event streaming enabled (buffer size: 1000)");
 

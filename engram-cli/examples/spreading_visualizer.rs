@@ -298,7 +298,7 @@ fn render_png(dot_path: &Path, png_path: &Path) -> Result<()> {
             "GraphViz 'dot' exited with status {}",
             exit.code().unwrap_or(-1)
         )),
-        Err(err) => Err(anyhow!("failed to invoke GraphViz 'dot': {}", err)),
+        Err(err) => Err(anyhow!("failed to invoke GraphViz 'dot': {err}")),
     }
 }
 
