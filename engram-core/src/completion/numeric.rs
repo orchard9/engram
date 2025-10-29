@@ -21,7 +21,7 @@ pub const fn usize_to_f64(value: usize) -> f64 {
     clippy::cast_precision_loss,
     clippy::cast_sign_loss
 )]
-pub const fn round_f32_to_usize(value: f32) -> usize {
+pub fn round_f32_to_usize(value: f32) -> usize {
     if !value.is_finite() {
         return 0;
     }

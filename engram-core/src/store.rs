@@ -2115,11 +2115,11 @@ impl MemoryStore {
         // Try HNSW index for embedding cues if available
         #[cfg(feature = "hnsw_index")]
         {
-            if let CueType::Embedding { vector, threshold } = &cue.cue_type
-                && let Some(ref hnsw) = self.hnsw_index
-            {
-                self.flush_pending_hnsw_updates();
-                return self.recall_with_hnsw(cue, hnsw, vector, *threshold).results;
+            if let CueType::Embedding { vector, threshold } = &cue.cue_type {
+                if let Some(ref hnsw) = self.hnsw_index {
+                    self.flush_pending_hnsw_updates();
+                    return self.recall_with_hnsw(cue, hnsw, vector, *threshold).results;
+                }
             }
         }
 
@@ -2265,10 +2265,10 @@ impl MemoryStore {
         // Check location if provided
         if let Some(loc) = location {
             max_score += 1.0;
-            if let Some(ep_loc) = &episode.where_location
-                && (ep_loc.contains(loc) || loc.contains(ep_loc))
-            {
-                match_score += 1.0;
+            if let Some(ep_loc) = &episode.where_location {
+                if ep_loc.contains(loc) || loc.contains(ep_loc) {
+                    match_score += 1.0;
+                }
             }
         }
 
@@ -2669,14 +2669,13 @@ impl MemoryStore {
         let mut results = Vec::new();
 
         for addr in similar_addresses {
-            if let Some(memory_id) = self.content_index.get(&addr)
-                && let Some(memory) = self.hot_memories.get(&memory_id)
-            {
-                // Calculate actual similarity
-                let similarity =
-                    crate::compute::cosine_similarity_768(embedding, &memory.embedding);
+            if let Some(memory_id) = self.content_index.get(&addr) {
+                if let Some(memory) = self.hot_memories.get(&memory_id) {
+                    // Calculate actual similarity
+                    let similarity =
+                        crate::compute::cosine_similarity_768(embedding, &memory.embedding);
 
-                if similarity > 0.8 {
+                    if similarity > 0.8 {
                     let episode = Episode::new(
                         memory.id.clone(),
                         memory.created_at,

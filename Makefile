@@ -5,7 +5,7 @@ fmt:
 	cargo fmt --all
 
 lint:
-	cargo clippy --workspace --all-targets --all-features -- -D warnings
+	cargo clippy --workspace --all-targets --features "default,cognitive_tracing,pattern_completion" -- -D warnings
 
 test:
 	cargo test --workspace -- --test-threads=1

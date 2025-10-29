@@ -292,23 +292,23 @@ fn discover_backups(
         let path = entry.path();
 
         // Look for backup files (tar.zst)
-        if let Some(filename) = path.file_name().and_then(|s| s.to_str())
-            && (filename.ends_with(".tar.zst") || filename.ends_with(".manifest.json"))
-        {
-            // Try to parse manifest
-            if let Some(manifest) = parse_backup_manifest(&path)? {
-                // Apply filters
-                if let Some(bt) = backup_type
-                    && manifest.backup_type != bt
-                {
-                    continue;
+        if let Some(filename) = path.file_name().and_then(|s| s.to_str()) {
+            if filename.ends_with(".tar.zst") || filename.ends_with(".manifest.json") {
+                // Try to parse manifest
+                if let Some(manifest) = parse_backup_manifest(&path)? {
+                    // Apply filters
+                    if let Some(bt) = backup_type {
+                        if manifest.backup_type != bt {
+                            continue;
+                        }
+                    }
+                    if let Some(sp) = space {
+                        if manifest.space_id != sp {
+                            continue;
+                        }
+                    }
+                    manifests.push(manifest);
                 }
-                if let Some(sp) = space
-                    && manifest.space_id != sp
-                {
-                    continue;
-                }
-                manifests.push(manifest);
             }
         }
     }

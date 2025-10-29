@@ -86,7 +86,7 @@ echo ""
 NODE_ERRORS=$(echo "$LOGS" | grep -ic "node.*not found\|memory.*not found\|invalid.*node" 2>/dev/null || echo "0")
 
 # Category 2: Activation/Confidence Violations
-ACTIVATION_ERRORS=$(echo "$LOGS" | grep -ic "invalid activation\|confidence\|activation level\|confidence interval" 2>/dev/null || echo "0")
+ACTIVATION_ERRORS=$(echo "$LOGS" | grep -ic "invalid activation\|invalid confidence\|activation level\|confidence interval\|out of bounds" 2>/dev/null || echo "0")
 
 # Category 3: Storage/Persistence Errors
 STORAGE_ERRORS=$(echo "$LOGS" | grep -ic "WAL\|persist\|deserialize\|serialize\|disk.*full\|no space left" 2>/dev/null || echo "0")

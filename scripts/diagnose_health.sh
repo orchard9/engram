@@ -10,7 +10,7 @@ OUTPUT="${1:-/dev/stdout}"
 exec > >(tee -a "$OUTPUT")
 
 echo "========================================"
-echo "   Engram Health Diagnostic Report     "
+echo "  Engram Health Diagnostic Report     "
 echo "========================================"
 echo "Timestamp: $(date)"
 echo ""

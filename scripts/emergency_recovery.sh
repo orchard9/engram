@@ -270,11 +270,12 @@ EOF
         fi
 
         # Move any .corrupted or .tmp files
-        find "$WAL_DIR" -name "*.corrupted" -o -name "*.tmp" 2>/dev/null | while read -r file; do
-          echo "Moving $(basename "$file") to quarantine"
-          mv "$file" "$CORRUPT_DIR/" 2>/dev/null || true
-          CORRUPT_FILES=$((CORRUPT_FILES + 1))
-        done
+        while IFS= read -r file; do
+          if [ -n "$file" ]; then
+            echo "Moving $(basename "$file") to quarantine"
+            mv "$file" "$CORRUPT_DIR/" 2>/dev/null || true
+          fi
+        done < <(find "$WAL_DIR" -name "*.corrupted" -o -name "*.tmp" 2>/dev/null || true)
 
         if [ "$CORRUPT_FILES" -gt 0 ]; then
           echo ""

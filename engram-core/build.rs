@@ -208,15 +208,15 @@ fn detect_cuda_toolkit() -> bool {
     };
 
     // Check for nvcc in PATH
-    if let Ok(output) = Command::new(nvcc_name).arg("--version").output()
-        && output.status.success()
-    {
-        let version_str = String::from_utf8_lossy(&output.stdout);
-        println!(
-            "cargo:warning=Found CUDA compiler: {}",
-            version_str.lines().next().unwrap_or("")
-        );
-        return true;
+    if let Ok(output) = Command::new(nvcc_name).arg("--version").output() {
+        if output.status.success() {
+            let version_str = String::from_utf8_lossy(&output.stdout);
+            println!(
+                "cargo:warning=Found CUDA compiler: {}",
+                version_str.lines().next().unwrap_or("")
+            );
+            return true;
+        }
     }
 
     // Check for CUDA_PATH environment variable
