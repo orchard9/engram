@@ -29,6 +29,8 @@
 pub mod observation_queue;
 pub mod queue_metrics;
 pub mod session;
+pub mod space_isolated_hnsw;
+pub mod worker_pool;
 
 pub use observation_queue::{
     ObservationPriority, ObservationQueue, QueueConfig, QueueDepths, QueueError, QueueMetrics,
@@ -36,3 +38,5 @@ pub use observation_queue::{
 };
 pub use queue_metrics::{QueueMetricsTracker, QueueStatistics};
 pub use session::{SessionError, SessionManager, SessionState, StreamSession};
+pub use space_isolated_hnsw::{SpaceHnswError, SpaceIsolatedHnsw};
+pub use worker_pool::{WorkerPool, WorkerPoolConfig, WorkerPoolError, WorkerStats};
