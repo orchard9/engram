@@ -21,6 +21,10 @@ pub struct HnswGraph {
     /// Node lookup map for O(1) access
     node_map: DashMap<String, u32>,
 
+    /// Node ID to Arc<HnswNode> map for safe concurrent lookups
+    /// This ensures get_node() can find nodes even during insertion
+    node_registry: DashMap<u32, Arc<HnswNode>>,
+
     /// Total number of nodes
     node_count: AtomicUsize,
 }
@@ -47,6 +51,7 @@ impl HnswGraph {
             layers,
             entry_points,
             node_map: DashMap::new(),
+            node_registry: DashMap::new(),
             node_count: AtomicUsize::new(0),
         }
     }
@@ -68,10 +73,22 @@ impl HnswGraph {
         let layer_count = node.layer_count.load(Ordering::Relaxed);
         let node_arc = Arc::new(node);
 
-        // Store memory ID to node ID mapping
+        // CRITICAL FIX: Register node FIRST in the node registry
+        // This ensures get_node() can find it even before layers are populated
+        self.node_registry.insert(node_id, node_arc.clone());
+
+        // Memory barrier: Ensure node is visible in registry before proceeding
+        std::sync::atomic::fence(Ordering::Release);
+
+        // Insert node into ALL layers to ensure visibility
+        for layer in 0..=layer_count {
+            self.layers[layer as usize].insert(node_id, node_arc.clone());
+        }
+
+        // Store memory ID to node ID mapping (after node is visible)
         self.node_map.insert(node_arc.memory.id.clone(), node_id);
 
-        // Insert into all layers up to layer_count
+        // Now build connections (node is guaranteed visible for get_node calls)
         for layer in 0..=layer_count {
             // Find entry point for this layer
             let entry_point = self.get_entry_point(layer as usize);
@@ -125,8 +142,7 @@ impl HnswGraph {
                 Self::prune_connections(neighbor_node, layer as usize, m, vector_ops);
             }
 
-            // Insert node into layer
-            self.layers[layer as usize].insert(node_id, node_arc.clone());
+            // Note: Node already inserted into layer at the start
 
             // Update entry point if necessary
             if entry_point == u32::MAX {
@@ -168,17 +184,37 @@ impl HnswGraph {
             .max()
             .unwrap_or(0);
 
-        // Process each node in the batch
+        // PHASE 1: Register ALL nodes first to ensure visibility
+        // This prevents race conditions where edges reference unregistered nodes
+        let node_arcs: Vec<_> = nodes
+            .into_iter()
+            .map(|node| {
+                let node_id = node.node_id;
+                let layer_count = node.layer_count.load(Ordering::Relaxed);
+                let node_arc = Arc::new(node);
+
+                // Register node in registry FIRST
+                self.node_registry.insert(node_id, node_arc.clone());
+
+                // Insert into all layers
+                for layer in 0..=layer_count {
+                    self.layers[layer as usize].insert(node_id, node_arc.clone());
+                }
+
+                // Store memory ID mapping
+                self.node_map.insert(node_arc.memory.id.clone(), node_id);
+
+                (node_id, layer_count, node_arc)
+            })
+            .collect();
+
+        // Memory barrier: Ensure ALL nodes are visible before building connections
+        std::sync::atomic::fence(Ordering::Release);
+
+        // PHASE 2: Build connections for all nodes
         let mut inserted_count = 0;
-        for node in nodes {
-            let node_id = node.node_id;
-            let layer_count = node.layer_count.load(Ordering::Relaxed);
-            let node_arc = Arc::new(node);
-
-            // Store memory ID to node ID mapping
-            self.node_map.insert(node_arc.memory.id.clone(), node_id);
-
-            // Insert into all layers up to layer_count
+        for (node_id, layer_count, node_arc) in node_arcs {
+            // Now build connections (ALL nodes are guaranteed visible for get_node calls)
             for layer in 0..=layer_count {
                 // Reuse entry point lookup (amortized across batch)
                 let entry_point = self.get_entry_point(layer as usize);
@@ -232,8 +268,7 @@ impl HnswGraph {
                     Self::prune_connections(neighbor_node, layer as usize, m, vector_ops);
                 }
 
-                // Insert node into layer
-                self.layers[layer as usize].insert(node_id, node_arc.clone());
+                // Note: Node already inserted into layer at the start
 
                 // Update entry point if this is a new highest layer
                 if entry_point == u32::MAX || (layer >= max_batch_layer && layer > 0) {
@@ -368,11 +403,18 @@ impl HnswGraph {
             }
 
             // Check neighbors
-            let current_node = self.get_node(current.node_id, guard)?;
+            let Ok(current_node) = self.get_node(current.node_id, guard) else {
+                continue; // Skip if node not found (concurrent insertion race)
+            };
+
             if let Some(connections) = current_node.get_connections(layer) {
                 for edge in connections {
                     if visited.insert(edge.target_id) {
-                        let neighbor = self.get_node(edge.target_id, guard)?;
+                        // Defensive: Skip neighbors that aren't fully registered yet
+                        let Ok(neighbor) = self.get_node(edge.target_id, guard) else {
+                            continue; // Skip this edge - node not ready yet
+                        };
+
                         let distance =
                             1.0 - vector_ops.cosine_similarity_768(query, neighbor.get_embedding());
 
@@ -475,13 +517,12 @@ impl HnswGraph {
     /// # Errors
     ///
     /// Returns `HnswError::MemoryNotFound` if the requested node is absent from
-    /// every layer.
+    /// the node registry.
     fn get_node(&self, node_id: u32, _guard: &Guard) -> Result<Arc<HnswNode>, super::HnswError> {
-        // Try each layer until we find the node
-        for layer in &self.layers {
-            if let Some(entry) = layer.get(&node_id) {
-                return Ok(entry.value().clone());
-            }
+        // Use the node registry for O(1) lookup with guaranteed visibility
+        // This prevents race conditions during concurrent insertions
+        if let Some(node) = self.node_registry.get(&node_id) {
+            return Ok(node.value().clone());
         }
 
         Err(super::HnswError::MemoryNotFound(format!(
