@@ -464,6 +464,8 @@ impl Worker {
             let batch = own_queue.dequeue_batch(batch_size);
 
             if !batch.is_empty() {
+                super::stream_metrics::record_batch_size(worker_id, batch.len());
+                super::stream_metrics::record_batch_processed(worker_id);
                 Self::process_batch(&batch, &space_hnsw, &stats);
                 continue;
             }
@@ -471,6 +473,9 @@ impl Worker {
             // 2. Own queue empty - try work stealing
             if let Some(stolen_batch) = Self::try_steal_work(worker_id, &all_queues, &config) {
                 stats.stolen_batches.fetch_add(1, Ordering::Relaxed);
+                super::stream_metrics::record_work_stolen(worker_id);
+                super::stream_metrics::record_batch_size(worker_id, stolen_batch.len());
+                super::stream_metrics::record_batch_processed(worker_id);
                 Self::process_batch(&stolen_batch, &space_hnsw, &stats);
                 continue;
             }
@@ -552,6 +557,8 @@ impl Worker {
 
         // Process each observation (space-isolated, so no contention)
         for obs in batch {
+            let obs_start = obs.enqueued_at;
+
             // Convert Episode to Memory
             let memory = Arc::new(Memory::from_episode(obs.episode.as_ref().clone(), 1.0));
 
@@ -568,6 +575,15 @@ impl Worker {
 
             // Update success stats
             stats.processed_observations.fetch_add(1, Ordering::Relaxed);
+
+            // Record metrics for this observation
+            let priority_str = match obs.priority {
+                ObservationPriority::High => "high",
+                ObservationPriority::Normal => "normal",
+                ObservationPriority::Low => "low",
+            };
+            super::stream_metrics::record_observation_processed(&obs.memory_space_id, priority_str);
+            super::stream_metrics::record_observation_latency(&obs.memory_space_id, obs_start);
         }
 
         // Update timing stats

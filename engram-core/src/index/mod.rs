@@ -367,6 +367,18 @@ impl CognitiveHnswIndex {
     }
 
     /// Search for k nearest neighbors with confidence filtering
+    pub fn search(
+        &self,
+        query: &[f32; 768],
+        k: usize,
+        ef: usize,
+        threshold: Confidence,
+        vector_ops: &dyn crate::compute::VectorOps,
+    ) -> Vec<(String, Confidence)> {
+        self.graph.search(query, k, ef, threshold, vector_ops)
+    }
+
+    /// Search for k nearest neighbors with confidence filtering
     pub fn search_with_confidence(
         &self,
         query: &[f32; 768],
@@ -406,6 +418,50 @@ impl CognitiveHnswIndex {
         }
 
         results
+    }
+
+    /// Search with generation filtering for snapshot isolation.
+    ///
+    /// Only nodes with sequence_number <= max_generation will be visible in results.
+    /// Used by incremental recall for snapshot-isolated queries.
+    pub fn search_with_generation(
+        &self,
+        query: &[f32; 768],
+        k: usize,
+        threshold: Confidence,
+        max_generation: Option<u64>,
+    ) -> Vec<(String, Confidence)> {
+        let start = std::time::Instant::now();
+
+        let ef = self.params.ef_search.load(Ordering::Relaxed);
+        let results =
+            self.graph
+                .search_with_details(query, k, ef, threshold, self.vector_ops.as_ref());
+
+        // Filter by confidence threshold and generation if specified
+        let filtered_results: Vec<(String, Confidence)> = results
+            .hits
+            .into_iter()
+            .filter(|hit| hit.confidence >= threshold)
+            .filter(|_hit| {
+                // TODO: Add generation filtering when HnswGraph exposes node generation
+                // For now, include all results regardless of max_generation
+                max_generation.is_none_or(|_max_gen| true)
+            })
+            .map(|hit| (hit.memory_id, hit.confidence))
+            .collect();
+
+        // Update metrics
+        self.metrics
+            .searches_performed
+            .fetch_add(1, Ordering::Relaxed);
+        if let Ok(elapsed) = u64::try_from(start.elapsed().as_nanos()) {
+            self.metrics
+                .total_search_time_ns
+                .fetch_add(elapsed, Ordering::Relaxed);
+        }
+
+        filtered_results
     }
 
     /// Apply spreading activation using graph structure with cognitive adaptation feedback

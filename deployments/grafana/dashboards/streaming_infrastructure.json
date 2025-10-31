@@ -1,0 +1,481 @@
+{
+  "dashboard": {
+    "title": "Engram Streaming Infrastructure",
+    "tags": ["engram", "streaming", "performance"],
+    "timezone": "browser",
+    "schemaVersion": 39,
+    "version": 1,
+    "refresh": "5s",
+    "time": {
+      "from": "now-15m",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "System Overview",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 24, "x": 0, "y": 0},
+        "targets": [
+          {
+            "expr": "sum(rate(engram_streaming_observations_total[1m]))",
+            "legendFormat": "Observations/sec",
+            "refId": "A"
+          },
+          {
+            "expr": "sum(engram_streaming_queue_depth)",
+            "legendFormat": "Queue Depth",
+            "refId": "B"
+          },
+          {
+            "expr": "engram_streaming_active_sessions_total",
+            "legendFormat": "Active Sessions",
+            "refId": "C"
+          }
+        ],
+        "options": {
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"]
+          },
+          "orientation": "horizontal",
+          "textMode": "value_and_name",
+          "colorMode": "value"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "thresholds"},
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": null, "color": "green"},
+                {"value": 1000, "color": "yellow"},
+                {"value": 5000, "color": "red"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 2,
+        "title": "Observation Rate by Space",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+        "targets": [
+          {
+            "expr": "sum(rate(engram_streaming_observations_total[1m])) by (memory_space)",
+            "legendFormat": "{{memory_space}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "custom": {
+              "lineWidth": 2,
+              "fillOpacity": 10,
+              "showPoints": "never"
+            },
+            "unit": "ops"
+          }
+        },
+        "options": {
+          "tooltip": {"mode": "multi"},
+          "legend": {"displayMode": "table", "placement": "right"}
+        }
+      },
+      {
+        "id": 3,
+        "title": "Queue Depth by Priority",
+        "type": "gauge",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+        "targets": [
+          {
+            "expr": "engram_streaming_queue_depth{priority=\"high\"}",
+            "legendFormat": "High",
+            "refId": "A"
+          },
+          {
+            "expr": "engram_streaming_queue_depth{priority=\"normal\"}",
+            "legendFormat": "Normal",
+            "refId": "B"
+          },
+          {
+            "expr": "engram_streaming_queue_depth{priority=\"low\"}",
+            "legendFormat": "Low",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "thresholds"},
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "green"},
+                {"value": 8000, "color": "yellow"},
+                {"value": 9000, "color": "red"}
+              ]
+            },
+            "min": 0,
+            "max": 10000
+          }
+        },
+        "options": {
+          "orientation": "horizontal",
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"]
+          },
+          "showThresholdLabels": true,
+          "showThresholdMarkers": true
+        }
+      },
+      {
+        "id": 4,
+        "title": "Worker Utilization Heatmap",
+        "type": "heatmap",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+        "targets": [
+          {
+            "expr": "engram_streaming_worker_utilization",
+            "legendFormat": "Worker {{worker_id}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "custom": {
+              "hideFrom": {
+                "tooltip": false,
+                "viz": false,
+                "legend": false
+              }
+            },
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": null, "color": "green"},
+                {"value": 60, "color": "yellow"},
+                {"value": 80, "color": "red"}
+              ]
+            }
+          }
+        },
+        "options": {
+          "calculate": false,
+          "cellGap": 2,
+          "cellRadius": 4,
+          "color": {
+            "exponent": 0.5,
+            "fill": "dark-orange",
+            "mode": "scheme",
+            "reverse": false,
+            "scheme": "Spectral",
+            "steps": 128
+          },
+          "exemplars": {
+            "color": "rgba(255,0,255,0.7)"
+          },
+          "filterValues": {
+            "le": 1e-9
+          },
+          "legend": {
+            "show": true
+          },
+          "rowsFrame": {
+            "layout": "auto"
+          },
+          "tooltip": {
+            "show": true,
+            "yHistogram": false
+          },
+          "yAxis": {
+            "axisPlacement": "left",
+            "reverse": false
+          }
+        }
+      },
+      {
+        "id": 5,
+        "title": "Observation Latency Distribution (P50/P99)",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, rate(engram_streaming_observation_latency_seconds_bucket[5m]))",
+            "legendFormat": "P50",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.99, rate(engram_streaming_observation_latency_seconds_bucket[5m]))",
+            "legendFormat": "P99",
+            "refId": "B"
+          },
+          {
+            "expr": "histogram_quantile(0.999, rate(engram_streaming_observation_latency_seconds_bucket[5m]))",
+            "legendFormat": "P99.9",
+            "refId": "C"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "custom": {
+              "lineWidth": 2,
+              "fillOpacity": 10,
+              "showPoints": "never"
+            },
+            "unit": "s"
+          },
+          "overrides": [
+            {
+              "matcher": {"id": "byName", "options": "P99"},
+              "properties": [
+                {"id": "color", "value": {"mode": "fixed", "fixedColor": "red"}}
+              ]
+            }
+          ]
+        },
+        "options": {
+          "tooltip": {"mode": "multi"},
+          "legend": {"displayMode": "list", "placement": "bottom"}
+        }
+      },
+      {
+        "id": 6,
+        "title": "Backpressure Events",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 6, "x": 0, "y": 20},
+        "targets": [
+          {
+            "expr": "rate(engram_streaming_backpressure_activations_total[5m])",
+            "legendFormat": "Activations/min",
+            "refId": "A"
+          }
+        ],
+        "options": {
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"]
+          },
+          "orientation": "horizontal",
+          "textMode": "value_and_name",
+          "colorMode": "value"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "thresholds"},
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": null, "color": "green"},
+                {"value": 10, "color": "yellow"},
+                {"value": 100, "color": "red"}
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 7,
+        "title": "Backpressure State",
+        "type": "state-timeline",
+        "gridPos": {"h": 4, "w": 6, "x": 6, "y": 20},
+        "targets": [
+          {
+            "expr": "engram_streaming_backpressure_state",
+            "legendFormat": "{{memory_space}}",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [
+              {"type": "value", "value": "0", "text": "Normal"},
+              {"type": "value", "value": "1", "text": "Warning"},
+              {"type": "value", "value": "2", "text": "Critical"},
+              {"type": "value", "value": "3", "text": "Overloaded"}
+            ],
+            "color": {
+              "mode": "thresholds"
+            },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": 0, "color": "green"},
+                {"value": 1, "color": "yellow"},
+                {"value": 2, "color": "orange"},
+                {"value": 3, "color": "red"}
+              ]
+            }
+          }
+        },
+        "options": {
+          "mergeValues": true,
+          "showValue": "never",
+          "alignValue": "center"
+        }
+      },
+      {
+        "id": 8,
+        "title": "Recall Latency",
+        "type": "timeseries",
+        "gridPos": {"h": 4, "w": 6, "x": 12, "y": 20},
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.99, rate(engram_streaming_recall_latency_seconds_bucket[5m]))",
+            "legendFormat": "P99 Recall Latency",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "custom": {
+              "lineWidth": 2,
+              "fillOpacity": 10,
+              "showPoints": "never"
+            },
+            "unit": "s"
+          }
+        },
+        "options": {
+          "tooltip": {"mode": "single"},
+          "legend": {"displayMode": "list", "placement": "bottom"}
+        }
+      },
+      {
+        "id": 9,
+        "title": "Batch Processing Stats",
+        "type": "timeseries",
+        "gridPos": {"h": 4, "w": 6, "x": 18, "y": 20},
+        "targets": [
+          {
+            "expr": "sum(rate(engram_streaming_batches_processed_total[1m])) by (worker_id)",
+            "legendFormat": "Worker {{worker_id}}",
+            "refId": "A"
+          },
+          {
+            "expr": "sum(rate(engram_streaming_work_stolen_total[1m]))",
+            "legendFormat": "Work Stealing",
+            "refId": "B"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "palette-classic"},
+            "custom": {
+              "lineWidth": 2,
+              "fillOpacity": 0,
+              "showPoints": "never"
+            },
+            "unit": "ops"
+          },
+          "overrides": [
+            {
+              "matcher": {"id": "byName", "options": "Work Stealing"},
+              "properties": [
+                {"id": "color", "value": {"mode": "fixed", "fixedColor": "purple"}}
+              ]
+            }
+          ]
+        },
+        "options": {
+          "tooltip": {"mode": "multi"},
+          "legend": {"displayMode": "list", "placement": "bottom"}
+        }
+      },
+      {
+        "id": 10,
+        "title": "Batch Size Distribution",
+        "type": "histogram",
+        "gridPos": {"h": 6, "w": 12, "x": 0, "y": 24},
+        "targets": [
+          {
+            "expr": "rate(engram_streaming_batch_size_bucket[5m])",
+            "legendFormat": "Batch Size",
+            "refId": "A",
+            "format": "heatmap"
+          }
+        ],
+        "options": {
+          "legend": {
+            "displayMode": "list",
+            "placement": "bottom"
+          }
+        }
+      },
+      {
+        "id": 11,
+        "title": "Error Rate",
+        "type": "stat",
+        "gridPos": {"h": 6, "w": 12, "x": 12, "y": 24},
+        "targets": [
+          {
+            "expr": "sum(rate(engram_streaming_batch_failures_total[5m]))",
+            "legendFormat": "Batch Failures/min",
+            "refId": "A"
+          },
+          {
+            "expr": "sum(rate(engram_streaming_observations_rejected_total[5m]))",
+            "legendFormat": "Rejections/min",
+            "refId": "B"
+          }
+        ],
+        "options": {
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"]
+          },
+          "orientation": "horizontal",
+          "textMode": "value_and_name",
+          "colorMode": "value"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "color": {"mode": "thresholds"},
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {"value": null, "color": "green"},
+                {"value": 0.1, "color": "yellow"},
+                {"value": 1.0, "color": "red"}
+              ]
+            }
+          }
+        }
+      }
+    ],
+    "templating": {
+      "list": [
+        {
+          "name": "datasource",
+          "type": "datasource",
+          "query": "prometheus",
+          "current": {
+            "text": "Prometheus",
+            "value": "Prometheus"
+          }
+        }
+      ]
+    },
+    "annotations": {
+      "list": [
+        {
+          "datasource": "Prometheus",
+          "enable": true,
+          "expr": "ALERTS{alertname=~\".*Streaming.*\"}",
+          "name": "Streaming Alerts",
+          "step": "60s",
+          "tagKeys": "alertname,severity",
+          "textFormat": "{{alertname}}: {{annotations.summary}}",
+          "titleFormat": "Alert"
+        }
+      ]
+    }
+  }
+}

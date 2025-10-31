@@ -14,12 +14,14 @@ pub struct HnswNode {
     pub node_id: u32,
     /// Lock-free layer updates
     pub layer_count: AtomicU8,
-    /// ABA protection generation
+    /// ABA protection generation (for lock-free CAS operations)
     pub generation: AtomicU32,
     /// Lock-free activation updates
     pub activation: AtomicF32,
     /// Probabilistic weight
     pub confidence: Confidence,
+    /// Sequence number for snapshot isolation (when observation was committed)
+    pub sequence_number: AtomicU64,
     /// Epoch-based timestamp
     pub last_access_epoch: AtomicU64,
     /// Pointer to embedding (separate allocation for cache efficiency)
@@ -28,8 +30,6 @@ pub struct HnswNode {
     pub connections_ptr: AtomicPtr<ConnectionBlock>,
     /// Reference to original memory
     pub memory: Arc<Memory>,
-    /// Padding to fill cache line
-    _padding: [u8; 7],
 }
 
 impl HnswNode {
@@ -43,6 +43,24 @@ impl HnswNode {
         node_id: u32,
         memory: Arc<Memory>,
         layer_count: u8,
+    ) -> Result<Self, super::HnswError> {
+        Self::from_memory_with_sequence(node_id, memory, layer_count, 0)
+    }
+
+    /// Create a new HNSW node from a memory with explicit sequence number.
+    ///
+    /// The sequence number is used for snapshot isolation - observations with
+    /// sequence <= snapshot_generation are visible in snapshot-isolated recalls.
+    ///
+    /// # Errors
+    ///
+    /// Returns `HnswError::InvalidDimension` when the memory embedding does not
+    /// match the expected dimensionality for the index.
+    pub fn from_memory_with_sequence(
+        node_id: u32,
+        memory: Arc<Memory>,
+        layer_count: u8,
+        sequence_number: u64,
     ) -> Result<Self, super::HnswError> {
         // Validate embedding dimension
         if memory.embedding.len() != 768 {
@@ -59,12 +77,23 @@ impl HnswNode {
             generation: AtomicU32::new(0),
             activation: AtomicF32::new(memory.activation()),
             confidence: memory.confidence,
+            sequence_number: AtomicU64::new(sequence_number),
             last_access_epoch: AtomicU64::new(0),
             embedding_ptr: AtomicPtr::new(embedding_ptr),
             connections_ptr: AtomicPtr::new(std::ptr::null_mut()),
             memory,
-            _padding: [0u8; 7],
         })
+    }
+
+    /// Get the sequence number for this node (for snapshot isolation).
+    #[must_use]
+    pub fn get_sequence_number(&self) -> u64 {
+        self.sequence_number.load(Ordering::Acquire)
+    }
+
+    /// Set the sequence number for this node (called when observation commits).
+    pub fn set_sequence_number(&self, seq: u64) {
+        self.sequence_number.store(seq, Ordering::Release);
     }
 
     /// Get the embedding for this node
@@ -301,9 +330,11 @@ mod tests {
 
     #[test]
     fn test_node_cache_alignment() {
-        // HnswNode should be exactly 64 bytes (one cache line)
-        assert_eq!(std::mem::size_of::<HnswNode>(), 64);
+        // HnswNode should be 64-byte aligned (one cache line)
+        // Size may be larger than 64 bytes due to added sequence_number field
         assert_eq!(std::mem::align_of::<HnswNode>(), 64);
+        // Verify size is reasonable (not excessively large)
+        assert!(std::mem::size_of::<HnswNode>() <= 128);
     }
 
     #[test]

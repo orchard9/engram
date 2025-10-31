@@ -3,9 +3,12 @@
 //! Provides cognitive-friendly service interface with natural language method names
 //! and educational error messages that teach memory system concepts.
 
+use crate::handlers::streaming::StreamingHandlers;
 use engram_core::{
     Confidence as CoreConfidence, Cue as CoreCue, Episode, MemorySpaceId, MemorySpaceRegistry,
-    MemoryStore, metrics::MetricsRegistry,
+    MemoryStore,
+    metrics::MetricsRegistry,
+    streaming::{ObservationQueue, QueueConfig, SessionManager},
 };
 use engram_proto::cue::CueType;
 use engram_proto::engram_service_server::{EngramService, EngramServiceServer};
@@ -40,6 +43,8 @@ pub struct MemoryService {
     metrics: Arc<MetricsRegistry>,
     registry: Arc<MemorySpaceRegistry>,
     default_space: MemorySpaceId,
+    /// Streaming handlers for bidirectional gRPC streaming (Milestone 11)
+    streaming_handlers: Arc<StreamingHandlers>,
 }
 
 impl MemoryService {
@@ -51,11 +56,21 @@ impl MemoryService {
         registry: Arc<MemorySpaceRegistry>,
         default_space: MemorySpaceId,
     ) -> Self {
+        // Initialize streaming components (Milestone 11)
+        let session_manager = Arc::new(SessionManager::new());
+        let observation_queue = Arc::new(ObservationQueue::new(QueueConfig::default()));
+        let streaming_handlers = Arc::new(StreamingHandlers::new(
+            session_manager,
+            observation_queue,
+            Arc::clone(&store),
+        ));
+
         Self {
             store,
             metrics,
             registry,
             default_space,
+            streaming_handlers,
         }
     }
 
@@ -1441,27 +1456,51 @@ impl EngramService for MemoryService {
     type ObserveStreamStream =
         std::pin::Pin<Box<dyn Stream<Item = Result<ObservationResponse, Status>> + Send>>;
 
-    /// Bidirectional streaming for observations
+    /// Bidirectional streaming for observations (Task 005)
     ///
-    /// TODO(milestone-11): Implement streaming observation protocol
+    /// Implements client → server streaming protocol:
+    /// 1. Client sends StreamInit → server returns StreamInitAck with session ID
+    /// 2. Client streams observations → server returns acks or backpressure signals
+    /// 3. Client sends FlowControl → server updates session state
+    /// 4. Client sends StreamClose → server gracefully closes session
     async fn observe_stream(
         &self,
-        _request: Request<tonic::Streaming<ObservationRequest>>,
+        request: Request<tonic::Streaming<ObservationRequest>>,
     ) -> Result<Response<Self::ObserveStreamStream>, Status> {
-        todo!("Milestone 11: Streaming observation not yet implemented")
+        let response = self
+            .streaming_handlers
+            .handle_observe_stream(request)
+            .await?;
+        let (metadata, stream, _extensions) = response.into_parts();
+        let boxed = Box::pin(stream) as Self::ObserveStreamStream;
+        Ok(Response::from_parts(
+            metadata,
+            boxed,
+            tonic::Extensions::default(),
+        ))
     }
 
     type RecallStreamStream =
         std::pin::Pin<Box<dyn Stream<Item = Result<StreamingRecallResponse, Status>> + Send>>;
 
-    /// Server streaming for recall results
+    /// Server streaming for recall results (Task 007)
     ///
-    /// TODO(milestone-11): Implement streaming recall protocol
+    /// Implements server → client streaming for incremental recall:
+    /// - Captures snapshot generation for consistent read isolation
+    /// - Streams results in batches for low first-result latency
+    /// - Supports bounded staleness mode (include_recent observations)
     async fn recall_stream(
         &self,
-        _request: Request<StreamingRecallRequest>,
+        request: Request<StreamingRecallRequest>,
     ) -> Result<Response<Self::RecallStreamStream>, Status> {
-        todo!("Milestone 11: Streaming recall not yet implemented")
+        let response = self.streaming_handlers.handle_recall_stream(request)?;
+        let (metadata, stream, _extensions) = response.into_parts();
+        let boxed = Box::pin(stream) as Self::RecallStreamStream;
+        Ok(Response::from_parts(
+            metadata,
+            boxed,
+            tonic::Extensions::default(),
+        ))
     }
 
     type MemoryStreamStream =

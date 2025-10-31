@@ -201,6 +201,11 @@ pub struct ObservationQueue {
     total_dequeued: AtomicU64,
     /// Backpressure events triggered
     backpressure_triggered: AtomicU64,
+
+    /// Current generation (highest committed observation sequence).
+    /// Updated by workers after HNSW insertion completes.
+    /// Used to capture snapshot for recall queries.
+    current_generation: AtomicU64,
 }
 
 impl ObservationQueue {
@@ -236,6 +241,7 @@ impl ObservationQueue {
             total_enqueued: AtomicU64::new(0),
             total_dequeued: AtomicU64::new(0),
             backpressure_triggered: AtomicU64::new(0),
+            current_generation: AtomicU64::new(0),
         }
     }
 
@@ -323,6 +329,15 @@ impl ObservationQueue {
         // Update metrics (Relaxed ordering acceptable for eventual consistency)
         depth.fetch_add(1, Ordering::Relaxed);
         self.total_enqueued.fetch_add(1, Ordering::Relaxed);
+
+        // Record queue depth for monitoring
+        let new_depth = depth.load(Ordering::Relaxed);
+        let priority_str = match priority {
+            ObservationPriority::High => "high",
+            ObservationPriority::Normal => "normal",
+            ObservationPriority::Low => "low",
+        };
+        super::stream_metrics::update_queue_depth(priority_str, new_depth);
 
         Ok(())
     }
@@ -550,6 +565,47 @@ impl ObservationQueue {
     #[must_use]
     pub const fn total_capacity(&self) -> usize {
         self.high_capacity + self.normal_capacity + self.low_capacity
+    }
+
+    /// Get current committed generation (snapshot point).
+    ///
+    /// This represents the highest sequence number that has been successfully
+    /// committed to the HNSW index. Used for snapshot-isolated recall queries.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use engram_core::streaming::observation_queue::{ObservationQueue, QueueConfig};
+    ///
+    /// let queue = ObservationQueue::new(QueueConfig::default());
+    /// let generation = queue.current_generation();
+    /// ```
+    #[must_use]
+    pub fn current_generation(&self) -> u64 {
+        self.current_generation.load(Ordering::SeqCst)
+    }
+
+    /// Mark a generation as committed (called by workers after HNSW insert).
+    ///
+    /// Uses `fetch_max` to handle out-of-order commits from parallel workers.
+    /// Only advances the generation forward, never backward.
+    ///
+    /// # Arguments
+    ///
+    /// * `generation` - The sequence number that was just committed to HNSW
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use engram_core::streaming::observation_queue::{ObservationQueue, QueueConfig};
+    ///
+    /// let queue = ObservationQueue::new(QueueConfig::default());
+    /// queue.mark_generation_committed(42);
+    /// assert_eq!(queue.current_generation(), 42);
+    /// ```
+    pub fn mark_generation_committed(&self, generation: u64) {
+        self.current_generation
+            .fetch_max(generation, Ordering::SeqCst);
     }
 }
 

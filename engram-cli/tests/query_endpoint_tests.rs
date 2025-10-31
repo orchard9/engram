@@ -28,25 +28,18 @@ async fn create_test_state() -> ApiState {
         .await
         .expect("Failed to create default space");
 
+    let auto_tuner = engram_core::activation::SpreadingAutoTuner::new(0.1, 1000);
     let (shutdown_tx, _) = watch::channel(false);
 
-    let memory_service = engram_cli::grpc::MemoryService::new(
-        store.clone(),
-        metrics.clone(),
-        registry.clone(),
-        default_space.clone(),
-    );
-
-    #[allow(deprecated)]
-    ApiState {
-        store: store.clone(),
-        memory_service: Arc::new(memory_service),
+    // Use ApiState::new constructor which includes session_manager and observation_queue
+    ApiState::new(
+        store,
         registry,
         default_space,
         metrics,
-        auto_tuner: engram_core::activation::SpreadingAutoTuner::new(0.1, 1000),
-        shutdown_tx: Arc::new(shutdown_tx),
-    }
+        auto_tuner,
+        Arc::new(shutdown_tx),
+    )
 }
 
 #[tokio::test]

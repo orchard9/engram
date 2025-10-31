@@ -21,7 +21,11 @@ fn create_test_memory(id: u32) -> Arc<Memory> {
         }
     }
 
-    Arc::new(Memory::new(format!("mem_{id}"), embedding, Confidence::MEDIUM))
+    Arc::new(Memory::new(
+        format!("mem_{id}"),
+        embedding,
+        Confidence::MEDIUM,
+    ))
 }
 
 fn main() {
@@ -38,7 +42,7 @@ fn main() {
 
         let elapsed = start.elapsed();
         let ops_per_sec = 1000.0 / elapsed.as_secs_f64();
-        println!("Single-threaded: 1000 ops in {:?} = {:.0} ops/sec", elapsed, ops_per_sec);
+        println!("Single-threaded: 1000 ops in {elapsed:?} = {ops_per_sec:.0} ops/sec");
     }
 
     // 2-thread concurrent
@@ -46,14 +50,16 @@ fn main() {
         let index = Arc::new(CognitiveHnswIndex::new());
         let start = Instant::now();
 
-        let handles: Vec<_> = (0..2).map(|t| {
-            let idx = Arc::clone(&index);
-            std::thread::spawn(move || {
-                for i in 0..1000 {
-                    idx.insert_memory(create_test_memory(t * 1000 + i)).unwrap();
-                }
+        let handles: Vec<_> = (0..2)
+            .map(|t| {
+                let idx = Arc::clone(&index);
+                std::thread::spawn(move || {
+                    for i in 0..1000 {
+                        idx.insert_memory(create_test_memory(t * 1000 + i)).unwrap();
+                    }
+                })
             })
-        }).collect();
+            .collect();
 
         for h in handles {
             h.join().unwrap();
@@ -61,7 +67,7 @@ fn main() {
 
         let elapsed = start.elapsed();
         let ops_per_sec = 2000.0 / elapsed.as_secs_f64();
-        println!("2-thread concurrent: 2000 ops in {:?} = {:.0} ops/sec", elapsed, ops_per_sec);
+        println!("2-thread concurrent: 2000 ops in {elapsed:?} = {ops_per_sec:.0} ops/sec");
     }
 
     // 4-thread concurrent
@@ -69,14 +75,16 @@ fn main() {
         let index = Arc::new(CognitiveHnswIndex::new());
         let start = Instant::now();
 
-        let handles: Vec<_> = (0..4).map(|t| {
-            let idx = Arc::clone(&index);
-            std::thread::spawn(move || {
-                for i in 0..1000 {
-                    idx.insert_memory(create_test_memory(t * 1000 + i)).unwrap();
-                }
+        let handles: Vec<_> = (0..4)
+            .map(|t| {
+                let idx = Arc::clone(&index);
+                std::thread::spawn(move || {
+                    for i in 0..1000 {
+                        idx.insert_memory(create_test_memory(t * 1000 + i)).unwrap();
+                    }
+                })
             })
-        }).collect();
+            .collect();
 
         for h in handles {
             h.join().unwrap();
@@ -84,7 +92,7 @@ fn main() {
 
         let elapsed = start.elapsed();
         let ops_per_sec = 4000.0 / elapsed.as_secs_f64();
-        println!("4-thread concurrent: 4000 ops in {:?} = {:.0} ops/sec", elapsed, ops_per_sec);
+        println!("4-thread concurrent: 4000 ops in {elapsed:?} = {ops_per_sec:.0} ops/sec");
     }
 
     // 8-thread concurrent (target: 60K+ ops/sec)
@@ -92,14 +100,16 @@ fn main() {
         let index = Arc::new(CognitiveHnswIndex::new());
         let start = Instant::now();
 
-        let handles: Vec<_> = (0..8).map(|t| {
-            let idx = Arc::clone(&index);
-            std::thread::spawn(move || {
-                for i in 0..1000 {
-                    idx.insert_memory(create_test_memory(t * 1000 + i)).unwrap();
-                }
+        let handles: Vec<_> = (0..8)
+            .map(|t| {
+                let idx = Arc::clone(&index);
+                std::thread::spawn(move || {
+                    for i in 0..1000 {
+                        idx.insert_memory(create_test_memory(t * 1000 + i)).unwrap();
+                    }
+                })
             })
-        }).collect();
+            .collect();
 
         for h in handles {
             h.join().unwrap();
@@ -107,12 +117,12 @@ fn main() {
 
         let elapsed = start.elapsed();
         let ops_per_sec = 8000.0 / elapsed.as_secs_f64();
-        println!("8-thread concurrent: 8000 ops in {:?} = {:.0} ops/sec", elapsed, ops_per_sec);
+        println!("8-thread concurrent: 8000 ops in {elapsed:?} = {ops_per_sec:.0} ops/sec");
 
         if ops_per_sec >= 60000.0 {
-            println!("\n✓ SUCCESS: Achieved {:.0} ops/sec (target: 60K+)", ops_per_sec);
+            println!("\n✓ SUCCESS: Achieved {ops_per_sec:.0} ops/sec (target: 60K+)");
         } else {
-            println!("\n✗ BELOW TARGET: Achieved {:.0} ops/sec (target: 60K+)", ops_per_sec);
+            println!("\n✗ BELOW TARGET: Achieved {ops_per_sec:.0} ops/sec (target: 60K+)");
             println!("  Recommendation: Consider space-partitioned HNSW fallback");
         }
     }
@@ -135,14 +145,14 @@ fn main() {
 
         let speedup = sequential_time.as_secs_f64() / batch_time.as_secs_f64();
         println!("\nBatch of 100:");
-        println!("  Sequential: {:?}", sequential_time);
-        println!("  Batch:      {:?}", batch_time);
-        println!("  Speedup:    {:.2}x", speedup);
+        println!("  Sequential: {sequential_time:?}");
+        println!("  Batch:      {batch_time:?}");
+        println!("  Speedup:    {speedup:.2}x");
 
         if speedup >= 3.0 {
-            println!("  ✓ SUCCESS: Achieved {:.2}x speedup (target: 3x+)", speedup);
+            println!("  ✓ SUCCESS: Achieved {speedup:.2}x speedup (target: 3x+)");
         } else {
-            println!("  ✗ BELOW TARGET: Achieved {:.2}x speedup (target: 3x+)", speedup);
+            println!("  ✗ BELOW TARGET: Achieved {speedup:.2}x speedup (target: 3x+)");
         }
     }
 }

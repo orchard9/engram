@@ -1,0 +1,12 @@
+# Python dependencies for Engram streaming client examples
+
+# gRPC for streaming protocol
+grpcio>=1.50.0
+grpcio-tools>=1.50.0
+
+# Numerical computing for embeddings
+numpy>=1.24.0
+
+# Optional: For production use
+# protobuf>=4.21.0
+# prometheus-client>=0.15.0  # For metrics

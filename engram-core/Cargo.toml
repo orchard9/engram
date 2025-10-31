@@ -183,6 +183,18 @@ name = "tracing_overhead"
 harness = false
 required-features = ["cognitive_tracing"]
 
+[[bench]]
+name = "streaming_throughput"
+harness = false
+
+[[bench]]
+name = "concurrent_recall"
+harness = false
+
+[[bench]]
+name = "streaming_parameter_tuning"
+harness = false
+
 [features]
 default = ["hnsw_index", "memory_mapped_persistence", "psychological_decay", "probabilistic_queries", "pattern_completion", "monitoring"]
 # For systems where Z3 is available

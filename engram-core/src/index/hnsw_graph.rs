@@ -300,6 +300,70 @@ impl HnswGraph {
             .collect()
     }
 
+    /// Search with generation filtering for snapshot isolation.
+    ///
+    /// Only nodes with `sequence_number <= max_generation` are visible in results.
+    /// If `max_generation` is `None`, all nodes are visible (no filtering).
+    ///
+    /// This enables snapshot-isolated recall where queries only see observations
+    /// committed before a specific generation timestamp.
+    pub fn search_with_generation(
+        &self,
+        query: &[f32; 768],
+        k: usize,
+        ef: usize,
+        threshold: Confidence,
+        max_generation: Option<u64>,
+        vector_ops: &dyn VectorOps,
+    ) -> Vec<(String, Confidence)> {
+        let guard = epoch::pin();
+        let mut stats = SearchStats::with_ef(ef);
+
+        // Start from highest layer with an entry point
+        let mut current_nearest = Vec::new();
+
+        for layer in (0..16).rev() {
+            let entry_point = self.get_entry_point(layer);
+            if entry_point == u32::MAX {
+                continue;
+            }
+
+            let layer_result = self
+                .search_layer_with_filter(
+                    query,
+                    entry_point,
+                    if layer == 0 { ef } else { 1 },
+                    layer,
+                    vector_ops,
+                    &guard,
+                    max_generation,
+                )
+                .unwrap_or_default();
+
+            stats.record_layer(layer_result.nodes_visited);
+
+            if !layer_result.candidates.is_empty() {
+                current_nearest = layer_result.candidates;
+            }
+        }
+
+        let mut results = Vec::new();
+
+        for candidate in current_nearest.into_iter().take(k) {
+            let similarity = (1.0 - candidate.distance).clamp(-1.0, 1.0);
+            if similarity >= threshold.raw() {
+                if let Ok(node) = self.get_node(candidate.node_id, &guard) {
+                    results.push((
+                        node.memory.id.clone(),
+                        Confidence::exact(similarity.max(0.0)),
+                    ));
+                }
+            }
+        }
+
+        results
+    }
+
     /// Search with detailed statistics and threshold filtering
     pub fn search_with_details(
         &self,
@@ -377,12 +441,46 @@ impl HnswGraph {
         vector_ops: &dyn VectorOps,
         guard: &Guard,
     ) -> Result<LayerSearchResult, super::HnswError> {
+        self.search_layer_with_filter(query, entry_point, ef, layer, vector_ops, guard, None)
+    }
+
+    /// Search within a single layer with generation filtering.
+    ///
+    /// If `max_generation` is `Some(gen)`, only nodes with `sequence_number <= gen` are visible.
+    /// If `max_generation` is `None`, all nodes are visible (no filtering).
+    ///
+    /// # Errors
+    ///
+    /// Propagates errors when node lookups fail during the beam search.
+    fn search_layer_with_filter(
+        &self,
+        query: &[f32; 768],
+        entry_point: u32,
+        ef: usize,
+        layer: usize,
+        vector_ops: &dyn VectorOps,
+        guard: &Guard,
+        max_generation: Option<u64>,
+    ) -> Result<LayerSearchResult, super::HnswError> {
         let mut visited = std::collections::HashSet::new();
         let mut candidates = BinaryHeap::new();
         let mut w = BinaryHeap::new();
 
         // Initialize with entry point
         let entry_node = self.get_node(entry_point, guard)?;
+
+        // Apply generation filter to entry point
+        if let Some(max_gen) = max_generation {
+            if entry_node.get_sequence_number() > max_gen {
+                // Entry point not visible in this snapshot - search would be incomplete
+                // Return empty results rather than wrong results
+                return Ok(LayerSearchResult {
+                    candidates: Vec::new(),
+                    nodes_visited: 0,
+                });
+            }
+        }
+
         let entry_distance =
             1.0 - vector_ops.cosine_similarity_768(query, entry_node.get_embedding());
 
@@ -414,6 +512,13 @@ impl HnswGraph {
                         let Ok(neighbor) = self.get_node(edge.target_id, guard) else {
                             continue; // Skip this edge - node not ready yet
                         };
+
+                        // Apply generation filter
+                        if let Some(max_gen) = max_generation {
+                            if neighbor.get_sequence_number() > max_gen {
+                                continue; // Node not visible in this snapshot
+                            }
+                        }
 
                         let distance =
                             1.0 - vector_ops.cosine_similarity_768(query, neighbor.get_embedding());

@@ -1,0 +1,307 @@
+groups:
+  - name: streaming_infrastructure
+    interval: 30s
+    rules:
+      # ========== Queue Depth Alerts ==========
+
+      - alert: HighQueueDepth
+        expr: |
+          sum(engram_streaming_queue_depth) > 80000 or
+          engram_streaming_queue_depth{priority="high"} > 8000 or
+          engram_streaming_queue_depth{priority="normal"} > 80000
+        for: 2m
+        labels:
+          severity: warning
+          component: streaming
+        annotations:
+          summary: "Streaming queue depth exceeds 80% capacity"
+          description: |
+            Queue depth {{ $value }} exceeds warning threshold (80% capacity).
+            Current depth by priority:
+            - High: {{ query "engram_streaming_queue_depth{priority=\"high\"}" | first | value }}
+            - Normal: {{ query "engram_streaming_queue_depth{priority=\"normal\"}" | first | value }}
+            - Low: {{ query "engram_streaming_queue_depth{priority=\"low\"}" | first | value }}
+
+            This may indicate insufficient worker capacity or slow processing.
+            Consider scaling workers or investigating performance bottlenecks.
+          runbook_url: https://docs.engram.dev/operations/streaming-troubleshooting#high-queue-depth
+
+      - alert: CriticalQueueDepth
+        expr: |
+          sum(engram_streaming_queue_depth) > 90000 or
+          engram_streaming_queue_depth{priority="high"} > 9000 or
+          engram_streaming_queue_depth{priority="normal"} > 90000
+        for: 1m
+        labels:
+          severity: critical
+          component: streaming
+        annotations:
+          summary: "CRITICAL: Streaming queue depth exceeds 90% capacity"
+          description: |
+            Queue depth {{ $value }} is critically high (>90% capacity).
+            System is approaching admission control rejection threshold.
+
+            IMMEDIATE ACTIONS:
+            1. Check worker health: `kubectl get pods -l app=engram-worker`
+            2. Scale workers: `kubectl scale deployment engram-workers --replicas=16`
+            3. Check for slow queries blocking HNSW insertions
+            4. Monitor backpressure state transitions
+          runbook_url: https://docs.engram.dev/operations/streaming-troubleshooting#critical-queue-depth
+
+      # ========== Worker Health Alerts ==========
+
+      - alert: WorkerDown
+        expr: up{job="engram-streaming"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: streaming
+        annotations:
+          summary: "Streaming worker is down"
+          description: |
+            Worker instance {{ $labels.instance }} is not responding to health checks.
+
+            IMMEDIATE ACTIONS:
+            1. Check worker logs: `kubectl logs -l app=engram-worker --tail=100`
+            2. Verify resource availability (CPU, memory)
+            3. Check for OOM kills: `dmesg | grep -i kill`
+            4. Restart worker if necessary: `kubectl rollout restart deployment/engram-workers`
+          runbook_url: https://docs.engram.dev/operations/streaming-troubleshooting#worker-crash
+
+      - alert: WorkerUtilizationImbalance
+        expr: |
+          (max(engram_streaming_worker_utilization) - min(engram_streaming_worker_utilization)) > 40
+        for: 5m
+        labels:
+          severity: info
+          component: streaming
+        annotations:
+          summary: "Worker load imbalance detected"
+          description: |
+            Worker utilization delta is {{ $value }}% (threshold: 40%).
+            Max utilization: {{ query "max(engram_streaming_worker_utilization)" | first | value }}%
+            Min utilization: {{ query "min(engram_streaming_worker_utilization)" | first | value }}%
+
+            This may indicate:
+            - Hot space (one memory space receiving disproportionate load)
+            - Work stealing threshold too high
+            - Space-to-worker hash collision
+
+            Review space distribution and consider rebalancing.
+          runbook_url: https://docs.engram.dev/operations/streaming-troubleshooting#load-imbalance
+
+      # ========== Latency Alerts ==========
+
+      - alert: HighObservationLatency
+        expr: |
+          histogram_quantile(0.99,
+            rate(engram_streaming_observation_latency_seconds_bucket[5m])
+          ) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          component: streaming
+        annotations:
+          summary: "P99 observation latency exceeds 100ms"
+          description: |
+            P99 observation latency is {{ $value | humanizeDuration }}.
+            Target: < 100ms
+
+            High latency may be caused by:
+            - Worker saturation (check utilization)
+            - Large queue depth (check backpressure)
+            - Slow HNSW insertions (check index size)
+            - CPU throttling or resource contention
+
+            Check worker metrics and consider scaling.
+          runbook_url: https://docs.engram.dev/operations/streaming-troubleshooting#high-latency
+
+      - alert: HighRecallLatency
+        expr: |
+          histogram_quantile(0.99,
+            rate(engram_streaming_recall_latency_seconds_bucket[5m])
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          component: streaming
+        annotations:
+          summary: "P99 recall latency exceeds 50ms"
+          description: |
+            P99 recall query latency is {{ $value | humanizeDuration }}.
+            Target: < 50ms
+
+            High recall latency may indicate:
+            - Large HNSW index size (>1M vectors)
+            - Concurrent insertion contention
+            - Insufficient HNSW ef_search parameter
+            - Memory pressure causing swapping
+
+            Review HNSW configuration and index sizes.
+          runbook_url: https://docs.engram.dev/operations/streaming-troubleshooting#high-recall-latency
+
+      # ========== Backpressure Alerts ==========
+
+      - alert: FrequentBackpressure
+        expr: |
+          rate(engram_streaming_backpressure_activations_total[1m]) > 100
+        for: 5m
+        labels:
+          severity: warning
+          component: streaming
+        annotations:
+          summary: "Frequent backpressure activations"
+          description: |
+            Backpressure activating {{ $value }}/sec (threshold: 100/sec).
+
+            Frequent backpressure indicates system is operating near capacity.
+            This will cause client throttling and increased latencies.
+
+            ACTIONS:
+            1. Scale workers horizontally
+            2. Increase queue capacity (if memory allows)
+            3. Review client send rates
+            4. Check for slow processing bottlenecks
+          runbook_url: https://docs.engram.dev/operations/streaming-troubleshooting#frequent-backpressure
+
+      - alert: PersistentBackpressure
+        expr: |
+          engram_streaming_backpressure_state > 1
+        for: 10m
+        labels:
+          severity: warning
+          component: streaming
+        annotations:
+          summary: "Backpressure active for >10 minutes"
+          description: |
+            Backpressure state has been elevated (Warning/Critical/Overloaded) for >10 minutes.
+            Current state: {{ $value }} (0=Normal, 1=Warning, 2=Critical, 3=Overloaded)
+
+            Persistent backpressure indicates sustained overload.
+            System cannot keep up with incoming observation rate.
+
+            IMMEDIATE ACTIONS:
+            1. Scale workers immediately
+            2. Review and potentially throttle high-volume clients
+            3. Check for stuck/slow workers
+            4. Verify HNSW index health
+          runbook_url: https://docs.engram.dev/operations/streaming-troubleshooting#persistent-backpressure
+
+      # ========== Error Rate Alerts ==========
+
+      - alert: HighRejectionRate
+        expr: |
+          sum(rate(engram_streaming_observations_rejected_total[5m])) /
+          sum(rate(engram_streaming_observations_total[5m])) > 0.01
+        for: 5m
+        labels:
+          severity: warning
+          component: streaming
+        annotations:
+          summary: "Observation rejection rate exceeds 1%"
+          description: |
+            {{ $value | humanizePercentage }} of observations are being rejected.
+            Rejection rate breakdown:
+            {{ range query "sum(rate(engram_streaming_observations_rejected_total[5m])) by (reason)" }}
+            - {{ .Labels.reason }}: {{ .Value | humanize }}/sec
+            {{ end }}
+
+            High rejection indicates admission control is active.
+            This means clients are seeing errors and data may be delayed.
+          runbook_url: https://docs.engram.dev/operations/streaming-troubleshooting#high-rejection-rate
+
+      - alert: BatchInsertionFailures
+        expr: |
+          sum(rate(engram_streaming_batch_failures_total[5m])) > 0.1
+        for: 2m
+        labels:
+          severity: critical
+          component: streaming
+        annotations:
+          summary: "HNSW batch insertion failures detected"
+          description: |
+            {{ $value }} batch insertions/sec are failing.
+
+            Batch failures indicate serious issues:
+            - HNSW index corruption
+            - Out of memory errors
+            - File system issues
+            - Lock contention bugs
+
+            CRITICAL: This causes data loss. Investigate immediately.
+            Check worker logs for error details.
+          runbook_url: https://docs.engram.dev/operations/streaming-troubleshooting#batch-failures
+
+      # ========== Throughput Alerts ==========
+
+      - alert: LowThroughput
+        expr: |
+          sum(rate(engram_streaming_observations_total[5m])) < 100
+        for: 10m
+        labels:
+          severity: info
+          component: streaming
+        annotations:
+          summary: "Streaming throughput unexpectedly low"
+          description: |
+            Observation processing rate is {{ $value | humanize }}/sec.
+            Expected: >100/sec under normal operation.
+
+            Low throughput may indicate:
+            - No active clients
+            - Client connectivity issues
+            - Upstream service degradation
+            - Deliberate load reduction
+
+            Verify client health and connectivity.
+          runbook_url: https://docs.engram.dev/operations/streaming-troubleshooting#low-throughput
+
+      - alert: ExcessiveWorkStealing
+        expr: |
+          sum(rate(engram_streaming_work_stolen_total[5m])) /
+          sum(rate(engram_streaming_batches_processed_total[5m])) > 0.3
+        for: 10m
+        labels:
+          severity: info
+          component: streaming
+        annotations:
+          summary: "High work stealing rate"
+          description: |
+            {{ $value | humanizePercentage }} of batches are work-stolen (threshold: 30%).
+
+            Excessive work stealing indicates:
+            - Uneven space distribution across workers
+            - Bursty workload patterns
+            - Suboptimal space-to-worker hashing
+
+            While not critical, high stealing adds ~200ns overhead per item.
+            Consider reviewing space distribution patterns.
+          runbook_url: https://docs.engram.dev/operations/streaming-tuning#work-stealing
+
+  # ========== Recording Rules (for performance) ==========
+
+  - name: streaming_recording_rules
+    interval: 30s
+    rules:
+      - record: streaming:observation_rate:1m
+        expr: sum(rate(engram_streaming_observations_total[1m]))
+
+      - record: streaming:queue_utilization:ratio
+        expr: |
+          sum(engram_streaming_queue_depth) /
+          sum(engram_streaming_queue_depth + 10000)
+
+      - record: streaming:worker_utilization:avg
+        expr: avg(engram_streaming_worker_utilization)
+
+      - record: streaming:observation_latency:p99
+        expr: |
+          histogram_quantile(0.99,
+            rate(engram_streaming_observation_latency_seconds_bucket[5m])
+          )
+
+      - record: streaming:recall_latency:p99
+        expr: |
+          histogram_quantile(0.99,
+            rate(engram_streaming_recall_latency_seconds_bucket[5m])
+          )

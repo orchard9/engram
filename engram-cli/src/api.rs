@@ -35,6 +35,7 @@ use engram_core::{
     },
     query::{EvidenceSource, UncertaintySource},
     store::MemoryEvent,
+    streaming::{ObservationQueue, QueueConfig, SessionManager},
 };
 
 /// Shared application state
@@ -76,6 +77,10 @@ pub struct ApiState {
     pub auto_tuner: Arc<SpreadingAutoTuner>,
     /// Shutdown signal sender for graceful termination
     pub shutdown_tx: Arc<tokio::sync::watch::Sender<bool>>,
+    /// Session manager for streaming protocol
+    pub session_manager: Arc<SessionManager>,
+    /// Observation queue for streaming ingestion
+    pub observation_queue: Arc<ObservationQueue>,
 }
 
 /// Auto-tuning response payload used by the REST API and OpenAPI schema.
@@ -168,6 +173,11 @@ impl ApiState {
             Arc::clone(&registry),
             default_space.clone(),
         ));
+
+        // Create streaming infrastructure
+        let session_manager = Arc::new(SessionManager::new());
+        let observation_queue = Arc::new(ObservationQueue::new(QueueConfig::default()));
+
         Self {
             store,
             memory_service,
@@ -176,6 +186,8 @@ impl ApiState {
             metrics,
             auto_tuner,
             shutdown_tx,
+            session_manager,
+            observation_queue,
         }
     }
 }
@@ -3839,6 +3851,11 @@ pub fn create_api_routes() -> Router<ApiState> {
         .route("/api/v1/stream/activities", get(stream_activities))
         .route("/api/v1/stream/memories", get(stream_memories))
         .route("/api/v1/stream/consolidation", get(stream_consolidation))
+        // WebSocket streaming (browser-compatible bidirectional streaming)
+        .route(
+            "/v1/stream",
+            get(crate::handlers::websocket::websocket_handler),
+        )
         // Real-time monitoring (specialized for debugging)
         .route("/api/v1/monitoring/events", get(monitor_events))
         .route("/api/v1/monitoring/activations", get(monitor_activations))
