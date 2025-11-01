@@ -64,6 +64,7 @@ fn generate_episodes(count: usize, seed: u64) -> Vec<Episode> {
 
 /// Tuning result capturing performance metrics
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // Prepared for future auto-tuning feature
 struct TuningResult {
     worker_count: usize,
     batch_size: usize,
@@ -75,16 +76,19 @@ struct TuningResult {
 
 impl TuningResult {
     /// Calculate score for low-latency profile (minimize latency)
+    #[allow(dead_code)] // Prepared for future auto-tuning feature
     fn low_latency_score(&self) -> f64 {
         1000.0 / self.avg_latency_ms // Higher score for lower latency
     }
 
     /// Calculate score for high-throughput profile (maximize throughput)
-    fn high_throughput_score(&self) -> f64 {
+    #[allow(dead_code)] // Prepared for future auto-tuning feature
+    const fn high_throughput_score(&self) -> f64 {
         self.throughput_obs_per_sec // Higher score for higher throughput
     }
 
     /// Calculate score for balanced profile (optimize both)
+    #[allow(dead_code)] // Prepared for future auto-tuning feature
     fn balanced_score(&self) -> f64 {
         let normalized_throughput = self.throughput_obs_per_sec / 100_000.0; // Normalize to target
         let normalized_latency = 20.0 / self.avg_latency_ms; // Normalize to target
