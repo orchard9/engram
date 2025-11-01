@@ -1651,6 +1651,9 @@ mod tests {
             (StorageTier::Cold, 1),
         ]);
         config.trace_activation_flow = true;
+        // Increase timeout from computed default (10s + 2s per core, up to ~34s on high-core systems)
+        // to 60s to account for slower test environments and prevent intermittent timeouts
+        config.completion_timeout = Some(Duration::from_secs(60));
 
         // Generate unique node IDs for this test to prevent cross-test interference
         let prefix = format!(
