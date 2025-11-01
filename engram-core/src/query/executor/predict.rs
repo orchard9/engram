@@ -130,6 +130,7 @@ pub fn execute_predict(
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used, clippy::unwrap_used, clippy::unnecessary_to_owned)]
 mod tests {
     use super::*;
     use crate::query::parser::ast::{NodeIdentifier, Pattern};

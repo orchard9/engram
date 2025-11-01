@@ -309,11 +309,13 @@ fn select_episodes_for_consolidation(
 ) -> Result<Vec<crate::Episode>, ConsolidateExecutionError> {
     match selector {
         EpisodeSelector::All => {
-            // Get all episodes from store
+            // Get all episodes from store and deduplicate by ID
+            // (episodes exist in both wal_buffer and hot_memories)
+            let mut seen_ids = std::collections::HashSet::new();
             let episodes: Vec<_> = space_handle
                 .store()
                 .get_all_episodes()
-                .map(|(_, ep)| ep)
+                .filter_map(|(id, ep)| if seen_ids.insert(id) { Some(ep) } else { None })
                 .collect();
             Ok(episodes)
         }
@@ -392,6 +394,7 @@ const fn matches_constraints(
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::query::parser::ast::{EpisodeSelector, NodeIdentifier, Pattern};
@@ -407,7 +410,7 @@ mod tests {
         })
         .expect("Failed to create registry");
 
-        let space_id = MemorySpaceId::new("test_space".to_string()).unwrap();
+        let space_id = MemorySpaceId::new("test_space").unwrap();
         let handle = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(registry.create_or_get(&space_id))
         })
@@ -461,8 +464,7 @@ mod tests {
             scheduler_policy: Some(SchedulerPolicy::Immediate),
         };
 
-        let context =
-            QueryContext::without_timeout(MemorySpaceId::new("test_space".to_string()).unwrap());
+        let context = QueryContext::without_timeout(MemorySpaceId::new("test_space").unwrap());
 
         let result = execute_consolidate(&query, &context, &space_handle);
 
@@ -480,8 +482,7 @@ mod tests {
             scheduler_policy: Some(SchedulerPolicy::Interval(Duration::from_secs(300))),
         };
 
-        let context =
-            QueryContext::without_timeout(MemorySpaceId::new("test_space".to_string()).unwrap());
+        let context = QueryContext::without_timeout(MemorySpaceId::new("test_space").unwrap());
 
         let result = execute_consolidate(&query, &context, &space_handle);
 
@@ -497,8 +498,7 @@ mod tests {
             scheduler_policy: Some(SchedulerPolicy::Threshold { activation: 0.5 }),
         };
 
-        let context =
-            QueryContext::without_timeout(MemorySpaceId::new("test_space".to_string()).unwrap());
+        let context = QueryContext::without_timeout(MemorySpaceId::new("test_space").unwrap());
 
         let result = execute_consolidate(&query, &context, &space_handle);
 
@@ -514,8 +514,7 @@ mod tests {
             scheduler_policy: None,
         };
 
-        let context =
-            QueryContext::without_timeout(MemorySpaceId::new("test_space".to_string()).unwrap());
+        let context = QueryContext::without_timeout(MemorySpaceId::new("test_space").unwrap());
 
         let result = execute_consolidate(&query, &context, &space_handle);
 

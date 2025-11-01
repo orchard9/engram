@@ -150,25 +150,43 @@ impl TwoComponentModel {
 
     /// Updates parameters on successful retrieval
     fn update_on_success(&mut self, response_time_ms: f32, confidence: f32) {
-        // Fast responses with high confidence suggest strong memory trace
-        let response_factor = if response_time_ms > 0.0 {
-            (2000.0 / response_time_ms).clamp(0.5, 2.0)
-        } else {
-            2.0
-        };
-        let retrieval_strength = confidence * response_factor;
+        // **Desirable Difficulties Principle** (Bjork & Bjork, 1992):
+        // More effortful retrieval (slower response, lower confidence) leads to GREATER
+        // stability gains. This is the mechanism behind the spacing effect.
+        //
+        // Effortful retrieval indicates:
+        // 1. Lower current retrievability (memory was fading)
+        // 2. Successful retrieval despite difficulty strengthens the trace more
+        // 3. Greater consolidation benefit from the retrieval practice
 
-        // Successful retrieval increases stability (key SM-18 insight)
-        // Stability increase depends on current difficulty and learning rate
-        let stability_gain = self.difficulty
-            * (1.0 + self.learning_rate_factor)
-            * (self.retrievability / 0.9).min(2.0)
-            * retrieval_strength;
+        // Retrieval effort factor: slower responses indicate MORE effort (inverse relationship)
+        // Normal fast response ~500ms gets factor 1.0, slow response ~2000ms gets factor 2.0
+        let effort_from_rt = if response_time_ms > 0.0 {
+            (response_time_ms / 1000.0).clamp(0.5, 3.0) // More effort = higher factor
+        } else {
+            1.0
+        };
+
+        // Retrieval effort from confidence: lower confidence = more effort
+        let effort_from_confidence = (1.2 - confidence).clamp(0.5, 1.5);
+
+        // Combined retrieval effort (higher = more effortful = greater stability gain)
+        let retrieval_effort = f32::midpoint(effort_from_rt, effort_from_confidence);
+
+        // **Spacing Effect**: Greater effort leads to greater stability increase
+        // Base stability gain scaled by difficulty, learning rate, and retrieval effort
+        let base_stability_gain = self.difficulty * (1.0 + self.learning_rate_factor);
+        // Effort multiplier: Scale effort benefit to match empirical spacing effect (20-40% improvement)
+        // Empirical data from Cepeda et al. (2006) shows distributed practice produces
+        // 20-40% better retention than massed practice
+        let effort_multiplier = 1.0 + (retrieval_effort - 1.0) * 0.8; // Increased from 0.5 to match empirical data
+        let stability_gain = base_stability_gain * effort_multiplier;
 
         self.stability += stability_gain;
 
-        // Reset retrievability to high level after successful recall
-        self.retrievability = (0.95 * retrieval_strength).min(0.98);
+        // Reset retrievability based on success confidence (not effort)
+        // High confidence successful retrieval resets retrievability higher
+        self.retrievability = (0.90 + confidence * 0.08).min(0.98);
 
         // Update difficulty based on performance (easier if fast/confident)
         if response_time_ms < 2000.0 && confidence > 0.8 {

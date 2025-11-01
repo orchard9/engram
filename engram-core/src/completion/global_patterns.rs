@@ -138,6 +138,8 @@ impl GlobalPatternApplicator {
     ///
     /// Queries source episodes from the pattern and extracts the specified field.
     /// Returns the most common field value across all source episodes.
+    #[allow(clippy::unused_self)]
+    #[allow(clippy::missing_const_for_fn)]
     fn extract_field_from_pattern(
         &self,
         _field_name: &str,

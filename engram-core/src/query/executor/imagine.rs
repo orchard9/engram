@@ -132,7 +132,9 @@ pub fn execute_imagine(
     // For now, return a basic result indicating pattern completion is pending
     // This maintains API compatibility while the feature is being integrated
 
-    let confidence_threshold = query.confidence_threshold.map_or(0.7, |t| match t {
+    // Default threshold for IMAGINE is lower than other queries since we're reconstructing
+    // from partial patterns - pattern completion inherently has more uncertainty
+    let confidence_threshold = query.confidence_threshold.map_or(0.2, |t| match t {
         crate::query::parser::ast::ConfidenceThreshold::Above(c)
         | crate::query::parser::ast::ConfidenceThreshold::Below(c) => c.raw(),
         crate::query::parser::ast::ConfidenceThreshold::Between { lower, upper: _ } => lower.raw(),
@@ -222,13 +224,23 @@ fn pattern_to_partial_episode(
 
     // Determine cue strength based on how much information we have
     let known_dimensions = partial_embedding.iter().filter(|x| x.is_some()).count();
-    let cue_strength = if known_dimensions > 0 {
+    let base_cue_strength = if known_dimensions > 0 {
         let ratio = known_dimensions as f32 / 768.0;
         Confidence::from_raw(ratio.min(1.0))
     } else if !known_fields.is_empty() {
         Confidence::MEDIUM
     } else {
         Confidence::LOW
+    };
+
+    // Boost cue strength when we have seed episodes providing temporal context
+    // Seeds act as retrieval cues that help constrain the completion space
+    let cue_strength = if temporal_context.is_empty() {
+        base_cue_strength
+    } else {
+        // Boost by 0.2 for having seeds, capped at HIGH confidence
+        let boosted = base_cue_strength.raw() + 0.2;
+        Confidence::from_raw(boosted.min(Confidence::HIGH.raw()))
     };
 
     PartialEpisode {
@@ -240,6 +252,7 @@ fn pattern_to_partial_episode(
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used, clippy::unwrap_used, clippy::unnecessary_to_owned)]
 mod tests {
     use super::*;
     use crate::query::parser::ast::{ConfidenceThreshold, NodeIdentifier, Pattern};
@@ -308,7 +321,7 @@ mod tests {
         let space_handle = create_test_space_handle();
         let vector = vec![0.1, 0.2, 0.3];
         let pattern = Pattern::Embedding {
-            vector: vector.clone(),
+            vector,
             threshold: 0.8,
         };
         let seeds = vec![];

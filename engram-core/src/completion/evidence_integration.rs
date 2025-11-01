@@ -170,6 +170,8 @@ impl HierarchicalEvidenceAggregator {
     ///
     /// This aggregates field values across all source episodes in the pattern,
     /// weighted by pattern relevance. Returns the most common field value.
+    #[allow(clippy::unused_self)]
+    #[allow(clippy::missing_const_for_fn)]
     fn extract_field_from_pattern(
         &self,
         _field_name: &str,

@@ -302,11 +302,9 @@ impl QueryExpander {
                     self.embedding_provider.embed(&variant.text, language).await
                 {
                     variant.embedding = Some(embedding_result.vector);
-                    remaining_budget -= variant_cost;
-                } else {
-                    // Embedding failed, still deduct budget to avoid retries
-                    remaining_budget -= variant_cost;
                 }
+                // Embedding failed or succeeded, still deduct budget
+                remaining_budget -= variant_cost;
             } else {
                 // Budget exhausted, skip remaining embeddings
                 break;

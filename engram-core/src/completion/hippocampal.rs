@@ -628,16 +628,24 @@ impl PatternCompleter for HippocampalCompletion {
     }
 
     fn estimate_confidence(&self, partial: &PartialEpisode) -> Confidence {
-        // Estimate based on percentage of known information
-        let known_count = partial
+        // Estimate based on percentage of known information from embedding dimensions
+        let known_embedding_dims = partial
             .partial_embedding
             .iter()
             .filter(|v| v.is_some())
             .count();
-        let total = partial.partial_embedding.len();
+        let total_dims = partial.partial_embedding.len();
 
-        let ratio = ratio(known_count, total);
-        Confidence::exact(ratio * partial.cue_strength.raw())
+        // Also consider known fields - each field represents ~256 dimensions of the 768 total
+        // (what/where/who each get 256 dims)
+        let field_contribution = partial.known_fields.len() * 256;
+        let effective_known = known_embedding_dims + field_contribution;
+
+        // Calculate ratio but cap at 1.0
+        let knowledge_ratio = (effective_known as f32 / total_dims as f32).min(1.0);
+
+        // Combine with cue strength
+        Confidence::exact(knowledge_ratio * partial.cue_strength.raw())
     }
 }
 
