@@ -78,9 +78,8 @@ z3 = { version = "0.12", optional = true }
 nalgebra = { version = "0.32", optional = true }
 
 # Production monitoring dependencies
-# NOTE: NUMA monitoring temporarily disabled
-# TODO: Re-enable with hwlocality (modern idiomatic bindings) when needed
-# hwlocality = { version = "1.0.0-alpha.6", optional = true }
+# NUMA-aware monitoring using modern hwlocality bindings
+hwlocality = { version = "1.0.0-alpha.11", optional = true }
 uuid = { version = "1.6.1", features = ["v4", "v5"] }
 
 # ANN library bindings for benchmarks
@@ -187,13 +186,14 @@ required-features = ["cognitive_tracing"]
 name = "streaming_throughput"
 harness = false
 
-[[bench]]
-name = "concurrent_recall"
-harness = false
-
-[[bench]]
-name = "streaming_parameter_tuning"
-harness = false
+# Temporarily disabled - needs API updates for space-partitioned HNSW
+# [[bench]]
+# name = "concurrent_recall"
+# harness = false
+#
+# [[bench]]
+# name = "streaming_parameter_tuning"
+# harness = false
 
 [features]
 default = ["hnsw_index", "memory_mapped_persistence", "psychological_decay", "probabilistic_queries", "pattern_completion", "monitoring"]
@@ -255,9 +255,8 @@ smt_verification = [
     "probabilistic_queries"
 ]
 
-# Production monitoring with lock-free metrics
-# NOTE: NUMA support (hwlocality) temporarily disabled - feature is no-op until re-enabled
-monitoring = []
+# Production monitoring with lock-free metrics and NUMA-aware collection
+monitoring = ["hwlocality"]
 
 # Development and testing features
 testing = []

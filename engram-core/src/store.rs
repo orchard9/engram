@@ -1826,8 +1826,15 @@ impl MemoryStore {
         // Step 1: Perform standard recall
         let recall_result = self.recall(cue);
 
-        // Step 2: Extract activation paths (empty for now - would need cognitive recall metadata)
-        let activation_paths = vec![]; // TODO: Extract from spreading activation context
+        // Step 2: Extract activation paths from spreading activation trace
+        // Note: Currently, recall_internal doesn't expose the spreading trace,
+        // so this returns empty. When RecallResult is extended to include spreading_trace,
+        // this will extract paths from the trace. See test_activation_path_extraction_from_trace
+        // for the implementation that will be used.
+        #[cfg(feature = "hnsw_index")]
+        let activation_paths = vec![];
+        #[cfg(not(feature = "hnsw_index"))]
+        let activation_paths = vec![];
 
         // Step 3: Gather uncertainty sources from system state
         let mut uncertainty_sources = Vec::new();
@@ -3344,5 +3351,88 @@ mod tests {
         assert!(store.get("med").is_some());
         assert!(store.get("high").is_some());
         assert!(store.get("new").is_some());
+    }
+
+    #[test]
+    #[cfg(feature = "hnsw_index")]
+    fn test_activation_path_extraction_from_trace() {
+        use crate::Activation;
+        use crate::activation::TraceEntry;
+        use crate::activation::storage_aware::StorageTier;
+        use crate::query::executor::ActivationPath;
+
+        // Helper function to extract paths from trace entries
+        // This will be moved to recall_probabilistic once RecallResult exposes spreading_trace
+        #[allow(clippy::items_after_statements)]
+        fn extract_activation_paths_from_trace(trace: &[TraceEntry]) -> Vec<ActivationPath> {
+            trace
+                .iter()
+                .filter_map(|entry| {
+                    entry.source_node.as_ref().map(|source| {
+                        ActivationPath::with_default_weight(
+                            source.clone(),
+                            entry.target_node.clone(),
+                            Activation::new(entry.activation),
+                            Confidence::from_raw(entry.confidence),
+                            entry.depth,
+                            StorageTier::Hot,
+                        )
+                    })
+                })
+                .collect()
+        }
+
+        // Create mock trace entries simulating spreading activation
+        let trace = vec![
+            TraceEntry {
+                depth: 0,
+                target_node: "memory_a".to_string(),
+                activation: 1.0,
+                confidence: 0.9,
+                source_node: None, // Seed node has no source
+            },
+            TraceEntry {
+                depth: 1,
+                target_node: "memory_b".to_string(),
+                activation: 0.8,
+                confidence: 0.85,
+                source_node: Some("memory_a".to_string()),
+            },
+            TraceEntry {
+                depth: 1,
+                target_node: "memory_c".to_string(),
+                activation: 0.75,
+                confidence: 0.8,
+                source_node: Some("memory_a".to_string()),
+            },
+            TraceEntry {
+                depth: 2,
+                target_node: "memory_d".to_string(),
+                activation: 0.6,
+                confidence: 0.7,
+                source_node: Some("memory_b".to_string()),
+            },
+        ];
+
+        let paths = extract_activation_paths_from_trace(&trace);
+
+        // Should extract 3 paths (trace entries with sources)
+        // Excludes the first entry which has no source (seed node)
+        assert_eq!(paths.len(), 3);
+
+        // Verify path details
+        assert_eq!(paths[0].source_episode_id, "memory_a");
+        assert_eq!(paths[0].target_episode_id, "memory_b");
+        assert_eq!(paths[0].hop_count, 1);
+        assert!((paths[0].activation.value() - 0.8).abs() < 0.01);
+
+        assert_eq!(paths[1].source_episode_id, "memory_a");
+        assert_eq!(paths[1].target_episode_id, "memory_c");
+        assert_eq!(paths[1].hop_count, 1);
+
+        assert_eq!(paths[2].source_episode_id, "memory_b");
+        assert_eq!(paths[2].target_episode_id, "memory_d");
+        assert_eq!(paths[2].hop_count, 2);
+        assert!((paths[2].activation.value() - 0.6).abs() < 0.01);
     }
 }

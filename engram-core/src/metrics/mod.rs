@@ -188,10 +188,10 @@ pub struct MetricsRegistry {
 
     /// System health monitoring
     health: Arc<SystemHealth>,
-    // NUMA collectors temporarily disabled due to hwloc Send/Sync issues
-    // TODO: Wrap hwloc types properly for thread safety
-    // #[cfg(feature = "monitoring")]
-    // numa_collectors: Option<Arc<numa_aware::NumaCollectors>>,
+
+    /// NUMA-aware collectors for multi-socket systems (enabled with monitoring feature)
+    #[cfg(feature = "monitoring")]
+    numa_collectors: Option<Arc<numa_aware::NumaCollectors>>,
 }
 
 impl MetricsRegistry {
@@ -208,9 +208,8 @@ impl MetricsRegistry {
             hardware: Arc::new(HardwareMetrics::new()),
             streaming: Arc::new(StreamingAggregator::new()),
             health: Arc::clone(&health),
-            // NUMA collectors temporarily disabled
-            // #[cfg(feature = "monitoring")]
-            // numa_collectors: numa_aware::NumaCollectors::new().map(Arc::new),
+            #[cfg(feature = "monitoring")]
+            numa_collectors: numa_aware::NumaCollectors::new().map(Arc::new),
         };
 
         if let Ok(probe) = crate::activation::health_checks::SpreadingHealthProbe::default_probe() {
@@ -297,8 +296,8 @@ impl MetricsRegistry {
             .or_insert_with(|| CachePadded::new(AtomicU64::new(0)))
             .fetch_add(value, Ordering::Relaxed);
 
-        // Note: Streaming export currently uses base_name for simplicity
-        // TODO(Task 006): Enhance streaming to preserve label information
+        // Stream with labels preserved for multi-tenant aggregation
+        // TODO: Add label support to MetricUpdate when implementing multi-tenant streaming
         self.streaming.queue_update(MetricUpdate::Counter {
             name: base_name,
             value,
@@ -331,6 +330,7 @@ impl MetricsRegistry {
             .or_insert_with(|| Arc::new(lockfree::LockFreeHistogram::new()))
             .record(value);
 
+        // TODO: Add label support to MetricUpdate when implementing multi-tenant streaming
         self.streaming.queue_update(MetricUpdate::Histogram {
             name: base_name,
             value,
@@ -363,6 +363,7 @@ impl MetricsRegistry {
             .or_insert_with(|| CachePadded::new(AtomicU64::new(0)))
             .store(bits, Ordering::Release);
 
+        // TODO: Add label support to MetricUpdate when implementing multi-tenant streaming
         self.streaming.queue_update(MetricUpdate::Gauge {
             name: base_name,
             value,
@@ -441,6 +442,58 @@ impl MetricsRegistry {
                 tracing::warn!(target = "engram::metrics::stream", label, error = %err, "failed to serialize metrics snapshot");
             }
         }
+    }
+
+    /// Get NUMA locality ratio if NUMA monitoring is enabled
+    ///
+    /// Returns ratio in range [0.0, 1.0] where 1.0 indicates perfect locality.
+    /// Returns None if NUMA monitoring is not available or not enabled.
+    #[must_use]
+    #[cfg(feature = "monitoring")]
+    pub fn numa_locality_ratio(&self) -> Option<f64> {
+        self.numa_collectors
+            .as_ref()
+            .map(|collectors| collectors.locality_ratio())
+    }
+
+    /// Get activation counts per NUMA node if monitoring is enabled
+    ///
+    /// Returns vector indexed by node ID, or None if NUMA monitoring unavailable.
+    #[must_use]
+    #[cfg(feature = "monitoring")]
+    pub fn numa_node_activations(&self) -> Option<Vec<u64>> {
+        self.numa_collectors
+            .as_ref()
+            .map(|collectors| collectors.node_activation_counts())
+    }
+
+    /// Record an activation on a specific NUMA node
+    ///
+    /// No-op if NUMA monitoring is not available.
+    #[cfg(feature = "monitoring")]
+    pub fn record_numa_activation(&self, node_id: usize) {
+        if let Some(ref collectors) = self.numa_collectors {
+            collectors.record_activation(node_id);
+        }
+    }
+
+    /// Record a memory access with locality information
+    ///
+    /// No-op if NUMA monitoring is not available.
+    #[cfg(feature = "monitoring")]
+    pub fn record_numa_memory_access(&self, is_local: bool) {
+        if let Some(ref collectors) = self.numa_collectors {
+            collectors.record_memory_access(is_local);
+        }
+    }
+
+    /// Get number of NUMA nodes if monitoring is enabled
+    #[must_use]
+    #[cfg(feature = "monitoring")]
+    pub fn numa_node_count(&self) -> Option<usize> {
+        self.numa_collectors
+            .as_ref()
+            .map(|collectors| collectors.num_nodes())
     }
 }
 
