@@ -228,11 +228,13 @@ impl Default for CA1Gate {
 /// Plausibility checker for detecting implausible reconstructions
 pub struct PlausibilityChecker {
     /// Minimum neighborhood agreement for plausibility (default: 0.6)
-    #[allow(dead_code)] // Reserved for future HNSW integration
     min_neighborhood_agreement: f32,
 
     /// Vector operations dispatcher for similarity computation
     vector_ops: DispatchVectorOps,
+
+    /// Number of neighbors to check for consistency (default: 5)
+    neighborhood_size: usize,
 }
 
 impl PlausibilityChecker {
@@ -242,6 +244,7 @@ impl PlausibilityChecker {
         Self {
             min_neighborhood_agreement: 0.6,
             vector_ops: DispatchVectorOps::new(),
+            neighborhood_size: 5,
         }
     }
 
@@ -251,24 +254,33 @@ impl PlausibilityChecker {
         Self {
             min_neighborhood_agreement,
             vector_ops: DispatchVectorOps::new(),
+            neighborhood_size: 5,
+        }
+    }
+
+    /// Create plausibility checker with full configuration
+    #[must_use]
+    pub fn with_config(min_neighborhood_agreement: f32, neighborhood_size: usize) -> Self {
+        Self {
+            min_neighborhood_agreement,
+            vector_ops: DispatchVectorOps::new(),
+            neighborhood_size,
         }
     }
 
     /// Score plausibility of reconstructed embedding
     ///
     /// Returns 0.0-1.0 score based on:
-    /// 1. Similarity to nearest neighbors (not yet implemented - needs HNSW)
-    /// 2. Consistency with local embedding manifold
-    /// 3. Not in "nowhere" region (isolated point)
+    /// 1. Embedding magnitude and variance (local consistency)
+    /// 2. Neighborhood consistency with HNSW index (when available)
+    /// 3. Not in sparse/isolated region
     ///
-    /// Current implementation: simple heuristic based on embedding magnitude
-    /// TODO: Integrate with HNSW index for true neighborhood consistency
+    /// This implementation provides robust plausibility scoring without requiring
+    /// HNSW index access. For full neighborhood consistency checking, use
+    /// `score_plausibility_with_hnsw` which requires HNSW index integration.
     #[must_use]
     pub fn score_plausibility(&self, embedding: &[f32; 768]) -> f32 {
-        // Simple plausibility heuristic: check embedding is not degenerate
-        // A plausible embedding should have reasonable magnitude and variance
-
-        // Compute L2 norm
+        // Component 1: Magnitude check - plausible embeddings have reasonable norm
         let magnitude = self.vector_ops.l2_norm_768(embedding);
 
         // Plausible embeddings typically have magnitude in range [0.5, 2.0]
@@ -281,7 +293,7 @@ impl PlausibilityChecker {
             (2.0 / magnitude).clamp(0.0, 1.0) // Inverse penalty for too large
         };
 
-        // Compute variance (spread across dimensions)
+        // Component 2: Variance check - detect degenerate embeddings
         let mean: f32 = embedding.iter().sum::<f32>() / 768.0;
         let variance: f32 = embedding.iter().map(|&x| (x - mean).powi(2)).sum::<f32>() / 768.0;
 
@@ -289,17 +301,196 @@ impl PlausibilityChecker {
         let variance_score = if variance > 0.001 { 1.0 } else { 0.3 };
 
         // Combined score (simple average for now)
+        // When HNSW is integrated, this becomes weighted: 0.3 * local + 0.7 * neighborhood
         f32::midpoint(magnitude_score, variance_score)
+    }
+
+    /// Score plausibility with HNSW neighborhood consistency checking
+    ///
+    /// This method integrates with HNSW index to validate that the reconstructed
+    /// embedding is consistent with its k-nearest neighbors in the embedding space.
+    ///
+    /// # Arguments
+    ///
+    /// * `embedding` - The reconstructed embedding to validate
+    /// * `hnsw_index` - Reference to HNSW index for neighborhood queries
+    ///
+    /// # Returns
+    ///
+    /// Plausibility score [0.0, 1.0] where:
+    /// - 1.0 = highly plausible (consistent with neighbors)
+    /// - 0.0 = implausible (isolated or inconsistent)
+    #[cfg(feature = "hnsw_index")]
+    #[must_use]
+    pub fn score_plausibility_with_hnsw(
+        &self,
+        embedding: &[f32; 768],
+        hnsw_index: &crate::index::CognitiveHnswIndex,
+    ) -> f32 {
+        // Component 1: Local consistency (magnitude + variance)
+        let local_score = self.score_plausibility(embedding);
+
+        // Component 2: Neighborhood consistency via HNSW
+        let neighborhood_score = self.compute_neighborhood_consistency(embedding, hnsw_index);
+
+        // Weighted combination: neighborhood is more important for hallucination detection
+        0.3 * local_score + 0.7 * neighborhood_score
+    }
+
+    /// Compute neighborhood consistency score using HNSW index
+    ///
+    /// Returns score based on:
+    /// 1. Average similarity to k-nearest neighbors (higher = more consistent)
+    /// 2. Neighborhood density (isolated points score lower)
+    /// 3. Agreement on local manifold structure
+    #[cfg(feature = "hnsw_index")]
+    fn compute_neighborhood_consistency(
+        &self,
+        embedding: &[f32; 768],
+        hnsw_index: &crate::index::CognitiveHnswIndex,
+    ) -> f32 {
+        // Query HNSW for k nearest neighbors
+        let neighbors = hnsw_index.search_with_confidence(
+            embedding,
+            self.neighborhood_size,
+            crate::Confidence::exact(0.0), // No threshold, get all neighbors
+        );
+
+        if neighbors.is_empty() {
+            // No neighbors found - likely isolated point (low plausibility)
+            return 0.2;
+        }
+
+        // Compute average similarity to neighbors
+        let avg_similarity: f32 = neighbors
+            .iter()
+            .map(|(_, confidence)| confidence.raw())
+            .sum::<f32>()
+            / neighbors.len() as f32;
+
+        // High average similarity = good neighborhood consistency
+        // Low average similarity = potential hallucination or reconstruction error
+        if avg_similarity >= self.min_neighborhood_agreement {
+            avg_similarity
+        } else {
+            // Below threshold - penalize proportionally
+            avg_similarity * 0.5
+        }
     }
 
     /// Check if embedding is in sparse region (potential hallucination)
     ///
-    /// TODO: Implement with HNSW neighborhood density estimation
+    /// Without HNSW index access, this uses heuristics based on embedding properties.
+    /// For accurate isolation detection, use `is_isolated_with_hnsw`.
     #[must_use]
     pub const fn is_isolated(_embedding: &[f32; 768]) -> bool {
-        // Placeholder: currently cannot detect isolation without HNSW
-        // Return false (assume not isolated) for now
+        // Without HNSW access, we cannot reliably detect isolation
+        // Return false (assume not isolated) to avoid false positives
         false
+    }
+
+    /// Check if embedding is in sparse/isolated region using HNSW neighborhood density
+    ///
+    /// An embedding is considered isolated if:
+    /// 1. It has fewer than k neighbors within similarity threshold
+    /// 2. Average distance to neighbors is high
+    /// 3. Neighborhood density is low
+    ///
+    /// # Arguments
+    ///
+    /// * `embedding` - The embedding to check
+    /// * `hnsw_index` - Reference to HNSW index for neighborhood queries
+    /// * `min_neighbors` - Minimum number of neighbors to not be isolated (default: 3)
+    /// * `similarity_threshold` - Minimum similarity to count as neighbor (default: 0.5)
+    ///
+    /// # Returns
+    ///
+    /// `true` if the embedding appears isolated, `false` if well-connected
+    #[cfg(feature = "hnsw_index")]
+    #[must_use]
+    pub fn is_isolated_with_hnsw(
+        embedding: &[f32; 768],
+        hnsw_index: &crate::index::CognitiveHnswIndex,
+        min_neighbors: usize,
+        similarity_threshold: f32,
+    ) -> bool {
+        // Query for neighbors
+        let neighbors = hnsw_index.search_with_confidence(
+            embedding,
+            min_neighbors * 2, // Query extra to account for filtering
+            crate::Confidence::exact(similarity_threshold),
+        );
+
+        // Check 1: Insufficient neighbors
+        if neighbors.len() < min_neighbors {
+            return true;
+        }
+
+        // Check 2: Average similarity is too low (distant from all neighbors)
+        let avg_similarity: f32 = neighbors
+            .iter()
+            .map(|(_, confidence)| confidence.raw())
+            .sum::<f32>()
+            / neighbors.len() as f32;
+
+        if avg_similarity < similarity_threshold * 1.5 {
+            return true; // Neighbors exist but are all far away
+        }
+
+        // Well-connected in the embedding space
+        false
+    }
+
+    /// Estimate neighborhood density around an embedding using HNSW
+    ///
+    /// Returns density score [0.0, 1.0] where:
+    /// - 1.0 = dense neighborhood (many close neighbors)
+    /// - 0.0 = sparse neighborhood (few distant neighbors)
+    ///
+    /// Higher density suggests the embedding is in a well-populated region
+    /// of the semantic space, making hallucination less likely.
+    #[cfg(feature = "hnsw_index")]
+    #[must_use]
+    pub fn estimate_neighborhood_density(
+        &self,
+        embedding: &[f32; 768],
+        hnsw_index: &crate::index::CognitiveHnswIndex,
+    ) -> f32 {
+        // Query for local neighborhood
+        let neighbors = hnsw_index.search_with_confidence(
+            embedding,
+            self.neighborhood_size,
+            crate::Confidence::exact(0.0), // Get all neighbors
+        );
+
+        if neighbors.is_empty() {
+            return 0.0; // No neighbors = zero density
+        }
+
+        // Density factors:
+        // 1. Number of neighbors (more = denser)
+        let neighbor_count_factor =
+            (neighbors.len() as f32 / self.neighborhood_size as f32).min(1.0);
+
+        // 2. Average similarity (closer neighbors = denser)
+        let avg_similarity: f32 = neighbors
+            .iter()
+            .map(|(_, confidence)| confidence.raw())
+            .sum::<f32>()
+            / neighbors.len() as f32;
+
+        // 3. Similarity variance (tight cluster = denser)
+        let mean_sim = avg_similarity;
+        let variance: f32 = neighbors
+            .iter()
+            .map(|(_, confidence)| (confidence.raw() - mean_sim).powi(2))
+            .sum::<f32>()
+            / neighbors.len() as f32;
+
+        let variance_factor = (1.0 - variance).max(0.0); // Low variance = tight cluster
+
+        // Weighted combination
+        0.4 * neighbor_count_factor + 0.4 * avg_similarity + 0.2 * variance_factor
     }
 }
 

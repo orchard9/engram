@@ -402,7 +402,7 @@ const fn f64_to_f32(value: f64) -> f32 {
 
 /// Parallel breadth-first traversal with work distribution
 pub struct ParallelBreadthFirstTraversal {
-    num_workers: usize,
+    _num_workers: usize,
     chunk_size: usize,
 }
 
@@ -411,35 +411,155 @@ impl ParallelBreadthFirstTraversal {
     #[must_use]
     pub const fn new(num_workers: usize, chunk_size: usize) -> Self {
         Self {
-            num_workers,
+            _num_workers: num_workers,
             chunk_size,
         }
     }
 
-    /// Execute parallel traversal using work distribution
-    /// Note: Simplified implementation without complex lifetime management
+    /// Execute parallel traversal using work distribution with rayon
     ///
-    /// # Errors
+    /// This implementation uses rayon's parallel iterator support to distribute
+    /// traversal work across threads while maintaining proper lifetime management.
     ///
-    /// Currently never returns an error but maintains Result for future extensibility
+    /// # Performance
+    ///
+    /// - Uses work-stealing thread pool for dynamic load balancing
+    /// - Chunk size controls granularity of parallel work distribution
+    /// - Best performance on graphs with high branching factors
+    ///
+    /// # Arguments
+    ///
+    /// * `graph` - Thread-safe graph reference (Arc allows sharing across workers)
+    /// * `seed_nodes` - Starting nodes for traversal
+    /// * `max_depth` - Maximum traversal depth
+    /// * `decay_function` - Activation decay function applied at each level
+    ///
+    /// # Returns
+    ///
+    /// Vector of visited nodes with their activations and depths
+    ///
+    /// # Panics
+    ///
+    /// Panics if internal mutex becomes poisoned (rare, indicates thread panic during traversal)
     #[must_use]
-    pub fn traverse_simple(
+    #[allow(clippy::expect_used)] // expect is appropriate for mutex poisoning detection
+    pub fn traverse_parallel(
         &self,
         graph: &Arc<MemoryGraph>,
         seed_nodes: &[(NodeId, f32)],
         max_depth: u16,
         decay_function: &DecayFunction,
     ) -> Vec<(NodeId, f32, u16)> {
-        // For now, use single-threaded implementation
-        // TODO: Implement proper parallel version with lifetime management
+        use rayon::prelude::*;
+        use std::sync::Mutex;
+
+        let results = Arc::new(Mutex::new(Vec::new()));
+        let mut current_level: Vec<_> = seed_nodes
+            .iter()
+            .map(|(id, act)| (id.clone(), *act, 0))
+            .collect();
+
+        for _depth in 0..max_depth {
+            if current_level.is_empty() {
+                break;
+            }
+
+            // Process current level in parallel chunks
+            let next_level = Arc::new(Mutex::new(Vec::new()));
+
+            current_level
+                .par_chunks(self.chunk_size.max(1))
+                .for_each(|chunk| {
+                    let mut local_results = Vec::with_capacity(chunk.len());
+                    let mut local_next = Vec::new();
+
+                    for (node_id, activation, depth) in chunk {
+                        local_results.push((node_id.clone(), *activation, *depth));
+
+                        let node_uuid = Uuid::new_v5(&Uuid::NAMESPACE_OID, node_id.as_bytes());
+                        if let Ok(neighbors) = graph.get_neighbors(&node_uuid) {
+                            let decay_factor = decay_function.apply(*depth + 1);
+
+                            for (neighbor_id, weight) in neighbors {
+                                let neighbor_node_id = neighbor_id.to_string();
+                                let new_activation = BreadthFirstTraversal::calculate_activation(
+                                    *activation,
+                                    weight,
+                                    decay_factor,
+                                    EdgeType::Excitatory,
+                                );
+
+                                if new_activation > 0.01 {
+                                    local_next.push((neighbor_node_id, new_activation, *depth + 1));
+                                }
+                            }
+                        }
+                    }
+
+                    // Batch append to shared collections
+                    if !local_results.is_empty() {
+                        if let Ok(mut results_guard) = results.lock() {
+                            results_guard.extend(local_results);
+                        }
+                    }
+
+                    if !local_next.is_empty() {
+                        if let Ok(mut next_guard) = next_level.lock() {
+                            next_guard.extend(local_next);
+                        }
+                    }
+                });
+
+            // Extract next level for next iteration
+            current_level = Arc::try_unwrap(next_level).map_or_else(
+                |arc| {
+                    arc.lock()
+                        .expect("Parallel traversal: failed to lock next_level")
+                        .clone()
+                },
+                |mutex| {
+                    mutex
+                        .into_inner()
+                        .expect("Parallel traversal: mutex poisoned for next_level")
+                },
+            );
+        }
+
+        // Extract final results
+        Arc::try_unwrap(results).map_or_else(
+            |arc| {
+                arc.lock()
+                    .expect("Parallel traversal: failed to lock results")
+                    .clone()
+            },
+            |mutex| {
+                mutex
+                    .into_inner()
+                    .expect("Parallel traversal: mutex poisoned for results")
+            },
+        )
+    }
+
+    /// Execute traversal using single-threaded implementation
+    ///
+    /// Simpler implementation without parallel overhead, suitable for
+    /// small graphs or when deterministic ordering is required.
+    ///
+    /// # Returns
+    ///
+    /// Vector of visited nodes with their activations and depths
+    #[must_use]
+    pub fn traverse_simple(
+        graph: &Arc<MemoryGraph>,
+        seed_nodes: &[(NodeId, f32)],
+        max_depth: u16,
+        decay_function: &DecayFunction,
+    ) -> Vec<(NodeId, f32, u16)> {
         let mut results = Vec::new();
         let mut current_level: VecDeque<_> = seed_nodes
             .iter()
             .map(|(id, act)| (id.clone(), *act, 0))
             .collect();
-
-        let chunk_size = self.chunk_size.max(1);
-        let max_batch = chunk_size.saturating_mul(self.num_workers.max(1));
 
         for _depth in 0..max_depth {
             if current_level.is_empty() {
@@ -448,35 +568,24 @@ impl ParallelBreadthFirstTraversal {
 
             let mut next_level = VecDeque::new();
 
-            while !current_level.is_empty() {
-                let mut chunk = Vec::with_capacity(max_batch.min(current_level.len()));
-                for _ in 0..max_batch {
-                    if let Some(item) = current_level.pop_front() {
-                        chunk.push(item);
-                    } else {
-                        break;
-                    }
-                }
+            while let Some((node_id, activation, depth)) = current_level.pop_front() {
+                results.push((node_id.clone(), activation, depth));
 
-                for (node_id, activation, depth) in chunk {
-                    results.push((node_id.clone(), activation, depth));
+                let node_uuid = Uuid::new_v5(&Uuid::NAMESPACE_OID, node_id.as_bytes());
+                if let Ok(neighbors) = graph.get_neighbors(&node_uuid) {
+                    let decay_factor = decay_function.apply(depth + 1);
 
-                    let node_uuid = Uuid::new_v5(&Uuid::NAMESPACE_OID, node_id.as_bytes());
-                    if let Ok(neighbors) = graph.get_neighbors(&node_uuid) {
-                        let decay_factor = decay_function.apply(depth + 1);
+                    for (neighbor_id, weight) in neighbors {
+                        let neighbor_node_id = neighbor_id.to_string();
+                        let new_activation = BreadthFirstTraversal::calculate_activation(
+                            activation,
+                            weight,
+                            decay_factor,
+                            EdgeType::Excitatory,
+                        );
 
-                        for (neighbor_id, weight) in neighbors {
-                            let neighbor_node_id = neighbor_id.to_string();
-                            let new_activation = BreadthFirstTraversal::calculate_activation(
-                                activation,
-                                weight,
-                                decay_factor,
-                                EdgeType::Excitatory, // Default edge type
-                            );
-
-                            if new_activation > 0.01 {
-                                next_level.push_back((neighbor_node_id, new_activation, depth + 1));
-                            }
+                        if new_activation > 0.01 {
+                            next_level.push_back((neighbor_node_id, new_activation, depth + 1));
                         }
                     }
                 }

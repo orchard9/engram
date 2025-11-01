@@ -290,13 +290,26 @@ impl QueryExpander {
         variants.truncate(self.max_variants);
 
         // Step 5: Compute embeddings for variants (up to budget)
-        // For now, compute embeddings for all variants
-        // TODO: Implement confidence budget tracking for embedding computation
+        // Use confidence budget to limit expensive embedding computations
+        // Budget allocation: prioritize high-confidence variants
+        let mut remaining_budget = self.max_variants as f32;
         for variant in &mut variants {
-            if let Ok(embedding_result) =
-                self.embedding_provider.embed(&variant.text, language).await
-            {
-                variant.embedding = Some(embedding_result.vector);
+            // Check if we have budget remaining (confidence-weighted)
+            let variant_cost = 1.0 - variant.confidence * 0.5; // High confidence variants cost less
+
+            if remaining_budget >= variant_cost {
+                if let Ok(embedding_result) =
+                    self.embedding_provider.embed(&variant.text, language).await
+                {
+                    variant.embedding = Some(embedding_result.vector);
+                    remaining_budget -= variant_cost;
+                } else {
+                    // Embedding failed, still deduct budget to avoid retries
+                    remaining_budget -= variant_cost;
+                }
+            } else {
+                // Budget exhausted, skip remaining embeddings
+                break;
             }
         }
 

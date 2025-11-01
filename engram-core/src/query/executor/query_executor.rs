@@ -278,50 +278,42 @@ impl QueryExecutor {
     /// Execute PREDICT query - predict future states.
     fn execute_predict(
         query: &PredictQuery<'_>,
-        _context: &QueryContext,
-        _space_handle: &Arc<crate::registry::SpaceHandle>,
+        context: &QueryContext,
+        space_handle: &Arc<crate::registry::SpaceHandle>,
     ) -> Result<ProbabilisticQueryResult, QueryExecutionError> {
-        // TODO: Implement prediction integration
-        // This requires System 2 reasoning capabilities from future milestones.
-
-        let _ = query;
-
-        Err(QueryExecutionError::NotImplemented {
-            query_type: "PREDICT".to_string(),
-            reason: "Prediction requires System 2 reasoning (Milestone 15)".to_string(),
-        })
+        // Use the predict executor module for PREDICT query execution
+        crate::query::executor::predict::execute_predict(query, context, space_handle).map_err(
+            |e| QueryExecutionError::ExecutionFailed {
+                message: e.to_string(),
+            },
+        )
     }
 
     /// Execute IMAGINE query - pattern completion.
     fn execute_imagine(
         query: &ImagineQuery<'_>,
-        _context: &QueryContext,
-        _space_handle: &Arc<crate::registry::SpaceHandle>,
+        context: &QueryContext,
+        space_handle: &Arc<crate::registry::SpaceHandle>,
     ) -> Result<ProbabilisticQueryResult, QueryExecutionError> {
-        // TODO: Implement pattern completion integration
-        // This uses the completion engine from Milestone 8.
-
-        let _ = query;
-        Err(QueryExecutionError::NotImplemented {
-            query_type: "IMAGINE".to_string(),
-            reason: "Pattern completion integration pending (Milestone 10)".to_string(),
-        })
+        // Use the imagine executor module for IMAGINE query execution
+        crate::query::executor::imagine::execute_imagine(query, context, space_handle).map_err(
+            |e| QueryExecutionError::ExecutionFailed {
+                message: e.to_string(),
+            },
+        )
     }
 
     /// Execute CONSOLIDATE query - memory consolidation.
     fn execute_consolidate(
         query: &ConsolidateQuery<'_>,
-        _context: &QueryContext,
-        _space_handle: &Arc<crate::registry::SpaceHandle>,
+        context: &QueryContext,
+        space_handle: &Arc<crate::registry::SpaceHandle>,
     ) -> Result<ProbabilisticQueryResult, QueryExecutionError> {
-        // TODO: Implement consolidation integration
-        // This requires the consolidation scheduler from future milestones.
-        let _ = query;
-
-        Err(QueryExecutionError::NotImplemented {
-            query_type: "CONSOLIDATE".to_string(),
-            reason: "Consolidation scheduler pending (Milestone 13)".to_string(),
-        })
+        // Use the consolidate executor module for CONSOLIDATE query execution
+        crate::query::executor::consolidate::execute_consolidate(query, context, space_handle)
+            .map_err(|e| QueryExecutionError::ExecutionFailed {
+                message: e.to_string(),
+            })
     }
 
     /// Convert AST pattern to Cue for memory store recall.

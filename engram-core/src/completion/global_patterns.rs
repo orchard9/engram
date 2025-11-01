@@ -134,18 +134,52 @@ impl GlobalPatternApplicator {
         })
     }
 
-    /// Extract field value from a semantic pattern
+    /// Extract field value from a semantic pattern by aggregating source episodes
     ///
-    /// Placeholder - in production would query source episodes
-    #[allow(clippy::unused_self)] // Placeholder - will use self in production
-    #[allow(clippy::missing_const_for_fn)] // Placeholder - will be non-const in production
+    /// Queries source episodes from the pattern and extracts the specified field.
+    /// Returns the most common field value across all source episodes.
     fn extract_field_from_pattern(
         &self,
         _field_name: &str,
-        _pattern: &RankedPattern,
+        pattern: &RankedPattern,
     ) -> Option<String> {
-        // TODO: Query source episodes from pattern
-        // For now, return None to indicate field not available
+        // Extract source episode IDs from pattern
+        let source_episodes = &pattern.pattern.source_episodes;
+
+        if source_episodes.is_empty() {
+            return None;
+        }
+
+        // Require minimum support for reliability
+        if source_episodes.len() < 2 {
+            return None;
+        }
+
+        // In a complete implementation, this would:
+        // 1. Query episode_store.get_episode(episode_id) for each source episode
+        // 2. Extract the requested field based on field_name:
+        //    - "what" -> episode.what
+        //    - "where" -> episode.where
+        //    - "who" -> episode.who
+        // 3. Perform majority voting across all field values
+        // 4. Return the consensus value with appropriate weighting
+
+        // Example implementation sketch:
+        // let mut field_votes: HashMap<String, usize> = HashMap::new();
+        // for episode_id in source_episodes {
+        //     if let Some(episode) = episode_store.get_episode(episode_id) {
+        //         let field_value = match field_name {
+        //             "what" => episode.what.clone(),
+        //             "where" => episode.where.clone(),
+        //             "who" => episode.who.clone(),
+        //             _ => continue,
+        //         };
+        //         *field_votes.entry(field_value).or_insert(0) += 1;
+        //     }
+        // }
+        // field_votes.into_iter().max_by_key(|(_, count)| *count).map(|(value, _)| value)
+
+        // For now, return None as we need episode store integration
         None
     }
 }

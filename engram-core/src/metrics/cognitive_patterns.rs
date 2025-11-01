@@ -45,6 +45,7 @@ pub struct CognitivePatternMetrics {
     reconsolidation_modifications: CachePadded<AtomicU64>,
     reconsolidation_window_hits: CachePadded<AtomicU64>,
     reconsolidation_window_misses: CachePadded<AtomicU64>,
+    reconsolidation_rejections: [CachePadded<AtomicU64>; 4], // outside_window, too_soon, conflicting, other
 
     // False memory metrics
     false_memory_generations: CachePadded<AtomicU64>,
@@ -84,6 +85,12 @@ impl CognitivePatternMetrics {
             reconsolidation_modifications: CachePadded::new(AtomicU64::new(0)),
             reconsolidation_window_hits: CachePadded::new(AtomicU64::new(0)),
             reconsolidation_window_misses: CachePadded::new(AtomicU64::new(0)),
+            reconsolidation_rejections: [
+                CachePadded::new(AtomicU64::new(0)),
+                CachePadded::new(AtomicU64::new(0)),
+                CachePadded::new(AtomicU64::new(0)),
+                CachePadded::new(AtomicU64::new(0)),
+            ],
             false_memory_generations: CachePadded::new(AtomicU64::new(0)),
             drm_critical_lure_recalls: CachePadded::new(AtomicU64::new(0)),
             drm_list_item_recalls: CachePadded::new(AtomicU64::new(0)),
@@ -211,25 +218,31 @@ impl CognitivePatternMetrics {
         }
     }
 
-    /// Record reconsolidation rejection with reason
+    /// Record reconsolidation rejection with structured reason
     ///
     /// # Performance
     /// - Monitoring disabled: 0ns
     /// - Monitoring enabled: ~25ns
+    ///
+    /// # Parameters
+    /// - `reason`: The specific reason for rejection, used for detailed tracking
     #[inline(always)]
     #[allow(clippy::inline_always)]
-    pub fn record_reconsolidation_rejection(&self, _reason: &str) {
+    pub fn record_reconsolidation_rejection(&self, reason: RejectionReason) {
         #[cfg(feature = "monitoring")]
         {
             // Count rejections as window misses
             self.reconsolidation_window_misses
                 .fetch_add(1, Ordering::Relaxed);
-            // TODO: Consider adding structured rejection reason tracking
+
+            // Track structured rejection reasons for detailed analysis
+            let idx = reason as usize;
+            self.reconsolidation_rejections[idx].fetch_add(1, Ordering::Relaxed);
         }
 
         #[cfg(not(feature = "monitoring"))]
         {
-            let _ = _reason;
+            let _ = reason;
         }
     }
 
@@ -396,6 +409,19 @@ impl CognitivePatternMetrics {
         0.0
     }
 
+    /// Get reconsolidation rejection count for specific reason
+    #[cfg(feature = "monitoring")]
+    #[must_use]
+    pub fn reconsolidation_rejection_count(&self, reason: RejectionReason) -> u64 {
+        self.reconsolidation_rejections[reason as usize].load(Ordering::Relaxed)
+    }
+
+    #[cfg(not(feature = "monitoring"))]
+    #[must_use]
+    pub const fn reconsolidation_rejection_count(&self, _reason: RejectionReason) -> u64 {
+        0
+    }
+
     /// Get false memory generation count
     #[cfg(feature = "monitoring")]
     #[must_use]
@@ -472,6 +498,9 @@ impl CognitivePatternMetrics {
         self.reconsolidation_window_hits.store(0, Ordering::Release);
         self.reconsolidation_window_misses
             .store(0, Ordering::Release);
+        for counter in &self.reconsolidation_rejections {
+            counter.store(0, Ordering::Release);
+        }
         self.false_memory_generations.store(0, Ordering::Release);
         self.drm_critical_lure_recalls.store(0, Ordering::Release);
         self.drm_list_item_recalls.store(0, Ordering::Release);
@@ -507,6 +536,20 @@ pub enum InterferenceType {
     Retroactive,
     /// Fan effect (multiple associations)
     Fan,
+}
+
+/// Reason for reconsolidation rejection
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum RejectionReason {
+    /// Memory access attempted outside reconsolidation window
+    OutsideWindow = 0,
+    /// Too soon after previous reconsolidation attempt
+    TooSoon = 1,
+    /// Conflicting concurrent modification detected
+    Conflicting = 2,
+    /// Other unspecified reason
+    Other = 3,
 }
 
 #[cfg(feature = "monitoring")]

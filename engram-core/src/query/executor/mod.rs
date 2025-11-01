@@ -94,13 +94,19 @@
 //! ```
 
 // Sub-modules
+pub mod consolidate;
 pub mod context;
+pub mod imagine;
+pub mod predict;
 pub mod query_executor;
 pub mod recall;
 pub mod spread;
 
 // Re-exports from sub-modules
+pub use consolidate::{ConsolidateExecutionError, execute_consolidate};
 pub use context::QueryContext;
+pub use imagine::{ImagineExecutionError, execute_imagine};
+pub use predict::{PredictExecutionError, execute_predict};
 pub use query_executor::{AstQueryExecutorConfig, QueryExecutionError, QueryExecutor};
 pub use recall::{RecallExecutionError, RecallExecutor};
 pub use spread::{SpreadExecutionError, execute_spread};

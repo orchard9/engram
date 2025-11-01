@@ -345,13 +345,92 @@ impl RecallExecutor {
 
     /// Gather uncertainty sources from system state
     ///
-    /// Currently returns empty - would be populated with:
-    /// - System memory pressure
-    /// - Query load
-    /// - Store degradation metrics
-    const fn gather_uncertainty_sources() -> Vec<UncertaintySource> {
-        // TODO: Integrate with system metrics to gather real uncertainty sources
-        vec![]
+    /// Integrates with the metrics system to provide real-time uncertainty
+    /// tracking based on system health, load, and degradation.
+    ///
+    /// # Uncertainty Sources
+    ///
+    /// - **System Pressure**: Memory pressure, CPU load affecting recall quality
+    /// - **Spreading Activation Noise**: Variance in activation spreading paths
+    /// - **Temporal Decay**: Uncertainty from time-based memory degradation
+    /// - **Measurement Error**: Query execution noise and sampling errors
+    fn gather_uncertainty_sources() -> Vec<UncertaintySource> {
+        use crate::metrics;
+
+        let mut sources = Vec::new();
+
+        // Get global metrics registry if available
+        if let Some(metrics_registry) = metrics::metrics() {
+            // 1. System Pressure from health status
+            let health_status = metrics_registry.health_status();
+            if !matches!(health_status, crate::metrics::health::HealthStatus::Healthy) {
+                // Calculate pressure level based on health status
+                let pressure_level = match health_status {
+                    crate::metrics::health::HealthStatus::Degraded => 0.5,
+                    crate::metrics::health::HealthStatus::Unhealthy => 1.0,
+                    crate::metrics::health::HealthStatus::Healthy => 0.0,
+                };
+
+                // Estimate confidence impact (degraded health reduces confidence)
+                let effect_on_confidence = pressure_level * 0.3; // Max 30% reduction
+
+                sources.push(UncertaintySource::SystemPressure {
+                    pressure_level,
+                    effect_on_confidence,
+                });
+            }
+
+            // 2. Spreading Activation Noise from streaming metrics
+            let snapshot = metrics_registry.streaming_snapshot();
+            if let Some(spreading_summary) = snapshot.spreading {
+                // Calculate activation variance from latency variance across tiers
+                let tier_latencies: Vec<f64> = spreading_summary
+                    .per_tier
+                    .values()
+                    .map(|tier| tier.mean_seconds)
+                    .collect();
+
+                if tier_latencies.len() >= 2 {
+                    let mean = tier_latencies.iter().sum::<f64>() / (tier_latencies.len() as f64);
+                    let variance = tier_latencies
+                        .iter()
+                        .map(|x| {
+                            let diff = x - mean;
+                            diff * diff
+                        })
+                        .sum::<f64>()
+                        / (tier_latencies.len() as f64);
+
+                    // Use normalized variance and tier count as diversity measure
+                    let activation_variance = (variance.sqrt() / mean.max(0.001)) as f32;
+                    let path_diversity = (tier_latencies.len() as f32) / 3.0; // Normalize by max tiers
+
+                    sources.push(UncertaintySource::SpreadingActivationNoise {
+                        activation_variance: activation_variance.min(1.0),
+                        path_diversity: path_diversity.min(1.0),
+                    });
+                }
+            }
+
+            // 3. Measurement Error from query execution variance
+            // Use gauge readings if available to estimate measurement noise
+            if let Some(pool_utilization) =
+                metrics_registry.gauge_value("engram_spreading_pool_utilization")
+            {
+                // High pool utilization can indicate contention and measurement noise
+                if pool_utilization > 0.8 {
+                    let error_magnitude = ((pool_utilization - 0.8) / 0.2) as f32;
+                    let confidence_degradation = error_magnitude * 0.15; // Max 15% degradation
+
+                    sources.push(UncertaintySource::MeasurementError {
+                        error_magnitude,
+                        confidence_degradation,
+                    });
+                }
+            }
+        }
+
+        sources
     }
 
     /// Compute cosine similarity between two embeddings

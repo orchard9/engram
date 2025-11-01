@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc b0060cc5f68c40dfb53d56a9528bb5d8dc7301aa808ece29556b02405146eb00 # shrinks to (error_type, expected, actual, suggestion, example) = ("failed", "Activation between 0.0 and 1.0", "<]𖭔<𞹟𑪽9'ℋ¥𐒥ూv =ﶩ<𑓑🕴", "Check input bounds with clamp()", "value.clamp(0.0, 1.0)")
+cc d6c42f277e158b19438c8de68063fe5f0d9e78cdaa959375b559410e3053509d # shrinks to (error_type, expected, actual, suggestion, example) = ("not found", "Activation between 0.0 and 1.0", ".", "Check input bounds with clamp()", "value.clamp(0.0, 1.0)")

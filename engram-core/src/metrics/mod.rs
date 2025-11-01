@@ -23,7 +23,9 @@ pub mod streaming;
 pub mod numa_aware;
 
 pub use cognitive::{CognitiveInsight, CognitiveMetrics, ConsolidationState};
-pub use cognitive_patterns::{CognitivePatternMetrics, InterferenceType, PrimingType};
+pub use cognitive_patterns::{
+    CognitivePatternMetrics, InterferenceType, PrimingType, RejectionReason,
+};
 pub use completion_metrics::{
     CalibrationMonitor, CompletionMetricsRecorder, CompletionResourceMonitor, CompletionTimer,
     ComponentLatencies, ResourceSnapshot,

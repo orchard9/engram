@@ -28,6 +28,7 @@
 
 pub mod consolidation_integration;
 
+use crate::metrics::cognitive_patterns::RejectionReason;
 use crate::{Confidence, Episode};
 use chrono::{DateTime, Duration, Utc};
 use dashmap::DashMap;
@@ -163,7 +164,7 @@ impl ReconsolidationEngine {
             #[cfg(feature = "monitoring")]
             {
                 if let Some(metrics) = crate::metrics::cognitive_patterns::cognitive_patterns() {
-                    metrics.record_reconsolidation_rejection(&eligibility.rejection_reason);
+                    metrics.record_reconsolidation_rejection(eligibility.rejection_reason);
                 }
             }
 
@@ -208,49 +209,30 @@ impl ReconsolidationEngine {
     ) -> EligibilityResult {
         // Boundary 1: Must be active recall
         if !recall.is_active_recall {
-            return EligibilityResult::ineligible(
-                "Reconsolidation requires active recall, not passive re-exposure",
-            );
+            return EligibilityResult::ineligible(RejectionReason::Other);
         }
 
         // Boundary 2: Time since recall must be within window
         let time_since_recall = current_time - recall.recall_timestamp;
 
         if time_since_recall < self.window_start {
-            return EligibilityResult::ineligible(&format!(
-                "Too soon after recall: {} < {} (window starts at {})",
-                format_duration(time_since_recall),
-                format_duration(self.window_start),
-                format_duration(self.window_start)
-            ));
+            return EligibilityResult::ineligible(RejectionReason::TooSoon);
         }
 
         if time_since_recall > self.window_end {
-            return EligibilityResult::ineligible(&format!(
-                "Too late after recall: {} > {} (window closed)",
-                format_duration(time_since_recall),
-                format_duration(self.window_end)
-            ));
+            return EligibilityResult::ineligible(RejectionReason::OutsideWindow);
         }
 
         // Boundary 3: Memory must be consolidated (>24 hours old)
         let memory_age = recall.recall_timestamp - recall.original_episode.when;
 
         if memory_age < self.min_memory_age {
-            return EligibilityResult::ineligible(&format!(
-                "Memory too recent: {} < {} (must be consolidated)",
-                format_duration(memory_age),
-                format_duration(self.min_memory_age)
-            ));
+            return EligibilityResult::ineligible(RejectionReason::TooSoon);
         }
 
         // Boundary 4: Memory must not be too remote (< ~1 year)
         if memory_age > self.max_memory_age {
-            return EligibilityResult::ineligible(&format!(
-                "Memory too remote: {} > {} (reduced plasticity)",
-                format_duration(memory_age),
-                format_duration(self.max_memory_age)
-            ));
+            return EligibilityResult::ineligible(RejectionReason::OutsideWindow);
         }
 
         // All boundaries satisfied
@@ -490,25 +472,26 @@ pub struct ReconsolidationResult {
 
 struct EligibilityResult {
     is_eligible: bool,
-    rejection_reason: String,
+    rejection_reason: RejectionReason,
 }
 
 impl EligibilityResult {
     const fn eligible() -> Self {
         Self {
             is_eligible: true,
-            rejection_reason: String::new(),
+            rejection_reason: RejectionReason::Other,
         }
     }
 
-    fn ineligible(reason: &str) -> Self {
+    const fn ineligible(reason: RejectionReason) -> Self {
         Self {
             is_eligible: false,
-            rejection_reason: reason.to_string(),
+            rejection_reason: reason,
         }
     }
 }
 
+#[allow(dead_code)]
 #[must_use]
 fn format_duration(d: Duration) -> String {
     let hours = d.num_hours();

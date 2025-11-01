@@ -125,14 +125,13 @@ fn baseline_recall_latency(c: &mut Criterion) {
 
     group.bench_function("recall_10_neighbors", |b| {
         b.iter(|| {
-            // Create a cue for search
-            let cue = engram_core::Cue::embedding(
-                "bench_query".to_string(),
-                query_embedding,
-                Confidence::HIGH,
-            );
-            let results = space_hnsw.search(&space_id, &cue, 10);
-            black_box(results)
+            // Get the index and search
+            if let Some(index) = space_hnsw.get_index(&space_id) {
+                let results = index.search_with_confidence(&query_embedding, 10, Confidence::LOW);
+                black_box(results)
+            } else {
+                black_box(vec![])
+            }
         });
     });
 
@@ -162,7 +161,7 @@ fn recall_under_streaming_load(c: &mut Criterion) {
                             num_workers: 4,
                             ..Default::default()
                         };
-                        let pool = WorkerPool::new(config);
+                        let pool = Arc::new(WorkerPool::new(config));
 
                         // Pre-populate index
                         let mut rng = StdRng::seed_from_u64(0xCAFE);
@@ -182,7 +181,7 @@ fn recall_under_streaming_load(c: &mut Criterion) {
                         // Start streaming at target rate in background
                         let streaming_done = Arc::new(AtomicBool::new(false));
                         let streaming_done_clone = Arc::clone(&streaming_done);
-                        let pool_clone = Arc::new(pool);
+                        let pool_clone = Arc::clone(&pool);
                         let space_id_clone = space_id.clone();
 
                         let streaming_thread = thread::spawn(move || {
@@ -221,12 +220,13 @@ fn recall_under_streaming_load(c: &mut Criterion) {
                         for _ in 0..10 {
                             // Get space_hnsw from pool (simulate recall operation)
                             let space_hnsw = SpaceIsolatedHnsw::new();
-                            let cue = engram_core::Cue::embedding(
-                                "bench_query".to_string(),
-                                query_embedding,
-                                Confidence::HIGH,
-                            );
-                            let _ = space_hnsw.search(&space_id, &cue, 10);
+                            if let Some(index) = space_hnsw.get_index(&space_id) {
+                                let _ = index.search_with_confidence(
+                                    &query_embedding,
+                                    10,
+                                    Confidence::LOW,
+                                );
+                            }
                             thread::sleep(Duration::from_millis(10));
                         }
 
@@ -237,8 +237,8 @@ fn recall_under_streaming_load(c: &mut Criterion) {
                         streaming_done.store(true, Ordering::Relaxed);
                         let _ = streaming_thread.join();
 
-                        // Shutdown pool
-                        pool_clone.shutdown(Duration::from_secs(5));
+                        // Shutdown pool - just drop it since it's wrapped in Arc
+                        drop(pool);
                     }
 
                     total_duration
@@ -336,12 +336,13 @@ fn concurrent_recall_frequency(c: &mut Criterion) {
                             // Simulate recall operation
                             let space_hnsw = SpaceIsolatedHnsw::new();
                             let query_embedding = generate_embedding(&mut rng);
-                            let cue = engram_core::Cue::embedding(
-                                "bench_query".to_string(),
-                                query_embedding,
-                                Confidence::HIGH,
-                            );
-                            let _ = space_hnsw.search(&space_id, &cue, 10);
+                            if let Some(index) = space_hnsw.get_index(&space_id) {
+                                let _ = index.search_with_confidence(
+                                    &query_embedding,
+                                    10,
+                                    Confidence::LOW,
+                                );
+                            }
 
                             let recall_latency = recall_start.elapsed();
                             latency_tracker.record(recall_latency);
@@ -356,7 +357,8 @@ fn concurrent_recall_frequency(c: &mut Criterion) {
                         streaming_done.store(true, Ordering::Relaxed);
                         let _ = streaming_thread.join();
 
-                        pool.shutdown(Duration::from_secs(5));
+                        // Shutdown pool - just drop it since it's wrapped in Arc
+                        drop(pool);
                     }
 
                     total_duration
@@ -437,7 +439,9 @@ fn multi_space_isolation(c: &mut Criterion) {
                         thread::sleep(Duration::from_millis(10));
                     }
 
-                    pool.shutdown(Duration::from_secs(5));
+                    // Note: shutdown requires moving the pool, but Arc prevents that.
+                    // We just drop the Arc instead, which will shut down when the last reference is dropped.
+                    drop(pool);
 
                     black_box(());
                 });
