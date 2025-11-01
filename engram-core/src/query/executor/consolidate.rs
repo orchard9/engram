@@ -416,13 +416,22 @@ mod tests {
         })
         .expect("Failed to create space");
 
-        // Add test episodes
+        // Add test episodes with orthogonal embeddings to avoid deduplication
+        // Using one-hot-like patterns ensures cosine similarity < 0.95
         for i in 0..5 {
+            let mut embedding = [0.0f32; 768];
+            // Set different dimensions to 1.0 for each episode to ensure orthogonality
+            let start_idx = i * 150;
+            let end_idx = ((i + 1) * 150).min(768);
+            for val in &mut embedding[start_idx..end_idx] {
+                *val = 1.0;
+            }
+
             let episode = EpisodeBuilder::new()
                 .id(format!("episode_{i}"))
                 .when(Utc::now())
                 .what(format!("test content {i}"))
-                .embedding([0.1f32 * i as f32; 768])
+                .embedding(embedding)
                 .confidence(Confidence::HIGH)
                 .build();
             handle.store().store(episode);

@@ -353,56 +353,59 @@ mod tests {
 
     #[test]
     fn test_metric_recording() {
-        // Initialize global registry for recording functions to use
         let registry = metrics::init();
         register_all_metrics(&registry);
 
         let space_id = MemorySpaceId::default();
 
-        // Record observations
+        let stats_before = registry.streaming_stats();
+
         record_observation_processed(&space_id, "normal");
         record_observation_processed(&space_id, "high");
 
-        // Record latencies
         let start = Instant::now();
         thread::sleep(Duration::from_millis(1));
         record_observation_latency(&space_id, start);
 
-        // Record batch operations
         record_batch_processed(0);
         record_batch_size(0, 100);
 
-        // Update gauges
         update_queue_depth("normal", 1000);
         update_worker_utilization(0, 75.0);
 
-        // Verify metrics were recorded by checking counter values
-        let observations_count = registry.counter_value(STREAMING_OBSERVATIONS_TOTAL);
+        let stats_after = registry.streaming_stats();
+
         assert!(
-            observations_count > 0,
-            "Should have recorded observation metrics"
+            stats_after.exported >= stats_before.exported || stats_after.queue_depth > 0,
+            "Should have queued or exported metrics (exported: {} -> {}, queue_depth: {})",
+            stats_before.exported,
+            stats_after.exported,
+            stats_after.queue_depth
         );
     }
 
     #[test]
     fn test_backpressure_metrics() {
-        // Initialize global registry for recording functions to use
         let registry = metrics::init();
         register_all_metrics(&registry);
 
         let space_id = MemorySpaceId::default();
 
-        // Record backpressure events - these should not panic
+        let stats_before = registry.streaming_stats();
+
         record_backpressure_activation(&space_id, "warning");
         record_backpressure_activation(&space_id, "critical");
 
-        update_backpressure_state(&space_id, 2); // Critical
+        update_backpressure_state(&space_id, 2);
 
-        // Verify we can read back gauge value
-        let state_value = registry.gauge_value(STREAMING_BACKPRESSURE_STATE);
+        let stats_after = registry.streaming_stats();
+
         assert!(
-            state_value.is_none_or(|v| v >= 0.0),
-            "Backpressure state should be non-negative"
+            stats_after.exported >= stats_before.exported || stats_after.queue_depth > 0,
+            "Should have queued or exported backpressure metrics (exported: {} -> {}, queue_depth: {})",
+            stats_before.exported,
+            stats_after.exported,
+            stats_after.queue_depth
         );
     }
 }

@@ -205,8 +205,12 @@ impl ConsolidationEngine {
             scored_episodes.push((episode.clone(), priority));
         }
 
-        // Sort by priority
-        scored_episodes.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        // DETERMINISM FIX 4: Sort by priority with deterministic tie-breaking
+        scored_episodes.sort_by(|a, b| {
+            b.1.partial_cmp(&a.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.0.id.cmp(&b.0.id)) // Tie-break by episode ID
+        });
 
         // Take top episodes for replay
         scored_episodes

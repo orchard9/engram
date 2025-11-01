@@ -242,8 +242,12 @@ impl DreamEngine {
             })
             .collect();
 
-        // Sort by score (highest first)
-        scored_episodes.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        // DETERMINISM FIX 4: Sort by score (highest first) with deterministic tie-breaking
+        scored_episodes.sort_by(|a, b| {
+            b.1.partial_cmp(&a.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.0.id.cmp(&b.0.id)) // Tie-break by episode ID
+        });
 
         // Take top episodes up to limit
         let selected: Vec<Episode> = scored_episodes

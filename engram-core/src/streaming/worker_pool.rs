@@ -458,7 +458,7 @@ impl Worker {
         config: WorkerPoolConfig,
         stats: Arc<WorkerStatsAtomic>,
     ) {
-        while !shutdown.load(Ordering::Relaxed) {
+        loop {
             // 1. Check own queue first (cache-hot for this worker)
             let batch_size = Self::select_adaptive_batch_size(&own_queue, &config);
             let batch = own_queue.dequeue_batch(batch_size);
@@ -480,7 +480,13 @@ impl Worker {
                 continue;
             }
 
-            // 3. No work anywhere - sleep briefly
+            // 3. No work anywhere - check if we should exit
+            if shutdown.load(Ordering::Relaxed) {
+                // Shutdown requested and all queues are empty - safe to exit
+                break;
+            }
+
+            // 4. Still running - sleep briefly
             thread::sleep(Duration::from_millis(config.idle_sleep_ms));
         }
     }
