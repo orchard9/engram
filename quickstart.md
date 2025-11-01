@@ -107,9 +107,9 @@ curl -X POST http://localhost:7432/api/v1/episodes/remember \
   }' | jq '.'
 ```
 
-### Try Pattern Completion (Beta)
+### Try Pattern Completion
 
-Pattern completion reconstructs missing memory details using CA3 attractor dynamics:
+Pattern completion reconstructs missing memory details using CA3 attractor dynamics (production-ready):
 
 ```bash
 # Store a complete memory
@@ -167,6 +167,34 @@ Expected output:
 - `source: "Reconstructed"` - Engram filled in missing details using hippocampal pattern completion
 - `completion_confidence: 0.82` - Multi-factor confidence score for reconstruction quality
 - `alternatives` - Alternative hypotheses from System 2 reasoning
+
+### Try Query Language
+
+Use SQL-like syntax for powerful memory queries:
+
+```bash
+# Recall with confidence filter
+curl -X POST http://localhost:7432/api/v1/query/execute \
+  -H "Content-Type: application/json" \
+  -d '{"query": "RECALL what=\"mitochondria\" CONFIDENCE > 0.8"}' | jq '.'
+
+# Multi-hop spreading activation
+curl -X POST http://localhost:7432/api/v1/query/execute \
+  -H "Content-Type: application/json" \
+  -d '{"query": "SPREAD FROM what=\"cellular biology\" HOPS 2"}' | jq '.'
+
+# Pattern completion via IMAGINE
+curl -X POST http://localhost:7432/api/v1/query/execute \
+  -H "Content-Type: application/json" \
+  -d '{"query": "IMAGINE what=\"Einstein\" CONFIDENCE_THRESHOLD 0.7"}' | jq '.'
+```
+
+**What just happened?**
+
+- `RECALL` - Retrieve memories with filters
+- `SPREAD` - Activate related memories through graph propagation
+- `IMAGINE` - Pattern completion using query syntax
+- Supports: `CONSOLIDATE`, `COMPLETE`, and more operations
 
 ### Explore the API
 

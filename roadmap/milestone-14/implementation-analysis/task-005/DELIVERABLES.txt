@@ -1,0 +1,281 @@
+================================================================================
+TASK 005 REPLICATION PROTOCOL - COMPLETE IMPLEMENTATION ANALYSIS
+================================================================================
+
+DELIVERABLE DOCUMENTS:
+  1. README_TASK_005.md (9.6 KB)
+     Navigation guide, quick summary, implementation path
+     
+  2. TASK_005_IMPLEMENTATION_ANALYSIS.md (28 KB, 913 lines)
+     Primary detailed guide with 14 comprehensive sections
+     
+  3. TASK_005_FILE_LOCATIONS.md (9.0 KB, 280 lines)
+     Quick reference with exact file paths and line numbers
+
+All files located in: /Users/jordan/Workspace/orchard9/engram/
+
+================================================================================
+ANALYSIS COVERAGE:
+================================================================================
+
+WAL IMPLEMENTATION ANALYSIS
+  - File: engram-core/src/storage/wal.rs (1158 lines)
+  - Header definition: lines 29-49
+  - Entry types: lines 286-315
+  - WalWriter struct: lines 464-492
+  - Critical methods: write_sync (645-678), writer_loop (681-750), read_wal_file (1115-1157)
+  - Serialization: Little-endian format with CRC32C checksums
+  - Sequence tracking: AtomicU64 for lock-free operation
+
+STORAGE LAYER ARCHITECTURE
+  - Entry point: MemorySpacePersistence (persistence.rs:44-97)
+  - Metrics: Atomic counters, no overhead, lock-free
+  - Config: StorageConfig with hot/warm/cold tier capacities
+  - Error handling: Cognitive error pattern with context/suggestion/example
+  - Space isolation: MemorySpaceId for multi-tenancy
+
+gRPC/ASYNC PATTERNS
+  - Service file: proto/engram/v1/service.proto
+  - Memory types: proto/engram/v1/memory.proto
+  - Streaming patterns: ObservationRequest/Response from Milestone 11
+  - Session tracking: session_id, sequence_number (reusable pattern)
+  - Async runtime: Tokio with RwLock, DashMap, Arc cloning
+
+METRICS INTEGRATION
+  - Pattern: engram_<subsystem>_<metric>_<unit>
+  - Multi-tenant support: with_space() helper function
+  - Atomic recording: No overhead from metrics
+  - New replication metrics: lag_ms, batches_sent_total, replica_status
+
+ERROR HANDLING
+  - StorageError: Io, CorruptionDetected, ChecksumMismatch, WalFailed, Configuration
+  - MemorySpaceError: NotFound, Persistence, DataRootUnavailable, StoreInit
+  - ReplicationError: UnsupportedVersion, EmptyBatch, ChecksumMismatch, ConnectionTimeout
+  - Pattern: thiserror with #[error] attributes and context messages
+
+ASYNC PATTERNS
+  - Thread spawning: std::thread::Builder for background workers
+  - Arc cloning: Cheap ownership sharing
+  - DashMap: Lock-free concurrent hashmaps
+  - RwLock: For read-heavy patterns (lag monitoring)
+  - Tokio timeout: tokio::time::timeout with futures::future::join_all
+  - Tracing: Structured logging with debug/error/info/warn
+
+================================================================================
+IMPLEMENTATION SPECIFICATIONS:
+================================================================================
+
+NEW FILES TO CREATE (12):
+  1. engram-core/src/cluster/mod.rs (50 lines) - Module root
+  2. engram-core/src/cluster/replication/mod.rs (30 lines) - Submodule root
+  3. engram-core/src/cluster/replication/error.rs (50 lines) - Error types
+  4. engram-core/src/cluster/replication/wal_format.rs (250 lines) - Batch headers
+  5. engram-core/src/cluster/replication/state.rs (200 lines) - State tracking
+  6. engram-core/src/cluster/replication/connection_pool.rs (150 lines) - TCP pool
+  7. engram-core/src/cluster/replication/wal_shipper.rs (180 lines) - Batch shipping
+  8. engram-core/src/cluster/replication/lag_monitor.rs (80 lines) - Lag tracking
+  9. engram-core/src/cluster/replication/receiver.rs (150 lines) - Replica receiver
+  10. engram-core/src/cluster/replication/catchup.rs (120 lines) - Catchup logic
+  11. engram-core/src/cluster/replication/promotion.rs (100 lines) - Promotion logic
+  12. engram-core/tests/replication_integration.rs (300+ lines) - Integration tests
+
+Total new code: ~1,500+ lines
+
+EXISTING FILES TO MODIFY (5):
+  1. engram-core/src/storage/wal.rs - Add replication shipper hook
+  2. engram-core/src/storage/mod.rs - Re-export replication types, add metrics
+  3. engram-core/src/metrics/mod.rs - Add replication metrics constants
+  4. engram-core/src/lib.rs - Add pub mod cluster;
+  5. engram-core/Cargo.toml - Add socket2 = "0.5" dependency
+
+Total modifications: ~100 lines
+
+DEPENDENCIES:
+  New: socket2 = "0.5" (TCP keepalive)
+  Existing: tokio, dashmap, bincode, crc32c, uuid, thiserror, tracing, futures
+
+================================================================================
+IMPLEMENTATION SEQUENCE:
+================================================================================
+
+Phase 1 (Day 1) - Foundation:
+  - Create cluster module structure
+  - Implement ReplicationError type
+  - Implement ReplicationBatchHeader and ReplicationBatch
+  - Unit tests for serialization
+
+Phase 2 (Day 1-2) - State Management:
+  - Implement ReplicationState with DashMap
+  - Implement ReplicaProgress and ReplicationCoordinator
+  - Unit tests for state tracking
+
+Phase 3 (Day 2-3) - Async Communication:
+  - Implement ReplicaConnectionPool with Tokio
+  - Implement WalShipper with batching
+  - Integrate with WalWriter hooks
+  - Unit tests for connection lifecycle
+
+Phase 4 (Day 3-4) - Monitoring & Recovery:
+  - Implement LagMonitor with metrics
+  - Implement ReplicationReceiver
+  - Implement Catchup mechanism
+  - Implement Promotion logic
+  - Add replication metrics
+
+Phase 5 - Testing & Integration:
+  - Integration tests (primary-to-replica flow)
+  - Integration tests (lag recovery)
+  - `make quality` to fix clippy warnings
+  - `./scripts/engram_diagnostics.sh` to verify
+
+================================================================================
+INTEGRATION POINTS (EXACT LINE NUMBERS):
+================================================================================
+
+Component                Location           File               Line(s)
+----------                --------           ----               -------
+WAL sequence tracking     write_sync()       wal.rs             645-678
+WAL batch completion      writer_loop()      wal.rs             681-750
+WAL entry fetching        WalReader          wal.rs             1081-1112
+Metrics recording         StorageMetrics     storage/mod.rs     335-416
+Space isolation           MemorySpaceId      types.rs           144-150
+Error propagation         StorageError       storage/mod.rs     241-329
+Persistence access        wal_writer()       persistence.rs     105-107
+Storage metrics           storage_metrics()  persistence.rs     110-112
+Metric constants          pattern            metrics/mod.rs     42-106
+Label helper              with_space()       metrics/mod.rs     131-135
+
+================================================================================
+KEY CONSTANTS:
+================================================================================
+
+WAL Constants:
+  - HEADER_SIZE: 64 bytes (cache-line aligned)
+  - WAL_MAGIC: 0xDEAD_BEEF
+  - Max batch size: 1000 entries
+  - Max batch delay: 10ms
+  - Default fsync mode: FsyncMode::PerBatch
+
+Replication Defaults:
+  - Replica count: 2
+  - Batch size: 100 entries
+  - Batch delay: 10ms
+  - Lag alert threshold: 1000ms
+  - Lag degraded threshold: 5000ms
+  - Connection timeout: 5s
+  - Keepalive interval: 10s
+  - Max retries: 3
+
+Replica Status Values:
+  - Healthy: Caught up (lag = 0)
+  - Lagging: lag < 1000ms
+  - Degraded: lag >= 1000ms
+  - Failed: 3+ consecutive failures
+
+================================================================================
+PERFORMANCE TARGETS:
+================================================================================
+
+Write Latency (P99):        <10ms (primary WAL fsync only)
+Replication Throughput:     100K entries/sec per replica
+Network Bandwidth:          <100MB/sec per replica
+Connection Pool Overhead:   <1ms per batch
+Lag Monitoring Overhead:    <0.01% CPU
+Memory Overhead:            <100MB per replica stream
+
+================================================================================
+HOW TO USE THESE DOCUMENTS:
+================================================================================
+
+Quick Start (15 minutes):
+  1. Read: README_TASK_005.md (full overview)
+  2. Skim: TASK_005_FILE_LOCATIONS.md (understand structure)
+
+Deep Dive (60 minutes):
+  3. Read: TASK_005_IMPLEMENTATION_ANALYSIS.md sections 1-6
+  4. Study: Key files listed in TASK_005_FILE_LOCATIONS.md
+
+Planning (30 minutes):
+  5. Read: TASK_005_IMPLEMENTATION_ANALYSIS.md sections 7-10
+  6. Create: Implementation plan using dependency graph
+
+Implementation (4 days):
+  7. Reference: TASK_005_FILE_LOCATIONS.md for exact locations
+  8. Follow: Implementation phases and checklist
+  9. Test: Unit and integration tests
+  10. Quality: make quality and engram_diagnostics.sh
+
+Detailed Specifications:
+  - Original: roadmap/milestone-14/005_replication_protocol_expansion.md
+  - Lines 100-154: ReplicationBatchHeader spec
+  - Lines 256-285: ReplicationBatch spec
+  - Lines 386-506: ReplicationState spec
+  - Lines 545-637: ReplicationCoordinator spec
+  - Lines 652-836: WalShipper spec
+  - Lines 851-1041: ReplicaConnectionPool spec
+  - Lines 1054-1106: LagMonitor spec
+  - Lines 1116-1150: ReplicationError spec
+  - Lines 1179-1241: Unit tests spec
+  - Lines 1247-1310: Integration tests spec
+
+================================================================================
+DOCUMENT STATISTICS:
+================================================================================
+
+Total Deliverables:       3 documents
+Total Size:               46.6 KB
+Total Lines:              1,193 lines of analysis
+Line References:          1,500+ to actual codebase
+Code Examples:            50+ patterns to follow
+Integration Points:       13 exact code locations
+File Specifications:      12 new + 5 modified files
+Metric Definitions:       10+ replication metrics
+
+================================================================================
+ARCHITECTURE PATTERNS TO FOLLOW:
+================================================================================
+
+1. Lock-Free Structures
+   - Use DashMap<K, V> for concurrent access without locks
+   - Use AtomicU64 for counters with Ordering::Relaxed
+   
+2. Async-Compatible Concurrency
+   - Arc<RwLock<T>> for async-friendly mutable state
+   - Arc::clone() for cheap ownership sharing
+   
+3. Error Handling
+   - Use thiserror with #[error("message")] macros
+   - Include context + suggestion + example
+   
+4. Metrics Recording
+   - Atomic operations, never wait on metrics
+   - Label support: (label_key, label_value) tuples
+   
+5. Testing
+   - Unit tests inline in modules
+   - Integration tests in tests/ directory
+   - Test patterns from task specification
+   
+6. WAL Integration
+   - Hook into write_sync() after fsync
+   - Hook into writer_loop() after batch write
+   - Use WalReader::scan_all() for entry retrieval
+
+================================================================================
+NEXT STEPS:
+================================================================================
+
+1. Read README_TASK_005.md (start here)
+2. Read TASK_005_IMPLEMENTATION_ANALYSIS.md (detailed guide)
+3. Reference TASK_005_FILE_LOCATIONS.md (during implementation)
+4. Create cluster module structure
+5. Implement error types and data structures
+6. Implement connection pool and WAL shipper
+7. Add metrics and hooks
+8. Write comprehensive tests
+9. Run make quality and fix all warnings
+10. Verify with engram_diagnostics.sh
+
+All documentation ready in: /Users/jordan/Workspace/orchard9/engram/
+
+================================================================================

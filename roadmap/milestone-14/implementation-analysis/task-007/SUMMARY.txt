@@ -1,0 +1,111 @@
+ENGRAM TASK 007: GOSSIP PROTOCOL FOR CONSOLIDATION STATE
+Implementation Analysis Complete - Very Thorough Review
+=====================================================
+
+ANALYSIS DATE: 2025-11-01
+REPORT LOCATION: /Users/jordan/Workspace/orchard9/engram/TASK_007_IMPLEMENTATION_ANALYSIS.md
+
+KEY FINDINGS:
+=============
+
+1. CONSOLIDATION STATE IS WELL-STRUCTURED
+   - SemanticPattern: /engram-core/src/completion/consolidation.rs:45-65
+   - ConsolidationSnapshot: /engram-core/src/completion/consolidation.rs:104-113
+   - ConsolidationService trait: /engram-core/src/consolidation/service.rs:54-66
+   - Implementation: /engram-core/src/consolidation/service.rs:69-83
+
+2. CONSOLIDATION TRIGGERS ARE IDENTIFIED
+   - Primary hook: /engram-core/src/completion/scheduler.rs:206-216
+   - Consolidation runs every 300 seconds (default)
+   - Minimum 10 episodes required
+   - Snapshot contains all current patterns and stats
+
+3. HASH FUNCTIONS ALREADY IN USE
+   - Pattern hashing: /engram-core/src/consolidation/pattern_detector.rs:499-506
+   - Uses std::collections::hash_map::DefaultHasher
+   - Pattern IDs are deterministic (hash of sorted source episodes)
+   - Follow this pattern for Merkle tree implementation
+
+4. SWIM GOSSIP INFRASTRUCTURE (Task 001)
+   - Status: PENDING (spec complete, not implemented)
+   - Task 001 file: /roadmap/milestone-14/001_cluster_membership_swim_pending.md
+   - Ready to piggyback consolidation gossip on SWIM messages
+   - Approach: Attach Merkle root to PING messages as metadata
+
+5. CLUSTER MODULE DOESN'T EXIST YET
+   - Must create: /engram-core/src/cluster/
+   - Subdirectories: cluster/gossip/ and cluster/conflict/
+   - 8 files to create total (see full report)
+
+6. CRITICAL INTEGRATION POINT
+   - After consolidation snapshot generation (scheduler.rs:216)
+   - Add hook: store.consolidation_service().update_merkle_tree(&snapshot)
+   - Or: pass gossiper to service and auto-update on snapshot changes
+
+7. HASH FUNCTION DECISION
+   - Recommendation: SHA-256 from 'sha2' crate (v0.10)
+   - Currently not in dependencies - must add
+   - Use for Merkle tree node hashing
+   - Hash pattern metadata (id, confidence, timestamp), not embedding
+
+8. SEMANTIC PATTERN STRUCTURE
+   - id: String (deterministic, based on source episodes)
+   - embedding: [f32; 768] (DON'T hash - too expensive, hash metadata only)
+   - source_episodes: Vec<String>
+   - strength: f32
+   - schema_confidence: Confidence
+   - last_consolidated: DateTime<Utc>
+
+9. EXACT FILE LOCATIONS (ALL WITH LINE NUMBERS)
+   ✓ SemanticPattern definition: consolidation.rs:45-65
+   ✓ ConsolidationSnapshot: consolidation.rs:104-113
+   ✓ ConsolidationService trait: service.rs:54-66
+   ✓ Consolidation trigger: scheduler.rs:206-216
+   ✓ Pattern hashing example: pattern_detector.rs:499-506
+   ✓ MemoryStore.consolidation_service: store.rs:7-12
+   ✓ Consolidation interval config: scheduler.rs:124-126
+   ✓ State storage: service.rs:69-83 (InMemoryConsolidationService)
+
+10. MERKLE TREE DESIGN
+    - Depth: 12 (supports 4096 leaf slots)
+    - Pattern to leaf: hash(pattern_id) % 4096
+    - Leaf hash: SHA-256(sorted patterns in leaf)
+    - Internal nodes: SHA-256(left_hash || right_hash)
+    - Root: fingerprint of entire consolidation state
+    - Incremental updates: O(log N) recomputation on pattern change
+
+IMPLEMENTATION READY:
+====================
+
+The codebase is well-structured for Task 007 implementation:
+- All consolidation state clearly identified with exact locations
+- Consolidation triggers clearly marked
+- Hash function patterns established
+- SWIM infrastructure spec ready (Task 001)
+- Integration approach clear and non-invasive
+
+DELIVERABLE:
+============
+Report file: TASK_007_IMPLEMENTATION_ANALYSIS.md (726 lines)
+Contains:
+- Executive summary
+- Exact file paths (all with line numbers)
+- Code structure and data flow
+- Integration points and hooks
+- Configuration parameters
+- Testing strategy
+- Performance targets
+- Critical decisions
+- Complete acceptance criteria mapping
+
+NEXT STEPS:
+===========
+1. Review TASK_007_IMPLEMENTATION_ANALYSIS.md
+2. Implement cluster module (8 files)
+3. Add sha2 dependency to Cargo.toml
+4. Hook gossiper to consolidation scheduler
+5. Implement Merkle tree per spec
+6. Implement conflict resolution (Task 008)
+7. Implement gossip exchange protocol
+8. Run tests (unit, property, integration)
+

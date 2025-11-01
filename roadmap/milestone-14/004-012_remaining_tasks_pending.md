@@ -2,23 +2,21 @@
 
 ## Task 004: Memory Space Partitioning and Assignment (3 days)
 
-**Objective**: Implement primary node assignment for memory spaces with replica placement.
+**See comprehensive specification in**: `roadmap/milestone-14/004_memory_space_partitioning_pending.md`
 
-**Key Components**:
-- `SpaceAssignment` struct mapping spaces to primary+replicas
-- Consistent hashing for even distribution
-- Rack-aware/zone-aware placement strategies
-- Automatic rebalancing on node join/leave
+**Summary**: Implement Jump Consistent Hash-based memory space assignment to cluster nodes with topology-aware replica placement using modified Rendezvous hashing. Includes rebalancing coordinator for zero-downtime migration when nodes join/leave.
 
-**Files**:
-- `engram-core/src/cluster/space_assignment.rs`
-- `engram-core/src/cluster/placement.rs`
-- `engram-core/src/cluster/rebalancing.rs`
+**Key Technical Decisions**:
+- Jump Hash for primary assignment (O(ln N), zero memory overhead, perfect distribution)
+- Rendezvous hash with topology penalties for replica selection
+- HDFS-style rack awareness: max 1 replica per rack
+- Rebalancing phases: add replicas → migrate primaries → remove old replicas
 
 **Acceptance Criteria**:
 - Even distribution across nodes (max 20% imbalance)
 - No space downtime during rebalancing
 - Replica placement respects topology constraints
+- Deterministic assignment for same space ID
 
 ---
 
@@ -85,36 +83,22 @@
 
 ## Task 007: Gossip Protocol for Consolidation State (4 days)
 
-**Objective**: Eventually consistent consolidation across nodes using anti-entropy gossip.
+**See detailed specification**: `roadmap/milestone-14/007_gossip_consolidation_state_pending.md`
+
+**Objective**: Eventually consistent consolidation across nodes using anti-entropy gossip with Merkle tree fingerprinting.
 
 **Key Components**:
-- Merkle tree for consolidation state fingerprinting
-- Gossip protocol exchanges merkle roots
-- Delta synchronization when roots differ
-- Conflict resolution via confidence voting
-
-**Algorithm**:
-```
-Every gossip interval (60s):
-1. Select random peer
-2. Exchange merkle roots for consolidation state
-3. If roots differ:
-   - Identify divergent subtrees
-   - Exchange only different data
-   - Merge using conflict resolution
-4. Update local state
-```
-
-**Files**:
-- `engram-core/src/cluster/gossip/consolidation.rs`
-- `engram-core/src/cluster/gossip/merkle_tree.rs`
-- `engram-core/src/cluster/gossip/conflict_resolution.rs`
+- Merkle tree for consolidation state fingerprinting (SHA-256, depth 12)
+- Anti-entropy gossip protocol (exchanges merkle roots every 60s)
+- Delta synchronization when roots differ (bandwidth efficient)
+- Conflict resolution via confidence voting and vector clocks
+- Integration with SWIM gossip transport layer
 
 **Acceptance Criteria**:
-- Convergence within 10 gossip rounds
-- Bandwidth efficient (delta sync only)
-- Deterministic conflict resolution
-- No lost consolidation patterns
+- Convergence within 10 gossip rounds (<10 minutes)
+- Bandwidth efficient (<5KB/s per node average)
+- Deterministic conflict resolution (property-tested)
+- No lost consolidation patterns (merge all divergent patterns)
 
 ---
 
