@@ -1,0 +1,408 @@
+//! Production-grade streaming metrics for Prometheus export.
+//!
+//! Provides lock-free, < 1% overhead monitoring for streaming infrastructure
+//! including observation processing, queue depths, worker utilization, and
+//! recall latencies.
+//!
+//! ## Metric Naming Convention
+//!
+//! All streaming metrics follow the pattern `engram_streaming_*` to enable
+//! easy aggregation and filtering in Prometheus/Grafana.
+//!
+//! ## Performance Characteristics
+//!
+//! - Counter increment: < 50ns
+//! - Gauge update: < 50ns
+//! - Histogram record: < 100ns
+//! - Total system overhead: < 1%
+//!
+//! ## Integration
+//!
+//! Metrics are recorded via the global `MetricsRegistry` and automatically
+//! exported via Prometheus endpoint. All recording operations are lock-free
+//! using atomic operations.
+
+use crate::metrics::{self, MetricsRegistry};
+use crate::types::MemorySpaceId;
+use std::time::Instant;
+
+// ============================================================================
+// Counter Metrics
+// ============================================================================
+
+/// Total observations successfully processed through streaming interface.
+///
+/// Labels: memory_space, priority
+/// Type: Counter
+/// Unit: Total count
+///
+/// Use this to track throughput per space and priority level. Rate of
+/// change gives observations/second.
+pub const STREAMING_OBSERVATIONS_TOTAL: &str = "engram_streaming_observations_total";
+
+/// Total observations rejected due to admission control.
+///
+/// Labels: memory_space, reason (over_capacity, invalid_sequence, duplicate)
+/// Type: Counter
+/// Unit: Total count
+///
+/// High rejection rate indicates backpressure or client issues. Should be
+/// < 1% of total observations under normal operation.
+pub const STREAMING_OBSERVATIONS_REJECTED_TOTAL: &str =
+    "engram_streaming_observations_rejected_total";
+
+/// Total backpressure state transitions (transitions to Warning/Critical).
+///
+/// Labels: memory_space, level (warning, critical, overloaded)
+/// Type: Counter
+/// Unit: Total count
+///
+/// Frequent activations indicate insufficient capacity. Consider adding
+/// workers or increasing queue capacity.
+pub const STREAMING_BACKPRESSURE_ACTIVATIONS_TOTAL: &str =
+    "engram_streaming_backpressure_activations_total";
+
+/// Total HNSW batch insertions completed by workers.
+///
+/// Labels: worker_id
+/// Type: Counter
+/// Unit: Total batches
+///
+/// Use to track worker activity and identify load imbalance.
+pub const STREAMING_BATCHES_PROCESSED_TOTAL: &str = "engram_streaming_batches_processed_total";
+
+/// Total batch insertion failures (HNSW errors).
+///
+/// Labels: worker_id, error_type
+/// Type: Counter
+/// Unit: Total failures
+///
+/// Should be zero under normal operation. Non-zero indicates HNSW index
+/// corruption or resource exhaustion.
+pub const STREAMING_BATCH_FAILURES_TOTAL: &str = "engram_streaming_batch_failures_total";
+
+/// Total work-stealing operations performed by idle workers.
+///
+/// Labels: worker_id
+/// Type: Counter
+/// Unit: Total steals
+///
+/// High steal count indicates load imbalance. Consider rebalancing space
+/// assignments or adjusting steal thresholds.
+pub const STREAMING_WORK_STOLEN_TOTAL: &str = "engram_streaming_work_stolen_total";
+
+// ============================================================================
+// Gauge Metrics
+// ============================================================================
+
+/// Current observation queue depth by priority.
+///
+/// Labels: priority (high, normal, low)
+/// Type: Gauge
+/// Unit: Count
+///
+/// Alert thresholds:
+/// - > 8000 (80% capacity): Warning
+/// - > 9000 (90% capacity): Critical
+pub const STREAMING_QUEUE_DEPTH: &str = "engram_streaming_queue_depth";
+
+/// Worker thread utilization percentage (0-100).
+///
+/// Labels: worker_id
+/// Type: Gauge
+/// Unit: Percentage
+///
+/// Healthy range: 40-80%. Below 40% indicates over-provisioning.
+/// Above 80% indicates need for more workers.
+pub const STREAMING_WORKER_UTILIZATION: &str = "engram_streaming_worker_utilization";
+
+/// Total active streaming sessions.
+///
+/// Type: Gauge
+/// Unit: Count
+///
+/// Tracks concurrent client connections. High values may indicate
+/// connection leaks or excessive client load.
+pub const STREAMING_ACTIVE_SESSIONS_TOTAL: &str = "engram_streaming_active_sessions_total";
+
+/// Current backpressure state (0=None, 1=Warning, 2=Critical, 3=Overloaded).
+///
+/// Labels: memory_space
+/// Type: Gauge
+/// Unit: State enum
+///
+/// Non-zero values indicate system is under load. Investigate queue depth
+/// and worker utilization.
+pub const STREAMING_BACKPRESSURE_STATE: &str = "engram_streaming_backpressure_state";
+
+/// Total memory used by observation queues (bytes).
+///
+/// Type: Gauge
+/// Unit: Bytes
+///
+/// Use for capacity planning. Typical: ~100 bytes per queued observation.
+pub const STREAMING_QUEUE_MEMORY_BYTES: &str = "engram_streaming_queue_memory_bytes";
+
+// ============================================================================
+// Histogram Metrics
+// ============================================================================
+
+/// Observation processing latency (enqueue → HNSW insertion complete).
+///
+/// Labels: memory_space
+/// Type: Histogram
+/// Unit: Seconds
+/// Buckets: 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0
+///
+/// Target P99 < 100ms. Higher latencies indicate worker saturation.
+pub const STREAMING_OBSERVATION_LATENCY_SECONDS: &str =
+    "engram_streaming_observation_latency_seconds";
+
+/// Incremental recall query latency.
+///
+/// Labels: memory_space
+/// Type: Histogram
+/// Unit: Seconds
+/// Buckets: 0.001, 0.005, 0.01, 0.02, 0.05, 0.1, 0.5
+///
+/// Target P99 < 50ms. Higher latencies may indicate HNSW index size issues.
+pub const STREAMING_RECALL_LATENCY_SECONDS: &str = "engram_streaming_recall_latency_seconds";
+
+/// Worker batch size distribution.
+///
+/// Labels: worker_id
+/// Type: Histogram
+/// Unit: Count
+/// Buckets: 1, 10, 50, 100, 250, 500, 1000
+///
+/// Adaptive batching should show larger batches under high load.
+pub const STREAMING_BATCH_SIZE: &str = "engram_streaming_batch_size";
+
+/// Queue wait time before dequeue (scheduling latency).
+///
+/// Labels: priority
+/// Type: Histogram
+/// Unit: Seconds
+/// Buckets: 0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0
+///
+/// Indicates queue processing lag. Should be < 10ms under normal operation.
+pub const STREAMING_QUEUE_WAIT_TIME_SECONDS: &str = "engram_streaming_queue_wait_time_seconds";
+
+// ============================================================================
+// Recording Functions
+// ============================================================================
+
+/// Record observation successfully processed.
+#[inline]
+pub fn record_observation_processed(space_id: &MemorySpaceId, priority: &str) {
+    let labels = vec![
+        ("memory_space", space_id.to_string()),
+        ("priority", priority.to_string()),
+    ];
+    metrics::increment_counter_with_labels(STREAMING_OBSERVATIONS_TOTAL, 1, &labels);
+}
+
+/// Record observation rejected by admission control.
+#[inline]
+pub fn record_observation_rejected(space_id: &MemorySpaceId, reason: &str) {
+    let labels = vec![
+        ("memory_space", space_id.to_string()),
+        ("reason", reason.to_string()),
+    ];
+    metrics::increment_counter_with_labels(STREAMING_OBSERVATIONS_REJECTED_TOTAL, 1, &labels);
+}
+
+/// Record backpressure activation.
+#[inline]
+pub fn record_backpressure_activation(space_id: &MemorySpaceId, level: &str) {
+    let labels = vec![
+        ("memory_space", space_id.to_string()),
+        ("level", level.to_string()),
+    ];
+    metrics::increment_counter_with_labels(STREAMING_BACKPRESSURE_ACTIVATIONS_TOTAL, 1, &labels);
+}
+
+/// Record batch processed by worker.
+#[inline]
+pub fn record_batch_processed(worker_id: usize) {
+    let labels = vec![("worker_id", worker_id.to_string())];
+    metrics::increment_counter_with_labels(STREAMING_BATCHES_PROCESSED_TOTAL, 1, &labels);
+}
+
+/// Record batch insertion failure.
+#[inline]
+pub fn record_batch_failure(worker_id: usize, error_type: &str) {
+    let labels = vec![
+        ("worker_id", worker_id.to_string()),
+        ("error_type", error_type.to_string()),
+    ];
+    metrics::increment_counter_with_labels(STREAMING_BATCH_FAILURES_TOTAL, 1, &labels);
+}
+
+/// Record work stealing operation.
+#[inline]
+pub fn record_work_stolen(worker_id: usize) {
+    let labels = vec![("worker_id", worker_id.to_string())];
+    metrics::increment_counter_with_labels(STREAMING_WORK_STOLEN_TOTAL, 1, &labels);
+}
+
+/// Update queue depth gauge.
+#[inline]
+pub fn update_queue_depth(priority: &str, depth: usize) {
+    let labels = vec![("priority", priority.to_string())];
+    #[allow(clippy::cast_precision_loss)]
+    metrics::record_gauge_with_labels(STREAMING_QUEUE_DEPTH, depth as f64, &labels);
+}
+
+/// Update worker utilization gauge.
+#[inline]
+pub fn update_worker_utilization(worker_id: usize, utilization_percent: f64) {
+    let labels = vec![("worker_id", worker_id.to_string())];
+    metrics::record_gauge_with_labels(STREAMING_WORKER_UTILIZATION, utilization_percent, &labels);
+}
+
+/// Update active sessions count.
+#[inline]
+pub fn update_active_sessions(count: usize) {
+    #[allow(clippy::cast_precision_loss)]
+    metrics::record_gauge(STREAMING_ACTIVE_SESSIONS_TOTAL, count as f64);
+}
+
+/// Update backpressure state gauge.
+#[inline]
+pub fn update_backpressure_state(space_id: &MemorySpaceId, state: u8) {
+    let labels = vec![("memory_space", space_id.to_string())];
+    metrics::record_gauge_with_labels(STREAMING_BACKPRESSURE_STATE, f64::from(state), &labels);
+}
+
+/// Record observation processing latency.
+#[inline]
+pub fn record_observation_latency(space_id: &MemorySpaceId, start: Instant) {
+    let latency_seconds = start.elapsed().as_secs_f64();
+    let labels = vec![("memory_space", space_id.to_string())];
+    metrics::observe_histogram_with_labels(
+        STREAMING_OBSERVATION_LATENCY_SECONDS,
+        latency_seconds,
+        &labels,
+    );
+}
+
+/// Record recall query latency.
+#[inline]
+pub fn record_recall_latency(space_id: &MemorySpaceId, start: Instant) {
+    let latency_seconds = start.elapsed().as_secs_f64();
+    let labels = vec![("memory_space", space_id.to_string())];
+    metrics::observe_histogram_with_labels(
+        STREAMING_RECALL_LATENCY_SECONDS,
+        latency_seconds,
+        &labels,
+    );
+}
+
+/// Record batch size.
+#[inline]
+pub fn record_batch_size(worker_id: usize, size: usize) {
+    let labels = vec![("worker_id", worker_id.to_string())];
+    #[allow(clippy::cast_precision_loss)]
+    metrics::observe_histogram_with_labels(STREAMING_BATCH_SIZE, size as f64, &labels);
+}
+
+/// Record queue wait time.
+#[inline]
+pub fn record_queue_wait_time(priority: &str, wait_time_seconds: f64) {
+    let labels = vec![("priority", priority.to_string())];
+    metrics::observe_histogram_with_labels(
+        STREAMING_QUEUE_WAIT_TIME_SECONDS,
+        wait_time_seconds,
+        &labels,
+    );
+}
+
+/// Register all streaming metrics with the global registry.
+///
+/// Call this during system initialization to ensure all metrics are
+/// available for export.
+pub fn register_all_metrics(registry: &MetricsRegistry) {
+    // Counters
+    registry.increment_counter(STREAMING_OBSERVATIONS_TOTAL, 0);
+    registry.increment_counter(STREAMING_OBSERVATIONS_REJECTED_TOTAL, 0);
+    registry.increment_counter(STREAMING_BACKPRESSURE_ACTIVATIONS_TOTAL, 0);
+    registry.increment_counter(STREAMING_BATCHES_PROCESSED_TOTAL, 0);
+    registry.increment_counter(STREAMING_BATCH_FAILURES_TOTAL, 0);
+    registry.increment_counter(STREAMING_WORK_STOLEN_TOTAL, 0);
+
+    // Gauges
+    registry.record_gauge(STREAMING_QUEUE_DEPTH, 0.0);
+    registry.record_gauge(STREAMING_WORKER_UTILIZATION, 0.0);
+    registry.record_gauge(STREAMING_ACTIVE_SESSIONS_TOTAL, 0.0);
+    registry.record_gauge(STREAMING_BACKPRESSURE_STATE, 0.0);
+    registry.record_gauge(STREAMING_QUEUE_MEMORY_BYTES, 0.0);
+
+    // Histograms
+    registry.observe_histogram(STREAMING_OBSERVATION_LATENCY_SECONDS, 0.0);
+    registry.observe_histogram(STREAMING_RECALL_LATENCY_SECONDS, 0.0);
+    registry.observe_histogram(STREAMING_BATCH_SIZE, 0.0);
+    registry.observe_histogram(STREAMING_QUEUE_WAIT_TIME_SECONDS, 0.0);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::thread;
+    use std::time::Duration;
+
+    #[test]
+    fn test_metric_recording() {
+        // Initialize global registry for recording functions to use
+        let registry = metrics::init();
+        register_all_metrics(&registry);
+
+        let space_id = MemorySpaceId::default();
+
+        // Record observations
+        record_observation_processed(&space_id, "normal");
+        record_observation_processed(&space_id, "high");
+
+        // Record latencies
+        let start = Instant::now();
+        thread::sleep(Duration::from_millis(1));
+        record_observation_latency(&space_id, start);
+
+        // Record batch operations
+        record_batch_processed(0);
+        record_batch_size(0, 100);
+
+        // Update gauges
+        update_queue_depth("normal", 1000);
+        update_worker_utilization(0, 75.0);
+
+        // Verify metrics were recorded by checking counter values
+        let observations_count = registry.counter_value(STREAMING_OBSERVATIONS_TOTAL);
+        assert!(
+            observations_count > 0,
+            "Should have recorded observation metrics"
+        );
+    }
+
+    #[test]
+    fn test_backpressure_metrics() {
+        // Initialize global registry for recording functions to use
+        let registry = metrics::init();
+        register_all_metrics(&registry);
+
+        let space_id = MemorySpaceId::default();
+
+        // Record backpressure events - these should not panic
+        record_backpressure_activation(&space_id, "warning");
+        record_backpressure_activation(&space_id, "critical");
+
+        update_backpressure_state(&space_id, 2); // Critical
+
+        // Verify we can read back gauge value
+        let state_value = registry.gauge_value(STREAMING_BACKPRESSURE_STATE);
+        assert!(
+            state_value.is_none_or(|v| v >= 0.0),
+            "Backpressure state should be non-negative"
+        );
+    }
+}

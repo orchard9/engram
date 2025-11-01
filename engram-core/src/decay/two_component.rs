@@ -179,7 +179,7 @@ impl TwoComponentModel {
         // Effort multiplier: Scale effort benefit to match empirical spacing effect (20-40% improvement)
         // Empirical data from Cepeda et al. (2006) shows distributed practice produces
         // 20-40% better retention than massed practice
-        let effort_multiplier = 1.0 + (retrieval_effort - 1.0) * 0.8; // Increased from 0.5 to match empirical data
+        let effort_multiplier = 1.0 + (retrieval_effort - 1.0) * 0.9; // Tuned to match empirical spacing effect
         let stability_gain = base_stability_gain * effort_multiplier;
 
         self.stability += stability_gain;

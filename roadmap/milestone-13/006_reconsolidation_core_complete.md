@@ -1,18 +1,13 @@
-# Task 006: Reconsolidation Engine Core (CORRECTED)
+# Task 006: Reconsolidation Engine Core
 
 **Status:** Pending
 **Priority:** P0 (Critical Path)
-**Estimated Effort:** 4 days (extended from 3 days for corrections)
+**Estimated Effort:** 3 days
 **Dependencies:** None (independent cognitive system)
 
 ## Objective
 
 Implement memory reconsolidation engine with exact boundary conditions from Nader et al. (2000). Memories become labile (modifiable) during 1-6 hour window post-recall, allowing updates before re-stabilization. Boundary conditions must be implemented exactly, not approximately.
-
-**CRITICAL CORRECTIONS APPLIED:**
-1. Plasticity function: linear → inverted-U (protein synthesis kinetics)
-2. Add modification type distinction (Update/Corruption/Replacement)
-3. Peak plasticity at 3-4 hours post-recall (not start of window)
 
 ## Theoretical Foundation
 
@@ -25,14 +20,6 @@ Memories undergo reconsolidation when:
 
 **Critical Insight:**
 This is NOT gradual decay. Outside the reconsolidation window, memories are stable and resistant to modification. Inside the window, they exhibit heightened plasticity. Boundary violations must be rejected, not degraded.
-
-**CORRECTED: Plasticity Dynamics (Nader & Einarsson 2010)**
-Protein synthesis shows non-linear kinetics:
-- Rapid rise (0-2h)
-- Plateau at peak (2-4h) - MAXIMUM PLASTICITY
-- Gradual decline (4-6h)
-
-This requires inverted-U function, not linear decrease.
 
 ## Integration Points
 
@@ -51,7 +38,7 @@ This requires inverted-U function, not linear decrease.
 
 ## Detailed Specification
 
-### 1. Reconsolidation Engine (CORRECTED)
+### 1. Reconsolidation Engine
 
 ```rust
 // /engram-core/src/cognitive/reconsolidation/mod.rs
@@ -71,12 +58,6 @@ use std::collections::HashMap;
 /// 2. Minimum memory age: 24 hours (must be consolidated)
 /// 3. Maximum memory age: 365 days (remote memories less plastic)
 /// 4. Requires active recall (not passive re-exposure)
-///
-/// # Plasticity Dynamics (CORRECTED)
-/// Uses inverted-U function matching protein synthesis kinetics:
-/// - Early (1h): Rising plasticity
-/// - Peak (3-4h): Maximum plasticity
-/// - Late (5-6h): Declining plasticity
 pub struct ReconsolidationEngine {
     /// Reconsolidation window start (default: 1 hour = 3600 seconds)
     /// Empirical basis: Nader et al. (2000) protein synthesis window
@@ -92,13 +73,9 @@ pub struct ReconsolidationEngine {
 
     /// Maximum memory age for reconsolidation (default: 365 days)
     /// Very old memories show reduced plasticity (boundary less precise)
-    /// NOTE: This boundary is less precise than others. Remote memories
-    /// show reduced but not absent plasticity. Recommend domain-specific
-    /// tuning (semantic memories may remain plastic longer than episodic).
     max_memory_age: Duration,
 
-    /// Maximum plasticity during reconsolidation window (default: 0.5)
-    /// Applied via inverted-U function peaking at window midpoint
+    /// Plasticity during reconsolidation window (default: 0.5)
     /// 0.0 = no modification allowed, 1.0 = complete replacement
     reconsolidation_plasticity: f32,
 
@@ -212,7 +189,7 @@ impl ReconsolidationEngine {
         // Apply modifications with plasticity modulation
         let modified_episode = self.apply_modifications(
             &recall_event.original_episode,
-            &modifications,
+            modifications,
             window_position
         );
 
@@ -301,9 +278,9 @@ impl ReconsolidationEngine {
 
     /// Compute position within reconsolidation window [0, 1]
     ///
-    /// 0.0 = start of window (1 hour post-recall)
-    /// 0.5 = middle of window (3.5 hours post-recall, near peak plasticity)
-    /// 1.0 = end of window (6 hours post-recall)
+    /// 0.0 = start of window (maximum plasticity)
+    /// 0.5 = middle of window
+    /// 1.0 = end of window (minimum plasticity)
     fn compute_window_position(&self, time_since_recall: Duration) -> f32 {
         let window_duration = self.window_end - self.window_start;
         let offset = time_since_recall - self.window_start;
@@ -316,18 +293,10 @@ impl ReconsolidationEngine {
 
     /// Compute plasticity factor based on window position
     ///
-    /// CORRECTED: Uses inverted-U function matching protein synthesis dynamics
-    /// (Nader & Einarsson 2010 Fig 3)
-    ///
-    /// - Early (position=0.0, 1h): Rising plasticity
-    /// - Peak (position=0.5, 3.5h): Maximum plasticity
-    /// - Late (position=1.0, 6h): Declining plasticity
+    /// Plasticity decreases linearly across window (empirical basis: Lee 2009)
     fn compute_plasticity(&self, window_position: f32) -> f32 {
-        // Inverted-U: peaks at window_position = 0.5 (middle of window)
-        // f(x) = 4x(1-x) gives parabola with maximum at x=0.5
-        let u_curve = 4.0 * window_position * (1.0 - window_position);
-
-        self.reconsolidation_plasticity * u_curve
+        // Linear decrease: max plasticity at start, min at end
+        self.reconsolidation_plasticity * (1.0 - window_position)
     }
 
     /// Apply modifications during reconsolidation window
@@ -337,7 +306,7 @@ impl ReconsolidationEngine {
     fn apply_modifications(
         &self,
         original: &Episode,
-        modifications: &EpisodeModifications,
+        modifications: EpisodeModifications,
         window_position: f32
     ) -> Episode {
         let plasticity = self.compute_plasticity(window_position);
@@ -345,17 +314,17 @@ impl ReconsolidationEngine {
         let mut modified = original.clone();
 
         // Apply field-level modifications weighted by plasticity
-        for (field_name, new_value) in &modifications.field_changes {
+        for (field_name, new_value) in modifications.field_changes {
             // Blend original and new value based on plasticity
             // plasticity = 0.0 → keep original
             // plasticity = 1.0 → full replacement
-            modified.update_field_with_blending(field_name, new_value.clone(), plasticity);
+            modified.update_field_with_blending(&field_name, new_value, plasticity);
         }
 
-        // Update confidence based on modification type (CORRECTED)
+        // Update confidence based on modification extent
         modified.confidence = self.compute_modified_confidence(
             original.confidence,
-            modifications,
+            modifications.modification_extent,
             plasticity
         );
 
@@ -365,53 +334,30 @@ impl ReconsolidationEngine {
             "reconsolidation_plasticity".to_string(),
             plasticity.to_string()
         );
-        modified.metadata.insert(
-            "modification_type".to_string(),
-            format!("{:?}", modifications.modification_type)
-        );
 
         modified
     }
 
-    /// Compute confidence of modified memory (CORRECTED)
+    /// Compute confidence of modified memory
     ///
-    /// Confidence change depends on modification type:
-    /// - Update: Strengthens memory (like rehearsal)
-    /// - Corruption: Reduces confidence
-    /// - Replacement: Resets confidence
+    /// Confidence decreases with extent of modification and plasticity
     fn compute_modified_confidence(
         &self,
         original_confidence: Confidence,
-        modifications: &EpisodeModifications,
+        modification_extent: f32,
         plasticity: f32
     ) -> Confidence {
-        match modifications.modification_type {
-            ModificationType::Update => {
-                // Strengthens memory (retrieval-induced strengthening)
-                // Dudai (2006): Reconsolidation can enhance memory stability
-                let boost = plasticity * 0.1;  // Up to 5% boost at peak plasticity (0.5 * 0.1)
-                let new_value = (original_confidence.value() * (1.0 + boost)).min(1.0);
-                Confidence::new(new_value)
-            }
-            ModificationType::Corruption => {
-                // Reduces confidence proportional to modification extent
-                let reduction = modifications.modification_extent * plasticity * 0.2;
-                let new_value = (original_confidence.value() * (1.0 - reduction)).max(0.1);
-                Confidence::new(new_value)
-            }
-            ModificationType::Replacement => {
-                // Confidence reset to quality of new information
-                // Use modification_extent as proxy for new information quality
-                Confidence::new(modifications.modification_extent.clamp(0.3, 0.8))
-            }
-        }
+        // Reduction proportional to modification extent and plasticity
+        let reduction = modification_extent * plasticity * 0.2; // 20% max reduction
+
+        let new_confidence = original_confidence.value() * (1.0 - reduction);
+
+        Confidence::new(new_confidence.max(0.1)) // Floor at 10%
     }
 
     fn compute_modification_confidence(&self, window_position: f32) -> Confidence {
-        // Higher confidence near peak plasticity (window_position = 0.5)
-        // Use inverted-U curve same as plasticity
-        let u_curve = 4.0 * window_position * (1.0 - window_position);
-        let confidence_value = 0.5 + (u_curve * 0.4); // Range [0.5, 0.9]
+        // Higher confidence at start of window, lower at end
+        let confidence_value = 0.9 - (window_position * 0.4);
         Confidence::new(confidence_value)
     }
 
@@ -430,7 +376,7 @@ impl Default for ReconsolidationEngine {
     }
 }
 
-/// Episode modifications to apply during reconsolidation (CORRECTED)
+/// Episode modifications to apply during reconsolidation
 pub struct EpisodeModifications {
     /// Field-level changes: field_name -> new_value
     pub field_changes: HashMap<String, String>,
@@ -438,25 +384,6 @@ pub struct EpisodeModifications {
     /// Overall modification extent [0, 1]
     /// 0.0 = minimal changes, 1.0 = extensive changes
     pub modification_extent: f32,
-
-    /// Type of modification (ADDED)
-    pub modification_type: ModificationType,
-}
-
-/// Type of memory modification (NEW)
-#[derive(Debug, Clone, Copy)]
-pub enum ModificationType {
-    /// Updating with new accurate information (maintains/increases confidence)
-    /// Example: Adding details to existing memory
-    Update,
-
-    /// Partial corruption or uncertainty (decreases confidence)
-    /// Example: Conflicting information causing doubt
-    Corruption,
-
-    /// Complete replacement (resets confidence)
-    /// Example: Correcting false memory with true information
-    Replacement,
 }
 
 /// Result of reconsolidation attempt
@@ -505,206 +432,239 @@ fn format_duration(d: Duration) -> String {
 }
 ```
 
-### 2. Comprehensive Validation Tests (CORRECTED)
+### 2. Comprehensive Validation Tests
 
 ```rust
 // /engram-core/tests/cognitive/reconsolidation_tests.rs
 
-use engram_core::cognitive::reconsolidation::{
-    ReconsolidationEngine, EpisodeModifications, ModificationType
-};
+use engram_core::cognitive::reconsolidation::{ReconsolidationEngine, EpisodeModifications};
 use engram_core::Episode;
 use chrono::{Utc, Duration};
 use std::collections::HashMap;
 
-// ... [Previous boundary tests remain unchanged] ...
-
 #[test]
-fn test_plasticity_peaks_mid_window() {
-    // ADDED: Validates inverted-U plasticity function
+fn test_reconsolidation_window_start_boundary() {
     let engine = ReconsolidationEngine::new();
-
-    // Plasticity at 1h < plasticity at 3.5h
-    let early_plasticity = engine.compute_plasticity(0.0);  // window_position=0
-    let mid_plasticity = engine.compute_plasticity(0.5);    // window_position=0.5 (peak)
-
-    assert!(
-        mid_plasticity > early_plasticity,
-        "Mid-window plasticity ({:.3}) should exceed early ({:.3})",
-        mid_plasticity,
-        early_plasticity
-    );
-
-    // Plasticity at 3.5h > plasticity at 5.5h
-    let late_plasticity = engine.compute_plasticity(0.9);   // window_position=0.9
-    assert!(
-        mid_plasticity > late_plasticity,
-        "Mid-window plasticity ({:.3}) should exceed late ({:.3})",
-        mid_plasticity,
-        late_plasticity
-    );
-
-    // Peak should be near 0.5 reconsolidation_plasticity (inverted-U maximum)
-    let expected_peak = 0.5 * 1.0; // reconsolidation_plasticity * u_curve_max
-    assert!(
-        (mid_plasticity - expected_peak).abs() < 0.05,
-        "Peak plasticity {:.3} should be near {:.3}",
-        mid_plasticity,
-        expected_peak
-    );
-}
-
-#[test]
-fn test_update_modifications_strengthen_memory() {
-    // ADDED: Validates Update modification type increases confidence
-    let engine = ReconsolidationEngine::new();
-    let episode = Episode::from_text_with_age(
-        "test memory",
-        random_embedding(),
-        Duration::hours(48)
-    );
+    let episode = Episode::from_text("test memory", random_embedding());
 
     let recall_time = Utc::now();
     engine.record_recall(&episode, recall_time, true);
 
-    let modifications = EpisodeModifications {
-        field_changes: HashMap::new(),
-        modification_extent: 0.3,
-        modification_type: ModificationType::Update,  // Strengthening
-    };
-
+    // Attempt modification at 59 minutes (before window start)
+    let too_early = recall_time + Duration::minutes(59);
     let result = engine.attempt_reconsolidation(
         &episode.id,
-        modifications,
-        recall_time + Duration::hours(3)  // Peak plasticity
-    ).unwrap();
-
-    // Confidence should increase or stay same (not decrease)
-    assert!(
-        result.modified_episode.confidence.value() >= episode.confidence.value(),
-        "Update modification should not decrease confidence: {} -> {}",
-        episode.confidence.value(),
-        result.modified_episode.confidence.value()
+        minimal_modifications(),
+        too_early
     );
+
+    assert!(result.is_none(), "Should reject modification before window start");
+
+    // Attempt at exactly 1 hour (window start)
+    let at_start = recall_time + Duration::hours(1);
+    let result = engine.attempt_reconsolidation(
+        &episode.id,
+        minimal_modifications(),
+        at_start
+    );
+
+    assert!(result.is_some(), "Should accept modification at window start");
 }
 
 #[test]
-fn test_corruption_modifications_reduce_confidence() {
-    // ADDED: Validates Corruption modification type decreases confidence
+fn test_reconsolidation_window_end_boundary() {
     let engine = ReconsolidationEngine::new();
-    let episode = Episode::from_text_with_age(
-        "test memory",
-        random_embedding(),
-        Duration::hours(48)
-    );
+    let episode = Episode::from_text("test memory", random_embedding());
 
     let recall_time = Utc::now();
     engine.record_recall(&episode, recall_time, true);
 
-    let modifications = EpisodeModifications {
-        field_changes: HashMap::new(),
-        modification_extent: 0.5,  // Moderate corruption
-        modification_type: ModificationType::Corruption,
-    };
-
+    // Attempt at exactly 6 hours (window end)
+    let at_end = recall_time + Duration::hours(6);
     let result = engine.attempt_reconsolidation(
         &episode.id,
-        modifications,
-        recall_time + Duration::hours(3)
-    ).unwrap();
-
-    // Confidence should decrease
-    assert!(
-        result.modified_episode.confidence.value() < episode.confidence.value(),
-        "Corruption modification should decrease confidence: {} -> {}",
-        episode.confidence.value(),
-        result.modified_episode.confidence.value()
+        minimal_modifications(),
+        at_end
     );
+
+    assert!(result.is_some(), "Should accept modification at window end");
+
+    // Attempt at 6 hours 1 minute (after window end)
+    let too_late = recall_time + Duration::hours(6) + Duration::minutes(1);
+    let result = engine.attempt_reconsolidation(
+        &episode.id,
+        minimal_modifications(),
+        too_late
+    );
+
+    assert!(result.is_none(), "Should reject modification after window end");
 }
 
 #[test]
-fn test_replacement_modifications_reset_confidence() {
-    // ADDED: Validates Replacement modification type resets confidence
+fn test_minimum_memory_age_boundary() {
     let engine = ReconsolidationEngine::new();
-    let episode = Episode::from_text_with_age(
-        "test memory",
+
+    // Recent memory (23 hours old - too young)
+    let recent_timestamp = Utc::now() - Duration::hours(23);
+    let recent_episode = Episode::from_text_with_timestamp(
+        "recent memory",
         random_embedding(),
-        Duration::hours(48)
+        recent_timestamp
     );
 
     let recall_time = Utc::now();
-    engine.record_recall(&episode, recall_time, true);
+    engine.record_recall(&recent_episode, recall_time, true);
 
-    let modifications = EpisodeModifications {
-        field_changes: HashMap::from([
-            ("content".to_string(), "completely new content".to_string())
-        ]),
-        modification_extent: 0.7,  // High quality replacement
-        modification_type: ModificationType::Replacement,
-    };
+    let mod_time = recall_time + Duration::hours(2); // Within window
+    let result = engine.attempt_reconsolidation(
+        &recent_episode.id,
+        minimal_modifications(),
+        mod_time
+    );
+
+    assert!(result.is_none(), "Should reject unconsolidated memory (<24h)");
+
+    // Consolidated memory (25 hours old - eligible)
+    let consolidated_timestamp = Utc::now() - Duration::hours(25);
+    let consolidated_episode = Episode::from_text_with_timestamp(
+        "consolidated memory",
+        random_embedding(),
+        consolidated_timestamp
+    );
+
+    engine.record_recall(&consolidated_episode, recall_time, true);
 
     let result = engine.attempt_reconsolidation(
-        &episode.id,
-        modifications,
-        recall_time + Duration::hours(3)
-    ).unwrap();
-
-    // Confidence should be reset to moderate value (not original)
-    let confidence_value = result.modified_episode.confidence.value();
-    assert!(
-        (0.3..=0.8).contains(&confidence_value),
-        "Replacement confidence {} should be in moderate range [0.3, 0.8]",
-        confidence_value
+        &consolidated_episode.id,
+        minimal_modifications(),
+        mod_time
     );
+
+    assert!(result.is_some(), "Should accept consolidated memory (>24h)");
 }
 
 #[test]
-fn test_remote_memory_boundary_documented_uncertainty() {
-    // ADDED: Documents that 365-day boundary is hard but biologically gradual
+fn test_maximum_memory_age_boundary() {
     let engine = ReconsolidationEngine::new();
 
-    // Memory at 364 days: eligible
-    let eligible_episode = Episode::from_text_with_age(
-        "old memory",
+    // Remote memory (366 days old - too old)
+    let remote_timestamp = Utc::now() - Duration::days(366);
+    let remote_episode = Episode::from_text_with_timestamp(
+        "remote memory",
         random_embedding(),
-        Duration::days(364)
+        remote_timestamp
     );
 
     let recall_time = Utc::now();
+    engine.record_recall(&remote_episode, recall_time, true);
+
+    let mod_time = recall_time + Duration::hours(2); // Within window
+    let result = engine.attempt_reconsolidation(
+        &remote_episode.id,
+        minimal_modifications(),
+        mod_time
+    );
+
+    assert!(result.is_none(), "Should reject remote memory (>365 days)");
+
+    // Old but eligible memory (364 days old)
+    let eligible_timestamp = Utc::now() - Duration::days(364);
+    let eligible_episode = Episode::from_text_with_timestamp(
+        "eligible old memory",
+        random_embedding(),
+        eligible_timestamp
+    );
+
     engine.record_recall(&eligible_episode, recall_time, true);
 
     let result = engine.attempt_reconsolidation(
         &eligible_episode.id,
         minimal_modifications(),
-        recall_time + Duration::hours(2)
-    );
-    assert!(result.is_some(), "Memory at 364 days should be eligible");
-
-    // Memory at 366 days: rejected
-    let remote_episode = Episode::from_text_with_age(
-        "very old memory",
-        random_embedding(),
-        Duration::days(366)
+        mod_time
     );
 
-    engine.record_recall(&remote_episode, recall_time, true);
+    assert!(result.is_some(), "Should accept memory within age range");
+}
+
+#[test]
+fn test_active_recall_requirement() {
+    let engine = ReconsolidationEngine::new();
+    let episode = Episode::from_text_with_age("test", random_embedding(), Duration::hours(48));
+
+    let recall_time = Utc::now();
+
+    // Passive re-exposure (is_active = false)
+    engine.record_recall(&episode, recall_time, false);
+
+    let mod_time = recall_time + Duration::hours(2);
+    let result = engine.attempt_reconsolidation(
+        &episode.id,
+        minimal_modifications(),
+        mod_time
+    );
+
+    assert!(result.is_none(), "Should reject passive re-exposure");
+
+    // Active recall (is_active = true)
+    engine.record_recall(&episode, recall_time, true);
 
     let result = engine.attempt_reconsolidation(
-        &remote_episode.id,
+        &episode.id,
         minimal_modifications(),
-        recall_time + Duration::hours(2)
+        mod_time
     );
-    assert!(result.is_none(), "Memory at 366 days should be rejected");
 
-    // NOTE: This is a hard boundary, but biological reality is gradual.
-    // Consider adding warning for memories near boundary (350-380 days).
+    assert!(result.is_some(), "Should accept active recall");
+}
+
+#[test]
+fn test_plasticity_decreases_across_window() {
+    let engine = ReconsolidationEngine::new();
+    let episode = Episode::from_text_with_age("test", random_embedding(), Duration::hours(48));
+
+    let recall_time = Utc::now();
+    engine.record_recall(&episode, recall_time, true);
+
+    // Early in window (1 hour post-recall)
+    let early_time = recall_time + Duration::hours(1);
+    let early_result = engine.attempt_reconsolidation(
+        &episode.id,
+        moderate_modifications(),
+        early_time
+    ).unwrap();
+
+    // Late in window (5.5 hours post-recall)
+    engine.record_recall(&episode, recall_time, true); // Re-record
+    let late_time = recall_time + Duration::hours(5) + Duration::minutes(30);
+    let late_result = engine.attempt_reconsolidation(
+        &episode.id,
+        moderate_modifications(),
+        late_time
+    ).unwrap();
+
+    // Plasticity should decrease across window
+    assert!(
+        early_result.plasticity_factor > late_result.plasticity_factor,
+        "Plasticity should be higher early in window ({:.3}) than late ({:.3})",
+        early_result.plasticity_factor,
+        late_result.plasticity_factor
+    );
 }
 
 fn minimal_modifications() -> EpisodeModifications {
     EpisodeModifications {
         field_changes: HashMap::new(),
         modification_extent: 0.1,
-        modification_type: ModificationType::Update,
+    }
+}
+
+fn moderate_modifications() -> EpisodeModifications {
+    let mut changes = HashMap::new();
+    changes.insert("detail".to_string(), "modified detail".to_string());
+
+    EpisodeModifications {
+        field_changes: changes,
+        modification_extent: 0.5,
     }
 }
 ```
@@ -714,63 +674,26 @@ fn minimal_modifications() -> EpisodeModifications {
 1. **Boundary Conditions (Exact per Nader et al. 2000):**
    - Window: 1-6 hours post-recall (exact)
    - Min age: 24 hours (exact)
-   - Max age: 365 days (exact, with documented uncertainty)
+   - Max age: 365 days (exact)
    - Active recall required (exact)
 
-2. **Plasticity Dynamics (CORRECTED):**
-   - Inverted-U function with peak at window midpoint
-   - Early window: rising plasticity
-   - Peak (3-4h): maximum plasticity
-   - Late window: declining plasticity
-   - Test validates peak > early and peak > late
-
-3. **Modification Types (NEW):**
-   - Update: Strengthens memory (confidence increases)
-   - Corruption: Weakens memory (confidence decreases)
-   - Replacement: Resets memory (confidence reset)
-   - Each type tested independently
-
-4. **Functional Requirements:**
+2. **Functional Requirements:**
    - Modifications accepted only within window
    - Rejections include clear reason
+   - Plasticity decreases linearly across window
    - Original episode preserved for auditing
-   - Metadata tracks modification type
 
-5. **Performance:**
+3. **Performance:**
    - Eligibility check: <50μs
    - Modification application: <100μs
    - Memory: <100KB for 1K tracked recalls
 
-6. **Testing:**
+4. **Testing:**
    - All four boundary conditions tested at exact thresholds
-   - Plasticity inverted-U validated
-   - All three modification types tested
+   - Plasticity gradient validated
    - Edge cases (negative time, future dates) handled
 
 ## Follow-ups
 
 - Task 007: Integration with consolidation system (M6)
 - Task 013: Performance validation under load
-
-## Implementation Checklist
-
-- [ ] Implement inverted-U plasticity function (CRITICAL FIX)
-- [ ] Add ModificationType enum (Update/Corruption/Replacement)
-- [ ] Update compute_modified_confidence to handle modification types
-- [ ] Add max_memory_age uncertainty documentation
-- [ ] Write test_plasticity_peaks_mid_window (NEW)
-- [ ] Write test_update_modifications_strengthen_memory (NEW)
-- [ ] Write test_corruption_modifications_reduce_confidence (NEW)
-- [ ] Write test_replacement_modifications_reset_confidence (NEW)
-- [ ] Write test_remote_memory_boundary_documented_uncertainty (NEW)
-- [ ] Update all existing tests to use ModificationType
-- [ ] Run `make quality` and fix all clippy warnings
-- [ ] Verify plasticity curve matches Nader & Einarsson (2010) Fig 3
-
-## References
-
-1. Nader, K., et al. (2000). Fear memories require protein synthesis for reconsolidation. *Nature*, 406(6797), 722-726.
-2. Nader, K., & Einarsson, E. Ö. (2010). Memory reconsolidation: an update. *Annals of the NY Academy of Sciences*, 1191(1), 27-41.
-3. Lee, J. L. (2009). Reconsolidation: maintaining memory relevance. *Trends in Neurosciences*, 32(8), 413-420.
-4. Dudai, Y. (2006). Reconsolidation: the advantage of being refocused. *Current Opinion in Neurobiology*, 16(2), 174-178.
-5. Roediger, H. L., & Karpicke, J. D. (2006). Test-enhanced learning. *Psychological Science*, 17(3), 249-255.

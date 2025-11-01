@@ -126,12 +126,14 @@ fn baseline_recall_latency(c: &mut Criterion) {
     group.bench_function("recall_10_neighbors", |b| {
         b.iter(|| {
             // Get the index and search
-            if let Some(index) = space_hnsw.get_index(&space_id) {
-                let results = index.search_with_confidence(&query_embedding, 10, Confidence::LOW);
-                black_box(results)
-            } else {
-                black_box(vec![])
-            }
+            space_hnsw.get_index(&space_id).map_or_else(
+                || black_box(vec![]),
+                |index| {
+                    let results =
+                        index.search_with_confidence(&query_embedding, 10, Confidence::LOW);
+                    black_box(results)
+                },
+            )
         });
     });
 
@@ -395,7 +397,7 @@ fn multi_space_isolation(c: &mut Criterion) {
 
                     // Create multiple spaces
                     let space_ids: Vec<_> = (0..space_count)
-                        .map(|i| MemorySpaceId::new(&format!("space_{i}")).unwrap())
+                        .map(|i| MemorySpaceId::new(format!("space_{i}")).unwrap())
                         .collect();
 
                     // Stream to all spaces concurrently
