@@ -250,3 +250,20 @@ pub fn deterministic_config(seed: u64) -> ParallelSpreadingConfig {
     config.completion_timeout = Some(Duration::from_secs(300)); // 5 minutes
     config
 }
+
+/// Helper that produces a fast deterministic spreading configuration for simple unit tests.
+///
+/// This configuration is optimized for tests with small graphs (<100 nodes) that should
+/// complete instantly. It uses a shorter timeout to catch actual hangs while avoiding
+/// false positives from resource contention.
+///
+/// Note: When run with --test-threads=1, even simple tests may experience contention
+/// due to the deterministic buffer handling in the scheduler. The 30-second timeout
+/// provides a reasonable balance between catching real hangs and avoiding false positives.
+#[must_use]
+pub fn fast_deterministic_config(seed: u64) -> ParallelSpreadingConfig {
+    let mut config = deterministic_config(seed);
+    // Use a moderate timeout that handles single-threaded test contention
+    config.completion_timeout = Some(Duration::from_secs(30)); // 30 seconds
+    config
+}
