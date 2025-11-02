@@ -142,11 +142,11 @@ fn resolve_memory_space(
     }
 
     // Priority 2: Environment variable
-    if let Ok(env_space) = std::env::var("ENGRAM_MEMORY_SPACE") {
-        if !env_space.trim().is_empty() {
-            return MemorySpaceId::try_from(env_space.as_str())
-                .map_err(|e| anyhow::anyhow!("Invalid ENGRAM_MEMORY_SPACE: {e}"));
-        }
+    if let Ok(env_space) = std::env::var("ENGRAM_MEMORY_SPACE")
+        && !env_space.trim().is_empty()
+    {
+        return MemorySpaceId::try_from(env_space.as_str())
+            .map_err(|e| anyhow::anyhow!("Invalid ENGRAM_MEMORY_SPACE: {e}"));
     }
 
     // Priority 3: Config default
@@ -1064,25 +1064,25 @@ fn print_probabilistic_table(result: &serde_json::Value) {
     }
 
     // Print evidence chain
-    if let Some(evidence_chain) = result["evidence_chain"].as_array() {
-        if !evidence_chain.is_empty() {
-            println!("\nEvidence Chain:");
-            for evidence in evidence_chain {
-                let source = evidence["source"].as_str().unwrap_or("unknown");
-                let confidence_pct = evidence["confidence"].as_f64().unwrap_or(0.0) * 100.0;
-                println!("  - {source}: {confidence_pct:.2}%");
-            }
+    if let Some(evidence_chain) = result["evidence_chain"].as_array()
+        && !evidence_chain.is_empty()
+    {
+        println!("\nEvidence Chain:");
+        for evidence in evidence_chain {
+            let source = evidence["source"].as_str().unwrap_or("unknown");
+            let confidence_pct = evidence["confidence"].as_f64().unwrap_or(0.0) * 100.0;
+            println!("  - {source}: {confidence_pct:.2}%");
         }
     }
 
     // Print uncertainty sources
-    if let Some(uncertainty_sources) = result["uncertainty_sources"].as_array() {
-        if !uncertainty_sources.is_empty() {
-            println!("\nUncertainty Sources:");
-            for source in uncertainty_sources {
-                let description = source["description"].as_str().unwrap_or("unknown");
-                println!("  - {description}");
-            }
+    if let Some(uncertainty_sources) = result["uncertainty_sources"].as_array()
+        && !uncertainty_sources.is_empty()
+    {
+        println!("\nUncertainty Sources:");
+        for source in uncertainty_sources {
+            let description = source["description"].as_str().unwrap_or("unknown");
+            println!("  - {description}");
         }
     }
 }

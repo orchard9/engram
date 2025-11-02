@@ -431,10 +431,10 @@ fn test_drm_confidence_calibration() {
         let lure_word = &list.critical_lure;
         let lure_test = list.create_lure_test();
 
-        if let Ok(completed) = reconstructor.complete(&lure_test) {
-            if &completed.episode.what == lure_word {
-                false_memory_confidences.push(completed.completion_confidence.raw());
-            }
+        if let Ok(completed) = reconstructor.complete(&lure_test)
+            && &completed.episode.what == lure_word
+        {
+            false_memory_confidences.push(completed.completion_confidence.raw());
         }
     }
 

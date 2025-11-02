@@ -1,3 +1,5 @@
+//! GPU functionality tests
+
 #![cfg(feature = "gpu")]
 
 use engram_core::compute::cuda;

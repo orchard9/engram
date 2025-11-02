@@ -394,9 +394,7 @@ impl IntegrationTestHarness {
             let warm_memory = Self::create_test_memory(id, vector);
             self.warm_tier.store(Arc::clone(&warm_memory)).await?;
             let address = ContentAddress::from_embedding(&warm_memory.embedding);
-            let _ = self
-                .content_index
-                .insert(address, warm_memory.id.to_string());
+            let _ = self.content_index.insert(address, warm_memory.id.clone());
         }
 
         // Test 3: Cold tier search

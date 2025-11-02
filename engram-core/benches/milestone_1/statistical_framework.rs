@@ -9,6 +9,7 @@ const fn usize_to_f64(value: usize) -> f64 {
     }
 }
 
+#[allow(clippy::missing_const_for_fn)] // floating point const operations not stable
 fn ceil_to_usize(value: f64) -> usize {
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     {

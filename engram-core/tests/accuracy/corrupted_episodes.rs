@@ -245,16 +245,16 @@ impl GroundTruthGenerator {
             known_fields.insert("what".to_string(), episode.what.clone());
         }
 
-        if !corruption_fields.contains(&"where") {
-            if let Some(ref loc) = episode.where_location {
-                known_fields.insert("where".to_string(), loc.clone());
-            }
+        if !corruption_fields.contains(&"where")
+            && let Some(ref loc) = episode.where_location
+        {
+            known_fields.insert("where".to_string(), loc.clone());
         }
 
-        if !corruption_fields.contains(&"who") {
-            if let Some(ref who_list) = episode.who {
-                known_fields.insert("who".to_string(), who_list.join(", "));
-            }
+        if !corruption_fields.contains(&"who")
+            && let Some(ref who_list) = episode.who
+        {
+            known_fields.insert("who".to_string(), who_list.join(", "));
         }
 
         // Corrupt corresponding embedding dimensions

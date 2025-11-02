@@ -6,9 +6,6 @@
 use engram_core::compute::scalar::ScalarVectorOps;
 use engram_core::compute::{self, VectorOps};
 
-#[cfg(target_arch = "x86_64")]
-use engram_core::compute::avx2::Avx2VectorOps;
-
 const EPSILON: f32 = 1e-6;
 const BENCH_ITERATIONS: u32 = 10_000;
 

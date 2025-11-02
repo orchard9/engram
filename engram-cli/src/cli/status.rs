@@ -163,10 +163,10 @@ fn print_health_details(health_data: &HealthResponse, space_filter: Option<&str>
                 .unwrap_or(0.0);
             println!("  - {name}: {status} ({latency:.3}s)");
 
-            if let Some(message) = check.get("message").and_then(|v| v.as_str()) {
-                if !message.is_empty() {
-                    println!("      {message}");
-                }
+            if let Some(message) = check.get("message").and_then(|v| v.as_str())
+                && !message.is_empty()
+            {
+                println!("      {message}");
             }
         }
     }
