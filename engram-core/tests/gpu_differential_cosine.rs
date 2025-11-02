@@ -94,7 +94,7 @@ fn test_identical_vectors() {
     let targets = vec![[1.0f32; 768]; 256];
 
     let cpu_result = cpu_ops.cosine_similarity_batch_768(&query, &targets);
-    let gpu_result = gpu_ops.batch_cosine_similarity_batch_768(&query, &targets);
+    let gpu_result = gpu_ops.cosine_similarity_batch_768(&query, &targets);
 
     assert_results_match(&cpu_result, &gpu_result, "Identical vectors");
 
@@ -117,7 +117,7 @@ fn test_opposite_vectors() {
     let targets = vec![[-1.0f32; 768]; 256];
 
     let cpu_result = cpu_ops.cosine_similarity_batch_768(&query, &targets);
-    let gpu_result = gpu_ops.batch_cosine_similarity_batch_768(&query, &targets);
+    let gpu_result = gpu_ops.cosine_similarity_batch_768(&query, &targets);
 
     assert_results_match(&cpu_result, &gpu_result, "Opposite vectors");
 
@@ -152,7 +152,7 @@ fn test_orthogonal_vectors() {
     }
 
     let cpu_result = cpu_ops.cosine_similarity_batch_768(&query, &targets);
-    let gpu_result = gpu_ops.batch_cosine_similarity_batch_768(&query, &targets);
+    let gpu_result = gpu_ops.cosine_similarity_batch_768(&query, &targets);
 
     assert_results_match(&cpu_result, &gpu_result, "Orthogonal vectors");
 
@@ -175,7 +175,7 @@ fn test_zero_query_vector() {
     let targets = vec![[1.0f32; 768]; 256];
 
     let cpu_result = cpu_ops.cosine_similarity_batch_768(&query, &targets);
-    let gpu_result = gpu_ops.batch_cosine_similarity_batch_768(&query, &targets);
+    let gpu_result = gpu_ops.cosine_similarity_batch_768(&query, &targets);
 
     assert_results_match(&cpu_result, &gpu_result, "Zero query vector");
 
@@ -198,7 +198,7 @@ fn test_zero_target_vectors() {
     let targets = vec![[0.0f32; 768]; 256]; // Zero vectors
 
     let cpu_result = cpu_ops.cosine_similarity_batch_768(&query, &targets);
-    let gpu_result = gpu_ops.batch_cosine_similarity_batch_768(&query, &targets);
+    let gpu_result = gpu_ops.cosine_similarity_batch_768(&query, &targets);
 
     assert_results_match(&cpu_result, &gpu_result, "Zero target vectors");
 
@@ -230,7 +230,7 @@ fn test_mixed_zero_nonzero() {
     }
 
     let cpu_result = cpu_ops.cosine_similarity_batch_768(&query, &targets);
-    let gpu_result = gpu_ops.batch_cosine_similarity_batch_768(&query, &targets);
+    let gpu_result = gpu_ops.cosine_similarity_batch_768(&query, &targets);
 
     assert_results_match(&cpu_result, &gpu_result, "Mixed zero/non-zero");
 }
@@ -249,7 +249,7 @@ fn test_random_vectors_batch_16() {
     let targets = random_batch_768(16, &mut rng);
 
     let cpu_result = cpu_ops.cosine_similarity_batch_768(&query, &targets);
-    let gpu_result = gpu_ops.batch_cosine_similarity_batch_768(&query, &targets);
+    let gpu_result = gpu_ops.cosine_similarity_batch_768(&query, &targets);
 
     assert_results_match(&cpu_result, &gpu_result, "Random batch size 16");
 }
@@ -268,7 +268,7 @@ fn test_random_vectors_batch_64() {
     let targets = random_batch_768(64, &mut rng);
 
     let cpu_result = cpu_ops.cosine_similarity_batch_768(&query, &targets);
-    let gpu_result = gpu_ops.batch_cosine_similarity_batch_768(&query, &targets);
+    let gpu_result = gpu_ops.cosine_similarity_batch_768(&query, &targets);
 
     assert_results_match(&cpu_result, &gpu_result, "Random batch size 64");
 }
@@ -287,7 +287,7 @@ fn test_random_vectors_batch_256() {
     let targets = random_batch_768(256, &mut rng);
 
     let cpu_result = cpu_ops.cosine_similarity_batch_768(&query, &targets);
-    let gpu_result = gpu_ops.batch_cosine_similarity_batch_768(&query, &targets);
+    let gpu_result = gpu_ops.cosine_similarity_batch_768(&query, &targets);
 
     assert_results_match(&cpu_result, &gpu_result, "Random batch size 256");
 }
@@ -306,7 +306,7 @@ fn test_random_vectors_batch_1024() {
     let targets = random_batch_768(1024, &mut rng);
 
     let cpu_result = cpu_ops.cosine_similarity_batch_768(&query, &targets);
-    let gpu_result = gpu_ops.batch_cosine_similarity_batch_768(&query, &targets);
+    let gpu_result = gpu_ops.cosine_similarity_batch_768(&query, &targets);
 
     assert_results_match(&cpu_result, &gpu_result, "Random batch size 1024");
 }
@@ -325,7 +325,7 @@ fn test_random_vectors_batch_10000() {
     let targets = random_batch_768(10000, &mut rng);
 
     let cpu_result = cpu_ops.cosine_similarity_batch_768(&query, &targets);
-    let gpu_result = gpu_ops.batch_cosine_similarity_batch_768(&query, &targets);
+    let gpu_result = gpu_ops.cosine_similarity_batch_768(&query, &targets);
 
     assert_results_match(&cpu_result, &gpu_result, "Random batch size 10000");
 }
@@ -344,7 +344,7 @@ fn test_very_small_values() {
     let targets = vec![[1e-10f32; 768]; 256];
 
     let cpu_result = cpu_ops.cosine_similarity_batch_768(&query, &targets);
-    let gpu_result = gpu_ops.batch_cosine_similarity_batch_768(&query, &targets);
+    let gpu_result = gpu_ops.cosine_similarity_batch_768(&query, &targets);
 
     assert_results_match(&cpu_result, &gpu_result, "Very small values");
 }
@@ -363,7 +363,7 @@ fn test_very_large_values() {
     let targets = vec![[1e10f32; 768]; 256];
 
     let cpu_result = cpu_ops.cosine_similarity_batch_768(&query, &targets);
-    let gpu_result = gpu_ops.batch_cosine_similarity_batch_768(&query, &targets);
+    let gpu_result = gpu_ops.cosine_similarity_batch_768(&query, &targets);
 
     assert_results_match(&cpu_result, &gpu_result, "Very large values");
 }
@@ -395,7 +395,7 @@ fn test_mixed_magnitudes() {
     }
 
     let cpu_result = cpu_ops.cosine_similarity_batch_768(&query, &targets);
-    let gpu_result = gpu_ops.batch_cosine_similarity_batch_768(&query, &targets);
+    let gpu_result = gpu_ops.cosine_similarity_batch_768(&query, &targets);
 
     assert_results_match(&cpu_result, &gpu_result, "Mixed magnitudes");
 }
@@ -426,7 +426,7 @@ fn test_normalized_vectors() {
     }
 
     let cpu_result = cpu_ops.cosine_similarity_batch_768(&query, &targets);
-    let gpu_result = gpu_ops.batch_cosine_similarity_batch_768(&query, &targets);
+    let gpu_result = gpu_ops.cosine_similarity_batch_768(&query, &targets);
 
     assert_results_match(&cpu_result, &gpu_result, "Normalized vectors");
 }
@@ -457,7 +457,7 @@ fn test_sparse_vectors() {
     }
 
     let cpu_result = cpu_ops.cosine_similarity_batch_768(&query, &targets);
-    let gpu_result = gpu_ops.batch_cosine_similarity_batch_768(&query, &targets);
+    let gpu_result = gpu_ops.cosine_similarity_batch_768(&query, &targets);
 
     assert_results_match(&cpu_result, &gpu_result, "Sparse vectors");
 }
@@ -476,12 +476,12 @@ fn test_property_associativity() {
     let targets = random_batch_768(256, &mut rng);
 
     // Test that order doesn't matter
-    let result1 = gpu_ops.batch_cosine_similarity_batch_768(&query, &targets);
+    let result1 = gpu_ops.cosine_similarity_batch_768(&query, &targets);
 
     // Compute same batch in different order
     let mut shuffled_targets = targets.clone();
     shuffled_targets.reverse();
-    let result2 = gpu_ops.batch_cosine_similarity_batch_768(&query, &shuffled_targets);
+    let result2 = gpu_ops.cosine_similarity_batch_768(&query, &shuffled_targets);
 
     // Results should match original in reversed order
     for (i, &val) in result2.iter().enumerate() {
@@ -513,7 +513,7 @@ fn test_single_vector_consistency() {
     let single_result = cpu_ops.cosine_similarity_768(&query, &target);
 
     // Batch of one
-    let batch_result = gpu_ops.batch_cosine_similarity_batch_768(&query, &[target]);
+    let batch_result = gpu_ops.cosine_similarity_batch_768(&query, &[target]);
 
     assert_eq!(batch_result.len(), 1);
     assert!(

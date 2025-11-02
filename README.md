@@ -71,6 +71,14 @@ export DYLD_LIBRARY_PATH="/opt/homebrew/lib:$DYLD_LIBRARY_PATH"
 export BINDGEN_EXTRA_CLANG_ARGS="-I/opt/homebrew/include"
 ```
 
+### System Requirements
+
+- **Rust**: 1.82.0 or newer (required for Edition 2024)
+- **System libraries**: hwloc, pkg-config, libudev (Linux)
+- **Optional**: CUDA 11.0+ for GPU acceleration
+
+See [docs/reference/system-requirements.md](docs/reference/system-requirements.md) for detailed requirements and troubleshooting.
+
 ### Building
 
 ```bash
@@ -406,7 +414,7 @@ brew install z3
 cargo clean && cargo build
 
 # Check Rust version
-rustc --version  # Should be 1.75+
+rustc --version  # Should be 1.82.0+
 ```
 
 ### Memory Spaces (Multi-Tenancy)

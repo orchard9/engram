@@ -2,6 +2,12 @@
 
 Store and recall your first memory in under 60 seconds. No prior knowledge required.
 
+## Prerequisites
+
+- Rust 1.82.0+ ([install](https://rustup.rs/))
+- System libraries: `hwloc`, `pkg-config`
+- See [docs/reference/system-requirements.md](docs/reference/system-requirements.md) for details
+
 ## Install (15 seconds)
 
 ```bash

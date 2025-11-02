@@ -462,23 +462,7 @@ impl GpuSpreadingEngine {
     }
 }
 
-// FFI bindings for CUDA spreading kernels
-mod ffi {
-    use std::os::raw::c_int;
-
-    extern "C" {
-        /// Compute sparse spreading with managed memory
-        pub fn cuda_sparse_spreading_managed(
-            h_row_ptr: *const c_int,
-            h_col_idx: *const c_int,
-            h_weights: *const f32,
-            h_input_activation: *const f32,
-            h_output_activation: *mut f32,
-            num_nodes: c_int,
-            num_edges: c_int,
-        ) -> c_int;
-    }
-}
+// FFI bindings for CUDA spreading kernels are in super::ffi module
 
 #[cfg(test)]
 mod tests {

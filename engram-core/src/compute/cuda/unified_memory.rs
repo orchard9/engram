@@ -53,6 +53,7 @@ use std::sync::{Arc, Mutex};
 ///
 /// The `UnifiedMemory<T>` is parameterized by element type to ensure
 /// type-safe access and prevent misaligned access patterns.
+#[derive(Debug)]
 pub struct UnifiedMemory<T> {
     /// Pointer to allocated memory (unified or pinned)
     ptr: NonNull<T>,

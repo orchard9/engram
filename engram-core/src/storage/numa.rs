@@ -580,7 +580,7 @@ impl NumaAllocator {
     fn allocate_mapping(
         size: usize,
         alignment: usize,
-        _policy: NumaPolicy,
+        policy: NumaPolicy,
     ) -> StorageResult<*mut u8> {
         // Align size to page boundary
         let page_size =
@@ -614,6 +614,10 @@ impl NumaAllocator {
             }
             _ => {}
         }
+
+        // On non-Linux Unix systems, we can't set NUMA policy but allocation still succeeds
+        #[cfg(not(target_os = "linux"))]
+        let _ = policy; // Suppress unused variable warning
 
         Ok(ptr.cast::<u8>())
     }

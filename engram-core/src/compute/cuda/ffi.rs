@@ -577,7 +577,7 @@ mod tests {
 
     #[test]
     #[cfg(cuda_available)]
-    fn test_kernel_launch() {
+    fn test_kernel_launch_function() {
         let size = 1024;
         let mut output = vec![0i32; size];
 
@@ -596,12 +596,12 @@ mod tests {
             Err(e) => {
                 println!("Kernel launch failed: {e}");
             }
-        }
+        };
     }
 
     #[test]
     #[cfg(cuda_available)]
-    fn test_vector_kernel() {
+    fn test_vector_kernel_function() {
         let count = 128;
         let input: Vec<[f32; 768]> = vec![[1.0; 768]; count];
         let mut output = vec![0.0f32; count];
@@ -620,6 +620,6 @@ mod tests {
             Err(e) => {
                 println!("Vector kernel failed: {e}");
             }
-        }
+        };
     }
 }

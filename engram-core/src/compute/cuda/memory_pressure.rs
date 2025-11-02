@@ -100,7 +100,7 @@ impl MemoryPressureMonitor {
     /// ```
     pub fn with_safety_margin(safety_margin: f32) -> Option<Self> {
         // Query total VRAM from GPU
-        let (free_vram, total_vram) = mem_get_info().ok()?;
+        let (_free_vram, total_vram) = mem_get_info().ok()?;
 
         if total_vram == 0 {
             tracing::warn!("GPU reports 0 bytes total VRAM, cannot create memory monitor");

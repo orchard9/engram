@@ -308,6 +308,9 @@ int cuda_sparse_spreading_managed(
         return -1;
     }
 
+    // Declare status variable before any goto statements
+    int status = -1;
+
     // Copy inputs to device
     err = cudaMemcpy(d_row_ptr, h_row_ptr, row_ptr_size, cudaMemcpyHostToDevice);
     if (err != cudaSuccess) {
@@ -341,7 +344,7 @@ int cuda_sparse_spreading_managed(
     }
 
     // Launch kernel
-    int status = cuda_sparse_spreading(
+    status = cuda_sparse_spreading(
         d_row_ptr,
         d_col_idx,
         d_weights,

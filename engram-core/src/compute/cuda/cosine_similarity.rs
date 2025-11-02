@@ -452,7 +452,7 @@ mod tests {
         let query = [1.0f32; 768];
         let targets = vec![[1.0f32; 768]; 128];
 
-        let similarities = gpu_ops.batch_cosine_similarity_batch_768(&query, &targets);
+        let similarities = gpu_ops.cosine_similarity_batch_768(&query, &targets);
 
         assert_eq!(similarities.len(), 128);
         for sim in &similarities {
@@ -473,7 +473,7 @@ mod tests {
         let query = [1.0f32; 768];
         let targets = vec![[0.5f32; 768]; 32]; // < 64, should use CPU
 
-        let similarities = gpu_ops.batch_cosine_similarity_batch_768(&query, &targets);
+        let similarities = gpu_ops.cosine_similarity_batch_768(&query, &targets);
 
         assert_eq!(similarities.len(), 32);
         // Should not have triggered GPU (batch too small)
@@ -494,7 +494,7 @@ mod tests {
         let query = [0.0f32; 768]; // Zero vector
         let targets = vec![[1.0f32; 768]; 128];
 
-        let similarities = gpu_ops.batch_cosine_similarity_batch_768(&query, &targets);
+        let similarities = gpu_ops.cosine_similarity_batch_768(&query, &targets);
 
         assert_eq!(similarities.len(), 128);
         for sim in &similarities {
@@ -521,7 +521,7 @@ mod tests {
 
         let targets = vec![target; 128];
 
-        let similarities = gpu_ops.batch_cosine_similarity_batch_768(&query, &targets);
+        let similarities = gpu_ops.cosine_similarity_batch_768(&query, &targets);
 
         assert_eq!(similarities.len(), 128);
         for sim in &similarities {
