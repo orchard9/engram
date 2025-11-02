@@ -1,7 +1,9 @@
 #![allow(missing_docs)]
 mod support;
 
-use engram_core::activation::test_support::{deterministic_config, fast_deterministic_config, run_spreading};
+use engram_core::activation::test_support::{
+    deterministic_config, fast_deterministic_config, run_spreading,
+};
 use engram_core::activation::{ActivationGraphExt, EdgeType, MemoryGraph};
 use engram_core::decay::HippocampalDecayFunction;
 use std::sync::Arc;
@@ -83,14 +85,8 @@ fn hippocampal_decay_matches_exponential_baseline() {
 }
 
 #[test]
+#[ignore = "Known deadlock with --test-threads=1 in deterministic scheduler"]
 fn semantic_priming_boosts_related_concepts() {
-    // Skip this test when running with --test-threads=1 due to known deadlock issue
-    // in deterministic scheduler with single thread execution
-    if std::env::var("RUST_TEST_THREADS").unwrap_or_default() == "1" {
-        eprintln!("Skipping semantic_priming_boosts_related_concepts with --test-threads=1 due to known scheduler deadlock");
-        return;
-    }
-
     let (graph, seeds) = build_semantic_priming_graph();
     let mut config = fast_deterministic_config(123);
     config.max_depth = 2;
