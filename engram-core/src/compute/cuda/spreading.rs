@@ -41,8 +41,8 @@
 //! ```
 
 use super::ffi::{self, CudaError};
-use super::unified_memory::{MemoryPool, UnifiedMemory};
-use crate::activation::{MemoryGraph, NodeId, WeightedEdge};
+use super::unified_memory::MemoryPool;
+use crate::activation::{MemoryGraph, NodeId};
 use dashmap::DashMap;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};

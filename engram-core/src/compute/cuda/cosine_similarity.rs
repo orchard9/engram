@@ -40,7 +40,6 @@
 //! let similarities = gpu_ops.batch_cosine_similarity_768(&query, &targets)?;
 //! ```
 
-use super::ffi::{CudaError, CudaMemcpyKind};
 use super::unified_memory::UnifiedMemory;
 use crate::compute::{VectorOps, scalar::ScalarVectorOps};
 use std::ffi::c_int;

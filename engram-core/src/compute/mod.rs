@@ -25,12 +25,20 @@ pub mod cuda;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CpuCapability {
     #[cfg(target_arch = "x86_64")]
+    /// AVX-512 Foundation - Intel's 512-bit SIMD instruction set providing
+    /// 16x f32 operations per instruction for maximum throughput
     Avx512F,
     #[cfg(target_arch = "x86_64")]
+    /// AVX2 with Fused Multiply-Add - 256-bit SIMD with FMA instructions
+    /// for efficient dot products and matrix operations
     Avx2Fma,
     #[cfg(target_arch = "x86_64")]
+    /// AVX2 - Advanced Vector Extensions 2 providing 256-bit SIMD operations
+    /// processing 8x f32 values simultaneously
     Avx2,
     #[cfg(target_arch = "x86_64")]
+    /// SSE4.2 - Streaming SIMD Extensions 4.2 providing 128-bit operations
+    /// for legacy compatibility with 4x f32 parallel processing
     Sse42,
     #[cfg(target_arch = "aarch64")]
     /// ARM NEON SIMD instruction set

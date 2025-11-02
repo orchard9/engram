@@ -342,17 +342,17 @@ impl NumaMemoryMap {
             NumaPolicy::Default => {
                 // No special policy
             }
-            NumaPolicy::Bind(_node) => {
+            NumaPolicy::Bind(node) => {
                 #[cfg(target_os = "linux")]
                 {
-                    let nodemask = 1u64 << _node;
+                    let nodemask = 1u64 << node;
                     unsafe {
                         libc::syscall(
                             libc::SYS_mbind,
                             mapping,
                             aligned_size,
                             libc::MPOL_BIND,
-                            &nodemask as *const u64,
+                            &raw const nodemask,
                             64, // maxnode
                             0,  // flags
                         );
@@ -369,24 +369,24 @@ impl NumaMemoryMap {
                             mapping,
                             aligned_size,
                             libc::MPOL_INTERLEAVE,
-                            &nodemask as *const u64,
+                            &raw const nodemask,
                             64, // maxnode
                             0,  // flags
                         );
                     }
                 }
             }
-            NumaPolicy::Preferred(_node) => {
+            NumaPolicy::Preferred(node) => {
                 #[cfg(target_os = "linux")]
                 {
-                    let nodemask = 1u64 << _node;
+                    let nodemask = 1u64 << node;
                     unsafe {
                         libc::syscall(
                             libc::SYS_mbind,
                             mapping,
                             aligned_size,
                             libc::MPOL_PREFERRED,
-                            &nodemask as *const u64,
+                            &raw const nodemask,
                             64, // maxnode
                             0,  // flags
                         );
@@ -606,7 +606,7 @@ impl NumaAllocator {
                         ptr,
                         aligned_size,
                         libc::MPOL_PREFERRED,
-                        &nodemask as *const u64,
+                        &raw const nodemask,
                         64, // maxnode
                         0,  // flags
                     );

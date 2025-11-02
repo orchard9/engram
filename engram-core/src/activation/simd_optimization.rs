@@ -238,12 +238,14 @@ unsafe fn batch_sigmoid_avx2_fma(
     temperature: f32,
     threshold: f32,
 ) -> Vec<f32> {
-    use std::arch::x86_64::*;
+    use std::arch::x86_64::{
+        _mm256_loadu_ps, _mm256_mul_ps, _mm256_set1_ps, _mm256_setzero_ps, _mm256_storeu_ps,
+        _mm256_sub_ps,
+    };
 
     let inv_temp = 1.0 / temperature.max(0.05);
-    let inv_temp_vec = unsafe { _mm256_set1_ps(inv_temp) };
-    let threshold_vec = unsafe { _mm256_set1_ps(threshold) };
-    let one_vec = unsafe { _mm256_set1_ps(1.0) };
+    let inv_temp_vec = _mm256_set1_ps(inv_temp);
+    let threshold_vec = _mm256_set1_ps(threshold);
 
     let mut output = Vec::with_capacity(similarities.len());
     let chunks = similarities.len() / 8;
@@ -254,13 +256,13 @@ unsafe fn batch_sigmoid_avx2_fma(
         let sim_vec = unsafe { _mm256_loadu_ps(similarities.as_ptr().add(offset)) };
 
         // Normalize: (sim - threshold) * inv_temp
-        let diff = unsafe { _mm256_sub_ps(sim_vec, threshold_vec) };
-        let normalized = unsafe { _mm256_mul_ps(diff, inv_temp_vec) };
+        let diff = _mm256_sub_ps(sim_vec, threshold_vec);
+        let normalized = _mm256_mul_ps(diff, inv_temp_vec);
 
         // Compute sigmoid approximation using rational function
         // sigmoid(x) ≈ 1 / (1 + exp(-x))
         // For better performance, use fast approximation
-        let neg_norm = unsafe { _mm256_sub_ps(_mm256_setzero_ps(), normalized) };
+        let neg_norm = _mm256_sub_ps(_mm256_setzero_ps(), normalized);
 
         // Store and compute sigmoid scalar for now (exp is expensive in SIMD)
         let mut temp = [0.0f32; 8];
@@ -298,9 +300,9 @@ unsafe fn fma_confidence_aggregate_avx2(
     path_confidence: f32,
     len: usize,
 ) {
-    use std::arch::x86_64::*;
+    use std::arch::x86_64::{_mm256_fmadd_ps, _mm256_loadu_ps, _mm256_set1_ps, _mm256_storeu_ps};
 
-    let path_vec = unsafe { _mm256_set1_ps(path_confidence) };
+    let path_vec = _mm256_set1_ps(path_confidence);
     let chunks = len / 8;
 
     for i in 0..chunks {
@@ -309,7 +311,7 @@ unsafe fn fma_confidence_aggregate_avx2(
         let weight_vec = unsafe { _mm256_loadu_ps(confidence_weights.as_ptr().add(offset)) };
 
         // Fused multiply-add: act + weight * path
-        let result = unsafe { _mm256_fmadd_ps(weight_vec, path_vec, act_vec) };
+        let result = _mm256_fmadd_ps(weight_vec, path_vec, act_vec);
         unsafe { _mm256_storeu_ps(activations.as_mut_ptr().add(offset), result) };
     }
 

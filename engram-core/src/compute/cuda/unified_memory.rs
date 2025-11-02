@@ -41,7 +41,6 @@ use std::marker::PhantomData;
 use std::ops::{Index, IndexMut};
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
 
 /// RAII wrapper for unified memory allocation
 ///
