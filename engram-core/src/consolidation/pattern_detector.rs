@@ -794,7 +794,7 @@ mod tests {
     /// It verifies that consolidation produces identical results across 1000 runs,
     /// providing high confidence in determinism for distributed deployment.
     #[test]
-    #[ignore] // Run explicitly with: cargo test -- --ignored --nocapture
+    #[ignore = "Run explicitly with: cargo test -- --ignored --nocapture"]
     fn test_consolidation_determinism_1000_iterations() {
         let config = PatternDetectionConfig {
             min_cluster_size: 2,
@@ -849,7 +849,7 @@ mod tests {
     ///
     /// Platform-specific floating-point differences would cause signature mismatch.
     #[test]
-    #[ignore] // Run on multiple platforms to verify cross-platform determinism
+    #[ignore = "Run on multiple platforms to verify cross-platform determinism"]
     fn test_cross_platform_determinism() {
         let config = PatternDetectionConfig {
             min_cluster_size: 2,

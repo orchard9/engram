@@ -3,7 +3,8 @@
 //! Provides SIMD implementations using 256-bit AVX2 instructions
 //! with FMA (Fused Multiply-Add) when available.
 
-#![cfg(target_arch = "x86_64")]
+#![allow(unsafe_code)]
+#![allow(clippy::similar_names)]
 
 use super::VectorOps;
 use std::arch::x86_64::*;

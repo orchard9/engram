@@ -48,6 +48,7 @@ fn compute_prefetch_lookahead(config: &ParallelSpreadingConfig) -> usize {
 #[allow(clippy::missing_const_for_fn)]
 fn prefetch_cache_line(node: &CacheOptimizedNode) {
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+    #[allow(unsafe_code)]
     unsafe {
         #[cfg(target_arch = "x86")]
         use core::arch::x86::_mm_prefetch;
