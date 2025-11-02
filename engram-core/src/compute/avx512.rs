@@ -3,6 +3,9 @@
 //! Provides SIMD implementations using 512-bit AVX-512 instructions
 //! for maximum throughput on supporting CPUs.
 
+#![allow(unsafe_code)]
+#![allow(unsafe_op_in_unsafe_fn)]
+
 use super::VectorOps;
 use super::avx2::Avx2VectorOps;
 

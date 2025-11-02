@@ -5,6 +5,7 @@
 
 #![allow(unsafe_code)]
 #![allow(clippy::similar_names)]
+#![allow(unsafe_op_in_unsafe_fn)]
 
 use super::VectorOps;
 use std::arch::x86_64::*;
@@ -256,59 +257,6 @@ unsafe fn horizontal_add_ps_256(v: __m256) -> f32 {
     _mm_cvtss_f32(sum32)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::compute::scalar::ScalarVectorOps;
-
-    #[test]
-    fn test_avx2_cosine_similarity() {
-        if !is_x86_feature_detected!("avx2") {
-            eprintln!("Skipping AVX2 tests - not supported on this CPU");
-            return;
-        }
-
-        let avx2_ops = Avx2VectorOps::new();
-        let scalar_ops = ScalarVectorOps::new();
-
-        let a = [0.5f32; 768];
-        let b = [0.7f32; 768];
-
-        let avx2_result = avx2_ops.cosine_similarity_768(&a, &b);
-        let scalar_result = scalar_ops.cosine_similarity_768(&a, &b);
-
-        assert!(
-            (avx2_result - scalar_result).abs() < 1e-6,
-            "AVX2: {}, Scalar: {}",
-            avx2_result,
-            scalar_result
-        );
-    }
-
-    #[test]
-    fn test_avx2_dot_product() {
-        if !is_x86_feature_detected!("avx2") {
-            return;
-        }
-
-        let avx2_ops = Avx2VectorOps::new();
-        let scalar_ops = ScalarVectorOps::new();
-
-        let a = [2.0f32; 768];
-        let b = [3.0f32; 768];
-
-        let avx2_result = avx2_ops.dot_product_768(&a, &b);
-        let scalar_result = scalar_ops.dot_product_768(&a, &b);
-
-        assert!(
-            (avx2_result - scalar_result).abs() < 1e-4,
-            "AVX2: {}, Scalar: {}",
-            avx2_result,
-            scalar_result
-        );
-    }
-}
-
 /// Optimized batch cosine similarity with AVX2 and FMA
 /// Processes multiple vectors against a single query with better cache utilization
 #[target_feature(enable = "avx2,fma")]
@@ -489,4 +437,53 @@ unsafe fn horizontal_sum_avx2(values: &[f32]) -> f32 {
     }
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::compute::scalar::ScalarVectorOps;
+
+    #[test]
+    fn test_avx2_cosine_similarity() {
+        if !is_x86_feature_detected!("avx2") {
+            eprintln!("Skipping AVX2 tests - not supported on this CPU");
+            return;
+        }
+
+        let avx2_ops = Avx2VectorOps::new();
+        let scalar_ops = ScalarVectorOps::new();
+
+        let a = [0.5f32; 768];
+        let b = [0.7f32; 768];
+
+        let avx2_result = avx2_ops.cosine_similarity_768(&a, &b);
+        let scalar_result = scalar_ops.cosine_similarity_768(&a, &b);
+
+        assert!(
+            (avx2_result - scalar_result).abs() < 1e-6,
+            "AVX2: {avx2_result}, Scalar: {scalar_result}"
+        );
+    }
+
+    #[test]
+    fn test_avx2_dot_product() {
+        if !is_x86_feature_detected!("avx2") {
+            return;
+        }
+
+        let avx2_ops = Avx2VectorOps::new();
+        let scalar_ops = ScalarVectorOps::new();
+
+        let a = [2.0f32; 768];
+        let b = [3.0f32; 768];
+
+        let avx2_result = avx2_ops.dot_product_768(&a, &b);
+        let scalar_result = scalar_ops.dot_product_768(&a, &b);
+
+        assert!(
+            (avx2_result - scalar_result).abs() < 1e-4,
+            "AVX2: {avx2_result}, Scalar: {scalar_result}"
+        );
+    }
 }

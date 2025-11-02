@@ -1,4 +1,6 @@
-#[allow(unsafe_code)]
+#![allow(unsafe_code)]
+#![allow(unsafe_op_in_unsafe_fn)]
+
 const LANES: usize = 8;
 const TILE_DIM: usize = 96; // 768 / 8 = 96 tiles
 

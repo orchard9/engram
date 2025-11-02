@@ -2268,10 +2268,10 @@ impl MemoryStore {
         // Check location if provided
         if let Some(loc) = location {
             max_score += 1.0;
-            if let Some(ep_loc) = &episode.where_location {
-                if ep_loc.contains(loc) || loc.contains(ep_loc) {
-                    match_score += 1.0;
-                }
+            if let Some(ep_loc) = &episode.where_location
+                && (ep_loc.contains(loc) || loc.contains(ep_loc))
+            {
+                match_score += 1.0;
             }
         }
 
@@ -2672,8 +2672,9 @@ impl MemoryStore {
         let mut results = Vec::new();
 
         for addr in similar_addresses {
-            if let Some(memory_id) = self.content_index.get(&addr) {
-                if let Some(memory) = self.hot_memories.get(&memory_id) {
+            if let Some(memory_id) = self.content_index.get(&addr)
+                && let Some(memory) = self.hot_memories.get(&memory_id)
+            {
                     // Calculate actual similarity
                     let similarity =
                         crate::compute::cosine_similarity_768(embedding, &memory.embedding);
@@ -2692,7 +2693,6 @@ impl MemoryStore {
 
                         results.push((episode, Confidence::exact(similarity)));
                     }
-                }
             }
         }
 

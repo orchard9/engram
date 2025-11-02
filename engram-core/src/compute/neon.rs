@@ -3,6 +3,9 @@
 //! Provides SIMD implementations using ARM NEON instructions
 //! for ARM-based systems (Apple Silicon, AWS Graviton, etc).
 
+#![allow(unsafe_code)]
+#![allow(unsafe_op_in_unsafe_fn)]
+
 use super::VectorOps;
 use super::scalar::ScalarVectorOps;
 
