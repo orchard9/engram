@@ -243,10 +243,8 @@ impl HippocampalCompletion {
                     || what_lower.contains(&episode_what_lower)
                     || Self::word_level_similarity(&what_lower, &episode_what_lower) > 0.0;
 
-                if is_similar {
-                    if let Some(ref location) = episode.where_location {
-                        *location_counts.entry(location.clone()).or_insert(0) += 1;
-                    }
+                if is_similar && let Some(ref location) = episode.where_location {
+                    *location_counts.entry(location.clone()).or_insert(0) += 1;
                 }
             }
 
@@ -275,11 +273,9 @@ impl HippocampalCompletion {
                     || what_lower.contains(&episode_what_lower)
                     || Self::word_level_similarity(&what_lower, &episode_what_lower) > 0.0;
 
-                if is_similar {
-                    if let Some(ref participants) = episode.who {
-                        for participant in participants {
-                            *participant_counts.entry(participant.clone()).or_insert(0) += 1;
-                        }
+                if is_similar && let Some(ref participants) = episode.who {
+                    for participant in participants {
+                        *participant_counts.entry(participant.clone()).or_insert(0) += 1;
                     }
                 }
             }
@@ -401,12 +397,12 @@ impl HippocampalCompletion {
         let mut partial_indices = Vec::new();
 
         for (i, opt_val) in partial.partial_embedding.iter().enumerate() {
-            if let Some(val) = opt_val {
-                if i >= 256 {
-                    // Only use where/who dimensions (not what which is 0-255)
-                    partial_vec.push(*val);
-                    partial_indices.push(i);
-                }
+            if let Some(val) = opt_val
+                && i >= 256
+            {
+                // Only use where/who dimensions (not what which is 0-255)
+                partial_vec.push(*val);
+                partial_indices.push(i);
             }
         }
 
@@ -482,7 +478,7 @@ impl HippocampalCompletion {
         );
 
         let mut episode = Episode::new(
-            format!("completed_{}", chrono::Utc::now().timestamp()),
+            format!("completed_{ts}", ts = chrono::Utc::now().timestamp()),
             Utc::now(),
             what,
             *completed_embedding,

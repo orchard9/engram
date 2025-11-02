@@ -757,8 +757,8 @@ impl<T> PartialResult<T> {
                     self.confidence.raw(),
                     threshold
                 ),
-                context: expected = format!("Confidence >= {}", threshold),
-                         actual = format!("Confidence = {}", self.confidence.raw()),
+                context: expected = format!("Confidence >= {threshold}"),
+                         actual = format!("Confidence = {confidence}", confidence = self.confidence.raw()),
                 suggestion: "Retry operation with more data or lower threshold",
                 example: "let result = operation().require_confidence(0.5)?;",
                 confidence: Confidence::exact(1.0)
@@ -1141,7 +1141,7 @@ mod proptests {
             let mut testing_framework = CognitiveErrorTesting::new();
 
             let error = cognitive_error!(
-                summary: format!("Memory node '{}' {}", actual, error_type),
+                summary: format!("Memory node '{actual}' {error_type}"),
                 context: expected = expected,
                          actual = actual,
                 suggestion: suggestion,
@@ -1166,7 +1166,7 @@ mod proptests {
             let (error_type, expected, actual, suggestion, example) = error_components;
 
             let error = cognitive_error!(
-                summary: format!("Validation {} for {}", error_type, actual),
+                summary: format!("Validation {error_type} for {actual}"),
                 context: expected = expected,
                          actual = actual,
                 suggestion: suggestion,
@@ -1233,7 +1233,7 @@ mod proptests {
             let (error_type, expected, actual, suggestion, example) = components;
 
             let error = cognitive_error!(
-                summary: format!("Operation {} for {}", error_type, actual),
+                summary: format!("Operation {error_type} for {actual}"),
                 context: expected = expected,
                          actual = actual,
                 suggestion: suggestion,

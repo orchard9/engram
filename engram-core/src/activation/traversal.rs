@@ -497,16 +497,16 @@ impl ParallelBreadthFirstTraversal {
                     }
 
                     // Batch append to shared collections
-                    if !local_results.is_empty() {
-                        if let Ok(mut results_guard) = results.lock() {
-                            results_guard.extend(local_results);
-                        }
+                    if !local_results.is_empty()
+                        && let Ok(mut results_guard) = results.lock()
+                    {
+                        results_guard.extend(local_results);
                     }
 
-                    if !local_next.is_empty() {
-                        if let Ok(mut next_guard) = next_level.lock() {
-                            next_guard.extend(local_next);
-                        }
+                    if !local_next.is_empty()
+                        && let Ok(mut next_guard) = next_level.lock()
+                    {
+                        next_guard.extend(local_next);
                     }
                 });
 

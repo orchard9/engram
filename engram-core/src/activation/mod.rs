@@ -489,20 +489,15 @@ pub struct WeightedEdge {
 }
 
 /// Edge types for Dale's law compliance
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum EdgeType {
     /// Positive influence (increases activation)
+    #[default]
     Excitatory,
     /// Negative influence (decreases activation)
     Inhibitory,
     /// Context-dependent influence (depends on pattern)
     Modulatory,
-}
-
-impl Default for EdgeType {
-    fn default() -> Self {
-        Self::Excitatory
-    }
 }
 
 /// Decay function implementations for different spreading dynamics

@@ -359,14 +359,14 @@ impl MemoryStore {
     fn persist_episode(&self, memory_arc: &Arc<Memory>, episode: &Episode) {
         use std::convert::TryFrom;
 
-        if let Some(ref wal_writer) = self.wal_writer {
-            if let Ok(wal_entry) = crate::storage::wal::WalEntry::new_episode(episode) {
-                wal_writer.write_async(wal_entry);
-                let episode_size = std::mem::size_of::<Episode>() as u64
-                    + u64::try_from(episode.id.len()).unwrap_or(0)
-                    + u64::try_from(episode.what.len()).unwrap_or(0);
-                self.storage_metrics.record_write(episode_size);
-            }
+        if let Some(ref wal_writer) = self.wal_writer
+            && let Ok(wal_entry) = crate::storage::wal::WalEntry::new_episode(episode)
+        {
+            wal_writer.write_async(wal_entry);
+            let episode_size = std::mem::size_of::<Episode>() as u64
+                + u64::try_from(episode.id.len()).unwrap_or(0)
+                + u64::try_from(episode.what.len()).unwrap_or(0);
+            self.storage_metrics.record_write(episode_size);
         }
 
         if let Some(ref backend) = self.persistent_backend {
@@ -1711,7 +1711,7 @@ impl MemoryStore {
                     memory
                         .content
                         .clone()
-                        .unwrap_or_else(|| format!("Memory {}", memory.id)),
+                        .unwrap_or_else(|| format!("Memory {id}", id = memory.id)),
                     memory.embedding,
                     memory.confidence,
                 );
@@ -2093,11 +2093,11 @@ impl MemoryStore {
         // 1. Try HNSW index for embedding cues if available
         #[cfg(feature = "hnsw_index")]
         {
-            if let CueType::Embedding { vector, threshold } = &cue.cue_type {
-                if let Some(ref hnsw) = self.hnsw_index {
-                    self.flush_pending_hnsw_updates();
-                    return self.recall_with_hnsw(cue, hnsw, vector, *threshold).results;
-                }
+            if let CueType::Embedding { vector, threshold } = &cue.cue_type
+                && let Some(ref hnsw) = self.hnsw_index
+            {
+                self.flush_pending_hnsw_updates();
+                return self.recall_with_hnsw(cue, hnsw, vector, *threshold).results;
             }
         }
 
@@ -2118,11 +2118,11 @@ impl MemoryStore {
         // Try HNSW index for embedding cues if available
         #[cfg(feature = "hnsw_index")]
         {
-            if let CueType::Embedding { vector, threshold } = &cue.cue_type {
-                if let Some(ref hnsw) = self.hnsw_index {
-                    self.flush_pending_hnsw_updates();
-                    return self.recall_with_hnsw(cue, hnsw, vector, *threshold).results;
-                }
+            if let CueType::Embedding { vector, threshold } = &cue.cue_type
+                && let Some(ref hnsw) = self.hnsw_index
+            {
+                self.flush_pending_hnsw_updates();
+                return self.recall_with_hnsw(cue, hnsw, vector, *threshold).results;
             }
         }
 
@@ -2151,7 +2151,7 @@ impl MemoryStore {
                 memory
                     .content
                     .clone()
-                    .unwrap_or_else(|| format!("Memory {}", memory.id)),
+                    .unwrap_or_else(|| format!("Memory {id}", id = memory.id)),
                 memory.embedding,
                 memory.confidence,
             );
@@ -2459,7 +2459,7 @@ impl MemoryStore {
         confidence: Confidence,
     ) -> CompletedEpisode {
         let now = chrono::Utc::now();
-        let identifier = format!("{prefix}_{}", now.timestamp());
+        let identifier = format!("{prefix}_{ts}", ts = now.timestamp());
         CompletedEpisode {
             episode: Episode::new(identifier, now, message.to_string(), [0.0; 768], confidence),
             completion_confidence: confidence,
@@ -2570,7 +2570,7 @@ impl MemoryStore {
                     memory
                         .content
                         .clone()
-                        .unwrap_or_else(|| format!("Memory {}", memory.id)),
+                        .unwrap_or_else(|| format!("Memory {id}", id = memory.id)),
                     memory.embedding,
                     memory.confidence,
                 );
@@ -2615,7 +2615,7 @@ impl MemoryStore {
                     memory
                         .content
                         .clone()
-                        .unwrap_or_else(|| format!("Memory {}", memory.id)),
+                        .unwrap_or_else(|| format!("Memory {id}", id = memory.id)),
                     memory.embedding,
                     memory.confidence,
                 );
@@ -2648,7 +2648,7 @@ impl MemoryStore {
                 memory
                     .content
                     .clone()
-                    .unwrap_or_else(|| format!("Memory {}", memory.id)),
+                    .unwrap_or_else(|| format!("Memory {id}", id = memory.id)),
                 memory.embedding,
                 memory.confidence,
             );
@@ -2675,24 +2675,24 @@ impl MemoryStore {
             if let Some(memory_id) = self.content_index.get(&addr)
                 && let Some(memory) = self.hot_memories.get(&memory_id)
             {
-                    // Calculate actual similarity
-                    let similarity =
-                        crate::compute::cosine_similarity_768(embedding, &memory.embedding);
+                // Calculate actual similarity
+                let similarity =
+                    crate::compute::cosine_similarity_768(embedding, &memory.embedding);
 
-                    if similarity > 0.8 {
-                        let episode = Episode::new(
-                            memory.id.clone(),
-                            memory.created_at,
-                            memory
-                                .content
-                                .clone()
-                                .unwrap_or_else(|| format!("Memory {}", memory.id)),
-                            memory.embedding,
-                            memory.confidence,
-                        );
+                if similarity > 0.8 {
+                    let episode = Episode::new(
+                        memory.id.clone(),
+                        memory.created_at,
+                        memory
+                            .content
+                            .clone()
+                            .unwrap_or_else(|| format!("Memory {id}", id = memory.id)),
+                        memory.embedding,
+                        memory.confidence,
+                    );
 
-                        results.push((episode, Confidence::exact(similarity)));
-                    }
+                    results.push((episode, Confidence::exact(similarity)));
+                }
             }
         }
 

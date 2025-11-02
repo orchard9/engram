@@ -436,7 +436,7 @@ impl ObservationQueue {
     /// for i in 0..100 {
     ///     queue.enqueue(
     ///         space_id.clone(),
-    ///         Episode::builder().what(format!("event {}", i)).build(),
+    ///         Episode::builder().what(format!("event {i}")).build(),
     ///         i,
     ///         ObservationPriority::Normal
     ///     ).unwrap();

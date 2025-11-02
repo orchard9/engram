@@ -115,10 +115,10 @@ impl<B: MemoryBackend> UnifiedMemoryGraph<B> {
                 // Retrieve memories that meet threshold
                 let mut memories = Vec::new();
                 for (id, score) in results {
-                    if score >= cue.result_threshold.raw() {
-                        if let Some(memory) = self.backend.retrieve(&id)? {
-                            memories.push(memory);
-                        }
+                    if score >= cue.result_threshold.raw()
+                        && let Some(memory) = self.backend.retrieve(&id)?
+                    {
+                        memories.push(memory);
                     }
                 }
                 memories
@@ -219,10 +219,10 @@ impl<B: MemoryBackend> UnifiedMemoryGraph<B> {
         let mut memories = Vec::new();
 
         for (id, score) in results {
-            if score >= threshold.raw() {
-                if let Some(memory) = self.backend.retrieve(&id)? {
-                    memories.push((memory, score));
-                }
+            if score >= threshold.raw()
+                && let Some(memory) = self.backend.retrieve(&id)?
+            {
+                memories.push((memory, score));
             }
         }
 

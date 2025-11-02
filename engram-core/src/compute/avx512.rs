@@ -17,8 +17,18 @@ pub struct Avx512VectorOps {
     avx2_ops: Avx2VectorOps,
 }
 
+impl Default for Avx512VectorOps {
+    #[allow(clippy::derivable_impls)]
+    fn default() -> Self {
+        Self {
+            avx2_ops: Avx2VectorOps::new(),
+        }
+    }
+}
+
 impl Avx512VectorOps {
     /// Create new AVX-512 vector operations instance
+    #[must_use]
     pub fn new() -> Self {
         Self {
             avx2_ops: Avx2VectorOps::new(),

@@ -221,7 +221,7 @@ impl System2Reasoner {
                 }
 
                 let episode = Episode::new(
-                    format!("pattern_hypothesis_{}", Utc::now().timestamp()),
+                    format!("pattern_hypothesis_{ts}", ts = Utc::now().timestamp()),
                     Utc::now(),
                     template.prediction.clone(),
                     embedding,
@@ -273,7 +273,7 @@ impl System2Reasoner {
                 }
 
                 let episode = Episode::new(
-                    format!("inference_hypothesis_{}", Utc::now().timestamp()),
+                    format!("inference_hypothesis_{ts}", ts = Utc::now().timestamp()),
                     Utc::now(),
                     rule.consequent.clone(),
                     embedding,
@@ -325,37 +325,37 @@ impl System2Reasoner {
             }
         }
 
-        if let Some(analog) = best_match {
-            if best_similarity > 0.5 {
-                // Create hypothesis based on analogy
-                let mut new_episode = analog.clone();
-                new_episode.id = format!("analogy_hypothesis_{}", Utc::now().timestamp());
+        if let Some(analog) = best_match
+            && best_similarity > 0.5
+        {
+            // Create hypothesis based on analogy
+            let mut new_episode = analog.clone();
+            new_episode.id = format!("analogy_hypothesis_{ts}", ts = Utc::now().timestamp());
 
-                // Update with known fields
-                if let Some(what) = partial.known_fields.get("what") {
-                    new_episode.what.clone_from(what);
-                }
-
-                let similarity = f64_to_f32(best_similarity);
-                let evidence = vec![Evidence::SemanticSimilarity(analog.id.clone(), similarity)];
-
-                let reasoning_chain = vec![ReasoningStep {
-                    description: format!("Analogical reasoning from episode: {}", analog.id),
-                    confidence: Confidence::exact(similarity),
-                    working_memory: self
-                        .working_memory
-                        .iter()
-                        .map(|item| item.content.clone())
-                        .collect(),
-                }];
-
-                return Some(Hypothesis {
-                    episode: new_episode,
-                    evidence,
-                    confidence: Confidence::exact(similarity * partial.cue_strength.raw()),
-                    reasoning_chain,
-                });
+            // Update with known fields
+            if let Some(what) = partial.known_fields.get("what") {
+                new_episode.what.clone_from(what);
             }
+
+            let similarity = f64_to_f32(best_similarity);
+            let evidence = vec![Evidence::SemanticSimilarity(analog.id.clone(), similarity)];
+
+            let reasoning_chain = vec![ReasoningStep {
+                description: format!("Analogical reasoning from episode: {id}", id = analog.id),
+                confidence: Confidence::exact(similarity),
+                working_memory: self
+                    .working_memory
+                    .iter()
+                    .map(|item| item.content.clone())
+                    .collect(),
+            }];
+
+            return Some(Hypothesis {
+                episode: new_episode,
+                evidence,
+                confidence: Confidence::exact(similarity * partial.cue_strength.raw()),
+                reasoning_chain,
+            });
         }
 
         None
@@ -422,10 +422,10 @@ impl System2Reasoner {
         }
 
         if let Some(where_loc) = partial.known_fields.get("where") {
-            if let Some(ref ep_where) = episode.where_location {
-                if ep_where.contains(where_loc) {
-                    similarity += 1.0;
-                }
+            if let Some(ref ep_where) = episode.where_location
+                && ep_where.contains(where_loc)
+            {
+                similarity += 1.0;
             }
             count += 1;
         }

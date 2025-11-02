@@ -72,11 +72,12 @@ pub struct ExampleCharacteristics {
 }
 
 /// Binary outcome representation for cognitive checks
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CheckResult {
     /// Requirement is satisfied
     Passed,
     /// Requirement is not satisfied
+    #[default]
     Failed,
 }
 
@@ -91,12 +92,6 @@ impl CheckResult {
     #[must_use]
     pub const fn as_bool(self) -> bool {
         matches!(self, Self::Passed)
-    }
-}
-
-impl Default for CheckResult {
-    fn default() -> Self {
-        Self::Failed
     }
 }
 

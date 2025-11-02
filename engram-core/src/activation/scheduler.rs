@@ -147,20 +147,20 @@ impl TierAwareSpreadingScheduler {
         let warm_deadline = deadlines[StorageTier::Warm as usize];
         let cold_deadline = deadlines[StorageTier::Cold as usize];
 
-        if self.priority_hot_tier {
-            if let Some(task) = self.queue_for(StorageTier::Hot).pop(now, hot_deadline) {
-                return Some(task.into_inner());
-            }
+        if self.priority_hot_tier
+            && let Some(task) = self.queue_for(StorageTier::Hot).pop(now, hot_deadline)
+        {
+            return Some(task.into_inner());
         }
 
         if let Some(task) = self.queue_for(StorageTier::Warm).pop(now, warm_deadline) {
             return Some(task.into_inner());
         }
 
-        if !self.priority_hot_tier {
-            if let Some(task) = self.queue_for(StorageTier::Hot).pop(now, hot_deadline) {
-                return Some(task.into_inner());
-            }
+        if !self.priority_hot_tier
+            && let Some(task) = self.queue_for(StorageTier::Hot).pop(now, hot_deadline)
+        {
+            return Some(task.into_inner());
         }
 
         if self.bypass_cold.load(Ordering::Relaxed) {
@@ -458,10 +458,10 @@ impl TierQueue {
         self.deadline_missed.store(false, Ordering::Relaxed);
 
         // Clear deterministic buffer
-        if self.deterministic {
-            if let Ok(mut buffer) = self.deterministic_buffer.lock() {
-                buffer.clear();
-            }
+        if self.deterministic
+            && let Ok(mut buffer) = self.deterministic_buffer.lock()
+        {
+            buffer.clear();
         }
     }
 }

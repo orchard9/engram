@@ -124,14 +124,14 @@ impl PatternDetector {
         // Phase 2: Extract common patterns from clusters
         let mut patterns = Vec::new();
         for cluster in clusters {
-            if cluster.len() >= self.config.min_cluster_size {
-                if let Some(pattern) = self.extract_pattern(&cluster) {
-                    patterns.push(pattern);
+            if cluster.len() >= self.config.min_cluster_size
+                && let Some(pattern) = self.extract_pattern(&cluster)
+            {
+                patterns.push(pattern);
 
-                    // Stop if we've hit the max patterns limit
-                    if patterns.len() >= self.config.max_patterns {
-                        break;
-                    }
+                // Stop if we've hit the max patterns limit
+                if patterns.len() >= self.config.max_patterns {
+                    break;
                 }
             }
         }
@@ -285,7 +285,10 @@ impl PatternDetector {
         // Create deterministic ID
         let mut source_episodes: Vec<String> = episodes.iter().map(|ep| ep.id.clone()).collect();
         source_episodes.sort();
-        let id = format!("pattern_{}", Self::compute_pattern_hash(&source_episodes));
+        let id = format!(
+            "pattern_{hash}",
+            hash = Self::compute_pattern_hash(&source_episodes)
+        );
 
         Some(EpisodicPattern {
             id,
@@ -476,7 +479,10 @@ impl PatternDetector {
         a.features.extend(b.features);
 
         // Update ID
-        a.id = format!("pattern_{}", Self::compute_pattern_hash(&a.source_episodes));
+        a.id = format!(
+            "pattern_{hash}",
+            hash = Self::compute_pattern_hash(&a.source_episodes)
+        );
 
         a
     }

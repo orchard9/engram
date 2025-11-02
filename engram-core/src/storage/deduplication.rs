@@ -9,9 +9,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Strategy for handling duplicate memories
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum MergeStrategy {
     /// Keep the memory with highest confidence
+    #[default]
     KeepHighestConfidence,
     /// Merge metadata from both memories
     MergeMetadata,
@@ -21,12 +22,6 @@ pub enum MergeStrategy {
     KeepMostRecent,
     /// Keep the oldest memory
     KeepOldest,
-}
-
-impl Default for MergeStrategy {
-    fn default() -> Self {
-        Self::KeepHighestConfidence
-    }
 }
 
 /// Result of a deduplication check
@@ -251,7 +246,7 @@ impl SemanticDeduplicator {
 
                 let mut composite = memory1.clone();
                 composite.embedding = composite_embedding;
-                composite.id = format!("{}_composite_{}", memory1.id, memory2.id);
+                composite.id = format!("{id1}_composite_{id2}", id1 = memory1.id, id2 = memory2.id);
 
                 // Combine confidence with slight reduction for uncertainty
                 composite.confidence = Confidence::exact(

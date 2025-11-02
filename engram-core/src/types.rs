@@ -272,9 +272,9 @@ impl CoreError {
             }
             Self::InvalidActivation { value } => {
                 cognitive_error!(
-                    summary: format!("Invalid activation level: {}", value),
+                    summary: format!("Invalid activation level: {value}"),
                     context: expected = "Activation between 0.0 and 1.0",
-                             actual = format!("{}", value),
+                             actual = format!("{value}"),
                     suggestion: "Use activation.clamp(0.0, 1.0) to ensure valid range",
                     example: "node.activate(energy.clamp(0.0, 1.0));",
                     confidence: Confidence::exact(1.0)
@@ -317,7 +317,7 @@ impl CoreError {
                 example,
             } => {
                 cognitive_error!(
-                    summary: format!("Validation failed: {}", reason),
+                    summary: format!("Validation failed: {reason}"),
                     context: expected = expected.clone(),
                              actual = reason.clone(),
                     suggestion: suggestion.clone(),

@@ -389,7 +389,7 @@ impl ConsolidationEngine {
                     Confidence::exact(episode.encoding_confidence.raw() * confidence_decay);
 
                 let memory = Memory::new(
-                    format!("consolidated_{}", episode.id),
+                    format!("consolidated_{id}", id = episode.id),
                     episode.embedding,
                     semantic_confidence,
                 );

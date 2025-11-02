@@ -172,7 +172,7 @@ impl ColumnarData {
             memory
                 .content
                 .clone()
-                .unwrap_or_else(|| format!("Memory: {}", memory.id)),
+                .unwrap_or_else(|| format!("Memory: {id}", id = memory.id)),
         );
         self.memory_ids.push(memory.id.clone());
 
@@ -475,10 +475,10 @@ impl ColdTier {
                 }
             };
 
-            if relevance >= fuzzy_threshold.raw() {
-                if let Some(episode) = Self::index_to_episode(data, i) {
-                    results.push((episode, Confidence::exact(relevance)));
-                }
+            if relevance >= fuzzy_threshold.raw()
+                && let Some(episode) = Self::index_to_episode(data, i)
+            {
+                results.push((episode, Confidence::exact(relevance)));
             }
         }
 
@@ -504,10 +504,10 @@ impl ColdTier {
             let timestamp = data.creation_times[i];
             let match_score = Self::matches_temporal_pattern(timestamp, pattern);
 
-            if match_score >= confidence_threshold.raw() {
-                if let Some(episode) = Self::index_to_episode(data, i) {
-                    results.push((episode, Confidence::exact(match_score)));
-                }
+            if match_score >= confidence_threshold.raw()
+                && let Some(episode) = Self::index_to_episode(data, i)
+            {
+                results.push((episode, Confidence::exact(match_score)));
             }
         }
 
@@ -531,10 +531,10 @@ impl ColdTier {
         for i in 0..search_limit {
             let confidence = data.confidences[i];
 
-            if confidence >= confidence_threshold.raw() {
-                if let Some(episode) = Self::index_to_episode(data, i) {
-                    results.push((episode, Confidence::exact(confidence)));
-                }
+            if confidence >= confidence_threshold.raw()
+                && let Some(episode) = Self::index_to_episode(data, i)
+            {
+                results.push((episode, Confidence::exact(confidence)));
             }
         }
 

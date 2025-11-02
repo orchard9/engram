@@ -38,7 +38,7 @@ pub fn export_json(events: &[CognitiveEvent]) -> Result<(), Box<dyn std::error::
     let output_path = {
         let output = JSON_OUTPUT
             .lock()
-            .map_err(|e| format!("JSON_OUTPUT mutex poisoned: {}", e))?;
+            .map_err(|e| format!("JSON_OUTPUT mutex poisoned: {e}"))?;
         output.clone()
     };
 

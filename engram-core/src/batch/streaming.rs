@@ -89,7 +89,7 @@ impl StreamingBatchProcessor {
                     let activation = memory_store.store(episode.clone());
                     BatchOperationResult::Store {
                         activation,
-                        memory_id: format!("mem_{}", id),
+                        memory_id: format!("mem_{id}"),
                     }
                 },
                 BatchOperation::Recall(cue) => {
@@ -228,9 +228,9 @@ mod tests {
         let operations: Vec<BatchOperation> = (0..10)
             .map(|i| {
                 let episode = EpisodeBuilder::new()
-                    .id(format!("ep{}", i))
+                    .id(format!("ep{i}"))
                     .when(Utc::now())
-                    .what(format!("Episode {}", i))
+                    .what(format!("Episode {i}"))
                     .embedding([i as f32 * 0.1; 768])
                     .confidence(Confidence::HIGH)
                     .build();

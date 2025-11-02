@@ -8,15 +8,26 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 
 use super::VectorOps;
-use std::arch::x86_64::*;
+use std::arch::x86_64::{
+    __m256, _MM_HINT_T0, _mm_add_ps, _mm_cvtss_f32, _mm_hadd_ps, _mm_prefetch, _mm256_add_ps,
+    _mm256_castps256_ps128, _mm256_extractf128_ps, _mm256_fmadd_ps, _mm256_loadu_ps, _mm256_mul_ps,
+    _mm256_set1_ps, _mm256_setzero_ps, _mm256_storeu_ps,
+};
 
 /// AVX2 implementation of vector operations
 pub struct Avx2VectorOps {
     has_fma: bool,
 }
 
+impl Default for Avx2VectorOps {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Avx2VectorOps {
     /// Create new AVX2 vector operations instance
+    #[must_use]
     pub fn new() -> Self {
         Self {
             has_fma: is_x86_feature_detected!("fma"),
@@ -286,7 +297,7 @@ unsafe fn cosine_similarity_batch_768_avx2_fma(
         // Prefetch next vector for better cache performance
         let next_idx = results.len() + 1;
         if next_idx < vectors.len() {
-            let prefetch_ptr = vectors[next_idx].as_ptr() as *const i8;
+            let prefetch_ptr = vectors[next_idx].as_ptr().cast::<i8>();
             _mm_prefetch(prefetch_ptr, _MM_HINT_T0);
         }
 
@@ -338,7 +349,7 @@ unsafe fn cosine_similarity_batch_768_avx2(query: &[f32; 768], vectors: &[[f32; 
         // Prefetch next vector for better cache performance
         let next_idx = results.len() + 1;
         if next_idx < vectors.len() {
-            let prefetch_ptr = vectors[next_idx].as_ptr() as *const i8;
+            let prefetch_ptr = vectors[next_idx].as_ptr().cast::<i8>();
             _mm_prefetch(prefetch_ptr, _MM_HINT_T0);
         }
 
@@ -368,8 +379,6 @@ unsafe fn cosine_similarity_batch_768_avx2(query: &[f32; 768], vectors: &[[f32; 
 /// AVX2 FMA accumulate for columnar operations
 #[target_feature(enable = "avx2,fma")]
 unsafe fn fma_accumulate_avx2(column: &[f32], scalar: f32, accumulator: &mut [f32]) {
-    use std::arch::x86_64::*;
-
     let scalar_vec = _mm256_set1_ps(scalar);
     let len = column.len().min(accumulator.len());
     let chunks = len / 8;
@@ -409,8 +418,6 @@ unsafe fn gather_f32_avx2(base: &[f32], indices: &[usize]) -> Vec<f32> {
 /// AVX2 horizontal sum reduction
 #[target_feature(enable = "avx2")]
 unsafe fn horizontal_sum_avx2(values: &[f32]) -> f32 {
-    use std::arch::x86_64::*;
-
     let mut sum = _mm256_setzero_ps();
     let chunks = values.len() / 8;
 
@@ -432,8 +439,8 @@ unsafe fn horizontal_sum_avx2(values: &[f32]) -> f32 {
     let mut result = _mm_cvtss_f32(sum_32);
 
     // Add remainder
-    for i in (chunks * 8)..values.len() {
-        result += values[i];
+    for value in values.iter().skip(chunks * 8) {
+        result += value;
     }
 
     result

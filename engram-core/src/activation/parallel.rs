@@ -55,7 +55,7 @@ fn prefetch_cache_line(node: &CacheOptimizedNode) {
         #[cfg(target_arch = "x86_64")]
         use core::arch::x86_64::_mm_prefetch;
         const _MM_HINT_T0: i32 = 3;
-        _mm_prefetch(node as *const CacheOptimizedNode as *const i8, _MM_HINT_T0);
+        _mm_prefetch(std::ptr::from_ref(node).cast::<i8>(), _MM_HINT_T0);
     }
     #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
     {

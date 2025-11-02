@@ -121,20 +121,15 @@ impl RecallMetrics {
 /// // For production: spreading with similarity fallback
 /// let hybrid = RecallMode::Hybrid;  // Recommended
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RecallMode {
     /// Use only vector similarity for recall
     Similarity,
     /// Use activation spreading for recall
     Spreading,
     /// Use both methods with fallback
+    #[default]
     Hybrid,
-}
-
-impl Default for RecallMode {
-    fn default() -> Self {
-        Self::Hybrid
-    }
 }
 
 /// Configuration for cognitive recall

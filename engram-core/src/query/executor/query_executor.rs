@@ -331,7 +331,10 @@ impl QueryExecutor {
                 // Convert Vec<f32> to fixed-size array
                 if vector.len() != 768 {
                     return Err(QueryExecutionError::InvalidPattern {
-                        reason: format!("Expected 768-dimensional embedding, got {}", vector.len()),
+                        reason: format!(
+                            "Expected 768-dimensional embedding, got {len}",
+                            len = vector.len()
+                        ),
                     });
                 }
 
@@ -370,7 +373,7 @@ impl QueryExecutor {
     fn create_query_evidence(query: &Query<'_>) -> Evidence {
         Evidence {
             source: EvidenceSource::DirectMatch {
-                cue_id: format!("query_ast_{}", query.category().as_str()),
+                cue_id: format!("query_ast_{cat}", cat = query.category().as_str()),
                 similarity_score: 1.0,
                 match_type: MatchType::Semantic,
             },

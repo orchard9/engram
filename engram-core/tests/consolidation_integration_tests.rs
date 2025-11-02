@@ -164,7 +164,7 @@ fn test_consolidation_progress_tracking() {
     );
 
     // Consolidate with this episode
-    engine.ripple_replay(&vec![
+    engine.ripple_replay(&[
         episode.clone(),
         create_episode_with_embedding("test_ep2", &[0.81; 768], 60),
         create_episode_with_embedding("test_ep3", &[0.82; 768], 120),

@@ -272,7 +272,7 @@ impl HotTier {
                 memory
                     .content
                     .clone()
-                    .unwrap_or_else(|| format!("Memory: {}", memory.id)),
+                    .unwrap_or_else(|| format!("Memory: {id}", id = memory.id)),
             )
             .embedding(memory.embedding)
             .confidence(memory.confidence)

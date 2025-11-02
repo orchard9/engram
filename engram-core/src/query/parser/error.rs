@@ -100,7 +100,7 @@ impl TokenizeError {
                     format!("Unexpected character '{ch}' in query"),
                     ErrorContext::new(
                         "Valid query syntax character",
-                        format!("Found '{ch}' at line {}, column {}", position.line, position.column),
+                        format!("Found '{ch}' at line {line}, column {col}", line = position.line, col = position.column),
                     ),
                     format!(
                         "Remove '{ch}' or check query syntax. Valid characters: letters, digits, _, >, <, =, [, ], ,"
@@ -405,7 +405,7 @@ impl ParseError {
             ErrorKind::UnexpectedToken { found, expected } => CognitiveError::new(
                 format!("Unexpected {found} in query"),
                 ErrorContext::new(
-                    format!("Expected: {}", expected.join(" or ")),
+                    format!("Expected: {expected}", expected = expected.join(" or ")),
                     format!(
                         "Found {found} at line {}, column {}",
                         self.position.line, self.position.column
@@ -693,7 +693,7 @@ fn generate_suggestion_and_example(
                 )
             } else {
                 (
-                    format!("Use one of: {}", expected.join(", ")),
+                    format!("Use one of: {expected}", expected = expected.join(", ")),
                     "RECALL episode WHERE confidence > 0.7".to_string(),
                 )
             }

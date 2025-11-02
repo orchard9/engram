@@ -236,10 +236,10 @@ impl FeatureRegistry {
     /// Get the best available provider for a feature type
     #[must_use]
     pub fn get_best(&self, feature_type: &str) -> Arc<dyn FeatureProvider> {
-        if let Some(provider) = self.get(feature_type) {
-            if provider.is_enabled() {
-                return provider;
-            }
+        if let Some(provider) = self.get(feature_type)
+            && provider.is_enabled()
+        {
+            return provider;
         }
 
         if let Some(provider) = self.get(&format!("{feature_type}_null")) {

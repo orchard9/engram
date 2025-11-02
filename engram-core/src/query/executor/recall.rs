@@ -204,14 +204,17 @@ impl RecallExecutor {
                 embedding_array.copy_from_slice(vector);
 
                 Ok(Cue::embedding(
-                    format!("embedding_query_{}", Self::hash_embedding(&embedding_array)),
+                    format!(
+                        "embedding_query_{hash}",
+                        hash = Self::hash_embedding(&embedding_array)
+                    ),
                     embedding_array,
                     Confidence::from_raw(*threshold),
                 ))
             }
 
             Pattern::ContentMatch(content) => Ok(Cue::semantic(
-                format!("content_query_{}", Self::hash_string(content)),
+                format!("content_query_{hash}", hash = Self::hash_string(content)),
                 content.to_string(),
                 Confidence::MEDIUM,
             )),

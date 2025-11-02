@@ -102,7 +102,7 @@ impl MemoryStore {
                 // Semantic match evidence
                 Evidence {
                     source: EvidenceSource::DirectMatch {
-                        cue_id: format!("semantic_{}", content.len()),
+                        cue_id: format!("semantic_{len}", len = content.len()),
                         similarity_score: confidence.raw(),
                         match_type: MatchType::Semantic,
                     },

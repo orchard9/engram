@@ -96,7 +96,7 @@ impl EmbeddingBlock {
     pub fn prefetch_for_activation(&self) {
         unsafe {
             std::arch::x86_64::_mm_prefetch(
-                (self as *const Self) as *const i8,
+                std::ptr::from_ref(self).cast::<i8>(),
                 std::arch::x86_64::_MM_HINT_T0,
             );
         }
@@ -107,7 +107,7 @@ impl EmbeddingBlock {
     #[inline]
     pub fn prefetch_for_similarity(&self) {
         unsafe {
-            let embedding_ptr = self.embedding.as_ptr() as *const i8;
+            let embedding_ptr = self.embedding.as_ptr().cast::<i8>();
             for line in 0..48 {
                 // 768 * 4 bytes / 64 bytes = 48 lines
                 std::arch::x86_64::_mm_prefetch(

@@ -282,7 +282,7 @@ fn transform_spreading_results(
                 memory
                     .content
                     .clone()
-                    .unwrap_or_else(|| format!("Memory {}", memory.id)),
+                    .unwrap_or_else(|| format!("Memory {id}", id = memory.id)),
                 memory.embedding,
                 confidence,
             );
