@@ -5,7 +5,7 @@
 ### Rust Toolchain
 - **Minimum Version**: Rust 1.82.0 (required for Edition 2024 support)
 - **Recommended**: Latest stable release (1.91.0 or newer)
-- **Installation**: 
+- **Installation**:
   ```bash
   curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
   rustup update stable
@@ -56,7 +56,7 @@ For optimal performance on NUMA systems:
 
 ### Linux
 - **Recommended**: Ubuntu 20.04 LTS or newer
-- **Supported**: 
+- **Supported**:
   - Debian 10+
   - RHEL/CentOS 8+
   - Fedora 34+

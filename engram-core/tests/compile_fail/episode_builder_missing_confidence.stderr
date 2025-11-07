@@ -8,7 +8,7 @@ error[E0599]: no method named `build` found for struct `EpisodeBuilder<engram_co
 14 | |         .what("Something happened".to_string())
 15 | |         .embedding([0.1f32; 768])
 16 | |         .build(); //~ ERROR: method `build` not found for this value
-   | |         -^^^^^ method not found in `EpisodeBuilder<NoConfidence>`
+   | |         -^^^^^ method not found in `EpisodeBuilder<engram_core::memory::episode_builder_states::NoConfidence>`
    | |_________|
    |
    |

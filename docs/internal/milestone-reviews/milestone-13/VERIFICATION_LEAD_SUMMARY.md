@@ -282,21 +282,21 @@ For EVERY test to be considered rigorous:
 
 ## Success Metrics
 
-### Task 008 (DRM) - PASS if:
+### Task 008 (DRM) - PASS if
 - False recall: 55-65% (±10%)
 - Confidence interval overlaps [50%, 70%]
 - Chi-square p > 0.01
 - All 4 word lists show effect (>30% false recall)
 - Confidence paradox: false memory confidence >0.3
 
-### Task 009 (Spacing) - PASS if:
+### Task 009 (Spacing) - PASS if
 - Improvement: 20-40% (±10%)
 - Statistical significance: p < 0.05
 - Effect size: Cohen's d ≥ 0.3
 - Stability: ≥25/30 replications pass
 - Time simulation validity: All tests pass
 
-### Task 010 (Interference) - PASS if:
+### Task 010 (Interference) - PASS if
 **Proactive:**
 - Reduction at 5 lists: 20-30% (±10%)
 - Linear regression: R² > 0.70, negative slope

@@ -4,7 +4,7 @@ error[E0599]: no method named `embedding_search` found for struct `CueBuilder<en
 11 |       let _cue = CueBuilder::new()
    |  ________________-
 12 | |         .embedding_search([0.1f32; 768], Confidence::MEDIUM)
-   | |         -^^^^^^^^^^^^^^^^ method not found in `CueBuilder<NoId>`
+   | |         -^^^^^^^^^^^^^^^^ method not found in `CueBuilder<engram_core::memory::cue_builder_states::NoId>`
    | |_________|
    |
    |

@@ -43,9 +43,8 @@
 
 3. **Missing error path tests**:
    - `QueryExecutionError::QueryTooComplex` - No test for query cost limits
-   - `QueryExecutionError::InvalidPattern` - No test for wrong embedding dimensions  
+   - `QueryExecutionError::InvalidPattern` - No test for wrong embedding dimensions
    - `QueryExecutionError::NotImplemented` - No test for PREDICT/IMAGINE/CONSOLIDATE
-   
 4. **Missing valgrind/miri validation**:
    - Task acceptance criteria required "valgrind/miri" testing
    - Only manual soak tests provided (10K queries)

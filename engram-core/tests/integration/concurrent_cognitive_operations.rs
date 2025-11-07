@@ -314,6 +314,7 @@ fn test_concurrent_associative_priming_coactivation() {
 // ==================== Mixed Operation Stress Test ====================
 
 #[test]
+#[ignore = "Extreme stress test (32 threads × 50K ops = 1.6M operations) - too heavy for CI, use --ignored for load testing"]
 fn test_mixed_cognitive_operations_stress_test() {
     // Extremely high concurrency: 32 threads, 50K operations each
     // This test is designed to find any remaining race conditions

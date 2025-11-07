@@ -1,10 +1,10 @@
-error[E0599]: no method named `content` found for struct `EpisodeBuilder` in the current scope
+error[E0599]: no method named `content` found for struct `EpisodeBuilder<State>` in the current scope
   --> tests/compile_fail/invalid_state_transitions.rs:33:36
    |
 33 |     let _invalid = episode_builder.content("extra".to_string()); //~ ERROR: borrow of moved value: `episode_builder`
-   |                                    ^^^^^^^ method not found in `EpisodeBuilder<Ready>`
+   |                                    ^^^^^^^ method not found in `EpisodeBuilder<engram_core::memory::episode_builder_states::Ready>`
 
-error[E0599]: no method named `embedding` found for struct `CueBuilder` in the current scope
+error[E0599]: no method named `embedding` found for struct `CueBuilder<State>` in the current scope
   --> tests/compile_fail/invalid_state_transitions.rs:42:30
    |
 42 |     let _wrong = cue_builder.embedding([0.3f32; 768]); //~ ERROR: method `embedding` not found

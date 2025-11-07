@@ -147,7 +147,7 @@ This report documents the integration testing and performance validation for Mil
 
 **Priority:** P0 (Blocking)
 
-#### In `cognitive/priming/repetition.rs`:
+#### In `cognitive/priming/repetition.rs`
 
 1. **Uninlined format args** (5 instances):
    - Lines 326, 333-335: Use `{variable}` syntax
@@ -158,12 +158,12 @@ This report documents the integration testing and performance validation for Mil
 3. **Unwrap in tests** (1 instance):
    - Line 447: Use `expect()` with descriptive message or `?` operator
 
-#### In `cognitive/reconsolidation/consolidation_integration.rs`:
+#### In `cognitive/reconsolidation/consolidation_integration.rs`
 
 4. **Unwrap used** (2 instances):
    - Lines 299-301, 307: Replace with proper error handling
 
-#### In `tracing/ring_buffer.rs`:
+#### In `tracing/ring_buffer.rs`
 
 5. **Pointer cast constness**:
    - Line 65: Use `pointer::cast_mut()` instead of `as *mut`
@@ -174,7 +174,7 @@ This report documents the integration testing and performance validation for Mil
 7. **Missing const for fn**:
    - Line 127: `capacity()` can be `const fn`
 
-#### In `tracing/exporters/`:
+#### In `tracing/exporters/`
 
 8. **Unnecessary wraps**:
    - `otlp.rs` line 12, `loki.rs` line 12: Remove `Result` wrapper (always returns `Ok`)
@@ -182,7 +182,7 @@ This report documents the integration testing and performance validation for Mil
 9. **Expect used**:
    - `json.rs` line 39: Handle mutex poisoning gracefully
 
-#### In `tracing/mod.rs`:
+#### In `tracing/mod.rs`
 
 10. **Inline always warnings** (4 instances):
     - Lines 62, 94, 127, 160: Remove `#[inline(always)]`, use `#[inline]` or trust compiler

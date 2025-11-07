@@ -698,7 +698,7 @@ Spec needs to clarify: Are you building event tracing or metrics aggregation? Th
 
 ## Consolidated Recommendations
 
-### For Task 001 (Metrics):
+### For Task 001 (Metrics)
 
 **MUST FIX:**
 
@@ -726,7 +726,7 @@ Spec needs to clarify: Are you building event tracing or metrics aggregation? Th
 
 ---
 
-### For Task 011 (Tracing):
+### For Task 011 (Tracing)
 
 **MUST ADD:**
 
@@ -780,17 +780,17 @@ Spec needs to clarify: Are you building event tracing or metrics aggregation? Th
 
 ## Recommended Action Items
 
-### Immediate (before starting implementation):
+### Immediate (before starting implementation)
 
 1. **Task 001:** Remove Arc wrapper, fix histogram sum calculation
 2. **Task 011:** Rewrite specification with bounded memory strategy
 
-### During implementation:
+### During implementation
 
 1. **Task 001:** Add loom tests, benchmark on production workload
 2. **Task 011:** Choose ringbuf or existing tracing crate
 
-### Post-implementation:
+### Post-implementation
 
 1. Validate actual overhead with Criterion benchmarks
 2. Run under production load simulator (10K ops/sec)

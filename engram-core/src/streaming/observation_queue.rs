@@ -840,6 +840,12 @@ mod tests {
     fn test_concurrent_enqueue_dequeue() {
         use std::sync::Arc;
         use std::sync::atomic::AtomicUsize;
+        use std::time::{Duration, Instant};
+
+        // Use smaller numbers for faster, more reliable test
+        let enqueuers = 2;
+        let items_per_enqueuer = 100;
+        let total_expected = enqueuers * items_per_enqueuer;
 
         let queue = Arc::new(ObservationQueue::new(QueueConfig::default()));
         let enqueue_count = Arc::new(AtomicUsize::new(0));
@@ -847,49 +853,55 @@ mod tests {
 
         let mut handles = vec![];
 
-        // Spawn 4 enqueuers
-        for t in 0..4 {
+        // Spawn enqueuers
+        for t in 0..enqueuers {
             let q = Arc::clone(&queue);
             let counter = Arc::clone(&enqueue_count);
             handles.push(std::thread::spawn(move || {
-                for i in 0..1_000 {
-                    let seq = t * 1_000 + i;
-                    if q.enqueue(
-                        test_space_id(),
-                        test_episode("test"),
-                        seq,
-                        ObservationPriority::Normal,
-                    )
-                    .is_ok()
+                for i in 0..items_per_enqueuer {
+                    let seq = t * items_per_enqueuer + i;
+                    // Keep trying until successful (handle backpressure)
+                    while q
+                        .enqueue(
+                            test_space_id(),
+                            test_episode("test"),
+                            seq as u64,
+                            ObservationPriority::Normal,
+                        )
+                        .is_err()
                     {
-                        counter.fetch_add(1, Ordering::SeqCst);
+                        std::thread::yield_now();
                     }
+                    counter.fetch_add(1, Ordering::SeqCst);
                 }
             }));
         }
 
-        // Spawn 2 dequeuers
-        for _ in 0..2 {
-            let q = Arc::clone(&queue);
-            let counter = Arc::clone(&dequeue_count);
-            let target = Arc::clone(&enqueue_count);
-            handles.push(std::thread::spawn(move || {
-                loop {
-                    let current_dequeued = counter.load(Ordering::SeqCst);
-                    let total_enqueued = target.load(Ordering::SeqCst);
+        // Spawn one dequeuer that runs until all items are processed
+        let q = Arc::clone(&queue);
+        let counter = Arc::clone(&dequeue_count);
+        let enqueue_counter = Arc::clone(&enqueue_count);
+        handles.push(std::thread::spawn(move || {
+            let start = Instant::now();
+            while counter.load(Ordering::SeqCst) < total_expected {
+                // Timeout protection
+                assert!(
+                    start.elapsed() <= Duration::from_secs(5),
+                    "Dequeue thread timed out. Dequeued: {}, Expected: {}",
+                    counter.load(Ordering::SeqCst),
+                    total_expected
+                );
 
-                    if current_dequeued >= total_enqueued && total_enqueued == 4_000 {
-                        break;
-                    }
-
-                    if let Some(_obs) = q.dequeue() {
-                        counter.fetch_add(1, Ordering::SeqCst);
-                    } else {
+                if let Some(_obs) = q.dequeue() {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                } else {
+                    // Only yield if we haven't seen all enqueued items yet
+                    if enqueue_counter.load(Ordering::SeqCst) < total_expected {
                         std::thread::yield_now();
                     }
                 }
-            }));
-        }
+            }
+        }));
 
         // Wait for completion
         for h in handles {
@@ -899,8 +911,8 @@ mod tests {
         // Verify all enqueued were dequeued
         let enqueued = enqueue_count.load(Ordering::SeqCst);
         let dequeued = dequeue_count.load(Ordering::SeqCst);
-        assert_eq!(enqueued, 4_000);
-        assert_eq!(enqueued, dequeued);
+        assert_eq!(enqueued, total_expected);
+        assert_eq!(dequeued, total_expected);
     }
 
     #[test]

@@ -809,7 +809,7 @@ echo "=== Zero-Cost Abstraction Verification Complete ==="
 # Run assembly verification
 ./scripts/verify_zero_cost_abstraction.sh
 
-# Expected output:
+# Expected output
 # PASS: Zero-cost abstraction verified (delta: 0 instructions)
 # PASS: Monitoring code completely eliminated when feature disabled
 ```
@@ -1238,13 +1238,13 @@ PASS: Monitoring code completely eliminated when feature disabled
 [... additional sections ...]
 """
 
-    output_path.write_text(report)
-    print(f"Report generated: {output_path}")
+output_path.write_text(report)
+print(f"Report generated: {output_path}")
 
-if __name__ == "__main__":
-    results_dir = Path(sys.argv[1] if len(sys.argv) > 1 else "target/criterion")
-    output_path = Path("PERFORMANCE_VALIDATION_REPORT.md")
-    generate_report(results_dir, output_path)
+if **name** == "**main**":
+results_dir = Path(sys.argv[1] if len(sys.argv) > 1 else "target/criterion")
+output_path = Path("PERFORMANCE_VALIDATION_REPORT.md")
+generate_report(results_dir, output_path)
 ```
 
 ---

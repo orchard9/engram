@@ -365,7 +365,7 @@ Day 19-20: Task 014 (Documentation)
 
 ## 5. File Reference Guide
 
-### For Each Task, Use This File:
+### For Each Task, Use This File
 
 | Task | Implementation File | Notes |
 |------|-------------------|-------|
@@ -634,7 +634,7 @@ Day 19-20: Task 014 (Documentation)
 - [ ] All parameters accurate
 - [ ] All runbooks tested
 
-### Milestone 13 Complete When:
+### Milestone 13 Complete When
 
 1. **All 14 tasks complete** with acceptance criteria met
 2. **Psychology validations pass** (proof of cognitive plausibility)
