@@ -115,6 +115,22 @@ fn test_batch_spreading_with_parallel_engine() {
     let node_a = format!("{test_id}_A");
     let nodes_b: Vec<String> = (1..=8).map(|i| format!("{test_id}_B{i}")).collect();
 
+    // Create embeddings to enable SIMD batch processing
+    let mut embedding_a = [0.0f32; 768];
+    for (i, val) in embedding_a.iter_mut().enumerate() {
+        *val = (i as f32 * 0.01).sin();
+    }
+    graph.set_embedding(&node_a, &embedding_a);
+
+    // Add embeddings for B nodes to enable SIMD processing
+    for (i, b_node) in nodes_b.iter().enumerate() {
+        let mut embedding_b = embedding_a;
+        for (j, val) in embedding_b.iter_mut().enumerate() {
+            *val += ((i + 1) as f32 * 0.001) * (j as f32).cos();
+        }
+        graph.set_embedding(b_node, &embedding_b);
+    }
+
     // A -> B1, B2, B3, B4, B5, B6, B7, B8 (enough for batch processing)
     ActivationGraphExt::add_edge(
         &*graph,
