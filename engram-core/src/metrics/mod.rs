@@ -31,6 +31,7 @@ pub use completion_metrics::{
     ComponentLatencies, ResourceSnapshot,
 };
 pub use hardware::{CacheLevel, HardwareMetrics, SimdOperation};
+#[cfg(not(test))]
 use health::HealthProbe;
 pub use health::{HealthCheck, HealthStatus, SystemHealth};
 pub use lockfree::{LockFreeCounter, LockFreeGauge, LockFreeHistogram};
@@ -214,14 +215,20 @@ impl MetricsRegistry {
             numa_collectors: numa_aware::NumaCollectors::new().map(Arc::new),
         };
 
-        if let Ok(probe) = crate::activation::health_checks::SpreadingHealthProbe::default_probe() {
-            let hysteresis = probe.hysteresis();
-            health.register_probe_with_hysteresis(probe, hysteresis);
-        } else {
-            tracing::warn!(
-                target = "engram::health",
-                "Failed to initialise spreading health probe"
-            );
+        // Disable spreading health probe during tests to prevent engine interference
+        #[cfg(not(test))]
+        {
+            if let Ok(probe) =
+                crate::activation::health_checks::SpreadingHealthProbe::default_probe()
+            {
+                let hysteresis = probe.hysteresis();
+                health.register_probe_with_hysteresis(probe, hysteresis);
+            } else {
+                tracing::warn!(
+                    target = "engram::health",
+                    "Failed to initialise spreading health probe"
+                );
+            }
         }
 
         registry

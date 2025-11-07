@@ -45,6 +45,8 @@ pub mod auto_tuning;
 pub mod circuit_breaker;
 pub mod confidence_aggregation;
 pub mod cycle_detector;
+/// Global engine registry for test isolation
+pub mod engine_registry;
 /// GPU abstraction layer for acceleration
 pub mod gpu_interface;
 /// Health monitoring probes for activation subsystems
@@ -53,6 +55,8 @@ pub mod health_checks;
 pub mod multi_cue;
 /// Lock-free parallel activation spreading engine
 pub mod parallel;
+/// Phase barrier for thread synchronization with shutdown support
+pub mod phase_barrier;
 pub mod queue;
 /// Integrated cognitive recall pipeline
 pub mod recall;
@@ -67,6 +71,7 @@ pub mod semantic_seeder;
 pub mod simd_optimization;
 /// Configuration for similarity-based activation
 pub mod similarity_config;
+pub mod test_isolation;
 pub mod test_support;
 pub mod traversal;
 

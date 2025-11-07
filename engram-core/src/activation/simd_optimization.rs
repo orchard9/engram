@@ -6,8 +6,6 @@ const TILE_DIM: usize = 96; // 768 / 8 = 96 tiles
 
 /// Cache-aligned batch structure for SIMD processing (AoSoA layout)
 /// Stores embeddings in Array-of-Structures-of-Arrays format for optimal SIMD access
-#[repr(align(64))]
-#[derive(Clone)]
 pub struct ActivationBatch {
     /// Embeddings stored in AoSoA layout: [dim][lane]
     /// Each dimension has LANES elements grouped together for SIMD access
@@ -20,10 +18,35 @@ impl ActivationBatch {
     /// Create new activation batch with specified capacity
     #[must_use]
     pub fn new(capacity: usize) -> Self {
+        use std::alloc::{Layout, alloc_zeroed};
+
         // Round up to next multiple of LANES for alignment
         let aligned_capacity = capacity.div_ceil(LANES) * LANES;
+        let num_elements = TILE_DIM * aligned_capacity / LANES;
+        let element_size = std::mem::size_of::<[f32; LANES]>();
+        let total_size = num_elements * element_size;
+
+        // Create layout with 64-byte alignment
+        let layout = Layout::from_size_align(total_size, 64)
+            .unwrap_or_else(|_| unreachable!("64 is a valid power of 2 alignment"));
+
+        // Allocate aligned memory
+        let ptr = unsafe { alloc_zeroed(layout) };
+        assert!(!ptr.is_null(), "Failed to allocate aligned memory");
+
+        // Convert to Vec with aligned allocation
+        let embeddings = unsafe {
+            // Ensure proper alignment before casting
+            debug_assert_eq!(ptr as usize % std::mem::align_of::<[f32; LANES]>(), 0);
+            // We know this cast is safe because we allocated with 64-byte alignment
+            // which is more than sufficient for [f32; 8] (needs 4-byte alignment)
+            #[allow(clippy::cast_ptr_alignment)]
+            let ptr = ptr.cast::<[f32; LANES]>();
+            Vec::from_raw_parts(ptr, num_elements, num_elements)
+        };
+
         Self {
-            embeddings: vec![[0.0; LANES]; TILE_DIM * aligned_capacity / LANES],
+            embeddings,
             count: 0,
         }
     }
@@ -112,6 +135,73 @@ impl ActivationBatch {
             "ActivationBatch not aligned to 64-byte boundary. Pointer: {:p}",
             self.embeddings.as_ptr()
         );
+    }
+}
+
+impl Clone for ActivationBatch {
+    fn clone(&self) -> Self {
+        use std::alloc::{Layout, alloc_zeroed};
+
+        let num_elements = self.embeddings.capacity();
+        if num_elements == 0 {
+            return Self {
+                embeddings: Vec::new(),
+                count: 0,
+            };
+        }
+
+        let element_size = std::mem::size_of::<[f32; LANES]>();
+        let total_size = num_elements * element_size;
+
+        // Create layout with 64-byte alignment
+        let layout = Layout::from_size_align(total_size, 64)
+            .unwrap_or_else(|_| unreachable!("64 is a valid power of 2 alignment"));
+
+        // Allocate aligned memory
+        let ptr = unsafe { alloc_zeroed(layout) };
+        assert!(!ptr.is_null(), "Failed to allocate aligned memory");
+
+        // Copy data and convert to Vec
+        let embeddings = unsafe {
+            // Ensure proper alignment before casting
+            debug_assert_eq!(ptr as usize % std::mem::align_of::<[f32; LANES]>(), 0);
+            // We know this cast is safe because we allocated with 64-byte alignment
+            // which is more than sufficient for [f32; 8] (needs 4-byte alignment)
+            #[allow(clippy::cast_ptr_alignment)]
+            let ptr = ptr.cast::<[f32; LANES]>();
+            // Copy the data
+            std::ptr::copy_nonoverlapping(self.embeddings.as_ptr(), ptr, self.embeddings.len());
+            Vec::from_raw_parts(ptr, self.embeddings.len(), num_elements)
+        };
+
+        Self {
+            embeddings,
+            count: self.count,
+        }
+    }
+}
+
+impl Drop for ActivationBatch {
+    fn drop(&mut self) {
+        use std::alloc::{Layout, dealloc};
+
+        let capacity = self.embeddings.capacity();
+        if capacity > 0 {
+            let element_size = std::mem::size_of::<[f32; LANES]>();
+            let total_size = capacity * element_size;
+            let layout = Layout::from_size_align(total_size, 64)
+                .unwrap_or_else(|_| unreachable!("64 is a valid power of 2 alignment"));
+
+            // Get the pointer before we forget the Vec
+            let ptr = self.embeddings.as_mut_ptr().cast::<u8>();
+
+            // Take the Vec and forget it to prevent its Drop from running
+            let vec = std::mem::take(&mut self.embeddings);
+            std::mem::forget(vec);
+
+            // Deallocate with correct alignment
+            unsafe { dealloc(ptr, layout) };
+        }
     }
 }
 

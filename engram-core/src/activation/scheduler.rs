@@ -215,6 +215,37 @@ impl TierAwareSpreadingScheduler {
         &self.latency_budget
     }
 
+    /// Signal shutdown by injecting poison pills into all queues
+    pub fn signal_shutdown(&self) {
+        // Create shutdown sentinel task
+        let shutdown_task = ScheduledTask::new(
+            ActivationTask::new(
+                "__SHUTDOWN__".to_string(),
+                f32::INFINITY, // source_activation
+                1.0,           // edge_weight
+                1.0,           // decay_factor
+                0,             // depth
+                0,             // max_depth
+            )
+            .with_storage_tier(StorageTier::Hot),
+        );
+
+        // Push to all tier queues to wake up workers
+        for queue in &self.queues {
+            // Push multiple sentinels to ensure all workers see one
+            for _ in 0..3 {
+                queue.push(shutdown_task.clone());
+            }
+        }
+    }
+
+    /// Clear all pending tasks from queues
+    pub fn drain_all(&self) {
+        for queue in &self.queues {
+            queue.drain();
+        }
+    }
+
     const fn queue_for(&self, tier: StorageTier) -> &TierQueue {
         &self.queues[tier as usize]
     }
@@ -227,6 +258,7 @@ struct SchedulerTiming {
 }
 
 /// Wrapper around an activation task recording when it entered the queue.
+#[derive(Clone)]
 struct ScheduledTask {
     task: ActivationTask,
     enqueued_at: Instant,
@@ -350,16 +382,8 @@ impl TierQueue {
             Err(poisoned) => poisoned.into_inner(),
         };
 
-        // Track if we reserved an in_flight slot during buffer refill
-        let mut reserved_slot = false;
-
         // If buffer is empty, refill from queue with sorting
         if buffer.is_empty() {
-            // Reserve in_flight slot BEFORE draining to maintain visibility during sort
-            // This prevents is_idle() from returning true while tasks are being sorted
-            self.in_flight.fetch_add(1, Ordering::Relaxed);
-            reserved_slot = true;
-
             let mut tasks = Vec::new();
             while let Some(task) = self.tasks.pop() {
                 self.queued.fetch_sub(1, Ordering::Relaxed);
@@ -367,8 +391,6 @@ impl TierQueue {
             }
 
             if tasks.is_empty() {
-                // No tasks were drained, release the reserved slot
-                self.in_flight.fetch_sub(1, Ordering::Relaxed);
                 return None;
             }
 
@@ -400,20 +422,11 @@ impl TierQueue {
                 continue;
             }
 
-            // Found valid task
-            if !reserved_slot {
-                // Buffer had existing tasks, increment now
-                self.in_flight.fetch_add(1, Ordering::Relaxed);
-            }
-            // Otherwise, we already incremented at refill start
+            // Found valid task - increment in_flight counter
+            self.in_flight.fetch_add(1, Ordering::Relaxed);
             return Some(task);
         }
 
-        // Buffer exhausted without finding valid task
-        if reserved_slot {
-            // Release the reservation we made during refill
-            self.in_flight.fetch_sub(1, Ordering::Relaxed);
-        }
         None
     }
 
@@ -463,6 +476,23 @@ impl TierQueue {
         {
             buffer.clear();
         }
+    }
+
+    fn drain(&self) {
+        // Clear main queue
+        while self.tasks.pop().is_some() {
+            self.queued.fetch_sub(1, Ordering::Relaxed);
+        }
+
+        // Clear deterministic buffer
+        if self.deterministic
+            && let Ok(mut buffer) = self.deterministic_buffer.lock()
+        {
+            buffer.clear();
+        }
+
+        // Reset counters
+        self.queued.store(0, Ordering::Relaxed);
     }
 }
 
@@ -559,5 +589,62 @@ mod tests {
                 .expect("cold tier snapshot")
                 .deadline_missed
         );
+    }
+
+    #[test]
+    fn scheduler_shutdown_injects_sentinels() {
+        let config = default_config();
+        let scheduler = TierAwareSpreadingScheduler::from_config(&config);
+        scheduler.reset(&config);
+
+        // Enqueue some regular tasks
+        scheduler.enqueue_task(make_task("task1", StorageTier::Hot));
+        scheduler.enqueue_task(make_task("task2", StorageTier::Warm));
+
+        // Signal shutdown
+        scheduler.signal_shutdown();
+
+        // Should see shutdown sentinels
+        let mut shutdown_count = 0;
+        let mut regular_count = 0;
+
+        while let Some(task) = scheduler.next_task() {
+            if task.target_node == "__SHUTDOWN__" {
+                shutdown_count += 1;
+            } else {
+                regular_count += 1;
+            }
+            scheduler.finish_task(task.storage_tier.unwrap_or(StorageTier::Hot));
+        }
+
+        // Should have seen at least one shutdown sentinel per tier (3 tiers * 3 copies each)
+        assert!(shutdown_count >= 3);
+        // Should still process regular tasks
+        assert_eq!(regular_count, 2);
+    }
+
+    #[test]
+    fn scheduler_drain_all_clears_queues() {
+        let config = default_config();
+        let scheduler = TierAwareSpreadingScheduler::from_config(&config);
+        scheduler.reset(&config);
+
+        // Enqueue tasks to all tiers
+        scheduler.enqueue_task(make_task("hot1", StorageTier::Hot));
+        scheduler.enqueue_task(make_task("hot2", StorageTier::Hot));
+        scheduler.enqueue_task(make_task("warm", StorageTier::Warm));
+        scheduler.enqueue_task(make_task("cold", StorageTier::Cold));
+
+        let snapshot = scheduler.snapshot();
+        assert_eq!(snapshot.total_pending, 4);
+
+        // Drain all queues
+        scheduler.drain_all();
+
+        // All queues should be empty
+        assert!(scheduler.is_idle());
+        let snapshot = scheduler.snapshot();
+        assert_eq!(snapshot.total_pending, 0);
+        assert!(scheduler.next_task().is_none());
     }
 }

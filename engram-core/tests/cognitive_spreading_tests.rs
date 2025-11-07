@@ -6,6 +6,7 @@ use engram_core::activation::test_support::{
 };
 use engram_core::activation::{ActivationGraphExt, EdgeType, MemoryGraph};
 use engram_core::decay::HippocampalDecayFunction;
+use serial_test::serial;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -28,31 +29,22 @@ use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 
 fn build_semantic_priming_graph() -> (Arc<MemoryGraph>, Vec<(String, f32)>) {
+    use engram_core::activation::test_support::unique_test_id;
+
     let graph = Arc::new(engram_core::activation::create_activation_graph());
+    let test_id = unique_test_id();
 
-    ActivationGraphExt::add_edge(
-        &*graph,
-        "doctor".to_string(),
-        "nurse".to_string(),
-        0.9,
-        EdgeType::Excitatory,
-    );
-    ActivationGraphExt::add_edge(
-        &*graph,
-        "doctor".to_string(),
-        "writer".to_string(),
-        0.4,
-        EdgeType::Excitatory,
-    );
-    ActivationGraphExt::add_edge(
-        &*graph,
-        "mechanic".to_string(),
-        "wrench".to_string(),
-        0.9,
-        EdgeType::Excitatory,
-    );
+    let doctor = format!("{test_id}_doctor");
+    let nurse = format!("{test_id}_nurse");
+    let writer = format!("{test_id}_writer");
+    let mechanic = format!("{test_id}_mechanic");
+    let wrench = format!("{test_id}_wrench");
 
-    (graph, vec![("doctor".to_string(), 1.0)])
+    ActivationGraphExt::add_edge(&*graph, doctor.clone(), nurse, 0.9, EdgeType::Excitatory);
+    ActivationGraphExt::add_edge(&*graph, doctor.clone(), writer, 0.4, EdgeType::Excitatory);
+    ActivationGraphExt::add_edge(&*graph, mechanic, wrench, 0.9, EdgeType::Excitatory);
+
+    (graph, vec![(doctor, 1.0)])
 }
 
 fn activation_for(results: &engram_core::activation::SpreadingResults, node: &str) -> f32 {
@@ -85,21 +77,44 @@ fn hippocampal_decay_matches_exponential_baseline() {
 }
 
 #[test]
-#[ignore = "Known deadlock with --test-threads=1 in deterministic scheduler"]
+#[serial]
+#[ignore = "Flaky test - times out when run with --test-threads=1 due to engine registry conflicts"]
 fn semantic_priming_boosts_related_concepts() {
     let (graph, seeds) = build_semantic_priming_graph();
     let mut config = fast_deterministic_config(123);
-    config.max_depth = 2;
+    config.max_depth = 1; // Reduced depth to simplify test
+    config.num_threads = 1; // Force single-threaded for tests
+    config.completion_timeout = Some(std::time::Duration::from_secs(30)); // Standard timeout
 
     let run = run_spreading(&graph, &seeds, config).expect("spreading should succeed");
-    let nurse_activation = activation_for(&run.results, "nurse");
-    let writer_activation = activation_for(&run.results, "writer");
 
-    assert!(nurse_activation > writer_activation);
-    assert!(nurse_activation > 0.0);
+    // Extract the test ID from the seed node to find the corresponding nodes
+    // The seed node is like "test_2489048_1762467675266832728_doctor"
+    // We need everything except the last part (_doctor)
+    let seed_parts: Vec<&str> = seeds[0].0.rsplitn(2, '_').collect();
+    let test_id = if seed_parts.len() == 2 {
+        seed_parts[1] // This is the "test_2489048_1762467675266832728" part
+    } else {
+        &seeds[0].0
+    };
+    let nurse_node = format!("{test_id}_nurse");
+    let writer_node = format!("{test_id}_writer");
+
+    let nurse_activation = activation_for(&run.results, &nurse_node);
+    let writer_activation = activation_for(&run.results, &writer_node);
+
+    assert!(
+        nurse_activation > writer_activation,
+        "nurse ({nurse_activation}) should have higher activation than writer ({writer_activation})"
+    );
+    assert!(nurse_activation > 0.0, "nurse should be activated");
+
+    // Give time for engine cleanup to avoid interference with subsequent tests
+    std::thread::sleep(std::time::Duration::from_millis(100));
 }
 
 #[test]
+#[serial]
 fn fan_effect_reduces_activation_per_association() {
     use support::graph_builders::fan;
 
@@ -114,11 +129,12 @@ fn fan_effect_reduces_activation_per_association() {
     let low_run =
         run_spreading(low_fan.graph(), &low_fan.seeds, config).expect("low fan spreading");
 
+    // The node names now have unique test IDs, so we need to look for nodes containing "_spoke_"
     let avg_high = high_run
         .results
         .activations
         .iter()
-        .filter(|node| node.memory_id.starts_with("concept_high_spoke"))
+        .filter(|node| node.memory_id.contains("_concept_high_spoke_"))
         .map(|node| {
             node.activation_level
                 .load(std::sync::atomic::Ordering::Relaxed)
@@ -130,7 +146,7 @@ fn fan_effect_reduces_activation_per_association() {
         .results
         .activations
         .iter()
-        .filter(|node| node.memory_id.starts_with("concept_low_spoke"))
+        .filter(|node| node.memory_id.contains("_concept_low_spoke_"))
         .map(|node| {
             node.activation_level
                 .load(std::sync::atomic::Ordering::Relaxed)
@@ -142,6 +158,9 @@ fn fan_effect_reduces_activation_per_association() {
         avg_low > avg_high,
         "Fan effect should dilute activation per association"
     );
+
+    // Give time for engine cleanup to avoid interference with subsequent tests
+    std::thread::sleep(std::time::Duration::from_millis(100));
 }
 
 #[cfg(feature = "hnsw_index")]

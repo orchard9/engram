@@ -14,6 +14,19 @@ use std::time::Duration;
 
 use super::MemoryGraph;
 
+/// Generate a unique test ID to prevent node name collisions between tests
+#[must_use]
+pub fn unique_test_id() -> String {
+    format!(
+        "test_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    )
+}
+
 /// Serializable view of a storage-aware activation used in snapshots and tests.
 #[derive(Debug, Serialize, Clone)]
 pub struct ActivationNodeSnapshot {
@@ -184,6 +197,9 @@ pub fn run_spreading_snapshot(
     let results = engine.spread_activation(seeds)?;
     let metrics_snapshot = SpreadingMetricsSnapshot::from_metrics(engine.get_metrics());
 
+    // Ensure proper shutdown
+    engine.shutdown()?;
+
     let activations = results
         .activations
         .iter()
@@ -219,6 +235,15 @@ pub fn run_spreading(
     let engine = ParallelSpreadingEngine::new(config, Arc::clone(graph))?;
     let results = engine.spread_activation(seeds)?;
     let metrics_snapshot = SpreadingMetricsSnapshot::from_metrics(engine.get_metrics());
+
+    // Ensure proper shutdown to release the engine registry handle
+    engine.shutdown()?;
+
+    // In single-threaded test mode, give extra time for cleanup
+    #[cfg(test)]
+    if std::env::var("RUST_TEST_THREADS").as_deref() == Ok("1") {
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
 
     Ok(SpreadingRun {
         results,

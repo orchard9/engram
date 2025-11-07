@@ -1,6 +1,6 @@
 use engram_core::activation::{
     ActivationGraphExt, DecayFunction, EdgeType, MemoryGraph, ParallelSpreadingConfig,
-    create_activation_graph, storage_aware::StorageTier,
+    create_activation_graph, storage_aware::StorageTier, test_support::unique_test_id,
 };
 use rand::{Rng, SeedableRng, rngs::StdRng};
 use serde::Serialize;
@@ -252,11 +252,12 @@ pub fn simple_cycle() -> GraphFixture {
 pub fn fan(center: &str, spokes: usize) -> GraphFixture {
     assert!(spokes >= 2, "Fan graph requires at least two spokes");
     let graph = Arc::new(create_activation_graph());
-    let center_id = center.to_string();
+    let test_id = unique_test_id();
+    let center_id = format!("{test_id}_{center}");
     let weight = 1.0_f32 / spokes as f32;
 
     for idx in 0..spokes {
-        let spoke = format!("{center}_spoke_{idx}");
+        let spoke = format!("{test_id}_{center}_spoke_{idx}");
         ActivationGraphExt::add_edge(
             &*graph,
             center_id.clone(),

@@ -47,10 +47,12 @@ impl SpreadingHealthProbe {
         config.enable_metrics = true;
         config.num_threads = config.num_threads.min(4);
         config.max_depth = 3;
+        // Add explicit timeout for health check probe
+        config.completion_timeout = Some(Duration::from_millis(500));
 
         let engine = ParallelSpreadingEngine::new(config, graph)?;
         let seeds = vec![("probe_a".to_string(), 1.0)];
-        Ok(Self::new(engine, seeds, Duration::from_millis(50), 0.05))
+        Ok(Self::new(engine, seeds, Duration::from_millis(100), 0.05))
     }
 
     fn run_spread(&self) -> ActivationResult<SpreadingResults> {
@@ -159,17 +161,36 @@ fn build_cycle_fixture(graph: &Arc<MemoryGraph>) {
         "probe_e".to_string(),
     ];
 
+    // Use ActivationGraphExt trait methods for proper edge creation
     for window in nodes.windows(2) {
         let source = window[0].clone();
         let target = window[1].clone();
-        graph.add_edge(source.clone(), target.clone(), 0.8, EdgeType::Excitatory);
-        graph.add_edge(target, source, 0.3, EdgeType::Excitatory);
+        ActivationGraphExt::add_edge(
+            &**graph,
+            source.clone(),
+            target.clone(),
+            0.8,
+            EdgeType::Excitatory,
+        );
+        ActivationGraphExt::add_edge(&**graph, target, source, 0.3, EdgeType::Excitatory);
     }
 
     // Close the cycle between last and first nodes.
     if let (Some(first), Some(last)) = (nodes.first(), nodes.last()) {
-        graph.add_edge(last.clone(), first.clone(), 0.7, EdgeType::Excitatory);
-        graph.add_edge(first.clone(), last.clone(), 0.4, EdgeType::Excitatory);
+        ActivationGraphExt::add_edge(
+            &**graph,
+            last.clone(),
+            first.clone(),
+            0.7,
+            EdgeType::Excitatory,
+        );
+        ActivationGraphExt::add_edge(
+            &**graph,
+            first.clone(),
+            last.clone(),
+            0.4,
+            EdgeType::Excitatory,
+        );
     }
 }
 

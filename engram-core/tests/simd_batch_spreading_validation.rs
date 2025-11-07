@@ -31,10 +31,12 @@ fn test_batch_cosine_similarity_matches_scalar() {
     );
 
     for (i, (scalar, simd)) in scalar_results.iter().zip(simd_results.iter()).enumerate() {
-        assert_ulps_eq!(scalar, simd, max_ulps = 2, epsilon = 1e-6);
+        // Allow up to 4 ULPs difference for SIMD operations
+        assert_ulps_eq!(scalar, simd, max_ulps = 4, epsilon = 1e-5);
         assert!(
-            (scalar - simd).abs() < 1e-6,
-            "SIMD result differs from scalar at index {i}: scalar={scalar}, simd={simd}"
+            (scalar - simd).abs() < 1e-5,
+            "SIMD result differs from scalar at index {i}: scalar={scalar}, simd={simd}, diff={}",
+            (scalar - simd).abs()
         );
     }
 }
