@@ -1,0 +1,36 @@
+=== Engram 24-Hour Baseline Test Setup ===
+Start Time: Sat Nov  8 01:28:28 AM UTC 2025
+Expected End Time: Sun Nov  9 01:28:28 AM UTC 2025
+
+Initial Status (at 1 hour 23 minutes runtime):
+- PID: 3112549
+- CPU Usage: 21.5%
+- Memory Usage: 27.8%
+- RSS: 9077684 KB (~8.7 GB)
+- VSZ: 139171572 KB (~132.7 GB)
+- Elapsed Time: 01:22:55
+- Health: healthy
+
+Configuration:
+- HTTP Port: 7433
+- gRPC Port: 50052
+- Memory Spaces: default, psychology, figurative, and others
+
+Monitoring Plan:
+- Process will run continuously for 24 hours
+- Periodic health checks via http://localhost:7433/health
+- Monitor for memory leaks (RSS growth)
+- Monitor for CPU usage patterns
+- Check for log errors/warnings
+
+Success Criteria:
+- Service remains healthy for 24 hours
+- No memory leaks (RSS stable)
+- No crashes or restarts
+- CPU usage remains reasonable (<50% average)
+- All APIs remain responsive
+
+Notes:
+- High VSZ is normal for memory-mapped operations
+- Current memory usage is stable after 1+ hour
+- CPU usage consistent around 20-22%

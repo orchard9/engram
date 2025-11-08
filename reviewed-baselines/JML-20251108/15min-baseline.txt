@@ -1,0 +1,38 @@
+=== Engram 15-Minute Baseline Test ===
+Start Time: Sat Nov  8 12:51:36 AM UTC 2025
+End Time: Sat Nov  8 01:09:07 AM UTC 2025
+Duration: 17.5 minutes (15 min test + 2.5 min buffer)
+Total Runtime: ~50 minutes since start
+
+Process Stats:
+- PID: 3112549
+- CPU Usage: 22.8% (increased from 20.8%)
+- Memory Usage: 27.8% (stable)
+- RSS: 9077684 KB (~8.7 GB, minimal increase)
+- VSZ: 139171572 KB (~132.7 GB, unchanged)
+
+Health Check: PASSED
+- Service: engram
+- Status: healthy
+- Version: 0.1.0
+
+Metrics Observations:
+- Activation pool utilization: 0.0 (pool underutilized)
+- Spreading latency: ~26-27 microseconds (excellent)
+- Spreading activation pool hit rate: 100%
+- Memory consolidation: Active (consolidation logs observed)
+- No ERROR logs observed
+- Few WARN logs (ports occupied, using alternatives)
+
+Performance Summary:
+- CPU usage slightly increased but stable (~22%)
+- Memory usage very stable (8.7 GB RSS)
+- Service remained healthy throughout test
+- All metrics within expected ranges
+- No performance degradation observed
+
+Notes:
+- High virtual memory (VSZ) is typical for memory-mapped files
+- Actual memory usage (RSS) is reasonable at 8.7 GB
+- System performing spreading activation probes regularly
+- Metrics streaming working correctly

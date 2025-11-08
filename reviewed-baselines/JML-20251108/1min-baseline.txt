@@ -1,0 +1,21 @@
+=== Engram 1-Minute Baseline Test ===
+Start Time: Sat Nov  8 12:19:43 AM UTC 2025
+End Time: Sat Nov  8 12:21:54 AM UTC 2025
+Duration: 2 minutes (1 minute runtime + 1 minute buffer)
+
+Process Stats:
+- PID: 3112549
+- CPU Usage: 20.8%
+- Memory Usage: 27.8%
+- RSS: 9076580 KB (~8.7 GB)
+- VSZ: 139171572 KB (~132.7 GB)
+
+Health Check: PASSED
+- Service: engram
+- Status: healthy
+- Version: 0.1.0
+
+Notes:
+- High memory usage observed (8.7 GB RSS)
+- CPU usage moderate at ~20%
+- Service remained healthy throughout test

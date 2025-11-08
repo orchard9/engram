@@ -1,0 +1,21 @@
+=== System Information ===
+Date: 2025-11-08
+Machine: JML
+OS: Linux 5.15.0-160-generic
+CPU: 20 cores
+Memory: 32GB total
+GPU: NVIDIA RTX A4500 (20GB VRAM)
+CUDA: 13.0 / Driver 580.95.05
+
+Engram Build:
+- Version: 0.1.0
+- Rust Edition: 2024
+- Features: GPU acceleration validated
+- Build Type: Release with optimizations
+- Compiler: rustc (latest stable)
+
+Test Environment:
+- Other services running: Unknown
+- System load before test: Low
+- Network: Local only
+- Storage: SSD

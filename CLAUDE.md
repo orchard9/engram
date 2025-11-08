@@ -3,6 +3,8 @@ This project uses Rust Edition 2024 for all code.
 
 IMPORTANT: After each test run or engram execution, check diagnostics with `./scripts/engram_diagnostics.sh` and track results in `tmp/engram_diagnostics.log` (prepended).
 
+PERFORMANCE: Baseline measurements are tracked in `reviewed-baselines/` - see README.md for process and current results.
+
 CRITICAL: NEVER use git commands (restore, stash, reset, etc.) to avoid test failures. When tests fail, root cause them, understand them, and fix them properly. No shortcuts.
 
 ## Roadmap
