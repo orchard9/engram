@@ -1,12 +1,18 @@
 //! Consolidation service abstractions for caching, observability, and persistence.
 
+pub mod clustering;
 pub mod compaction;
+pub mod concept_formation;
 pub mod dream;
 pub mod pattern_detector;
 pub mod service;
 pub mod statistical_tests;
 
+pub use clustering::{BiologicalClusterer, EpisodeCluster};
 pub use compaction::{CompactionConfig, CompactionResult, StorageCompactor};
+#[cfg(feature = "dual_memory_types")]
+pub use concept_formation::ConceptFormationResult;
+pub use concept_formation::{ConceptFormationEngine, ConceptSignature, ProtoConcept, SleepStage};
 pub use dream::{DreamConfig, DreamEngine, DreamError, DreamOutcome};
 pub use pattern_detector::{
     EpisodicPattern, PatternDetectionConfig, PatternDetector, PatternFeature,

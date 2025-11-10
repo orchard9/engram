@@ -863,32 +863,49 @@ impl MemoryStore {
     #[cfg(feature = "hnsw_index")]
     fn process_hnsw_batch(hnsw: &CognitiveHnswIndex, batch: &[HnswUpdate]) {
         let start = std::time::Instant::now();
-        let mut processed = 0;
-        let mut failed = 0;
         let mut skipped = 0;
 
-        for update in batch {
-            match update {
-                HnswUpdate::Insert { memory } => {
-                    if let Err(e) = hnsw.insert_memory(Arc::clone(memory)) {
-                        tracing::warn!(error = ?e, memory_id = %memory.id, "HNSW insert failed");
-                        failed += 1;
-                    } else {
-                        processed += 1;
-                    }
-                }
+        // Collect all Insert operations into a batch for optimized insertion
+        let memories: Vec<Arc<Memory>> = batch
+            .iter()
+            .filter_map(|update| match update {
+                HnswUpdate::Insert { memory } => Some(Arc::clone(memory)),
                 HnswUpdate::Remove { id } => {
-                    // Remove operation not yet implemented in CognitiveHnswIndex
                     tracing::trace!(memory_id = %id, "HNSW remove operation not yet implemented");
                     skipped += 1;
+                    None
                 }
                 HnswUpdate::Rebuild => {
-                    // Rebuild operation not yet implemented in CognitiveHnswIndex
                     tracing::trace!("HNSW rebuild operation not yet implemented");
                     skipped += 1;
+                    None
+                }
+            })
+            .collect();
+
+        // Use optimized batch insert (3-5x faster than sequential inserts)
+        let (processed, failed) = if memories.is_empty() {
+            (0, 0)
+        } else {
+            match hnsw.insert_batch(&memories) {
+                Ok(result) => (result.inserted_count, 0),
+                Err(e) => {
+                    tracing::warn!(error = ?e, batch_size = memories.len(), "HNSW batch insert failed, falling back to sequential");
+                    // Fallback to sequential insertion on batch error
+                    let mut processed = 0;
+                    let mut failed = 0;
+                    for memory in &memories {
+                        if let Err(e) = hnsw.insert_memory(Arc::clone(memory)) {
+                            tracing::warn!(error = ?e, memory_id = %memory.id, "HNSW insert failed");
+                            failed += 1;
+                        } else {
+                            processed += 1;
+                        }
+                    }
+                    (processed, failed)
                 }
             }
-        }
+        };
 
         if processed > 0 || failed > 0 || skipped > 0 {
             tracing::debug!(
@@ -896,6 +913,7 @@ impl MemoryStore {
                 failed,
                 skipped,
                 duration_ms = start.elapsed().as_millis() as u64,
+                batch_size = memories.len(),
                 "Processed HNSW update batch"
             );
         }

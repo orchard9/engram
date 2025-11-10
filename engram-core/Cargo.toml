@@ -187,6 +187,11 @@ required-features = ["cognitive_tracing"]
 name = "streaming_throughput"
 harness = false
 
+[[bench]]
+name = "dual_memory_types"
+harness = false
+required-features = ["dual_memory_types"]
+
 # Temporarily disabled - needs API updates for space-partitioned HNSW
 # [[bench]]
 # name = "concurrent_recall"
@@ -296,6 +301,9 @@ security = [
 # Secrets management integrations
 vault_secrets = ["security", "vaultrs", "reqwest"]
 aws_secrets = ["security", "aws-sdk-secretsmanager", "reqwest"]
+
+# Dual memory architecture (Milestone 17)
+dual_memory_types = []
 
 # Experimental features
 # numa_aware = ["numa-rs"]

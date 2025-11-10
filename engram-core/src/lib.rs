@@ -482,6 +482,10 @@ pub use embedding::multilingual::MultilingualEncoder;
 pub use memory::{
     Cue, CueBuilder, CueType, Episode, EpisodeBuilder, Memory, MemoryBuilder, TemporalPattern,
 };
+
+#[cfg(feature = "dual_memory_types")]
+pub use memory::{DualMemoryNode, EpisodeId, MemoryNodeType};
+
 pub use query::{
     ConfidenceInterval, Evidence, EvidenceSource, MatchType, ProbabilisticError,
     ProbabilisticQueryResult, ProbabilisticRecall, ProbabilisticResult, UncertaintySource,

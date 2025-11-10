@@ -1,0 +1,47 @@
+# Competitive Baseline: Qdrant ANN Search Benchmark
+#
+# Replicates Qdrant's published benchmark for approximate nearest neighbor search
+# Reference: https://qdrant.tech/benchmarks/
+#
+# Benchmark details:
+# - Dataset: 1M vectors, 768 dimensions (OpenAI ada-002 embedding size)
+# - Target: 99.5% recall@10 accuracy
+# - Competitor P99: 22-24ms latency, 626 QPS throughput
+# - Engram target: <20ms P99 (10% faster)
+#
+# This scenario tests pure vector search performance without graph operations,
+# enabling direct comparison with vector databases.
+
+name = "Qdrant ANN 1M Benchmark"
+description = "Pure ANN search workload matching Qdrant benchmark (1M vectors, 768-dim)"
+
+[duration]
+total_seconds = 60
+
+[arrival]
+pattern = "constant"
+rate = 1000.0  # Start at 1000 QPS, compare against Qdrant's 626 QPS
+
+[operations]
+# Pure ANN search workload - no storage or recall operations
+store_weight = 0.0
+recall_weight = 0.0
+embedding_search_weight = 1.0  # 100% vector similarity search
+pattern_completion_weight = 0.0
+
+[data]
+num_nodes = 1_000_000  # 1M vectors to match Qdrant benchmark scale
+embedding_dim = 768    # OpenAI ada-002 embedding dimension
+memory_spaces = 1
+
+# Clustered distribution to simulate real-world semantic embeddings
+# where similar concepts cluster together
+embedding_distribution = { type = "clustered", num_clusters = 100, std_dev = 0.15 }
+
+[validation]
+expected_p99_latency_ms = 20.0     # Target: beat Qdrant's 22-24ms
+expected_throughput_ops_sec = 800.0 # Target: exceed Qdrant's 626 QPS
+max_error_rate = 0.005              # 0.5% error rate (99.5% recall target)
+
+[chaos]
+enabled = false

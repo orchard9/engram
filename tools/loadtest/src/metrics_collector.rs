@@ -90,7 +90,7 @@ impl MetricsCollector {
         let mut max_p99 = 0.0f64;
 
         for histogram in inner.latency_histograms.values() {
-            if histogram.len() > 0 {
+            if !histogram.is_empty() {
                 total_count += histogram.len();
                 let p99_us = histogram.value_at_quantile(0.99);
                 let p99_ms = p99_us as f64 / 1000.0;
@@ -223,10 +223,12 @@ impl OperationStatistics {
         self.p99_latency_us as f64 / 1000.0
     }
 
+    #[allow(dead_code)] // Useful for detailed analysis
     pub fn p999_latency_ms(&self) -> f64 {
         self.p999_latency_us as f64 / 1000.0
     }
 
+    #[allow(dead_code)] // Useful for detailed analysis
     pub fn mean_latency_ms(&self) -> f64 {
         self.mean_latency_us / 1000.0
     }

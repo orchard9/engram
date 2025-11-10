@@ -1,18 +1,24 @@
-///! Comparative benchmark framework for differential testing against FAISS and Neo4j
-///!
-///! Runs identical workloads against multiple systems and compares:
-///! - Throughput at P99 < 10ms latency (ops/second)
-///! - Memory efficiency (bytes per node)
-///! - Index build time (for 1M nodes)
-///! - Query latency distribution (P50, P95, P99, P99.9)
-///! - Concurrency scaling (1, 4, 16, 64 threads)
-///! - Resource utilization (CPU%, Memory%, Disk I/O)
+//! Comparative benchmark framework for differential testing against FAISS and Neo4j
+//!
+//! Runs identical workloads against multiple systems and compares:
+//! - Throughput at P99 < 10ms latency (ops/second)
+//! - Memory efficiency (bytes per node)
+//! - Index build time (for 1M nodes)
+//! - Query latency distribution (P50, P95, P99, P99.9)
+//! - Concurrency scaling (1, 4, 16, 64 threads)
+//! - Resource utilization (CPU%, Memory%, Disk I/O)
+//!
+//! NOTE: Module under development for M17.1 Task 004
+
+#![allow(dead_code)] // Module stub for future work
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 /// Configuration for a benchmark run
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)] // Module under development
 pub struct BenchmarkConfig {
     pub num_nodes: usize,
     pub embedding_dim: usize,
@@ -23,6 +29,7 @@ pub struct BenchmarkConfig {
 
 /// Results from a single benchmark run
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)] // Module under development
 pub struct BenchmarkResults {
     pub system_name: String,
     pub throughput_ops_sec: f64,
@@ -35,6 +42,7 @@ pub struct BenchmarkResults {
 }
 
 /// Trait for systems that can be benchmarked
+#[allow(dead_code)] // Module under development
 pub trait BenchmarkTarget {
     fn name(&self) -> &str;
 
@@ -50,12 +58,14 @@ pub trait BenchmarkTarget {
 }
 
 /// Engram benchmark target
+#[allow(dead_code)] // Module under development
 pub struct EngramTarget {
     // TODO: Integrate with actual Engram API
     endpoint: String,
 }
 
 impl EngramTarget {
+    #[allow(dead_code)] // Module under development
     pub fn new(endpoint: String) -> Self {
         Self { endpoint }
     }
@@ -98,6 +108,7 @@ impl BenchmarkTarget for EngramTarget {
 /// - faiss-rs crate or C++ FFI bindings
 /// - FAISS library installed on system
 /// - Index creation and management
+#[allow(dead_code)] // Module under development
 pub struct FaissTarget {
     _phantom: std::marker::PhantomData<()>,
 }
@@ -154,6 +165,7 @@ impl BenchmarkTarget for FaissTarget {
 /// - neo4rs crate
 /// - Neo4j instance running
 /// - Graph schema setup
+#[allow(dead_code)] // Module under development
 pub struct Neo4jTarget {
     _uri: String,
 }
@@ -196,15 +208,18 @@ impl BenchmarkTarget for Neo4jTarget {
 }
 
 /// Run comparative benchmark across multiple systems
+#[allow(dead_code)] // Module under development
 pub struct ComparativeBenchmark {
     config: BenchmarkConfig,
 }
 
 impl ComparativeBenchmark {
+    #[allow(dead_code)] // Module under development
     pub fn new(config: BenchmarkConfig) -> Self {
         Self { config }
     }
 
+    #[allow(dead_code)] // Module under development
     pub fn run_all(
         &self,
         _targets: Vec<Box<dyn BenchmarkTarget>>,

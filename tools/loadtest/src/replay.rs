@@ -118,9 +118,27 @@ async fn execute_operation(
         }
         Operation::PatternCompletion { partial } => {
             let url = format!("{}/api/v1/complete", endpoint);
+            // Convert partial embedding to proper API format
+            const EMBEDDING_DIM: usize = 768;
+            let mut partial_embedding: Vec<Option<f32>> = vec![None; EMBEDDING_DIM];
+
+            // Fill in known values at alternating positions
+            for (i, &value) in partial.iter().enumerate() {
+                if i * 2 < EMBEDDING_DIM {
+                    partial_embedding[i * 2] = Some(value);
+                }
+            }
+
+            let body = serde_json::json!({
+                "partial_episode": {
+                    "known_fields": {},
+                    "partial_embedding": partial_embedding
+                }
+            });
+
             client
                 .post(&url)
-                .json(partial)
+                .json(&body)
                 .send()
                 .await?
                 .error_for_status()?;

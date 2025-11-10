@@ -120,37 +120,37 @@ impl Report {
     pub fn meets_validation_criteria(&self, config: &WorkloadConfig) -> bool {
         let mut passes = true;
 
-        if let Some(expected_p99) = config.validation.expected_p99_latency_ms {
-            if self.p99_latency_ms > expected_p99 {
-                tracing::warn!(
-                    "P99 latency {:.2}ms exceeds target {:.2}ms",
-                    self.p99_latency_ms,
-                    expected_p99
-                );
-                passes = false;
-            }
+        if let Some(expected_p99) = config.validation.expected_p99_latency_ms
+            && self.p99_latency_ms > expected_p99
+        {
+            tracing::warn!(
+                "P99 latency {:.2}ms exceeds target {:.2}ms",
+                self.p99_latency_ms,
+                expected_p99
+            );
+            passes = false;
         }
 
-        if let Some(expected_throughput) = config.validation.expected_throughput_ops_sec {
-            if self.overall_throughput < expected_throughput {
-                tracing::warn!(
-                    "Throughput {:.0} ops/sec below target {:.0} ops/sec",
-                    self.overall_throughput,
-                    expected_throughput
-                );
-                passes = false;
-            }
+        if let Some(expected_throughput) = config.validation.expected_throughput_ops_sec
+            && self.overall_throughput < expected_throughput
+        {
+            tracing::warn!(
+                "Throughput {:.0} ops/sec below target {:.0} ops/sec",
+                self.overall_throughput,
+                expected_throughput
+            );
+            passes = false;
         }
 
-        if let Some(max_error_rate) = config.validation.max_error_rate {
-            if self.overall_error_rate > max_error_rate {
-                tracing::warn!(
-                    "Error rate {:.2}% exceeds maximum {:.2}%",
-                    self.overall_error_rate * 100.0,
-                    max_error_rate * 100.0
-                );
-                passes = false;
-            }
+        if let Some(max_error_rate) = config.validation.max_error_rate
+            && self.overall_error_rate > max_error_rate
+        {
+            tracing::warn!(
+                "Error rate {:.2}% exceeds maximum {:.2}%",
+                self.overall_error_rate * 100.0,
+                max_error_rate * 100.0
+            );
+            passes = false;
         }
 
         passes

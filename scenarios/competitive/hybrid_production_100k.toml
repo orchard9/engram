@@ -1,0 +1,47 @@
+# Competitive Baseline: Engram Hybrid Workload
+#
+# Demonstrates Engram's unique capability: hybrid vector+graph+temporal operations
+# in a single unified memory system. No direct competitor equivalent exists.
+#
+# Workload characteristics:
+# - Mixed operations: 30% store, 30% recall (graph), 30% search (vector), 10% completion
+# - Dataset: 100K nodes, 768-dimensional embeddings
+# - Tests all three core capabilities simultaneously
+# - Validates that hybrid architecture doesn't sacrifice performance
+#
+# This scenario establishes baseline for Engram's differentiated value proposition.
+# Future optimization target: <10ms P99 for mixed workload (better than specialized tools).
+
+name = "Hybrid Production 100K Benchmark"
+description = "Mixed vector+graph+completion workload (Engram unique capability)"
+
+[duration]
+total_seconds = 60
+
+[arrival]
+pattern = "constant"
+rate = 1000.0  # Target 1000 QPS mixed workload
+
+[operations]
+# Balanced hybrid workload testing all core operations
+store_weight = 0.3              # 30% episodic storage
+recall_weight = 0.3             # 30% graph traversal
+embedding_search_weight = 0.3   # 30% vector similarity
+pattern_completion_weight = 0.1 # 10% pattern completion
+
+[data]
+num_nodes = 100_000   # 100K nodes for production-scale testing
+embedding_dim = 768   # Standard embedding dimension
+memory_spaces = 1
+
+# Clustered distribution creates realistic semantic structure
+# with both local (graph) and global (vector) patterns
+embedding_distribution = { type = "clustered", num_clusters = 50, std_dev = 0.15 }
+
+[validation]
+expected_p99_latency_ms = 10.0      # Aggressive target: beat specialized tools
+expected_throughput_ops_sec = 900.0  # Target: maintain high throughput under mixed load
+max_error_rate = 0.01                # 1% error rate
+
+[chaos]
+enabled = false

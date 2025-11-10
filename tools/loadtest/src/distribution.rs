@@ -24,6 +24,7 @@ pub enum ArrivalPattern {
 
 impl ArrivalPattern {
     /// Calculate inter-arrival time in seconds
+    #[allow(dead_code)] // Used in replay mode
     pub fn next_interval<R: Rng>(&self, rng: &mut R, elapsed_secs: u64) -> f64 {
         match self {
             Self::Poisson { lambda } => {

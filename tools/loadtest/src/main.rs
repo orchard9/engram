@@ -238,7 +238,11 @@ async fn run_workload(
             metrics.record_operation(operation.op_type(), op_elapsed, result.is_ok());
 
             if let Err(e) = result {
-                tracing::debug!("Operation failed: {}", e);
+                tracing::warn!(
+                    operation = ?operation.op_type(),
+                    error = %e,
+                    "Operation failed"
+                );
             }
 
             operations_sent += 1;
@@ -277,43 +281,112 @@ async fn execute_operation(
     match operation {
         Operation::Store { memory } => {
             let url = format!("{}/api/v1/memories", endpoint);
-            client
-                .post(&url)
-                .json(memory)
-                .send()
-                .await?
-                .error_for_status()?;
-        }
-        Operation::Recall { cue } => {
-            let url = format!("{}/api/v1/recall", endpoint);
-            client
-                .post(&url)
-                .json(cue)
-                .send()
-                .await?
-                .error_for_status()?;
-        }
-        Operation::EmbeddingSearch { query, k } => {
-            let url = format!("{}/api/v1/search", endpoint);
+            // Engram's REST API requires 'content' field for memory creation
+            // For load testing, we use synthetic content with the embedding
             let body = serde_json::json!({
-                "query": query,
-                "k": k,
+                "content": format!("Load test memory {}", uuid::Uuid::new_v4()),
+                "confidence": memory.confidence,
+                "embedding": memory.embedding,
             });
-            client
+            let response = client
                 .post(&url)
                 .json(&body)
                 .send()
-                .await?
-                .error_for_status()?;
+                .await
+                .context("Store: network error")?;
+
+            let status = response.status();
+            if !status.is_success() {
+                let error_body = response.text().await.unwrap_or_default();
+                anyhow::bail!("Store failed with status {}: {}", status, error_body);
+            }
+        }
+        Operation::Recall { cue } => {
+            // Engram uses GET /api/v1/memories/recall with query params
+            let embedding_json = serde_json::to_string(&cue.embedding)?;
+            let url = format!(
+                "{}/api/v1/memories/recall?embedding={}&threshold={}&max_results={}&space={}",
+                endpoint,
+                urlencoding::encode(&embedding_json),
+                cue.threshold,
+                cue.max_depth,
+                urlencoding::encode(&cue.memory_space)
+            );
+            let response = client
+                .get(&url)
+                .send()
+                .await
+                .context("Recall: network error")?;
+
+            let status = response.status();
+            if !status.is_success() {
+                let error_body = response.text().await.unwrap_or_default();
+                anyhow::bail!("Recall failed with status {}: {}", status, error_body);
+            }
+        }
+        Operation::EmbeddingSearch { query: _, k } => {
+            // Engram uses GET /api/v1/memories/search with text query parameter
+            // Generate synthetic query text for load testing
+            let synthetic_query = format!("test query {}", uuid::Uuid::new_v4());
+            let url = format!(
+                "{}/api/v1/memories/search?query={}&limit={}",
+                endpoint,
+                urlencoding::encode(&synthetic_query),
+                k
+            );
+            let response = client
+                .get(&url)
+                .send()
+                .await
+                .context("Search: network error")?;
+
+            let status = response.status();
+            if !status.is_success() {
+                let error_body = response.text().await.unwrap_or_default();
+                anyhow::bail!("Search failed with status {}: {}", status, error_body);
+            }
         }
         Operation::PatternCompletion { partial } => {
             let url = format!("{}/api/v1/complete", endpoint);
-            client
+            // Engram requires exactly 768 dimensions in partial_embedding
+            // The generator provides embedding_dim/2 values (e.g., 384)
+            // Create a 768-element array with Some() for known values and None for masked positions
+            const EMBEDDING_DIM: usize = 768;
+            let mut partial_embedding: Vec<Option<f32>> = vec![None; EMBEDDING_DIM];
+
+            // Fill in known values at alternating positions to simulate partial pattern
+            // This creates a realistic pattern completion scenario where ~half the dimensions are known
+            for (i, &value) in partial.iter().enumerate() {
+                if i * 2 < EMBEDDING_DIM {
+                    partial_embedding[i * 2] = Some(value);
+                }
+            }
+
+            let body = serde_json::json!({
+                "partial_episode": {
+                    "known_fields": {
+                        "what": format!("test pattern {}", uuid::Uuid::new_v4())
+                    },
+                    "partial_embedding": partial_embedding,
+                    "cue_strength": 0.7
+                }
+            });
+            let response = client
                 .post(&url)
-                .json(partial)
+                .json(&body)
                 .send()
-                .await?
-                .error_for_status()?;
+                .await
+                .context("PatternCompletion: network error")?;
+
+            let status = response.status();
+            if !status.is_success() {
+                let error_body = response.text().await.unwrap_or_default();
+                anyhow::bail!(
+                    "PatternCompletion failed with status {}: {}",
+                    status,
+                    error_body
+                );
+            }
         }
     }
 

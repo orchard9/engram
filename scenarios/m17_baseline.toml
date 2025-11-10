@@ -1,0 +1,29 @@
+# Milestone 17 Baseline Load Test Scenario
+name = "M17 Baseline"
+description = "Mixed read/write workload for dual memory performance tracking"
+
+[duration]
+total_seconds = 60
+
+[arrival]
+pattern = "constant"
+rate = 1000.0
+
+[operations]
+store_weight = 0.5
+recall_weight = 0.425
+embedding_search_weight = 0.075
+pattern_completion_weight = 0.0  # Disabled: requires correlated embeddings (see dedicated scenario)
+
+[data]
+num_nodes = 1000
+embedding_dim = 768
+memory_spaces = 1
+
+[validation]
+expected_p99_latency_ms = 50.0
+expected_throughput_ops_sec = 800.0
+max_error_rate = 0.01
+
+[chaos]
+enabled = false

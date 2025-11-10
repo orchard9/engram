@@ -3831,7 +3831,10 @@ pub fn create_api_routes() -> Router<ApiState> {
         // Query execution operations
         .route("/api/v1/query", post(crate::handlers::query::query_handler))
         // REST-style endpoints for CLI compatibility
-        .route("/api/v1/memories", post(create_memory_rest))
+        .route(
+            "/api/v1/memories",
+            get(search_memories_rest).post(create_memory_rest),
+        )
         .route("/api/v1/memories/{id}", get(get_memory_by_id))
         .route(
             "/api/v1/memories/{id}",

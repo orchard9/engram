@@ -64,10 +64,14 @@ pub struct Memory {
     pub embedding_provenance: Option<EmbeddingProvenance>,
 }
 
-// Custom serialization for large arrays
-mod embedding_serde {
+/// Custom serialization for large arrays
+///
+/// This module provides efficient serialization/deserialization for 768-dimensional
+/// embedding arrays used throughout the system.
+pub mod embedding_serde {
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+    /// Serialize a 768-dimensional embedding array
     pub fn serialize<S>(embedding: &[f32; 768], serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -75,6 +79,7 @@ mod embedding_serde {
         embedding.as_slice().serialize(serializer)
     }
 
+    /// Deserialize a 768-dimensional embedding array
     pub fn deserialize<'de, D>(deserializer: D) -> Result<[f32; 768], D::Error>
     where
         D: Deserializer<'de>,

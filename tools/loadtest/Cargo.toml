@@ -19,6 +19,7 @@ clap.workspace = true
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+uuid = { version = "1.11", features = ["v4"] }
 
 # Statistics and distributions
 rand.workspace = true
@@ -40,6 +41,7 @@ tracing-subscriber.workspace = true
 
 # HTTP client for load testing
 reqwest = { version = "0.12", features = ["json"] }
+urlencoding = "2.1"
 
 # Progress display
 indicatif = "0.17"
