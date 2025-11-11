@@ -61,7 +61,10 @@ STOPSIGNAL SIGTERM
 
 # Set memory allocator for better container performance
 ENV MIMALLOC_SHOW_STATS=0
+
+# Production logging and panic capture
 ENV RUST_LOG=info
+ENV RUST_BACKTRACE=1
 
 ENTRYPOINT ["/usr/local/bin/engram"]
 CMD ["start", "--http-port", "7432", "--grpc-port", "50051"]

@@ -192,6 +192,11 @@ name = "dual_memory_types"
 harness = false
 required-features = ["dual_memory_types"]
 
+[[bench]]
+name = "binding_performance"
+harness = false
+required-features = ["dual_memory_types"]
+
 # Temporarily disabled - needs API updates for space-partitioned HNSW
 # [[bench]]
 # name = "concurrent_recall"

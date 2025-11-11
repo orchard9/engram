@@ -58,35 +58,43 @@ fn test_gpu_basic_functionality() {
         Err(e) => panic!("Failed to launch kernel: {}", e),
     }
 
-    // Test cosine similarity
-    use engram_core::compute::VectorOps;
-    use engram_core::compute::cuda::cosine_similarity::GpuCosineSimilarity;
+    // Test cosine similarity (only when CUDA is actually available)
+    #[cfg(cuda_available)]
+    {
+        use engram_core::compute::VectorOps;
+        use engram_core::compute::cuda::cosine_similarity::GpuCosineSimilarity;
 
-    let gpu_ops = GpuCosineSimilarity::new();
-    let query = [1.0f32; 768];
-    let targets = vec![[1.0f32; 768]; 128];
+        let gpu_ops = GpuCosineSimilarity::new();
+        let query = [1.0f32; 768];
+        let targets = vec![[1.0f32; 768]; 128];
 
-    let results = gpu_ops.cosine_similarity_batch_768(&query, &targets);
-    println!("✓ Successfully computed batch cosine similarity");
-    assert_eq!(results.len(), 128);
+        let results = gpu_ops.cosine_similarity_batch_768(&query, &targets);
+        println!("✓ Successfully computed batch cosine similarity");
+        assert_eq!(results.len(), 128);
 
-    // Check accuracy
-    for (i, &sim) in results.iter().enumerate() {
+        // Check accuracy
+        for (i, &sim) in results.iter().enumerate() {
+            assert!(
+                (sim - 1.0).abs() < 1e-6,
+                "Expected similarity ~1.0, got {} at index {}",
+                sim,
+                i
+            );
+        }
+        println!("✓ GPU computation accuracy verified");
+
+        // Check that GPU was actually used for large batch
         assert!(
-            (sim - 1.0).abs() < 1e-6,
-            "Expected similarity ~1.0, got {} at index {}",
-            sim,
-            i
+            gpu_ops.gpu_call_count() > 0,
+            "Expected GPU to be used for batch of 128 vectors"
         );
+        println!("✓ GPU call count: {}", gpu_ops.gpu_call_count());
     }
-    println!("✓ GPU computation accuracy verified");
 
-    // Check that GPU was actually used for large batch
-    assert!(
-        gpu_ops.gpu_call_count() > 0,
-        "Expected GPU to be used for batch of 128 vectors"
-    );
-    println!("✓ GPU call count: {}", gpu_ops.gpu_call_count());
+    #[cfg(not(cuda_available))]
+    {
+        println!("! Cosine similarity test skipped (CUDA not available at compile time)");
+    }
 
     println!("\n=== All GPU tests passed ===\n");
 }

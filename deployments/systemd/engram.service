@@ -1,0 +1,113 @@
+# Engram Cognitive Graph Database - systemd service unit
+#
+# Installation:
+#   1. Copy this file to /etc/systemd/system/engram.service
+#   2. Create engram user: sudo useradd -r -s /bin/false -d /var/lib/engram engram
+#   3. Create data directory: sudo mkdir -p /var/lib/engram && sudo chown engram:engram /var/lib/engram
+#   4. Copy binary: sudo cp target/release/engram /usr/local/bin/
+#   5. Reload systemd: sudo systemctl daemon-reload
+#   6. Enable: sudo systemctl enable engram
+#   7. Start: sudo systemctl start engram
+#
+# Monitoring:
+#   sudo systemctl status engram
+#   sudo journalctl -u engram -f                    # Follow logs
+#   sudo journalctl -u engram | grep -A 50 "PANIC"  # Search for panics
+#   sudo journalctl -u engram -n 1000               # Last 1000 lines
+
+[Unit]
+Description=Engram Cognitive Graph Database
+Documentation=https://docs.engram.dev
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=engram
+Group=engram
+WorkingDirectory=/var/lib/engram
+
+# Binary location and arguments
+ExecStart=/usr/local/bin/engram start --http-port 7432 --grpc-port 50051
+
+# CRITICAL: Environment for panic capture and logging
+# RUST_BACKTRACE=full provides complete stack traces in production
+# RUST_BACKTRACE=1 provides abbreviated traces (use for lower log volume)
+Environment="RUST_BACKTRACE=full"
+Environment="RUST_LOG=info"
+Environment="ENGRAM_DATA_DIR=/var/lib/engram"
+
+# Optional: Performance tuning
+# Environment="ENGRAM_CACHE_SIZE_MB=2048"
+# Environment="ENGRAM_CONSOLIDATION_INTERVAL_SEC=60"
+# Environment="ENGRAM_FLUSH_INTERVAL_SEC=30"
+
+# Optional: Memory allocator tuning
+# Environment="MIMALLOC_LARGE_OS_PAGES=1"
+# Environment="MIMALLOC_RESERVE_HUGE_OS_PAGES=4"
+
+# Capture all output to systemd journal
+# Panics will be visible in journalctl
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=engram
+
+# Resource limits
+# Increase file descriptor limit for high-throughput workloads
+LimitNOFILE=65536
+# Process limit for worker threads
+LimitNPROC=4096
+# Memory limit (optional - adjust based on workload)
+# MemoryMax=8G
+# MemoryHigh=6G
+
+# Graceful shutdown handling
+# SIGTERM allows 30 seconds for graceful shutdown (WAL flush, etc.)
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=30
+SendSIGKILL=yes
+
+# Restart policy
+# Always restart on failure (panics, OOM, crashes)
+# Wait 5 seconds between restart attempts to avoid rapid restart loops
+Restart=always
+RestartSec=5
+# Prevent restart if binary exits successfully with code 0
+RestartPreventExitStatus=0
+# Give up after 5 restart attempts within 60 seconds
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+# Security hardening
+# Prevent privilege escalation
+NoNewPrivileges=true
+# Use private /tmp
+PrivateTmp=true
+# Protect system files
+ProtectSystem=strict
+# Protect /home directories
+ProtectHome=true
+# Allow writes only to data directory
+ReadWritePaths=/var/lib/engram
+# Drop all capabilities except network binding
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+# Restrict kernel features
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+# Restrict system calls
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+# Lock down personality
+LockPersonality=true
+# Restrict address families to IPv4/IPv6
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# Prevent access to real-time features
+RestrictRealtime=true
+# Private /dev
+PrivateDevices=true
+
+[Install]
+WantedBy=multi-user.target

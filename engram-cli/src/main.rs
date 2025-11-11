@@ -19,6 +19,7 @@ use engram_core::{
 };
 use std::fs;
 use std::net::SocketAddr;
+use std::panic;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -36,8 +37,55 @@ use engram_cli::cli::{
 };
 use engram_cli::config::ConfigManager;
 
+/// Setup custom panic hook that logs through tracing infrastructure
+///
+/// This ensures panics are:
+/// - Captured in structured logs (can be forwarded to Sentry, CloudWatch, etc.)
+/// - Include full backtrace when RUST_BACKTRACE is set
+/// - Written to both tracing AND stderr (fallback if tracing fails)
+/// - Never lost even if process crashes immediately
+fn setup_panic_hook() {
+    panic::set_hook(Box::new(|panic_info| {
+        let backtrace = std::backtrace::Backtrace::force_capture();
+
+        let payload = panic_info.payload();
+        let message = if let Some(s) = payload.downcast_ref::<&str>() {
+            s
+        } else if let Some(s) = payload.downcast_ref::<String>() {
+            s.as_str()
+        } else {
+            "Box<dyn Any>"
+        };
+
+        let location = panic_info.location().map_or_else(
+            || "unknown location".to_string(),
+            |loc| format!("{}:{}:{}", loc.file(), loc.line(), loc.column()),
+        );
+
+        // Log through tracing if available (structured logging)
+        tracing::error!(
+            message = %message,
+            location = %location,
+            backtrace = %backtrace,
+            "PANIC: Thread panicked - this is a critical error that should be investigated"
+        );
+
+        // ALWAYS write to stderr as fallback (even if tracing not initialized or fails)
+        // This ensures we capture the panic even during early startup or logging system failure
+        eprintln!("\n═══════════════════════════════════════════════════════════");
+        eprintln!("PANIC at {location}: {message}");
+        eprintln!("═══════════════════════════════════════════════════════════");
+        eprintln!("Backtrace:\n{backtrace}");
+        eprintln!("═══════════════════════════════════════════════════════════\n");
+    }));
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Setup panic hook FIRST, before anything else
+    // This ensures we capture panics even during CLI parsing or tracing init
+    setup_panic_hook();
+
     let cli = Cli::parse();
 
     // Initialize tracing

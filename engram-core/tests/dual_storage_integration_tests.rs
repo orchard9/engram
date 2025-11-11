@@ -359,12 +359,11 @@ fn test_budget_enforcement_concept_hard_limit() {
 
     // Log observed behavior for documentation
     eprintln!(
-        "Budget test: inserted {} concepts with 1MB budget (theoretical max ~30, capacity 100)",
-        con_count
+        "Budget test: inserted {con_count} concepts with 1MB budget (theoretical max ~30, capacity 100)"
     );
 
     if let Some(error_index) = first_error_at {
-        eprintln!("First error occurred at concept {}", error_index);
+        eprintln!("First error occurred at concept {error_index}");
     } else {
         eprintln!("No errors encountered (budget may not be strictly enforced)");
     }
@@ -677,7 +676,7 @@ fn test_single_node_operations() {
     // Insert single episode
     let episode = create_test_episode("single", 0.5);
     let id = backend
-        .add_node_typed(episode.clone())
+        .add_node_typed(episode)
         .expect("Failed to insert episode");
 
     // Verify count
@@ -747,7 +746,7 @@ fn test_maximum_capacity_stress() {
 
     // Insert many episodes (more than capacity)
     for i in 0..150 {
-        let episode = create_test_episode(&format!("stress-ep-{}", i), 0.5);
+        let episode = create_test_episode(&format!("stress-ep-{i}"), 0.5);
         // May fail when budget exhausted, that's OK
         backend.add_node_typed(episode).ok();
     }
@@ -1132,7 +1131,7 @@ fn test_invariant_memory_budget_never_negative() {
 
     // Insert and remove nodes repeatedly
     for _i in 0..100 {
-        let episode = create_test_episode(&format!("ep-{}", _i), 0.5);
+        let episode = create_test_episode(&format!("ep-{_i}"), 0.5);
         let id = backend.add_node_typed(episode).expect("Failed to insert");
 
         if _i % 2 == 0 {

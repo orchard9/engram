@@ -9,7 +9,10 @@
 //! - Automatic compaction and defragmentation
 
 use super::confidence::{ConfidenceTier, StorageConfidenceCalibrator};
-use super::{StorageError, StorageTierBackend, TierStatistics, mapped::MappedWarmStorage};
+use super::{
+    StorageError, StorageTierBackend, TierStatistics,
+    mapped::{CompactionStats, MappedWarmStorage},
+};
 use crate::{Confidence, Cue, Episode, Memory};
 use std::sync::Arc;
 
@@ -98,18 +101,10 @@ impl WarmTier {
     ///
     /// # Errors
     ///
-    /// Returns an error if maintenance on the underlying storage fails.
-    pub async fn compact(&self) -> Result<CompactionStats, StorageError> {
-        // Trigger maintenance which includes compaction
-        self.storage.maintenance().await?;
-
-        // Return compaction statistics
-        let stats = self.storage.statistics();
-        Ok(CompactionStats {
-            entries_compacted: stats.memory_count,
-            space_reclaimed_bytes: 0, // Would be calculated by actual compaction
-            compaction_ratio: stats.compaction_ratio,
-        })
+    /// Returns an error if compaction on the underlying storage fails.
+    pub fn compact(&self) -> Result<CompactionStats, StorageError> {
+        // Trigger content compaction
+        self.storage.compact_content()
     }
 
     /// Get memory usage statistics
@@ -140,6 +135,63 @@ impl WarmTier {
     pub fn contains_memory(&self, memory_id: &str) -> bool {
         self.storage_timestamps.contains_key(memory_id)
     }
+
+    /// Iterate over all memories in the warm tier
+    ///
+    /// Returns an iterator over (id, episode) pairs from persistent storage.
+    /// The iterator is lazy and only loads memories as needed.
+    ///
+    /// # Performance
+    ///
+    /// - Iterator creation: O(1) - just clones ID list
+    /// - Per-memory: ~10-50μs (memory-mapped I/O)
+    /// - Total: ~10-50ms for thousands of memories
+    ///
+    /// # Implementation Note
+    ///
+    /// Memories that fail to load are skipped with a warning logged.
+    /// This ensures iteration continues even if individual memories are corrupted.
+    pub fn iter_memories(&self) -> impl Iterator<Item = (String, Episode)> + '_ {
+        // Get all memory IDs from storage timestamps
+        // We use storage_timestamps rather than directly accessing MappedWarmStorage
+        // to ensure we only iterate over memories we've explicitly tracked
+        self.storage_timestamps.iter().filter_map(|entry| {
+            let memory_id = entry.key().clone();
+
+            // Try to load memory from storage
+            match self.storage.get(&memory_id) {
+                Ok(Some(memory)) => {
+                    // Convert Memory to Episode
+                    let episode = Episode::new(
+                        memory.id.clone(),
+                        memory.created_at,
+                        memory
+                            .content
+                            .clone()
+                            .unwrap_or_else(|| format!("Memory {id}", id = memory.id)),
+                        memory.embedding,
+                        memory.confidence,
+                    );
+                    Some((memory_id, episode))
+                }
+                Ok(None) => {
+                    tracing::warn!(
+                        memory_id = %memory_id,
+                        "Memory ID in storage_timestamps but not found in storage"
+                    );
+                    None
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        memory_id = %memory_id,
+                        error = %e,
+                        "Failed to load memory from warm tier, skipping"
+                    );
+                    None
+                }
+            }
+        })
+    }
 }
 
 /// Configuration for warm tier storage
@@ -167,17 +219,6 @@ impl Default for WarmTierConfig {
             enable_defragmentation: true,
         }
     }
-}
-
-/// Statistics from compaction operations
-#[derive(Debug, Clone)]
-pub struct CompactionStats {
-    /// Number of entries processed during compaction
-    pub entries_compacted: usize,
-    /// Bytes of space reclaimed
-    pub space_reclaimed_bytes: u64,
-    /// Compression ratio achieved
-    pub compaction_ratio: f32,
 }
 
 /// Memory usage information
@@ -383,17 +424,37 @@ mod tests {
         let warm_tier =
             WarmTier::new(file_path, 1000, metrics).context("failed to create warm tier")?;
 
-        // Store memories
+        // Store memories with actual content to create fragmentation
         for i in 0..20 {
-            let memory = create_test_memory(&format!("mem_{i}"), 0.5);
-            warm_tier.store(memory).await.context("store failed")?;
+            let episode = EpisodeBuilder::new()
+                .id(format!("mem_{i}"))
+                .when(Utc::now())
+                .what(format!(
+                    "Content for memory {i} - this creates storage usage"
+                ))
+                .embedding([0.5f32; 768])
+                .confidence(Confidence::HIGH)
+                .build();
+
+            warm_tier
+                .store(Arc::new(Memory::from_episode(episode, 0.5)))
+                .await
+                .context("store failed")?;
         }
 
-        // Force compaction
-        let compaction_stats = warm_tier.compact().await.context("compaction failed")?;
+        // Delete half the memories to create fragmentation
+        for i in (0..20).step_by(2) {
+            warm_tier
+                .remove(&format!("mem_{i}"))
+                .await
+                .context("remove failed")?;
+        }
+
+        // Force compaction - should reclaim space from deleted memories
+        let compaction_stats = warm_tier.compact().context("compaction failed")?;
         ensure!(
-            compaction_stats.entries_compacted > 0,
-            "compaction should reclaim at least one entry"
+            compaction_stats.bytes_reclaimed > 0,
+            "compaction should reclaim at least one byte (deleted 10 out of 20 memories)"
         );
         Ok(())
     }

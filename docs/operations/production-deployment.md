@@ -398,37 +398,12 @@ sudo cp target/release/engram /usr/local/bin/
 sudo chmod +x /usr/local/bin/engram
 
 # Create user and data directory
-sudo useradd -r -s /bin/false engram
+sudo useradd -r -s /bin/false -d /var/lib/engram engram
 sudo mkdir -p /var/lib/engram
 sudo chown engram:engram /var/lib/engram
 
-# Create systemd service
-sudo tee /etc/systemd/system/engram.service <<EOF
-[Unit]
-Description=Engram Cognitive Graph Database
-After=network.target
-
-[Service]
-Type=simple
-User=engram
-Group=engram
-WorkingDirectory=/var/lib/engram
-Environment="ENGRAM_DATA_DIR=/var/lib/engram"
-Environment="RUST_LOG=info"
-ExecStart=/usr/local/bin/engram start --http-port 7432 --grpc-port 50051
-Restart=always
-RestartSec=10
-
-# Security hardening
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=/var/lib/engram
-
-[Install]
-WantedBy=multi-user.target
-EOF
+# Copy the production-ready service file
+sudo cp deployments/systemd/engram.service /etc/systemd/system/
 
 # Enable and start service
 sudo systemctl daemon-reload
@@ -438,6 +413,13 @@ sudo systemctl start engram
 # Check status
 sudo systemctl status engram
 sudo journalctl -u engram -f
+
+# The service file includes:
+# - RUST_BACKTRACE=full for panic capture
+# - Comprehensive security hardening
+# - Proper resource limits
+# - Automatic restart on failure
+# See deployments/systemd/engram.service for full configuration
 
 ```
 
@@ -731,6 +713,215 @@ resources:
     memory: 2Gi
 
 ```
+
+## Panic and Crash Capture
+
+Engram uses Rust's panic system for catastrophic failures. To ensure all panics are captured in production, proper configuration is critical.
+
+### Why This Matters
+
+Without panic capture:
+- Server crashes are silent - no diagnostic information
+- Debugging production issues becomes impossible
+- Root cause analysis requires reproducing the issue
+
+With proper panic capture:
+- Full stack traces captured automatically
+- Structured logging integrates with monitoring systems
+- Incidents can be diagnosed from crash logs alone
+
+### Custom Panic Hook
+
+Engram includes a custom panic hook (added in `engram-cli/src/main.rs`) that:
+
+- Logs panics through the tracing infrastructure (structured, forwarded to Sentry/CloudWatch/etc.)
+- Includes full backtraces when `RUST_BACKTRACE` is set
+- Writes to both structured logs AND stderr (fallback if tracing fails)
+- Never loses panic messages even if the process crashes immediately
+
+### Environment Variables
+
+**CRITICAL**: Always set these in production:
+
+```bash
+# Full stack traces (recommended for production)
+export RUST_BACKTRACE=full
+
+# Abbreviated traces (use for lower log volume)
+export RUST_BACKTRACE=1
+
+# Logging level
+export RUST_LOG=info  # or "debug" for verbose logging
+```
+
+### Docker Configuration
+
+Already configured in `docker-compose.yml`:
+
+```yaml
+environment:
+  RUST_BACKTRACE: ${RUST_BACKTRACE:-1}  # Default to 1, override via .env
+  RUST_LOG: ${RUST_LOG:-info}
+```
+
+View panic logs:
+
+```bash
+# Follow logs in real-time
+docker logs -f engram-db
+
+# Search for panics
+docker logs engram-db 2>&1 | grep -A 50 "PANIC"
+
+# Export logs for analysis
+docker logs engram-db > engram-crash-$(date +%Y%m%d-%H%M%S).log
+```
+
+### Systemd Configuration
+
+Use the provided service file at `deployments/systemd/engram.service`:
+
+```bash
+# Install service file
+sudo cp deployments/systemd/engram.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable engram
+sudo systemctl start engram
+```
+
+The service file includes:
+- `Environment="RUST_BACKTRACE=full"` for complete traces
+- `StandardOutput=journal` and `StandardError=journal` for systemd log capture
+- Proper restart policies for crash recovery
+
+View panic logs:
+
+```bash
+# Real-time monitoring
+sudo journalctl -u engram -f
+
+# Search for panics
+sudo journalctl -u engram | grep -A 50 "PANIC"
+
+# Last 100 lines
+sudo journalctl -u engram -n 100
+
+# Export for analysis
+sudo journalctl -u engram --since "1 hour ago" > engram-crash-$(date +%Y%m%d-%H%M%S).log
+```
+
+### Kubernetes Configuration
+
+Add to deployment spec:
+
+```yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: engram
+spec:
+  template:
+    spec:
+      containers:
+      - name: engram
+        env:
+        - name: RUST_BACKTRACE
+          value: "full"
+        - name: RUST_LOG
+          value: "info"
+```
+
+View panic logs:
+
+```bash
+# Follow logs
+kubectl logs -f engram-0 -n engram
+
+# Search for panics in all pods
+kubectl logs -l app=engram -n engram | grep -A 50 "PANIC"
+
+# Get logs from crashed pod
+kubectl logs engram-0 -n engram --previous
+```
+
+### Panic Log Format
+
+With Engram's custom panic hook, panics are logged with:
+
+```
+═══════════════════════════════════════════════════════════
+PANIC at src/store.rs:245:13: attempt to divide by zero
+═══════════════════════════════════════════════════════════
+Backtrace:
+   0: std::backtrace::Backtrace::force_capture
+             at /rustc/.../library/std/src/backtrace.rs:101:13
+   1: engram_cli::setup_panic_hook::{{closure}}
+             at ./engram-cli/src/main.rs:49:22
+   2: std::panicking::rust_panic_with_hook
+             at /rustc/.../library/std/src/panicking.rs:785:13
+   ... (full trace continues)
+═══════════════════════════════════════════════════════════
+```
+
+Additionally, the panic is logged through tracing as a structured log:
+
+```json
+{
+  "timestamp": "2025-11-10T17:29:58.234Z",
+  "level": "ERROR",
+  "message": "PANIC: Thread panicked - this is a critical error that should be investigated",
+  "fields": {
+    "message": "attempt to divide by zero",
+    "location": "src/store.rs:245:13",
+    "backtrace": "... (full trace) ..."
+  }
+}
+```
+
+### Monitoring and Alerting
+
+Set up alerts for panics:
+
+**Prometheus/Grafana**:
+```promql
+# Alert if any panics detected in logs
+rate(log_messages{level="error", message=~".*PANIC.*"}[5m]) > 0
+```
+
+**Kubernetes**:
+```bash
+# CrashLoopBackOff indicates repeated crashes
+kubectl get pods -n engram -w
+```
+
+**Docker**:
+```bash
+# Check restart count
+docker inspect engram-db --format='{{.RestartCount}}'
+```
+
+### Crash Recovery
+
+Engram's restart policies ensure automatic recovery:
+
+- **Docker**: `restart: unless-stopped` (docker-compose.yml)
+- **Systemd**: `Restart=always` with 5-second delay
+- **Kubernetes**: StatefulSet automatically recreates pods
+
+After a crash:
+1. Verify data integrity (WAL recovery runs automatically)
+2. Check monitoring dashboards for anomalies
+3. Review panic logs for root cause
+4. File bug report with full trace
+
+### Production Checklist
+
+- [ ] `RUST_BACKTRACE=full` set in all environments
+- [ ] Logs captured to persistent storage (journald, Docker volumes, or log aggregator)
+- [ ] Monitoring alerts configured for panics
+- [ ] Restart policies tested (verify server recovers from kill -9)
+- [ ] Log rotation configured (prevent disk exhaustion)
+- [ ] Team knows how to access panic logs
 
 ## Next Steps
 
