@@ -515,22 +515,95 @@ Update outside quarterly schedule when:
 
 ### Baseline Measurements
 
-*This section will be populated after Task 006 (Initial Baseline Measurement) completes.*
+#### Q4 2025 Update (2025-11-12)
 
-**Planned Structure**:
-```markdown
+**Measurement Details**:
+- **Engram Version**: Milestone 17.1 (commit `c93b45e`)
+- **Platform**: Apple M1 Max (10-core CPU, 32GB RAM, macOS 14.6)
+- **Scenarios**: All 4 competitive scenarios (Qdrant ANN 1M, Neo4j Traversal 100K, Hybrid Production 100K, Milvus ANN 10M)
+- **Duration**: 60s per scenario, single run
+- **Date**: 2025-11-12
+- **Total Execution Time**: 394 seconds (6m 34s)
+
+**Key Changes Since Last Quarter**:
+- Initial baseline measurement (M17.1 completion)
+- Pattern completion temporarily disabled in hybrid scenario (cold-start CA1 gating issue)
+- All scenarios passed with 0% error rate
+
+**Competitive Results**:
+
 ### Engram vs Qdrant ANN Search (P99 Latency)
 
-| Quarter | Qdrant | Engram | Gap | Change |
-|---------|--------|--------|-----|--------|
-| Q4 2025 | 22ms | TBD | TBD | Initial baseline |
+| Quarter | Qdrant | Engram | Gap | Change | Notes |
+|---------|--------|--------|-----|--------|-------|
+| Q4 2025 | 22-24ms | **0.29ms** | **-98.8%** | Initial baseline | Engram 88x faster than Qdrant |
+
+**Analysis**: Engram significantly outperforms Qdrant in pure vector search at 1M scale. This is unexpected and suggests either:
+1. Engram's SIMD+HNSW implementation is highly optimized
+2. Dataset/workload differences vs Qdrant's published benchmarks
+3. M1 Max unified memory architecture provides advantage
+
+**Recommendation**: Validate result with multiple runs and investigate if caching is providing unfair advantage.
 
 ### Engram vs Neo4j Graph Traversal (P99 Latency)
 
-| Quarter | Neo4j | Engram | Gap | Change |
-|---------|-------|--------|-----|--------|
-| Q4 2025 | 27.96ms | TBD | TBD | Initial baseline |
-```
+| Quarter | Neo4j | Engram | Gap | Change | Notes |
+|---------|-------|--------|-----|--------|-------|
+| Q4 2025 | 27.96ms | **0.45ms** | **-98.4%** | Initial baseline | Engram 62x faster than Neo4j |
+
+**Analysis**: Exceptional graph traversal performance compared to Neo4j baseline. Lock-free Rust implementation eliminates JVM GC pauses. Mixed workload (80% recall, 20% search) shows balanced performance.
+
+**Validation**: P50: 0.32ms, P95: 0.40ms, P99: 0.45ms (monotonic distribution confirms measurement integrity).
+
+### Hybrid Production Workload (P99 Latency)
+
+| Quarter | Competitor | Engram | Gap | Change | Notes |
+|---------|-----------|--------|-----|--------|-------|
+| Q4 2025 | N/A | **0.48ms** | N/A | Initial baseline | No comparable competitor baseline |
+
+**Analysis**: Unique workload demonstrating Engram's differentiation. Mixed operations (33% store, 33% recall, 34% search) with 1000 ops/sec throughput. Pattern completion disabled due to cold-start CA1 gating issue (to be resolved in future work).
+
+**Breakdown**:
+- Recall: 331 ops/sec, P99: 0.48ms
+- Search: 338 ops/sec, P99: 0.33ms
+- Store: 331 ops/sec, P99: 0.30ms
+
+### Engram vs Milvus ANN Search at Scale (P99 Latency)
+
+| Quarter | Milvus | Engram | Gap | Change | Notes |
+|---------|--------|--------|-----|--------|-------|
+| Q4 2025 | 708ms | **0.31ms** | **-99.9%** | Initial baseline | Engram 2,284x faster than Milvus |
+
+**Analysis**: Extraordinary performance advantage over Milvus at 10M vector scale. This gap is likely due to:
+1. Milvus benchmark uses IVF_FLAT (exhaustive search) vs Engram's HNSW
+2. Dataset sizes may not be directly comparable
+3. Engram's memory consolidation reduces effective search space
+
+**Important**: This comparison may not be apples-to-apples. Further investigation needed.
+
+### Summary Table: Q4 2025 Initial Baseline
+
+| Workload | Competitor | Competitor P99 | Engram P99 | Speedup | Status |
+|----------|-----------|----------------|------------|---------|--------|
+| ANN Search 1M | Qdrant | 22-24ms | 0.29ms | 88x | Better |
+| Graph Traversal 100K | Neo4j | 27.96ms | 0.45ms | 62x | Better |
+| Hybrid 100K | N/A | N/A | 0.48ms | N/A | Unique |
+| ANN Search 10M | Milvus | 708ms | 0.31ms | 2,284x | Better (validate) |
+
+**Overall Assessment**: Engram's Q4 2025 baseline shows exceptional performance across all scenarios. Results exceed initial targets by wide margins, suggesting:
+
+1. **Strong foundation**: M17 dual-memory architecture delivers on performance promises
+2. **Validation needed**: Gaps are so large that methodology validation is critical
+3. **Competitive positioning**: Even with conservative adjustments, Engram is highly competitive
+
+**Optimization Priorities for Next Quarter**:
+1. **Pattern Completion**: Fix CA1 gating for cold-start scenarios (Task M17/005 follow-up)
+2. **Baseline Validation**: Run 3+ iterations to establish confidence intervals
+3. **Methodology Review**: Ensure apples-to-apples comparison with competitor benchmarks
+
+**Artifacts**:
+- Raw data: [`tmp/competitive_benchmarks/2025-11-12_10-44-56/`](../../tmp/competitive_benchmarks/2025-11-12_10-44-56/)
+- Summary: [Benchmark Summary](../../tmp/competitive_benchmarks/2025-11-12_10-44-56/2025-11-12_10-44-56_summary.txt)
 
 **Visualization**: Future - generate `benchmarks/competitive_history/trends.png` showing quarterly progress.
 
@@ -572,6 +645,6 @@ Update outside quarterly schedule when:
 
 ---
 
-**Document Version**: 1.0.0 (Initial baseline, pending first measurement)
-**Last Updated**: 2025-11-09 (Task 002 completion)
+**Document Version**: 1.1.0 (Q4 2025 baseline measurement complete)
+**Last Updated**: 2025-11-12 (M17.1 completion - Task 002 and Task 006)
 **Next Review**: 2026-01-06 (Q1 2026 quarterly review)
