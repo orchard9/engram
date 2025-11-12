@@ -7,6 +7,9 @@ pub mod backends;
 pub mod graph;
 pub mod traits;
 
+#[cfg(feature = "dual_memory_types")]
+pub mod binding_index;
+
 #[cfg(test)]
 mod tests;
 
@@ -14,8 +17,17 @@ mod tests;
 pub use graph::UnifiedMemoryGraph;
 pub use traits::{GraphBackend, MemoryBackend, MemoryError};
 
+#[cfg(feature = "dual_memory_types")]
+pub use traits::DualMemoryBackend;
+
 // Re-export backend implementations
 pub use backends::{DashMapBackend, HashMapBackend, InfallibleBackend};
+
+#[cfg(feature = "dual_memory_types")]
+pub use backends::DualDashMapBackend;
+
+#[cfg(feature = "dual_memory_types")]
+pub use binding_index::{BindingIndex, BindingMemoryStats};
 
 /// Configuration for memory graph operations
 #[derive(Debug, Clone)]

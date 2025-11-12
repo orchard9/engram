@@ -6,6 +6,9 @@ use std::sync::Arc;
 use thiserror::Error;
 use uuid::Uuid;
 
+#[cfg(feature = "dual_memory_types")]
+use crate::memory::DualMemoryNode;
+
 /// Errors that can occur in memory operations
 #[derive(Error, Debug)]
 pub enum MemoryError {
@@ -37,6 +40,14 @@ pub enum MemoryError {
     #[error("Invalid embedding dimension: expected 768, got {0}")]
     /// Occurs when embedding has wrong dimension
     InvalidEmbeddingDimension(usize),
+
+    #[error("Type conversion error: {0}")]
+    /// Occurs when converting between Memory and DualMemoryNode types fails
+    TypeConversionError(String),
+
+    #[error("Unsupported operation for memory type: {0}")]
+    /// Occurs when an operation is not supported for the memory node type
+    UnsupportedTypeOperation(String),
 }
 
 /// Core trait for memory storage backends
@@ -215,4 +226,314 @@ pub trait GraphBackend: MemoryBackend {
         // Default implementation using get_neighbors
         self.get_neighbors(id).map(|neighbors| neighbors.len())
     }
+
+    /// Add a concept binding between episode and concept
+    ///
+    /// Creates a bidirectional binding with atomic strength tracking.
+    ///
+    /// # Arguments
+    ///
+    /// * `episode_id` - Source episode node
+    /// * `concept_id` - Target concept node
+    /// * `strength` - Initial binding strength (0.0-1.0)
+    /// * `contribution` - Episode's contribution to concept formation (0.0-1.0)
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MemoryError::NotFound`] if either node doesn't exist.
+    /// Returns [`MemoryError::StorageError`] if binding creation fails.
+    ///
+    /// # Default Implementation
+    ///
+    /// Returns [`MemoryError::UnsupportedTypeOperation`] - backends must override.
+    #[must_use = "Handle the result to detect backend failures"]
+    fn add_concept_binding(
+        &self,
+        _episode_id: Uuid,
+        _concept_id: Uuid,
+        _strength: f32,
+        _contribution: f32,
+    ) -> Result<(), MemoryError> {
+        Err(MemoryError::UnsupportedTypeOperation(
+            "Concept bindings not supported by this backend".to_string(),
+        ))
+    }
+
+    /// Get concepts for an episode (bottom-up access)
+    ///
+    /// Returns all concept bindings for the given episode.
+    ///
+    /// # Arguments
+    ///
+    /// * `episode_id` - Episode node UUID
+    ///
+    /// # Returns
+    ///
+    /// Vector of (concept_id, strength, contribution) tuples
+    ///
+    /// # Default Implementation
+    ///
+    /// Returns empty vector - backends should override for efficiency.
+    #[must_use]
+    fn get_episode_concepts(&self, _episode_id: &Uuid) -> Vec<(Uuid, f32, f32)> {
+        Vec::new()
+    }
+
+    /// Get episodes for a concept (top-down access)
+    ///
+    /// Returns all episode bindings for the given concept.
+    ///
+    /// # Arguments
+    ///
+    /// * `concept_id` - Concept node UUID
+    ///
+    /// # Returns
+    ///
+    /// Vector of (episode_id, strength, contribution) tuples
+    ///
+    /// # Default Implementation
+    ///
+    /// Returns empty vector - backends should override for efficiency.
+    #[must_use]
+    fn get_concept_episodes(&self, _concept_id: &Uuid) -> Vec<(Uuid, f32, f32)> {
+        Vec::new()
+    }
+
+    /// Spread activation through bindings
+    ///
+    /// Propagates activation from source node through its bindings.
+    ///
+    /// # Arguments
+    ///
+    /// * `source_id` - Source node UUID
+    /// * `is_episode` - True if source is episode, false if concept
+    /// * `decay` - Activation decay factor (0.0-1.0)
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MemoryError::NotFound`] if source node doesn't exist.
+    /// Returns [`MemoryError::StorageError`] if activation update fails.
+    ///
+    /// # Default Implementation
+    ///
+    /// Returns [`MemoryError::UnsupportedTypeOperation`] - backends must override.
+    #[must_use = "Handle the result to detect backend failures"]
+    fn spread_through_bindings(
+        &self,
+        _source_id: &Uuid,
+        _is_episode: bool,
+        _decay: f32,
+    ) -> Result<(), MemoryError> {
+        Err(MemoryError::UnsupportedTypeOperation(
+            "Binding-based spreading not supported by this backend".to_string(),
+        ))
+    }
+}
+
+/// Extended trait for dual memory type operations.
+///
+/// This trait extends `MemoryBackend` to support type-aware storage and retrieval
+/// of episodic vs semantic (concept) memory nodes. Backends implementing this trait
+/// can optimize storage layouts, NUMA placement, and cache strategies based on the
+/// distinct access patterns of episodes (temporal locality, frequent updates) vs
+/// concepts (stable, semantic search).
+///
+/// # Design Philosophy
+///
+/// Following *A Philosophy of Software Design* principles:
+///
+/// - **Deep module**: The trait hides internal storage complexity (separate DashMaps,
+///   NUMA allocations, cache tiers) behind a simple, general-purpose interface.
+/// - **Information hiding**: Implementation details like shard counts, memory budgets,
+///   and type indices are encapsulated within the backend.
+/// - **Strategic design**: Methods are designed to work for any dual-memory backend
+///   implementation (DashMap-based, B-tree, hybrid, etc.) without exposing storage details.
+///
+/// # When to Use
+///
+/// Use `DualMemoryBackend` when:
+/// - You need to distinguish between episodic and semantic memory at the storage layer
+/// - You want to optimize storage strategies based on memory type (e.g., episodes use
+///   LRU eviction, concepts use consolidation)
+/// - You need type-specific iteration without deserializing all nodes
+/// - You want separate memory budgets or NUMA placement for different memory types
+///
+/// Use plain `MemoryBackend` when:
+/// - You don't need to distinguish between memory types
+/// - You have a homogeneous memory model
+/// - You want maximum backward compatibility with existing code
+///
+/// # Performance Characteristics
+///
+/// Implementations should target:
+/// - **Type-specific insertion**: <100μs P99 latency for episodes, <200μs for concepts
+/// - **Type-filtered iteration**: >1M nodes/sec with zero allocations
+/// - **Memory overhead**: <15% vs single-map storage (for type indexing)
+/// - **NUMA placement**: >60% reduction in remote memory access on multi-socket systems
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use engram_core::memory_graph::{DualMemoryBackend, MemoryBackend};
+/// use engram_core::memory::DualMemoryNode;
+///
+/// fn process_episodes<B: DualMemoryBackend>(backend: &B) {
+///     // Iterate only episode nodes - zero allocation
+///     for episode in backend.iter_episodes() {
+///         // Process episodic memories with temporal context
+///         if episode.is_episode() {
+///             println!("Episode: {}", episode.id);
+///         }
+///     }
+///
+///     // Get separate counts for capacity planning
+///     let (ep_count, concept_count) = backend.count_by_type();
+///     println!("Episodes: {}, Concepts: {}", ep_count, concept_count);
+/// }
+/// ```
+///
+/// # Thread Safety
+///
+/// All methods are required to be thread-safe (through `Send + Sync` bound from
+/// `MemoryBackend`). Concurrent type-specific operations must not cause data races.
+#[cfg(feature = "dual_memory_types")]
+pub trait DualMemoryBackend: MemoryBackend {
+    /// Add a node with explicit type annotation.
+    ///
+    /// This method stores a `DualMemoryNode` with its memory type metadata,
+    /// allowing the backend to route it to the appropriate storage tier
+    /// (episode map vs concept map) and apply type-specific policies.
+    ///
+    /// # Implementation Notes
+    ///
+    /// Backends should:
+    /// - Route episodes to high-churn storage (e.g., episode DashMap with 64 shards)
+    /// - Route concepts to stable storage (e.g., concept DashMap with 16 shards)
+    /// - Update type index for fast type lookups
+    /// - Apply NUMA placement based on memory type
+    /// - Enforce type-specific memory budgets
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MemoryError::CapacityExceeded`] if type-specific budget is exhausted.
+    /// Returns [`MemoryError::StorageError`] if the backend fails to persist the node.
+    #[must_use = "Handle the result to detect backend failures"]
+    fn add_node_typed(&self, node: DualMemoryNode) -> Result<Uuid, MemoryError>;
+
+    /// Retrieve a node with type information preserved.
+    ///
+    /// Unlike `retrieve()` which returns `Memory`, this method returns the full
+    /// `DualMemoryNode` with type metadata intact, allowing callers to query
+    /// consolidation scores, instance counts, and other type-specific fields.
+    ///
+    /// # Performance
+    ///
+    /// Implementations should check the type index first to determine which
+    /// storage tier to query, avoiding unnecessary lookups in both maps.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MemoryError::NotFound`] if the node doesn't exist.
+    /// Returns [`MemoryError::StorageError`] if retrieval fails.
+    #[must_use = "Handle the result to detect backend failures"]
+    fn get_node_typed(&self, id: &Uuid) -> Result<Option<DualMemoryNode>, MemoryError>;
+
+    /// Iterate only episode nodes with zero allocations.
+    ///
+    /// Returns an iterator over episode nodes, avoiding deserialization of
+    /// concept nodes entirely. This is more efficient than filtering `all_ids()`
+    /// when you only need one memory type.
+    ///
+    /// # Performance Contract
+    ///
+    /// - **Zero allocation**: Iterator should yield references or clones without
+    ///   intermediate allocations (beyond DashMap internal iteration overhead).
+    /// - **Cache efficiency**: Should iterate the episode storage tier directly
+    ///   for better cache locality vs jumping between types.
+    /// - **Throughput**: Target >1M nodes/sec on modern hardware.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// for episode in backend.iter_episodes() {
+    ///     if let Some(score) = episode.node_type.consolidation_score() {
+    ///         if score > 0.8 {
+    ///             // Trigger concept formation
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    #[must_use]
+    fn iter_episodes(&self) -> Box<dyn Iterator<Item = DualMemoryNode> + '_>;
+
+    /// Iterate only concept nodes with zero allocations.
+    ///
+    /// Returns an iterator over concept nodes, avoiding deserialization of
+    /// episode nodes entirely. Useful for consolidation and semantic search.
+    ///
+    /// # Performance Contract
+    ///
+    /// - **Zero allocation**: Iterator should yield references or clones without
+    ///   intermediate allocations (beyond DashMap internal iteration overhead).
+    /// - **Cache efficiency**: Should iterate the concept storage tier directly.
+    /// - **Throughput**: Target >500K nodes/sec (lower than episodes due to
+    ///   larger centroid embeddings).
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// for concept in backend.iter_concepts() {
+    ///     if let Some(count) = concept.node_type.instance_count() {
+    ///         println!("Concept {} has {} instances", concept.id, count);
+    ///     }
+    /// }
+    /// ```
+    #[must_use]
+    fn iter_concepts(&self) -> Box<dyn Iterator<Item = DualMemoryNode> + '_>;
+
+    /// Get counts by type: (episodes, concepts).
+    ///
+    /// Returns separate counts for capacity planning and monitoring. This is
+    /// more efficient than filtering all nodes when you only need statistics.
+    ///
+    /// # Performance
+    ///
+    /// Implementations should cache these counts or compute them from separate
+    /// DashMap `.len()` calls rather than iterating all nodes.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let (episodes, concepts) = backend.count_by_type();
+    /// if episodes > 1_000_000 {
+    ///     // Trigger consolidation to free up episode storage
+    /// }
+    /// ```
+    #[must_use]
+    fn count_by_type(&self) -> (usize, usize);
+
+    /// Get memory usage by type in bytes: (episode_bytes, concept_bytes).
+    ///
+    /// Returns approximate memory consumption for each type, useful for
+    /// monitoring and enforcing type-specific memory budgets.
+    ///
+    /// # Accuracy
+    ///
+    /// Implementations may return estimates based on:
+    /// - `count * sizeof(DualMemoryNode)` for ballpark numbers
+    /// - Atomic counters updated on insertion/removal for precise tracking
+    /// - System allocator queries (less portable)
+    ///
+    /// Exact byte counts are not required - approximations within 10% are acceptable.
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let (ep_bytes, concept_bytes) = backend.memory_usage_by_type();
+    /// let ep_mb = ep_bytes / (1024 * 1024);
+    /// let concept_mb = concept_bytes / (1024 * 1024);
+    /// println!("Episodes: {}MB, Concepts: {}MB", ep_mb, concept_mb);
+    /// ```
+    #[must_use]
+    fn memory_usage_by_type(&self) -> (usize, usize);
 }

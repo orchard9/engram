@@ -1,0 +1,23 @@
+# Python virtual environment
+venv/
+__pycache__/
+*.pyc
+
+# Data files
+data/
+*.bz2
+*.gz
+*.xml
+
+# Checkpoints
+checkpoints/
+
+# Logs
+logs/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

@@ -1629,7 +1629,7 @@ impl MemoryStore {
             .map(|backend| backend.get_tier_statistics())
     }
 
-    /// Perform maintenance on storage tiers
+    /// Perform maintenance on storage tiers (asynchronous background version)
     #[cfg(feature = "memory_mapped_persistence")]
     pub fn maintenance(&self) {
         // Perform basic maintenance operations
@@ -1644,6 +1644,97 @@ impl MemoryStore {
                 );
             }
         }
+
+        // Trigger compaction if needed
+        if let Some(ref backend) = self.persistent_backend {
+            let warm_tier = backend.warm_tier();
+            let stats = warm_tier.inner().content_storage_stats();
+
+            // Trigger compaction if fragmentation > 50% AND size > 100MB
+            if stats.fragmentation_ratio > 0.5 && stats.total_bytes > 100_000_000 {
+                tracing::info!(
+                    fragmentation = format!("{:.1}%", stats.fragmentation_ratio * 100.0),
+                    size_mb = stats.total_bytes / 1_000_000,
+                    "Triggering warm tier content compaction"
+                );
+
+                // Spawn compaction in background to avoid blocking maintenance
+                let warm_tier_clone = warm_tier.clone();
+                tokio::task::spawn_blocking(move || {
+                    match warm_tier_clone.inner().compact_content() {
+                        Ok(compact_stats) => {
+                            tracing::info!(
+                                reclaimed_mb = compact_stats.bytes_reclaimed / 1_000_000,
+                                duration_ms = compact_stats.duration.as_millis(),
+                                "Warm tier compaction completed successfully"
+                            );
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                error = %e,
+                                "Warm tier compaction failed, will retry on next maintenance cycle"
+                            );
+                        }
+                    }
+                });
+            }
+        }
+    }
+
+    /// Perform synchronous maintenance and return report
+    ///
+    /// Checks fragmentation levels and triggers compaction if:
+    /// - Fragmentation ratio > 50%
+    /// - Total content storage > 100MB
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if compaction fails
+    #[cfg(feature = "memory_mapped_persistence")]
+    pub fn run_maintenance(
+        &self,
+    ) -> Result<crate::storage::MaintenanceReport, crate::storage::StorageError> {
+        use crate::storage::MaintenanceReport;
+
+        let mut report = MaintenanceReport::default();
+
+        // Calculate memory pressure
+        let current_count = self.memory_count.load(Ordering::Relaxed);
+        report.pressure_before = f64::from(Self::pressure_ratio(current_count, self.max_memories));
+
+        if let Some(ref backend) = self.persistent_backend {
+            let warm_tier = backend.warm_tier();
+            let stats = warm_tier.inner().content_storage_stats();
+
+            // Trigger compaction if fragmentation > 50% AND size > 100MB
+            if stats.fragmentation_ratio > 0.5 && stats.total_bytes > 100_000_000 {
+                report.maintenance_triggered = true;
+
+                tracing::info!(
+                    fragmentation = format!("{:.1}%", stats.fragmentation_ratio * 100.0),
+                    size_mb = stats.total_bytes / 1_000_000,
+                    "Running synchronous warm tier content compaction"
+                );
+
+                // Perform synchronous compaction
+                let compact_stats = warm_tier.inner().compact_content()?;
+
+                tracing::info!(
+                    reclaimed_mb = compact_stats.bytes_reclaimed / 1_000_000,
+                    duration_ms = compact_stats.duration.as_millis(),
+                    "Warm tier compaction completed successfully"
+                );
+
+                report.compaction = Some(compact_stats);
+            }
+        }
+
+        // Update pressure after maintenance
+        let current_count_after = self.memory_count.load(Ordering::Relaxed);
+        report.pressure_after =
+            f64::from(Self::pressure_ratio(current_count_after, self.max_memories));
+
+        Ok(report)
     }
 
     /// Gracefully shutdown storage backend

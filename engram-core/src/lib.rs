@@ -497,7 +497,7 @@ pub use query::{
     figurative::{FigurativeInterpreter, IdiomLexicon, InterpretationError},
     lexicon::{AbbreviationLexicon, CompositeLexicon, Lexicon, SynonymLexicon},
 };
-pub use store::{Activation, MemoryStore, RecallResult, StoreResult};
+pub use store::{Activation, MemoryStore, RecallResult, StoreResult, TierCounts};
 pub use streaming_health::{StreamingHealthMetrics, StreamingHealthStatus, StreamingHealthTracker};
 
 #[cfg(feature = "psychological_decay")]

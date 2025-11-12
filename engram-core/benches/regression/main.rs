@@ -100,10 +100,9 @@ impl Baselines {
                 .arg("-n")
                 .arg("machdep.cpu.brand_string")
                 .output()
+                && let Ok(cpu) = String::from_utf8(output.stdout)
             {
-                if let Ok(cpu) = String::from_utf8(output.stdout) {
-                    return cpu.trim().to_string();
-                }
+                return cpu.trim().to_string();
             }
         }
 

@@ -341,10 +341,10 @@ impl NumaMemoryMap {
             NumaPolicy::Default => {
                 // No special policy
             }
-            NumaPolicy::Bind(node) => {
+            NumaPolicy::Bind(_node) => {
                 #[cfg(target_os = "linux")]
                 {
-                    let nodemask = 1u64 << node;
+                    let nodemask = 1u64 << _node;
                     unsafe {
                         libc::syscall(
                             libc::SYS_mbind,
@@ -375,10 +375,10 @@ impl NumaMemoryMap {
                     }
                 }
             }
-            NumaPolicy::Preferred(node) => {
+            NumaPolicy::Preferred(_node) => {
                 #[cfg(target_os = "linux")]
                 {
-                    let nodemask = 1u64 << node;
+                    let nodemask = 1u64 << _node;
                     unsafe {
                         libc::syscall(
                             libc::SYS_mbind,

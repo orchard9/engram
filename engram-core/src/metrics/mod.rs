@@ -94,6 +94,20 @@ pub const COMPACTION_EPISODES_REMOVED: &str = "engram_compaction_episodes_remove
 /// Total bytes of storage space reclaimed through compaction.
 pub const COMPACTION_STORAGE_SAVED_BYTES: &str = "engram_compaction_storage_saved_bytes";
 
+// Content storage compaction metrics (warm tier)
+/// Total bytes allocated in warm tier content storage.
+pub const CONTENT_STORAGE_TOTAL_BYTES: &str = "engram_content_storage_total_bytes";
+/// Bytes occupied by live content in warm tier.
+pub const CONTENT_STORAGE_LIVE_BYTES: &str = "engram_content_storage_live_bytes";
+/// Fragmentation ratio in content storage (0.0 to 1.0).
+pub const CONTENT_STORAGE_FRAGMENTATION_RATIO: &str = "engram_content_storage_fragmentation_ratio";
+/// Total number of content storage compaction operations.
+pub const CONTENT_COMPACTION_TOTAL: &str = "engram_content_compaction_total";
+/// Duration of content storage compaction operations (milliseconds).
+pub const CONTENT_COMPACTION_DURATION_MS: &str = "engram_content_compaction_duration_ms";
+/// Total bytes reclaimed by content storage compaction.
+pub const CONTENT_COMPACTION_BYTES_RECLAIMED: &str = "engram_content_compaction_bytes_reclaimed";
+
 // WAL (Write-Ahead Log) metrics
 /// Total number of episodes successfully recovered from WAL during server startup.
 pub const WAL_RECOVERY_SUCCESSES_TOTAL: &str = "engram_wal_recovery_successes_total";

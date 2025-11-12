@@ -1130,11 +1130,11 @@ fn test_invariant_memory_budget_never_negative() {
     let (backend, _temp) = create_default_backend();
 
     // Insert and remove nodes repeatedly
-    for _i in 0..100 {
-        let episode = create_test_episode(&format!("ep-{_i}"), 0.5);
+    for i in 0..100 {
+        let episode = create_test_episode(&format!("ep-{i}"), 0.5);
         let id = backend.add_node_typed(episode).expect("Failed to insert");
 
-        if _i % 2 == 0 {
+        if i % 2 == 0 {
             backend.remove(&id).expect("Failed to remove");
         }
     }

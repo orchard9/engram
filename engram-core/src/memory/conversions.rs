@@ -45,6 +45,16 @@ impl From<&Memory> for DualMemoryNode {
     }
 }
 
+impl From<DualMemoryNode> for Memory {
+    /// Convert DualMemoryNode to Memory (for backwards compatibility).
+    ///
+    /// Concept nodes are represented as Memory with centroid embedding.
+    /// This enables gradual rollout without breaking existing APIs.
+    fn from(dual: DualMemoryNode) -> Self {
+        dual.to_memory()
+    }
+}
+
 impl DualMemoryNode {
     /// Convert back to Memory (for backwards compatibility).
     ///

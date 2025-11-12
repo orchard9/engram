@@ -374,6 +374,12 @@ impl CognitiveTierArchitecture {
         self.warm_tier.iter_memories()
     }
 
+    /// Get reference to warm tier for direct access
+    #[must_use]
+    pub const fn warm_tier(&self) -> &Arc<WarmTier> {
+        &self.warm_tier
+    }
+
     /// Iterate over all memories in the cold tier
     ///
     /// Returns a Vec of (id, episode) pairs from archived cold storage.

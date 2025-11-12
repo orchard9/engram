@@ -19,20 +19,21 @@ fn test_gpu_basic_functionality() {
     // Get device info
     match cuda::ffi::get_device_count() {
         Ok(count) => {
-            println!("✓ Found {} CUDA device(s)", count);
+            println!("✓ Found {count} CUDA device(s)");
             assert!(count > 0, "Expected at least one CUDA device");
 
             // Query first device
             if let Ok(props) = cuda::ffi::get_device_properties(0) {
-                println!("✓ Device 0: {}", props.device_name());
-                println!("  Compute capability: {}.{}", props.major, props.minor);
-                println!(
-                    "  Memory: {} GB",
-                    props.total_global_mem / (1024 * 1024 * 1024)
-                );
+                let device_name = props.device_name();
+                let major = props.major;
+                let minor = props.minor;
+                let memory_gb = props.total_global_mem / (1024 * 1024 * 1024);
+                println!("✓ Device 0: {device_name}");
+                println!("  Compute capability: {major}.{minor}");
+                println!("  Memory: {memory_gb} GB");
             }
         }
-        Err(e) => panic!("Failed to get device count: {}", e),
+        Err(e) => panic!("Failed to get device count: {e}"),
     }
 
     // Test memory allocation
@@ -42,7 +43,7 @@ fn test_gpu_basic_functionality() {
             let _ = cuda::ffi::free(ptr);
             println!("✓ Successfully freed memory");
         }
-        Err(e) => panic!("Failed to allocate memory: {}", e),
+        Err(e) => panic!("Failed to allocate memory: {e}"),
     }
 
     // Test kernel launch
@@ -55,7 +56,7 @@ fn test_gpu_basic_functionality() {
             assert_eq!(output[512], 1024, "Expected output[512] = 1024");
             println!("✓ Kernel computation verified");
         }
-        Err(e) => panic!("Failed to launch kernel: {}", e),
+        Err(e) => panic!("Failed to launch kernel: {e}"),
     }
 
     // Test cosine similarity (only when CUDA is actually available)

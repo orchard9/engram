@@ -26,6 +26,7 @@ pub mod compact;
 pub mod confidence;
 pub mod content_addressing;
 pub mod deduplication;
+pub mod dual_memory_budget;
 pub mod hot_tier;
 #[cfg(feature = "memory_mapped_persistence")]
 pub mod index;
@@ -61,9 +62,23 @@ pub use deduplication::{
     DeduplicationAction, DeduplicationResult, DeduplicationStats, MergeStrategy,
     SemanticDeduplicator,
 };
+pub use dual_memory_budget::DualMemoryBudget;
 pub use hot_tier::HotTier;
 #[cfg(feature = "memory_mapped_persistence")]
-pub use mapped::MappedWarmStorage;
+pub use mapped::{CompactionStats, ContentStorageStats, MappedWarmStorage};
+
+/// Maintenance operation report
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct MaintenanceReport {
+    /// Compaction statistics if compaction was performed
+    pub compaction: Option<CompactionStats>,
+    /// Memory pressure before maintenance (0.0 to 1.0)
+    pub pressure_before: f64,
+    /// Memory pressure after maintenance (0.0 to 1.0)
+    pub pressure_after: f64,
+    /// Whether maintenance was triggered
+    pub maintenance_triggered: bool,
+}
 #[cfg(feature = "memory_mapped_persistence")]
 pub use persistence::{MemorySpacePersistence, PersistenceConfig, PersistenceError};
 #[cfg(feature = "memory_mapped_persistence")]
@@ -73,7 +88,7 @@ pub use tiers::{
 };
 #[cfg(feature = "memory_mapped_persistence")]
 pub use wal::{WalEntry, WalWriter};
-pub use warm_tier::{CompactionStats, MemoryUsage, WarmTier, WarmTierConfig};
+pub use warm_tier::{MemoryUsage, WarmTier, WarmTierConfig};
 
 const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_992; // 2^53
 
@@ -300,6 +315,18 @@ pub enum StorageError {
     /// Migration operation failed
     #[error("Migration failed: {0}")]
     MigrationFailed(String),
+
+    /// Compaction is already in progress
+    #[error("Compaction already in progress")]
+    CompactionInProgress,
+
+    /// Compaction failed
+    #[error("Compaction failed: {0}")]
+    CompactionFailed(String),
+
+    /// Insufficient memory for operation
+    #[error("Insufficient memory: {0}")]
+    InsufficientMemory(String),
 }
 
 impl StorageError {

@@ -12,7 +12,7 @@ members = [
     # "tools/migrate-neo4j",
     # "tools/migrate-postgresql",
     # "tools/migrate-redis",
-    # "tools/loadtest",  # Temporarily excluded - needs compilation fixes
+    "tools/loadtest",  # Re-enabled with API endpoint fixes
 ]
 exclude = [
     "engram-core/fuzz",

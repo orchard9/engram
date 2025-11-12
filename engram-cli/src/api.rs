@@ -25,7 +25,7 @@ use crate::grpc::MemoryService;
 use crate::openapi::create_swagger_ui;
 use engram_core::{
     Confidence as CoreConfidence, Cue as CoreCue, Episode, MemorySpaceError, MemorySpaceId,
-    MemorySpaceRegistry, MemoryStore, SpaceSummary,
+    MemorySpaceRegistry, MemoryStore, SpaceSummary, TierCounts,
     activation::{AutoTuneAuditEntry, RecallMode, SpreadingAutoTuner},
     completion::{ConsolidationStats as CoreConsolidationStats, SemanticPattern},
     memory::EpisodeBuilder as CoreEpisodeBuilder,
@@ -601,6 +601,37 @@ pub struct ProbabilisticQueryRequest {
     pub mode: Option<String>,
     /// Memory space identifier for multi-tenant isolation (defaults to server default)
     pub space: Option<String>,
+}
+
+/// Query parameters for listing memories with tier-aware pagination
+#[derive(Debug, Deserialize, ToSchema, IntoParams)]
+pub struct ListMemoriesQuery {
+    /// Storage tier to query: "hot" (in-memory), "warm" (persistent), "cold" (archived), "all"
+    #[serde(default = "default_tier")]
+    pub tier: String,
+
+    /// Pagination offset (default: 0)
+    #[serde(default)]
+    pub offset: usize,
+
+    /// Pagination limit (default: 100, max: 1000)
+    #[serde(default = "default_limit")]
+    pub limit: usize,
+
+    /// Include 768-dimensional embeddings in response (default: false to reduce payload size)
+    #[serde(default)]
+    pub include_embeddings: bool,
+
+    /// Memory space identifier for multi-tenant isolation (defaults to server default)
+    pub space: Option<String>,
+}
+
+fn default_tier() -> String {
+    "hot".to_string()
+}
+
+const fn default_limit() -> usize {
+    100
 }
 
 /// Query parameters for streaming activities
@@ -2082,8 +2113,182 @@ pub async fn recognize_pattern(
 }
 
 // ============================================================================
+// REST-style endpoint response types
+// ============================================================================
+
+/// Pagination metadata for list responses
+#[derive(Debug, Serialize, ToSchema)]
+pub struct PaginationInfo {
+    /// Starting offset of returned results
+    pub offset: usize,
+    /// Maximum number of results requested
+    pub limit: usize,
+    /// Actual number of results returned
+    pub returned: usize,
+}
+
+/// Response for listing memories with tier-aware pagination
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ListMemoriesResponse {
+    /// Array of memory objects
+    pub memories: Vec<serde_json::Value>,
+    /// Total count of memories returned in this response
+    pub count: usize,
+    /// Pagination metadata
+    pub pagination: PaginationInfo,
+    /// Tier counts across hot/warm/cold storage
+    pub tier_counts: TierCounts,
+}
+
+// ============================================================================
 // REST-style endpoints for CLI compatibility
 // ============================================================================
+
+/// GET /api/v1/memories - List memories with tier-aware pagination
+///
+/// This endpoint supports querying across storage tiers (hot/warm/cold) with
+/// pagination and optional embedding inclusion for reduced payload sizes.
+///
+/// Query parameters:
+/// - `tier`: Storage tier ("hot", "warm", "cold", "all") - defaults to "hot"
+/// - `offset`: Pagination offset (default: 0)
+/// - `limit`: Number of results (default: 100, max: 1000)
+/// - `include_embeddings`: Include 768-dim vectors (default: false)
+/// - `space`: Memory space ID (defaults to server default)
+pub async fn list_memories_rest(
+    State(state): State<ApiState>,
+    headers: HeaderMap,
+    Query(query): Query<ListMemoriesQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    // Extract memory space ID with fallback to default
+    let space_id =
+        extract_memory_space_id(&headers, query.space.as_deref(), None, &state.default_space)?;
+
+    // Get space-specific store handle from registry
+    let handle = state
+        .registry
+        .create_or_get(&space_id)
+        .await
+        .map_err(|e| ApiError::SystemError(format!("Failed to access memory space: {e}")))?;
+    let store = handle.store();
+
+    // Validate and clamp pagination parameters
+    let offset = query.offset;
+    let limit = query.limit.min(1000);
+
+    // Validate tier parameter
+    let tier = query.tier.to_lowercase();
+    if !matches!(tier.as_str(), "hot" | "warm" | "cold" | "all") {
+        return Err(ApiError::bad_request(
+            format!("Invalid tier value: '{}'", query.tier),
+            "Use one of: 'hot' (in-memory), 'warm' (persistent), 'cold' (archived), 'all'",
+            "GET /api/v1/memories?tier=hot&limit=100",
+        ));
+    }
+
+    // Get tier counts for response
+    let tier_counts = store.get_tier_counts();
+
+    // Helper function to build memory JSON
+    let build_memory_json =
+        |id: String, ep: Episode, include_embeddings: bool| -> serde_json::Value {
+            if include_embeddings {
+                json!({
+                    "id": id,
+                    "content": ep.what,
+                    "embedding": ep.embedding.to_vec(),
+                    "confidence": ep.encoding_confidence.raw(),
+                    "timestamp": ep.when.to_rfc3339(),
+                })
+            } else {
+                json!({
+                    "id": id,
+                    "content": ep.what,
+                    "confidence": ep.encoding_confidence.raw(),
+                    "timestamp": ep.when.to_rfc3339(),
+                })
+            }
+        };
+
+    // Select tier and iterate
+    let memories: Vec<serde_json::Value> = match tier.as_str() {
+        "hot" => {
+            // Use tier-aware iterator for hot tier (in-memory)
+            // Iterator returns (id, episode) tuples
+            store
+                .iter_hot_memories()
+                .skip(offset)
+                .take(limit)
+                .map(|(id, ep)| build_memory_json(id, ep, query.include_embeddings))
+                .collect()
+        }
+        "warm" => {
+            // Warm tier: memory-mapped persistent storage
+            let iter = store.iter_warm_memories().ok_or_else(|| {
+                ApiError::not_implemented(
+                    "warm tier not yet available",
+                    "Enable memory_mapped_persistence feature and configure persistence",
+                    "See docs/operations/production-deployment.md",
+                )
+            })?;
+
+            iter.skip(offset)
+                .take(limit)
+                .map(|(id, ep)| build_memory_json(id, ep, query.include_embeddings))
+                .collect()
+        }
+        "cold" => {
+            // Cold tier: archived columnar storage
+            let iter = store.iter_cold_memories().ok_or_else(|| {
+                ApiError::not_implemented(
+                    "Cold tier not yet available",
+                    "Enable memory_mapped_persistence feature and configure persistence",
+                    "See docs/operations/production-deployment.md",
+                )
+            })?;
+
+            iter.skip(offset)
+                .take(limit)
+                .map(|(id, ep)| build_memory_json(id, ep, query.include_embeddings))
+                .collect()
+        }
+        "all" => {
+            // All tiers: hot → warm → cold (lazy chain)
+            // Check if any tiers beyond hot are available, return NOT_IMPLEMENTED if not
+            if store.iter_warm_memories().is_none() && store.iter_cold_memories().is_none() {
+                return Err(ApiError::not_implemented(
+                    "Tier iteration across all tiers not yet available",
+                    "Enable memory_mapped_persistence feature and configure persistence",
+                    "See docs/operations/production-deployment.md",
+                ));
+            }
+
+            store
+                .iter_all_memories()
+                .skip(offset)
+                .take(limit)
+                .map(|(id, ep)| build_memory_json(id, ep, query.include_embeddings))
+                .collect()
+        }
+        _ => unreachable!("tier validation already performed"),
+    };
+
+    let returned = memories.len();
+
+    // Build response with pagination metadata
+    let response = ListMemoriesResponse {
+        memories,
+        count: returned,
+        pagination: PaginationInfo {
+            offset,
+            limit,
+            returned,
+        },
+        tier_counts,
+    };
+
+    Ok(Json(response))
+}
 
 /// POST /api/v1/memories - Simple memory creation (CLI-compatible)
 ///
@@ -2384,6 +2589,53 @@ pub async fn shutdown_server(State(state): State<ApiState>) -> Result<impl IntoR
             "status": "shutdown_initiated",
             "message": "Server is shutting down gracefully"
         })),
+    ))
+}
+
+/// POST /api/v1/maintenance/compact - Trigger storage compaction
+#[utoipa::path(
+    post,
+    path = "/api/v1/maintenance/compact",
+    tag = "maintenance",
+    responses(
+        (status = 200, description = "Compaction completed successfully", body = MaintenanceReport),
+        (status = 409, description = "Compaction already in progress"),
+        (status = 500, description = "Compaction failed", body = ErrorResponse)
+    )
+)]
+/// # Errors
+///
+/// Returns `ApiError` if compaction fails or is already in progress
+#[cfg(feature = "memory_mapped_persistence")]
+pub async fn trigger_compaction(
+    State(state): State<ApiState>,
+) -> Result<impl IntoResponse, ApiError> {
+    tracing::info!("Manual compaction triggered via API");
+
+    #[allow(deprecated)]
+    let report = state.store.run_maintenance().map_err(|e| {
+        if matches!(e, engram_core::storage::StorageError::CompactionInProgress) {
+            tracing::warn!("Compaction already in progress");
+            ApiError::CompactionInProgress
+        } else {
+            tracing::error!(error = %e, "Compaction failed");
+            ApiError::SystemError(format!("Compaction failed: {e}"))
+        }
+    })?;
+
+    tracing::info!(
+        maintenance_triggered = report.maintenance_triggered,
+        bytes_reclaimed = report.compaction.as_ref().map_or(0, |c| c.bytes_reclaimed),
+        "Compaction completed"
+    );
+
+    Ok((StatusCode::OK, Json(report)))
+}
+
+#[cfg(not(feature = "memory_mapped_persistence"))]
+pub async fn trigger_compaction(_state: State<ApiState>) -> Result<impl IntoResponse, ApiError> {
+    Err(ApiError::FeatureNotEnabled(
+        "Compaction requires memory_mapped_persistence feature".to_string(),
     ))
 }
 
@@ -2695,6 +2947,10 @@ pub enum ApiError {
         /// Example of correct usage
         example: String,
     },
+    /// Compaction already in progress
+    CompactionInProgress,
+    /// Feature not enabled
+    FeatureNotEnabled(String),
 }
 
 impl ApiError {
@@ -2822,6 +3078,18 @@ impl IntoResponse for ApiError {
                 "NOT_IMPLEMENTED",
                 message,
                 format!("Suggestion: {}\nExample: {}", suggestion, example)
+            ),
+            Self::CompactionInProgress => (
+                StatusCode::CONFLICT,
+                "COMPACTION_IN_PROGRESS",
+                "Compaction operation already in progress".to_string(),
+                "A compaction operation is currently running. Wait for it to complete before triggering another.".to_string()
+            ),
+            Self::FeatureNotEnabled(msg) => (
+                StatusCode::NOT_IMPLEMENTED,
+                "FEATURE_NOT_ENABLED",
+                msg,
+                "This feature requires additional build flags. Consult the deployment documentation for details.".to_string()
             ),
         };
 
@@ -3833,7 +4101,7 @@ pub fn create_api_routes() -> Router<ApiState> {
         // REST-style endpoints for CLI compatibility
         .route(
             "/api/v1/memories",
-            get(search_memories_rest).post(create_memory_rest),
+            get(list_memories_rest).post(create_memory_rest),
         )
         .route("/api/v1/memories/{id}", get(get_memory_by_id))
         .route(
@@ -3845,6 +4113,8 @@ pub fn create_api_routes() -> Router<ApiState> {
         .route("/api/v1/system/health", get(system_health))
         .route("/api/v1/system/spreading/config", get(spreading_config))
         .route("/api/v1/system/introspect", get(system_introspect))
+        // Maintenance operations
+        .route("/api/v1/maintenance/compact", post(trigger_compaction))
         .route("/metrics", get(metrics_snapshot))
         .route("/metrics/prometheus", get(metrics_prometheus))
         // Episode-specific operations

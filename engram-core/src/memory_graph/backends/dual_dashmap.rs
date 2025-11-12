@@ -171,6 +171,9 @@ pub struct DualDashMapBackend {
     // Stores true for Episode, false for Concept
     type_index: Arc<DashMap<Uuid, bool>>,
 
+    // BINDING INDEX (episode-concept connections)
+    binding_index: Arc<crate::memory_graph::binding_index::BindingIndex>,
+
     // NUMA and budget
     #[cfg(unix)]
     #[allow(dead_code)] // Reserved for future NUMA-aware allocation
@@ -272,6 +275,15 @@ impl DualDashMapBackend {
             32, // Balanced shard count
         ));
 
+        // Initialize binding index with aggressive GC threshold
+        let binding_index = Arc::new(
+            crate::memory_graph::binding_index::BindingIndex::with_capacity(
+                episode_capacity,
+                concept_capacity,
+                0.1, // Aggressive GC threshold to maintain <20% overhead
+            ),
+        );
+
         // Initialize budget tracker
         let budget = Arc::new(DualMemoryBudget::new(episode_budget_mb, concept_budget_mb));
 
@@ -291,6 +303,7 @@ impl DualDashMapBackend {
             concept_edges,
             concept_activation_cache,
             type_index,
+            binding_index,
             #[cfg(unix)]
             numa_topology,
             #[cfg(unix)]
@@ -1991,5 +2004,250 @@ impl DualDashMapBackend {
         }
 
         layer
+    }
+}
+
+#[cfg(feature = "dual_memory_types")]
+impl GraphBackend for DualDashMapBackend {
+    fn add_edge(&self, from: Uuid, to: Uuid, weight: f32) -> Result<(), MemoryError> {
+        // Delegate to existing implementation
+        Self::add_edge(self, from, to, weight)
+    }
+
+    fn remove_edge(&self, from: &Uuid, to: &Uuid) -> Result<bool, MemoryError> {
+        // Determine source node type
+        let is_episode = self
+            .type_index
+            .get(from)
+            .map(|entry| *entry.value())
+            .ok_or(MemoryError::NotFound(*from))?;
+
+        let edges = if is_episode {
+            &self.episode_edges
+        } else {
+            &self.concept_edges
+        };
+
+        // Remove edge from adjacency list
+        if let Some(mut entry) = edges.get_mut(from) {
+            let initial_len = entry.len();
+            entry.retain(|(target, _)| target != to);
+            Ok(entry.len() < initial_len)
+        } else {
+            Ok(false)
+        }
+    }
+
+    fn get_neighbors(&self, id: &Uuid) -> Result<Vec<(Uuid, f32)>, MemoryError> {
+        // Determine node type
+        let is_episode = self
+            .type_index
+            .get(id)
+            .map(|entry| *entry.value())
+            .ok_or(MemoryError::NotFound(*id))?;
+
+        let edges = if is_episode {
+            &self.episode_edges
+        } else {
+            &self.concept_edges
+        };
+
+        Ok(edges
+            .get(id)
+            .map(|entry| entry.value().clone())
+            .unwrap_or_default())
+    }
+
+    fn traverse_bfs(&self, start: &Uuid, max_depth: usize) -> Result<Vec<Uuid>, MemoryError> {
+        use std::collections::{HashSet, VecDeque};
+
+        let mut visited = HashSet::new();
+        let mut queue = VecDeque::new();
+        let mut result = Vec::new();
+
+        queue.push_back((*start, 0));
+        visited.insert(*start);
+
+        while let Some((current, depth)) = queue.pop_front() {
+            if depth > max_depth {
+                continue;
+            }
+
+            result.push(current);
+
+            if depth < max_depth {
+                for (neighbor, _weight) in self.get_neighbors(&current)? {
+                    if visited.insert(neighbor) {
+                        queue.push_back((neighbor, depth + 1));
+                    }
+                }
+            }
+        }
+
+        Ok(result)
+    }
+
+    fn get_edge_weight(&self, from: &Uuid, to: &Uuid) -> Result<Option<f32>, MemoryError> {
+        let neighbors = self.get_neighbors(from)?;
+        Ok(neighbors.iter().find(|(id, _)| id == to).map(|(_, w)| *w))
+    }
+
+    fn all_edges(&self) -> Result<Vec<(Uuid, Uuid, f32)>, MemoryError> {
+        let mut edges = Vec::new();
+
+        // Collect from episode edges
+        for entry in self.episode_edges.iter() {
+            let from = *entry.key();
+            for (to, weight) in entry.value() {
+                edges.push((from, *to, *weight));
+            }
+        }
+
+        // Collect from concept edges
+        for entry in self.concept_edges.iter() {
+            let from = *entry.key();
+            for (to, weight) in entry.value() {
+                edges.push((from, *to, *weight));
+            }
+        }
+
+        Ok(edges)
+    }
+
+    fn add_concept_binding(
+        &self,
+        episode_id: Uuid,
+        concept_id: Uuid,
+        strength: f32,
+        contribution: f32,
+    ) -> Result<(), MemoryError> {
+        // Verify both nodes exist
+        if !self.type_index.contains_key(&episode_id) {
+            return Err(MemoryError::NotFound(episode_id));
+        }
+        if !self.type_index.contains_key(&concept_id) {
+            return Err(MemoryError::NotFound(concept_id));
+        }
+
+        // Create binding
+        let binding = crate::memory::bindings::ConceptBinding::new(
+            episode_id,
+            concept_id,
+            strength,
+            contribution,
+        );
+
+        // Add to binding index
+        self.binding_index.add_binding(binding);
+
+        Ok(())
+    }
+
+    fn get_episode_concepts(&self, episode_id: &Uuid) -> Vec<(Uuid, f32, f32)> {
+        self.binding_index
+            .get_concepts_for_episode(episode_id)
+            .iter()
+            .map(|binding| {
+                (
+                    binding.concept_id,
+                    binding.get_strength(),
+                    binding.contribution,
+                )
+            })
+            .collect()
+    }
+
+    fn get_concept_episodes(&self, concept_id: &Uuid) -> Vec<(Uuid, f32, f32)> {
+        self.binding_index
+            .get_episodes_for_concept(concept_id)
+            .iter()
+            .map(|binding| {
+                (
+                    binding.episode_id,
+                    binding.get_strength(),
+                    binding.contribution,
+                )
+            })
+            .collect()
+    }
+
+    fn spread_through_bindings(
+        &self,
+        source_id: &Uuid,
+        is_episode: bool,
+        decay: f32,
+    ) -> Result<(), MemoryError> {
+        use crate::memory::binding_ops::BindingBatchOps;
+
+        // Get source activation
+        let source_activation = if is_episode {
+            self.episode_activation_cache
+                .get(source_id)
+                .map_or(0.5, |a| a.load(Ordering::Relaxed))
+        } else {
+            self.concept_activation_cache
+                .get(source_id)
+                .map_or(0.5, |a| a.load(Ordering::Relaxed))
+        };
+
+        if is_episode {
+            // Episode → Concepts (bottom-up, low fan-out)
+            let bindings = self.binding_index.get_concepts_for_episode(source_id);
+            for binding in &bindings {
+                let contribution = source_activation * binding.get_strength() * decay;
+                if let Some(target_activation) =
+                    self.concept_activation_cache.get(&binding.concept_id)
+                {
+                    loop {
+                        let current = target_activation.load(Ordering::Relaxed);
+                        let new_value = (current + contribution).min(1.0);
+                        if target_activation
+                            .compare_exchange_weak(
+                                current,
+                                new_value,
+                                Ordering::Release,
+                                Ordering::Relaxed,
+                            )
+                            .is_ok()
+                        {
+                            break;
+                        }
+                    }
+                }
+            }
+        } else {
+            // Concept → Episodes (top-down, high fan-out)
+            let bindings_arc = self.binding_index.get_episodes_for_concept(source_id);
+
+            // Use SIMD batch operations for high fan-out
+            let activation_delta = source_activation * decay;
+            BindingBatchOps::batch_add_activation(&bindings_arc, activation_delta);
+
+            // Update activation cache
+            for binding in bindings_arc.iter() {
+                let weighted_contribution = activation_delta * binding.get_strength();
+                if let Some(target_activation) =
+                    self.episode_activation_cache.get(&binding.episode_id)
+                {
+                    loop {
+                        let current = target_activation.load(Ordering::Relaxed);
+                        let new_value = (current + weighted_contribution).min(1.0);
+                        if target_activation
+                            .compare_exchange_weak(
+                                current,
+                                new_value,
+                                Ordering::Release,
+                                Ordering::Relaxed,
+                            )
+                            .is_ok()
+                        {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 }

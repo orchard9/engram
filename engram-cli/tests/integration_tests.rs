@@ -11,7 +11,6 @@
 #![allow(clippy::or_fun_call)]
 #![allow(clippy::len_zero)]
 
-use assert_cmd::cargo;
 use engram_cli::{find_available_port, is_port_available};
 use predicates::prelude::*;
 use std::time::Duration;
@@ -73,7 +72,7 @@ async fn test_find_available_port_with_occupied_port() {
 
 #[tokio::test]
 async fn test_cli_help() {
-    let mut cmd = cargo::cargo_bin_cmd!("engram");
+    let mut cmd = assert_cmd::Command::cargo_bin("engram").unwrap();
     cmd.arg("--help")
         .assert()
         .success()
@@ -84,7 +83,7 @@ async fn test_cli_help() {
 
 #[tokio::test]
 async fn test_cli_start_help() {
-    let mut cmd = cargo::cargo_bin_cmd!("engram");
+    let mut cmd = assert_cmd::Command::cargo_bin("engram").unwrap();
     cmd.args(&["start", "--help"])
         .assert()
         .success()
@@ -113,7 +112,7 @@ async fn test_cli_start_single_node() {
     let pid_path = temp_dir.path().join("engram.pid");
     let data_dir = temp_dir.path().join("data");
 
-    let mut cmd = cargo::cargo_bin_cmd!("engram");
+    let mut cmd = assert_cmd::Command::cargo_bin("engram").unwrap();
     let assert = cmd
         .env("ENGRAM_PID_PATH", pid_path.to_str().unwrap())
         .env("ENGRAM_DATA_DIR", data_dir.to_str().unwrap())
@@ -161,7 +160,7 @@ async fn test_port_discovery_timeout() {
 
 #[tokio::test]
 async fn test_cli_version() {
-    let mut cmd = cargo::cargo_bin_cmd!("engram");
+    let mut cmd = assert_cmd::Command::cargo_bin("engram").unwrap();
     cmd.arg("--version")
         .assert()
         .success()
@@ -170,7 +169,7 @@ async fn test_cli_version() {
 
 #[test]
 fn test_cli_invalid_command() {
-    let mut cmd = cargo::cargo_bin_cmd!("engram");
+    let mut cmd = assert_cmd::Command::cargo_bin("engram").unwrap();
     cmd.arg("invalid-command")
         .assert()
         .failure()
@@ -179,7 +178,7 @@ fn test_cli_invalid_command() {
 
 #[tokio::test]
 async fn test_cli_stop_help() {
-    let mut cmd = cargo::cargo_bin_cmd!("engram");
+    let mut cmd = assert_cmd::Command::cargo_bin("engram").unwrap();
     cmd.args(&["stop", "--help"])
         .assert()
         .success()
@@ -198,7 +197,7 @@ async fn test_cli_stop_no_server() {
     // Ensure PID file doesn't exist and the temp dir is clean
     let _ = std::fs::remove_file(&pid_path);
 
-    let mut cmd = cargo::cargo_bin_cmd!("engram");
+    let mut cmd = assert_cmd::Command::cargo_bin("engram").unwrap();
     cmd.env("ENGRAM_PID_PATH", pid_path.to_str().unwrap())
         .arg("stop")
         .assert()
@@ -212,7 +211,7 @@ async fn test_cli_stop_force_flag() {
     let temp_dir = tempfile::tempdir().unwrap();
     let pid_path = temp_dir.path().join("engram.pid");
 
-    let mut cmd = cargo::cargo_bin_cmd!("engram");
+    let mut cmd = assert_cmd::Command::cargo_bin("engram").unwrap();
     cmd.env("ENGRAM_PID_PATH", pid_path.to_str().unwrap())
         .args(&["stop", "--force"])
         .assert()
@@ -222,7 +221,7 @@ async fn test_cli_stop_force_flag() {
 
 #[tokio::test]
 async fn test_cli_status_help() {
-    let mut cmd = cargo::cargo_bin_cmd!("engram");
+    let mut cmd = assert_cmd::Command::cargo_bin("engram").unwrap();
     cmd.args(&["status", "--help"])
         .assert()
         .success()
@@ -237,7 +236,7 @@ async fn test_cli_status_no_server() {
     let temp_dir = tempfile::tempdir().unwrap();
     let pid_path = temp_dir.path().join("engram.pid");
 
-    let mut cmd = cargo::cargo_bin_cmd!("engram");
+    let mut cmd = assert_cmd::Command::cargo_bin("engram").unwrap();
     let output = cmd
         .env("ENGRAM_PID_PATH", pid_path.to_str().unwrap())
         .arg("status")
@@ -268,7 +267,7 @@ async fn test_cli_status_json_no_server() {
     // Ensure PID file doesn't exist
     let _ = std::fs::remove_file(&pid_path);
 
-    let mut cmd = cargo::cargo_bin_cmd!("engram");
+    let mut cmd = assert_cmd::Command::cargo_bin("engram").unwrap();
     cmd.env("ENGRAM_PID_PATH", pid_path.to_str().unwrap())
         .args(&["status", "--json"])
         .assert()
@@ -288,7 +287,7 @@ async fn test_cli_status_json_no_server() {
 
 #[tokio::test]
 async fn test_cli_config_help() {
-    let mut cmd = cargo::cargo_bin_cmd!("engram");
+    let mut cmd = assert_cmd::Command::cargo_bin("engram").unwrap();
     cmd.args(&["config", "--help"])
         .assert()
         .success()
@@ -300,7 +299,7 @@ async fn test_cli_config_help() {
 
 #[tokio::test]
 async fn test_cli_config_get_help() {
-    let mut cmd = cargo::cargo_bin_cmd!("engram");
+    let mut cmd = assert_cmd::Command::cargo_bin("engram").unwrap();
     cmd.args(&["config", "get", "--help"])
         .assert()
         .success()
@@ -310,7 +309,7 @@ async fn test_cli_config_get_help() {
 
 #[tokio::test]
 async fn test_cli_config_set_help() {
-    let mut cmd = cargo::cargo_bin_cmd!("engram");
+    let mut cmd = assert_cmd::Command::cargo_bin("engram").unwrap();
     cmd.args(&["config", "set", "--help"])
         .assert()
         .success()
@@ -324,7 +323,7 @@ async fn test_cli_config_list() {
     let temp_dir = tempfile::tempdir().unwrap();
     let config_path = temp_dir.path().join("config.toml");
 
-    let mut cmd = cargo::cargo_bin_cmd!("engram");
+    let mut cmd = assert_cmd::Command::cargo_bin("engram").unwrap();
     cmd.env("ENGRAM_CONFIG_PATH", config_path.to_str().unwrap())
         .args(&["config", "list"])
         .assert()
@@ -339,7 +338,7 @@ async fn test_cli_config_list_section() {
     let temp_dir = tempfile::tempdir().unwrap();
     let config_path = temp_dir.path().join("config.toml");
 
-    let mut cmd = cargo::cargo_bin_cmd!("engram");
+    let mut cmd = assert_cmd::Command::cargo_bin("engram").unwrap();
     let output = cmd
         .env("ENGRAM_CONFIG_PATH", config_path.to_str().unwrap())
         .args(&["config", "list", "--section", "feature_flags"])
@@ -368,7 +367,7 @@ async fn test_cli_config_get_default_value() {
     let config_path = config_dir.path().join("config.toml");
 
     // Set config directory via environment variable
-    let mut cmd = cargo::cargo_bin_cmd!("engram");
+    let mut cmd = assert_cmd::Command::cargo_bin("engram").unwrap();
     cmd.env("ENGRAM_CONFIG_PATH", config_path.to_str().unwrap())
         .args(&["config", "get", "feature_flags.spreading_api_beta"])
         .assert()
@@ -379,7 +378,7 @@ async fn test_cli_config_get_default_value() {
 
 #[tokio::test]
 async fn test_cli_config_get_unknown_key() {
-    let mut cmd = cargo::cargo_bin_cmd!("engram");
+    let mut cmd = assert_cmd::Command::cargo_bin("engram").unwrap();
     cmd.args(&["config", "get", "unknown.key"])
         .assert()
         .failure()
@@ -388,7 +387,7 @@ async fn test_cli_config_get_unknown_key() {
 
 #[tokio::test]
 async fn test_cli_config_path() {
-    let mut cmd = cargo::cargo_bin_cmd!("engram");
+    let mut cmd = assert_cmd::Command::cargo_bin("engram").unwrap();
     cmd.args(&["config", "path"])
         .assert()
         .success()

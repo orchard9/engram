@@ -8,10 +8,14 @@ use crate::consolidation::{
     CompactionConfig, CompactionResult, EpisodicPattern, PatternDetectionConfig, PatternDetector,
     StorageCompactor,
 };
+#[cfg(feature = "dual_memory_types")]
+use crate::consolidation::{ConceptFormationEngine, ProtoConcept, SleepStage};
 use crate::{Episode, MemoryStore};
 use chrono::Utc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+#[cfg(feature = "dual_memory_types")]
+use uuid::Uuid;
 
 /// Dream operation error types
 #[derive(Debug, thiserror::Error)]
@@ -61,6 +65,11 @@ pub struct DreamConfig {
 
     /// Whether to compact storage after pattern detection
     pub enable_compaction: bool,
+
+    /// Current sleep stage for consolidation modulation
+    /// Default: NREM2 (peak consolidation)
+    #[cfg(feature = "dual_memory_types")]
+    pub sleep_stage: SleepStage,
 }
 
 impl Default for DreamConfig {
@@ -73,6 +82,8 @@ impl Default for DreamConfig {
             min_episode_age: Duration::from_secs(86400), // 1 day
             max_episodes_per_iteration: 50,
             enable_compaction: true,
+            #[cfg(feature = "dual_memory_types")]
+            sleep_stage: SleepStage::NREM2, // Peak consolidation
         }
     }
 }
@@ -95,6 +106,8 @@ impl DreamConfig {
             min_episode_age: Duration::from_secs(1), // 1 second for testing
             max_episodes_per_iteration: 10,
             enable_compaction: true,
+            #[cfg(feature = "dual_memory_types")]
+            sleep_stage: SleepStage::NREM2,
         }
     }
 }
@@ -104,8 +117,12 @@ pub struct DreamEngine {
     /// Configuration for dream cycles
     pub config: DreamConfig,
 
-    /// Pattern detector for unsupervised pattern discovery
+    /// Pattern detector for unsupervised pattern discovery (for storage compaction)
     pattern_detector: Arc<PatternDetector>,
+
+    /// Concept formation engine (for semantic consolidation)
+    #[cfg(feature = "dual_memory_types")]
+    concept_engine: Arc<ConceptFormationEngine>,
 
     /// Storage compactor for replacing episodes with semantic patterns
     compactor: Arc<StorageCompactor>,
@@ -115,13 +132,17 @@ impl DreamEngine {
     /// Create a new dream engine with the given configuration
     #[must_use]
     pub fn new(config: DreamConfig) -> Self {
-        // Create pattern detector with default configuration
+        // Create pattern detector with default configuration (for storage compaction)
         let pattern_config = PatternDetectionConfig {
             min_cluster_size: 3,
             similarity_threshold: 0.8,
             max_patterns: 100,
         };
         let pattern_detector = Arc::new(PatternDetector::new(pattern_config));
+
+        // Create concept formation engine (for semantic consolidation)
+        #[cfg(feature = "dual_memory_types")]
+        let concept_engine = Arc::new(ConceptFormationEngine::new());
 
         // Create compactor with aligned min_episode_age from DreamConfig
         let compaction_config = CompactionConfig {
@@ -135,6 +156,8 @@ impl DreamEngine {
         Self {
             config,
             pattern_detector,
+            #[cfg(feature = "dual_memory_types")]
+            concept_engine,
             compactor,
         }
     }
@@ -146,21 +169,31 @@ impl DreamEngine {
         pattern_detector: PatternDetector,
         compactor: StorageCompactor,
     ) -> Self {
+        #[cfg(feature = "dual_memory_types")]
+        let concept_engine = Arc::new(ConceptFormationEngine::new());
+
         Self {
             config,
             pattern_detector: Arc::new(pattern_detector),
+            #[cfg(feature = "dual_memory_types")]
+            concept_engine,
             compactor: Arc::new(compactor),
         }
     }
 
     /// Run dream cycle for offline consolidation
     ///
-    /// This implements the 5-phase dream consolidation process:
+    /// This implements the enhanced dream consolidation process:
+    ///
     /// 1. Select episodes for replay based on importance
     /// 2. Replay episodes with ripple dynamics (multiple iterations)
-    /// 3. Detect enhanced patterns from replay
+    /// 3. Pattern detection and concept formation:
+    ///    - 3a. Detect patterns from replay (for storage compaction)
+    ///    - 3b. Form concepts from episodes (for semantic consolidation)
     /// 4. Extract semantic memories from patterns
-    /// 5. Apply storage compaction
+    /// 5. Consolidation and storage:
+    ///    - 5a. Apply storage compaction (if enabled)
+    ///    - 5b. Promote proto-concepts to semantic concepts
     pub fn dream(&self, store: &MemoryStore) -> Result<DreamOutcome, DreamError> {
         let start = Instant::now();
 
@@ -181,13 +214,19 @@ impl DreamEngine {
         // Phase 2: Replay episodes with ripple dynamics
         let replay_outcome = self.replay_episodes(&episodes)?;
 
-        // Phase 3: Detect enhanced patterns from replay
+        // Phase 3a: Detect patterns from replay (existing - for storage compaction)
         let patterns = self.detect_patterns_from_replay(&episodes)?;
+
+        // Phase 3b: Form concepts from episodes (NEW - for semantic consolidation)
+        #[cfg(feature = "dual_memory_types")]
+        let proto_concepts = self
+            .concept_engine
+            .process_episodes(&episodes, self.config.sleep_stage);
 
         // Phase 4: Extract semantic memories from patterns
         let semantic_patterns = Self::extract_semantic_from_patterns(&patterns)?;
 
-        // Phase 5: Apply consolidation (if enabled)
+        // Phase 5a: Apply storage compaction (existing)
         let compaction_results = if self.config.enable_compaction {
             self.compact_replayed_episodes(&episodes, &semantic_patterns)?
         } else {
@@ -203,12 +242,19 @@ impl DreamEngine {
             .map(|r| r.storage_reduction_bytes)
             .sum();
 
+        // Phase 5b: Promote proto-concepts to semantic concepts (NEW)
+        #[cfg(feature = "dual_memory_types")]
+        let concepts_created = Self::promote_proto_concepts(&proto_concepts, store);
+
+        #[cfg(not(feature = "dual_memory_types"))]
+        let concepts_created = 0;
+
         Ok(DreamOutcome {
             dream_duration: start.elapsed(),
             episodes_replayed: episodes.len(),
             replay_iterations: replay_outcome.replays_completed,
             patterns_discovered: patterns.len(),
-            semantic_memories_created: semantic_patterns.len(),
+            semantic_memories_created: semantic_patterns.len() + concepts_created,
             storage_reduction_bytes: storage_reduction,
         })
     }
@@ -375,6 +421,41 @@ impl DreamEngine {
         }
 
         Ok(results)
+    }
+
+    /// Phase 5b: Promote proto-concepts to semantic concepts
+    ///
+    /// Only promotes proto-concepts that meet the consolidation threshold:
+    /// - consolidation_strength > 0.1 (cortical representation threshold)
+    /// - replay_count >= 3 (minimum statistical evidence)
+    /// - coherence_score > 0.65 (CA3 pattern completion threshold)
+    ///
+    /// Creates SemanticPattern and stores for backwards compatibility.
+    /// Task 002 will replace this with DualMemoryNode::Concept in graph.
+    #[cfg(feature = "dual_memory_types")]
+    fn promote_proto_concepts(proto_concepts: &[ProtoConcept], store: &MemoryStore) -> usize {
+        let mut created = 0;
+
+        for proto in proto_concepts {
+            // Only promote if consolidation strength exceeds threshold
+            if proto.consolidation_strength > 0.1 {
+                // Create SemanticPattern from ProtoConcept (temporary compatibility layer)
+                // Task 002 will replace this with DualMemoryNode::Concept storage
+                let semantic_pattern = SemanticPattern {
+                    id: Uuid::new_v4().to_string(),
+                    embedding: proto.centroid,
+                    source_episodes: proto.episode_indices.clone(),
+                    strength: proto.consolidation_strength,
+                    schema_confidence: crate::Confidence::from_raw(proto.coherence_score),
+                    last_consolidated: Utc::now(),
+                };
+
+                store.store_semantic_pattern(&semantic_pattern);
+                created += 1;
+            }
+        }
+
+        created
     }
 }
 

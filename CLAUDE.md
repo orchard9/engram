@@ -1,6 +1,8 @@
 Written by world class rust engineers that pride elegant efficiency and delivering a focused product.
 This project uses Rust Edition 2024 for all code.
 
+PRIORITY: Everything we do from here on out should be reducing tech debt and improving code quality. Clean, correct, maintainable code is our #1 priority.
+
 IMPORTANT: After each test run or engram execution, check diagnostics with `./scripts/engram_diagnostics.sh` and track results in `tmp/engram_diagnostics.log` (prepended).
 
 CRITICAL: NEVER use git commands (restore, stash, reset, etc.) to avoid test failures. When tests fail, root cause them, understand them, and fix them properly. No shortcuts.
@@ -23,6 +25,68 @@ roadmap/milestone-0/: Tasks are stored as 001*{task_name}*{task_status}.md files
 10. Verify implementation matches task requirements. Re-read the task file and compare against your changes to ensure full alignment with specifications. If requirements are not met, create a follow-up task in the same milestone using the original task name as a prefix.
 11. Rename the task file from \_in_progress to \_complete
 12. Use git status to add/ignore/remove what should be removed, then commit your work
+
+If at any point anything gets stuck, move the task to \_blocked, write in the task file why it's blocked, and pause
+
+## How to do a Milestone 17 task (Dual Memory Architecture)
+
+Milestone 17 has a <5% performance regression target. Follow enhanced workflow with before/after load testing:
+
+1. **Establish baseline** - Run 60s load test BEFORE making changes:
+   ```bash
+   ./scripts/m17_performance_check.sh <task_number> before
+   # Example: ./scripts/m17_performance_check.sh 001 before
+   ```
+
+2. Understand the requirements by reading the task file thoroughly
+
+3. Review the current code base, vision.md, and milestones.md
+
+4. Rename the task file from \_pending to \_in_progress
+
+5. Follow the Pareto principle to write tests for the code (80% coverage from 20% effort)
+
+6. Write the code until tests pass
+
+7. Review the code to ensure it works properly and adheres to the system architecture
+
+8. Make any necessary changes based on review
+
+9. Follow the Pareto principle to integration test and fix any issues
+
+10. **CRITICAL**: Run `make quality` and fix ALL clippy warnings before proceeding - zero warnings allowed
+
+11. **Performance validation** - Run 60s load test AFTER changes:
+    ```bash
+    ./scripts/m17_performance_check.sh <task_number> after
+    ./scripts/compare_m17_performance.sh <task_number>
+    ```
+
+    **If regression >5% detected:**
+    - Profile with `cargo flamegraph --bin engram` to identify hot spots
+    - Check `tmp/m17_performance/<task>_after_*_diag.txt` for diagnostics
+    - Review `tmp/m17_performance/<task>_after_*_sys.txt` for system metrics
+    - Fix performance issues before proceeding
+    - Re-run after test until regression <5%
+
+12. Verify implementation matches task requirements
+
+13. **Track results** in performance log:
+    ```bash
+    # Copy summary output from compare script to PERFORMANCE_LOG.md
+    # Update task section with before/after metrics and status
+    ```
+
+14. Rename the task file from \_in_progress to \_complete
+
+15. Commit with performance summary in commit message:
+    ```
+    feat(m17): Complete Task XXX - <task name>
+
+    <implementation summary>
+
+    Performance: P99 latency +X.X%, throughput +Y.Y% (within 5% target)
+    ```
 
 If at any point anything gets stuck, move the task to \_blocked, write in the task file why it's blocked, and pause
 
