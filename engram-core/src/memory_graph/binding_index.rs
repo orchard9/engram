@@ -7,6 +7,7 @@
 //! 2. **Concept → Episodes (top-down)**: High fan-out (10-1000 episodes), scatter pattern
 
 use crate::memory::bindings::ConceptBinding;
+use crate::memory_graph::backends::DUAL_MEMORY_NODE_SIZE;
 use dashmap::DashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -34,7 +35,7 @@ pub struct BindingMemoryStats {
 impl BindingMemoryStats {
     /// Calculate overhead percentage relative to node storage
     ///
-    /// Assumes node size of ~3328 bytes (DualMemoryNode with 768-dim embedding)
+    /// Uses `DUAL_MEMORY_NODE_SIZE` (3328 bytes) for DualMemoryNode with 768-dim embedding.
     ///
     /// # Arguments
     ///
@@ -48,7 +49,7 @@ impl BindingMemoryStats {
         if node_count == 0 {
             return 0.0;
         }
-        let node_memory = node_count * 3328;
+        let node_memory = node_count * DUAL_MEMORY_NODE_SIZE;
         (self.total_bytes as f32 / node_memory as f32) * 100.0
     }
 }

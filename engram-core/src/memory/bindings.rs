@@ -123,7 +123,8 @@ impl ConceptBinding {
     /// Update strength atomically with compare-and-swap
     ///
     /// Applies the provided function to the current strength and stores
-    /// the result atomically. Retries on contention using weak CAS.
+    /// the result atomically. Retries on contention using weak CAS with
+    /// a maximum retry limit to prevent infinite loops.
     ///
     /// # Arguments
     ///
@@ -131,7 +132,7 @@ impl ConceptBinding {
     ///
     /// # Returns
     ///
-    /// `true` if update succeeded (always succeeds eventually)
+    /// `true` if update succeeded, `false` if max retries exceeded (extremely rare)
     ///
     /// # Example
     ///
@@ -147,7 +148,11 @@ impl ConceptBinding {
     where
         F: Fn(f32) -> f32,
     {
-        loop {
+        // Maximum retry attempts to prevent infinite loops on hardware failures
+        // 1000 retries is more than sufficient for any realistic contention scenario
+        const MAX_RETRIES: u32 = 1000;
+
+        for _ in 0..MAX_RETRIES {
             let current = self.strength.load(Ordering::Relaxed);
             let new_value = f(current).clamp(0.0, 1.0);
 
@@ -159,7 +164,13 @@ impl ConceptBinding {
                 self.last_activated.store(Utc::now());
                 return true;
             }
+            // Hint to CPU that we're in a spin loop
+            std::hint::spin_loop();
         }
+
+        // Extremely rare case: max retries exceeded
+        // This indicates hardware issues or pathological contention
+        false
     }
 
     /// Add activation to strength (saturating add)
@@ -309,11 +320,11 @@ mod tests {
             "ConceptBinding must be 64-byte aligned"
         );
 
-        // Verify size is exactly 64 bytes
+        // Verify size is exactly 64 bytes (one cache line)
         let size = std::mem::size_of::<ConceptBinding>();
-        assert!(
-            size <= 64,
-            "ConceptBinding size ({size} bytes) must fit in one cache line (64 bytes)"
+        assert_eq!(
+            size, 64,
+            "ConceptBinding size ({size} bytes) must be exactly one cache line (64 bytes)"
         );
     }
 

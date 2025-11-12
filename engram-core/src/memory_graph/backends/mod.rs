@@ -12,4 +12,4 @@ pub use hashmap::HashMapBackend;
 pub use infallible::InfallibleBackend;
 
 #[cfg(feature = "dual_memory_types")]
-pub use dual_dashmap::DualDashMapBackend;
+pub use dual_dashmap::{DUAL_MEMORY_NODE_SIZE, DualDashMapBackend};

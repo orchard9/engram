@@ -122,7 +122,7 @@ use uuid::Uuid;
 /// - 64 bytes: repr(align(64)) struct alignment padding
 ///
 /// Total ≈ 3320 bytes per node (rounded to 3328 for 64-byte alignment)
-const DUAL_MEMORY_NODE_SIZE: usize = 3328;
+pub const DUAL_MEMORY_NODE_SIZE: usize = 3328;
 
 /// NUMA-aware dual-tier DashMap backend for episode-concept memory
 ///
