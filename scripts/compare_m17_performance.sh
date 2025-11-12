@@ -183,7 +183,7 @@ BEFORE_ERROR_PCT=$(awk "BEGIN {printf \"%.1f\", $BEFORE_ERROR_RATE * 100}")
 AFTER_ERROR_PCT=$(awk "BEGIN {printf \"%.1f\", $AFTER_ERROR_RATE * 100}")
 
 if awk "BEGIN {exit !($BEFORE_ERROR_RATE > 0.1 || $AFTER_ERROR_RATE > 0.1)}"; then
-    echo "⚠️  WARNING: High error rate detected (before: ${BEFORE_ERROR_PCT}%, after: ${AFTER_ERROR_PCT}%)"
+    echo "[WARN]  WARNING: High error rate detected (before: ${BEFORE_ERROR_PCT}%, after: ${AFTER_ERROR_PCT}%)"
     echo "          Comparison may not be valid - fix API errors first"
     echo
 fi
@@ -191,20 +191,20 @@ fi
 # Only check regressions if changes are numeric (not "N/A")
 if [[ "$p99_change" != "N/A" ]] && compare_float "$p99_change" "$LATENCY_THRESHOLD"; then
     if [[ "$COMPETITIVE" == true ]]; then
-        echo "⚠️  COMPETITIVE REGRESSION: P99 latency increased by ${p99_change}% (threshold: +10%)"
+        echo "[WARN]  COMPETITIVE REGRESSION: P99 latency increased by ${p99_change}% (threshold: +10%)"
         REGRESSION=2
     else
-        echo "⚠️  REGRESSION: P99 latency increased by ${p99_change}% (threshold: +5%)"
+        echo "[WARN]  REGRESSION: P99 latency increased by ${p99_change}% (threshold: +5%)"
         REGRESSION=1
     fi
 fi
 
 if [[ "$throughput_change" != "N/A" ]] && compare_float "$THROUGHPUT_THRESHOLD" "$throughput_change"; then
     if [[ "$COMPETITIVE" == true ]]; then
-        echo "⚠️  COMPETITIVE REGRESSION: Throughput decreased by ${throughput_change}% (threshold: -10%)"
+        echo "[WARN]  COMPETITIVE REGRESSION: Throughput decreased by ${throughput_change}% (threshold: -10%)"
         REGRESSION=2
     else
-        echo "⚠️  REGRESSION: Throughput decreased by ${throughput_change}% (threshold: -5%)"
+        echo "[WARN]  REGRESSION: Throughput decreased by ${throughput_change}% (threshold: -5%)"
         REGRESSION=1
     fi
 fi
@@ -215,31 +215,31 @@ if awk "BEGIN {exit !($BEFORE_ERROR_RATE < 0.05 && $AFTER_ERROR_RATE < 0.05)}"; 
     :
 elif awk "BEGIN {exit !($AFTER_ERROR_RATE > $BEFORE_ERROR_RATE + 0.05)}"; then
     ERROR_INCREASE=$(awk "BEGIN {printf \"%.1f\", ($AFTER_ERROR_RATE - $BEFORE_ERROR_RATE) * 100}")
-    echo "⚠️  REGRESSION: Error rate increased by ${ERROR_INCREASE}pp"
+    echo "[WARN]  REGRESSION: Error rate increased by ${ERROR_INCREASE}pp"
     REGRESSION=1
 fi
 
 if [[ $REGRESSION -eq 0 ]]; then
     if [[ "$COMPETITIVE" == true ]]; then
-        echo "✓ No competitive regressions detected (within 10% threshold)"
+        echo "[OK] No competitive regressions detected (within 10% threshold)"
         echo
         echo "Summary for PERFORMANCE_LOG.md:"
         echo "- Before: P50=${BEFORE_P50}ms, P95=${BEFORE_P95}ms, P99=${BEFORE_P99}ms, ${BEFORE_THROUGHPUT} ops/s"
         echo "- After:  P50=${AFTER_P50}ms, P95=${AFTER_P95}ms, P99=${AFTER_P99}ms, ${AFTER_THROUGHPUT} ops/s"
         echo "- Change: ${p99_change}% P99 latency, ${throughput_change}% throughput"
-        echo "- Status: ✓ Within 10% competitive target"
+        echo "- Status: [OK] Within 10% competitive target"
         if awk "BEGIN {exit !($AFTER_P99 > 0.001)}"; then
             NEO4J_GAP=$(awk "BEGIN {printf \"%.1f\", (($NEO4J_P99_BASELINE - $AFTER_P99) / $NEO4J_P99_BASELINE) * 100}")
             echo "- vs Neo4j: ${NEO4J_GAP}% (baseline: ${NEO4J_P99_BASELINE}ms)"
         fi
     else
-        echo "✓ No significant regressions detected (within 5% threshold)"
+        echo "[OK] No significant regressions detected (within 5% threshold)"
         echo
         echo "Summary for PERFORMANCE_LOG.md:"
         echo "- Before: P50=${BEFORE_P50}ms, P95=${BEFORE_P95}ms, P99=${BEFORE_P99}ms, ${BEFORE_THROUGHPUT} ops/s"
         echo "- After:  P50=${AFTER_P50}ms, P95=${AFTER_P95}ms, P99=${AFTER_P99}ms, ${AFTER_THROUGHPUT} ops/s"
         echo "- Change: ${p99_change}% P99 latency, ${throughput_change}% throughput"
-        echo "- Status: ✓ Within 5% target"
+        echo "- Status: [OK] Within 5% target"
     fi
 else
     echo

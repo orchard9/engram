@@ -162,6 +162,39 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $*" >&2
 }
 
+# Cross-platform timeout function (macOS doesn't have timeout command)
+# Usage: timeout_run <seconds> <command> [args...]
+# Returns: command exit code, or 124 if timeout reached
+timeout_run() {
+    local timeout_duration=$1
+    shift
+
+    # Run command in background
+    "$@" &
+    local cmd_pid=$!
+
+    # Wait for timeout or completion
+    local elapsed=0
+    while kill -0 "$cmd_pid" 2>/dev/null; do
+        if [[ $elapsed -ge $timeout_duration ]]; then
+            # Timeout reached, kill the process
+            kill -TERM "$cmd_pid" 2>/dev/null || true
+            sleep 1
+            if kill -0 "$cmd_pid" 2>/dev/null; then
+                kill -KILL "$cmd_pid" 2>/dev/null || true
+            fi
+            wait "$cmd_pid" 2>/dev/null || true
+            return 124  # Same exit code as GNU timeout
+        fi
+        sleep 1
+        ((elapsed++))
+    done
+
+    # Command completed, get exit code
+    wait "$cmd_pid"
+    return $?
+}
+
 # Atomic file write helper
 atomic_write() {
     local content=$1
@@ -489,7 +522,7 @@ start_engram_server() {
     log_info "Starting Engram server on port $ENGRAM_PORT..."
 
     # Start server in background
-    "$ENGRAM_BIN" server --port "$ENGRAM_PORT" >/dev/null 2>&1 &
+    "$ENGRAM_BIN" start --port "$ENGRAM_PORT" >/dev/null 2>&1 &
     ENGRAM_PID=$!
 
     # Verify process started
@@ -676,7 +709,7 @@ run_scenario() {
     log_info "Executing loadtest (${SCENARIO_DURATION}s)..."
     local loadtest_exit=0
 
-    timeout "$SERVER_TIMEOUT" "$LOADTEST_BIN" run \
+    timeout_run "$SERVER_TIMEOUT" "$LOADTEST_BIN" run \
         --scenario "$scenario_file" \
         --duration "$SCENARIO_DURATION" \
         --endpoint "http://localhost:$ENGRAM_PORT" \

@@ -73,7 +73,7 @@ RETRY_DELAY=1
 for i in $(seq 1 $RETRIES); do
     sleep $RETRY_DELAY
     if curl -sf http://localhost:7432/health > /dev/null 2>&1; then
-        echo "✓ Server healthy after ${i} seconds"
+        echo "[OK] Server healthy after ${i} seconds"
         break
     fi
 
@@ -106,17 +106,17 @@ if ./target/release/loadtest run \
     --seed "$SEED" \
     --endpoint http://localhost:7432 \
     --output "$RESULT_FILE" 2>&1 | tee "${FILE_PREFIX}_${TIMESTAMP}_loadtest.log"; then
-    echo "✓ Load test completed successfully"
+    echo "[OK] Load test completed successfully"
 else
-    echo "⚠️  Load test completed with errors (check log for details)"
+    echo "[WARN] Load test completed with errors (check log for details)"
 fi
 
 # 4. Capture system metrics
 echo "Capturing system metrics..."
 if ps -p $SERVER_PID -o rss,vsz,%cpu,%mem > "$SYS_FILE" 2>/dev/null; then
-    echo "✓ System metrics captured"
+    echo "[OK] System metrics captured"
 else
-    echo "⚠️  Could not capture system metrics (server may have stopped)"
+    echo "[WARN] Could not capture system metrics (server may have stopped)"
 fi
 
 # 5. Stop server gracefully
@@ -127,9 +127,9 @@ wait $SERVER_PID 2>/dev/null || true
 # 6. Run diagnostics
 echo "Running diagnostics..."
 if ./scripts/engram_diagnostics.sh 2>/dev/null | head -20 > "$DIAG_FILE"; then
-    echo "✓ Diagnostics captured"
+    echo "[OK] Diagnostics captured"
 else
-    echo "⚠️  Could not run diagnostics"
+    echo "[WARN] Could not run diagnostics"
 fi
 
 echo

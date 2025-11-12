@@ -362,6 +362,33 @@ async fn execute_operation(
                 }
             }
 
+            // Pattern completion configuration for cold-start scenarios
+            //
+            // BIOLOGICAL JUSTIFICATION:
+            // Pattern completion relies on hippocampal CA3 autoassociative networks that
+            // require learned attractor basins. In cold-start scenarios (no pre-trained
+            // patterns), CA3 convergence is slow, leading to low completion confidence.
+            //
+            // Default ca1_threshold (0.7) assumes warm-start with learned patterns.
+            // For cold-start benchmarking, we use lower thresholds appropriate for
+            // unprimed memory systems.
+            //
+            // CONFIGURATION RATIONALE:
+            // - ca1_threshold: 0.3 (vs default 0.7)
+            //   Allows completion when CA3 takes 3-5 iterations to converge
+            //   Still blocks truly random noise (>6 iterations)
+            //
+            // - max_iterations: 10 (vs default 7)
+            //   More convergence time without learned attractors
+            //   Biological constraint (theta rhythm) less critical for synthetic benchmarks
+            //
+            // - num_hypotheses: 3 (default)
+            //   Standard System 2 reasoning capacity
+            //
+            // See tmp/finish-task-006-with-no-loose-ends.md for full investigation.
+            //
+            // TODO: Move to scenario-level configuration (scenarios/*/hybrid_*.toml)
+            //       to support both cold-start and warm-start pattern completion tests.
             let body = serde_json::json!({
                 "partial_episode": {
                     "known_fields": {
@@ -369,6 +396,11 @@ async fn execute_operation(
                     },
                     "partial_embedding": partial_embedding,
                     "cue_strength": 0.7
+                },
+                "config": {
+                    "ca1_threshold": 0.3,
+                    "num_hypotheses": 3,
+                    "max_iterations": 10
                 }
             });
             let response = client

@@ -91,7 +91,7 @@ Milestone 17 has a <5% performance regression target. Follow enhanced workflow w
     - Vector search modifications
     - Core memory consolidation logic
 
-    **Competitive regression threshold: <10%** (stricter than internal 5%)
+    **Competitive regression threshold: <10%** (higher tolerance than internal 5%)
     - Exit code 2 indicates competitive regression
     - Compare against Neo4j baseline: 27.96ms P99 latency
     - Focus on maintaining market differentiation
