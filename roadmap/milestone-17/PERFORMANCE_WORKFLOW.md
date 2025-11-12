@@ -119,6 +119,91 @@ Check loadtest log:
 cat tmp/m17_performance/<task>_<phase>_*_loadtest.log
 ```
 
+## Competitive Validation (Optional)
+
+For tasks that modify core graph operations, competitive validation ensures Engram maintains its positioning against Neo4j and other graph databases.
+
+### When to Use Competitive Validation
+
+Run competitive validation if your task modifies:
+- **Spreading activation algorithms** - Changes to activation propagation, decay, or thresholds
+- **Graph traversal** - Node navigation, edge following, or path finding optimizations
+- **Vector search** - Embedding similarity calculations or HNSW modifications
+- **Memory consolidation** - Episode-to-concept transformation or schema extraction
+
+**Not required for:**
+- Documentation updates
+- Test-only changes
+- Configuration changes
+- Monitoring/metrics additions
+
+### Competitive Validation Workflow
+
+```bash
+# 1. Establish competitive baseline (before changes)
+./scripts/m17_performance_check.sh 001 before --competitive
+
+# 2. Implement task...
+
+# 3. Run competitive validation (after changes)
+./scripts/m17_performance_check.sh 001 after --competitive
+
+# 4. Compare against baseline AND Neo4j
+./scripts/compare_m17_performance.sh 001 --competitive
+```
+
+### Competitive Thresholds
+
+| Metric | Internal Target | Competitive Target | Baseline |
+|--------|----------------|-------------------|----------|
+| P99 latency increase | <5% | <10% | Neo4j: 27.96ms |
+| Throughput decrease | <5% | <10% | Neo4j: 280 QPS |
+| Exit code | 1 (internal regression) | 2 (competitive regression) | 0 (success) |
+
+**Competitive regression (exit code 2)** indicates:
+- Performance degraded >10% vs internal baseline
+- Engram's competitive positioning weakened vs Neo4j
+- Requires investigation before task completion
+
+### Interpreting Competitive Results
+
+**Example output:**
+```
+Competitive Positioning:
+Metric               vs Neo4j
+-------------------- ----------
+P99 latency            61.2% faster
+Neo4j P99             27.96ms (baseline)
+Engram P99            10.85ms (Engram)
+
+Checking for competitive regressions (>10% threshold)...
+
+✓ No competitive regressions detected (within 10% threshold)
+
+Summary for PERFORMANCE_LOG.md:
+- Before: P50=8.2ms, P95=9.5ms, P99=10.1ms, 490 ops/s
+- After:  P50=8.7ms, P95=10.2ms, P99=10.85ms, 475 ops/s
+- Change: +7.4% P99 latency, -3.1% throughput
+- Status: ✓ Within 10% competitive target
+- vs Neo4j: 61.2% (baseline: 27.96ms)
+```
+
+**What this means:**
+- Internal delta: +7.4% P99 latency (exceeds 5% internal target but acceptable for competitive)
+- Competitive delta: Still 61% faster than Neo4j baseline
+- Decision: Accept change, document in PERFORMANCE_LOG.md
+
+### Competitive Scenario Details
+
+Competitive validation uses `scenarios/competitive/hybrid_production_100k.toml`:
+- **Workload mix**: 30% store, 30% recall, 30% search, 10% pattern completion
+- **Dataset**: 100K nodes, scale-free distribution
+- **Seed**: 0xABCD1234 (deterministic)
+- **Duration**: 60 seconds
+- **Comparison**: Neo4j graph traversal baseline (27.96ms P99)
+
+This scenario represents realistic production workloads combining graph and vector operations - Engram's key differentiation vs pure graph or vector databases.
+
 ## Example Complete Workflow
 
 ```bash
@@ -143,4 +228,29 @@ Implemented cache-aligned DualMemoryNode with Episode/Concept variants.
 Added zero-copy conversions and feature flag gating.
 
 Performance: P99 latency +2.3%, throughput -0.8% (within 5% target)"
+```
+
+## Example Workflow with Competitive Validation
+
+```bash
+# Starting Task 005 (modifies spreading activation)
+./scripts/m17_performance_check.sh 005 before
+./scripts/m17_performance_check.sh 005 before --competitive
+
+# Implement task...
+
+# Standard validation
+./scripts/m17_performance_check.sh 005 after
+./scripts/compare_m17_performance.sh 005
+
+# Competitive validation
+./scripts/m17_performance_check.sh 005 after --competitive
+./scripts/compare_m17_performance.sh 005 --competitive
+
+# Both validations pass - update logs and commit
+git commit -m "feat(m17): Complete Task 005 - Graph Storage Adaptation
+
+Performance:
+- Internal: P99 +3.2%, throughput -1.8% (within 5% target)
+- Competitive: P99 +6.8%, still 58% faster than Neo4j (within 10% target)"
 ```

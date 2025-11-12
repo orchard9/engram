@@ -77,9 +77,28 @@ Milestone 17 has a <5% performance regression target. Follow enhanced workflow w
     # Update task section with before/after metrics and status
     ```
 
-14. Rename the task file from \_in_progress to \_complete
+14. **(Optional) Competitive validation** - For tasks that modify core graph operations:
+    ```bash
+    # Run competitive scenario validation
+    ./scripts/m17_performance_check.sh <task_number> before --competitive
+    ./scripts/m17_performance_check.sh <task_number> after --competitive
+    ./scripts/compare_m17_performance.sh <task_number> --competitive
+    ```
 
-15. Commit with performance summary in commit message:
+    **When to use competitive validation:**
+    - Changes to spreading activation algorithms
+    - Graph traversal optimizations
+    - Vector search modifications
+    - Core memory consolidation logic
+
+    **Competitive regression threshold: <10%** (stricter than internal 5%)
+    - Exit code 2 indicates competitive regression
+    - Compare against Neo4j baseline: 27.96ms P99 latency
+    - Focus on maintaining market differentiation
+
+15. Rename the task file from \_in_progress to \_complete
+
+16. Commit with performance summary in commit message:
     ```
     feat(m17): Complete Task XXX - <task name>
 
