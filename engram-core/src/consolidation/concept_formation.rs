@@ -92,6 +92,74 @@ impl SleepStage {
             Self::QuietWake => 0.5,
         }
     }
+
+    /// Get concept formation probability for this sleep stage
+    ///
+    /// Based on empirical replay frequency and spindle density data:
+    /// - NREM2: 15% (peak spindle-ripple coupling, Mölle & Born 2011)
+    /// - NREM3: 8% (sustained but lower density slow-wave sleep)
+    /// - REM: 3% (selective emotional processing)
+    /// - QuietWake: 1% (minimal offline consolidation)
+    #[must_use]
+    pub const fn concept_formation_probability(self) -> f32 {
+        match self {
+            Self::NREM2 => 0.15,
+            Self::NREM3 => 0.08,
+            Self::REM => 0.03,
+            Self::QuietWake => 0.01,
+        }
+    }
+
+    /// Get replay capacity (max episodes) for this stage
+    ///
+    /// Derived from SWR frequency data (Wilson & McNaughton 1994):
+    /// - NREM2: 100 (high replay during spindles)
+    /// - NREM3: 80 (sustained during slow waves)
+    /// - REM: 50 (selective replay)
+    /// - QuietWake: 20 (brief awake replay)
+    #[must_use]
+    pub const fn replay_capacity(self) -> usize {
+        match self {
+            Self::NREM2 => 100,
+            Self::NREM3 => 80,
+            Self::REM => 50,
+            Self::QuietWake => 20,
+        }
+    }
+
+    /// Typical duration of this sleep stage in minutes
+    ///
+    /// Used for consolidation cycle timing (Carskadon & Dement 2011):
+    /// - NREM2: 20 minutes per cycle
+    /// - NREM3: 30 minutes in early cycles
+    /// - REM: 15 minutes (increases across night)
+    /// - QuietWake: 5 minutes (brief rest periods)
+    #[must_use]
+    pub const fn typical_duration_minutes(self) -> u32 {
+        match self {
+            Self::NREM2 => 20,
+            Self::NREM3 => 30,
+            Self::REM => 15,
+            Self::QuietWake => 5,
+        }
+    }
+
+    /// Minimum consolidation cycles before concept formation
+    ///
+    /// Ensures sufficient statistical evidence accumulation:
+    /// - NREM2: 3 cycles (3 spindle-coupled replays minimum)
+    /// - NREM3: 2 cycles (2 deep consolidation passes)
+    /// - REM: 5 cycles (more selective, needs more evidence)
+    /// - QuietWake: 10 cycles (awake replay very conservative)
+    #[must_use]
+    pub const fn min_cycles_before_formation(self) -> u32 {
+        match self {
+            Self::NREM2 => 3,
+            Self::NREM3 => 2,
+            Self::REM => 5,
+            Self::QuietWake => 10,
+        }
+    }
 }
 
 /// Deterministic signature for proto-concept identity across cycles

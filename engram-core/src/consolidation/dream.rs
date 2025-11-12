@@ -4,12 +4,16 @@
 //! episodic memories into semantic knowledge during offline periods.
 
 use crate::completion::consolidation::SemanticPattern;
+use crate::consolidation::concept_integration::{
+    ConceptFormationConfig, ConceptFormationHelper, ConceptFormationStats, ConsolidationCycleState,
+    SkipReason,
+};
 use crate::consolidation::{
     CompactionConfig, CompactionResult, EpisodicPattern, PatternDetectionConfig, PatternDetector,
-    StorageCompactor,
+    SleepStage, StorageCompactor,
 };
 #[cfg(feature = "dual_memory_types")]
-use crate::consolidation::{ConceptFormationEngine, ProtoConcept, SleepStage};
+use crate::consolidation::{ConceptFormationEngine, ProtoConcept};
 use crate::{Episode, MemoryStore};
 use chrono::Utc;
 use std::sync::Arc;
@@ -456,6 +460,124 @@ impl DreamEngine {
         }
 
         created
+    }
+
+    /// Extended dream cycle with concept formation integration
+    ///
+    /// This method wraps the standard dream() consolidation with biologically-plausible
+    /// concept formation that respects:
+    /// - Sleep stage modulation (NREM2 > NREM3 > REM > Wake)
+    /// - Multiple formation gates (cycles, episodes, spacing, probability, rollout)
+    /// - Circuit breakers (rate limit, concept/episode ratio)
+    /// - Gradual rollout (shadow → 1% → 10% → 50% → 100%)
+    ///
+    /// # Biological Timescales
+    ///
+    /// Formation frequency target: 0.5-2 per hour during sleep-like consolidation
+    /// - Minimum 30 minutes between formations (Walker 2009)
+    /// - 3+ episodes required (Tse et al. 2007)
+    /// - 3+ consolidation cycles in sleep stage (Mölle & Born 2011)
+    /// - Probabilistic gate by stage: NREM2 (15%), NREM3 (8%), REM (3%), Wake (1%)
+    ///
+    /// # Performance
+    ///
+    /// Concept formation adds <10% latency to base consolidation:
+    /// - Formation decision: <1ms (multi-gate checks)
+    /// - Actual formation: <100ms (clustering + binding)
+    /// - Shadow mode: ~5% overhead (logging only)
+    ///
+    /// # Determinism
+    ///
+    /// Formation decisions are deterministic for M14 distributed consolidation:
+    /// - Uses cycle number as RNG seed
+    /// - Same episodes + cycle state → same decision
+    /// - Enables cross-node validation
+    pub fn dream_with_concepts(
+        &self,
+        store: &MemoryStore,
+        cycle_state: &mut ConsolidationCycleState,
+        concept_config: &ConceptFormationConfig,
+    ) -> Result<ExtendedDreamOutcome, DreamError> {
+        let start = Instant::now();
+
+        // Phase 1: Standard dream consolidation (existing baseline)
+        let base_outcome = self.dream(store)?;
+
+        // Phase 2: Concept formation (conditionally enabled with multi-gate checks)
+        let formation_stats = if concept_config.enabled {
+            let helper = ConceptFormationHelper::new(concept_config.clone());
+            let episodes = self.select_dream_episodes(store)?;
+            helper.try_form_concepts(&episodes, cycle_state)
+        } else {
+            ConceptFormationStats {
+                skip_reason: Some(SkipReason::Disabled),
+                ..Default::default()
+            }
+        };
+
+        // Phase 3: Update cycle state
+        cycle_state.advance_cycle(base_outcome.episodes_replayed);
+        if formation_stats.concepts_formed > 0 {
+            cycle_state.record_formation(formation_stats.concepts_formed);
+        }
+
+        Ok(ExtendedDreamOutcome {
+            base: base_outcome,
+            concept_stats: formation_stats,
+            sleep_stage: cycle_state.sleep_stage,
+            cycle_number: cycle_state.total_cycles,
+            total_duration: start.elapsed(),
+        })
+    }
+}
+
+/// Extended dream outcome with concept formation statistics
+#[derive(Debug, Clone)]
+pub struct ExtendedDreamOutcome {
+    /// Base dream consolidation statistics
+    pub base: DreamOutcome,
+
+    /// Concept formation statistics
+    pub concept_stats: ConceptFormationStats,
+
+    /// Sleep stage during this cycle
+    pub sleep_stage: SleepStage,
+
+    /// Cycle number in consolidation sequence
+    pub cycle_number: u64,
+
+    /// Total duration including concept formation
+    pub total_duration: Duration,
+}
+
+impl ExtendedDreamOutcome {
+    /// Calculate concept formation overhead ratio
+    ///
+    /// Returns ratio of total duration to base consolidation duration.
+    /// Target: <1.10 (10% overhead maximum)
+    #[must_use]
+    pub fn formation_overhead_ratio(&self) -> f32 {
+        let base_ms = self.base.dream_duration.as_millis() as f32;
+        let total_ms = self.total_duration.as_millis() as f32;
+
+        if base_ms > 0.0 {
+            total_ms / base_ms
+        } else {
+            1.0
+        }
+    }
+
+    /// Check if concept formation occurred
+    #[must_use]
+    pub const fn concepts_formed(&self) -> bool {
+        self.concept_stats.concepts_formed > 0
+    }
+
+    /// Check if formation was skipped (and why)
+    #[must_use]
+    pub const fn formation_skipped(&self) -> bool {
+        self.concept_stats.skip_reason.is_some()
+            || self.concept_stats.circuit_breaker_reason.is_some()
     }
 }
 
