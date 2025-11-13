@@ -6,8 +6,9 @@ These tasks provide comprehensive psychological validation of M17's dual memory 
 
 ## Task List
 
-### Task 017: Semantic Priming Validation (Neely 1977)
+### Task 021: Semantic Priming Validation (Neely 1977)
 **Status**: Pending
+**File**: `021_semantic_priming_validation_pending.md`
 **Duration**: 5 days
 **Priority**: High (foundational spreading activation validation)
 
@@ -28,8 +29,9 @@ These tasks provide comprehensive psychological validation of M17's dual memory 
 
 ---
 
-### Task 018: Anderson Fan Effect Validation (Person-Location Paradigm)
+### Task 022: Anderson Fan Effect Validation (Person-Location Paradigm)
 **Status**: Pending
+**File**: `022_anderson_fan_effect_validation_pending.md`
 **Duration**: 4 days
 **Priority**: High (validates fan effect implementation in M17 Task 007)
 
@@ -50,8 +52,9 @@ These tasks provide comprehensive psychological validation of M17's dual memory 
 
 ---
 
-### Task 019: Consolidation Timeline Validation (Takashima 2006)
+### Task 023: Consolidation Timeline Validation (Takashima 2006)
 **Status**: Pending
+**File**: `023_consolidation_timeline_validation_pending.md`
 **Duration**: 5 days
 **Priority**: High (validates episodic-to-semantic transformation)
 
@@ -72,8 +75,9 @@ These tasks provide comprehensive psychological validation of M17's dual memory 
 
 ---
 
-### Task 020: Retrograde Amnesia Gradient (Ribot's Law)
+### Task 024: Retrograde Amnesia Gradient (Ribot's Law)
 **Status**: Pending
+**File**: `024_retrograde_amnesia_gradient_validation_pending.md`
 **Duration**: 4 days
 **Priority**: High (validates consolidation protects against "lesion")
 
@@ -94,8 +98,9 @@ These tasks provide comprehensive psychological validation of M17's dual memory 
 
 ---
 
-### Task 021: DRM False Memory Paradigm (Roediger & McDermott 1995)
-**Status**: Pending (task file to be created)
+### Task 025: DRM False Memory Paradigm (Roediger & McDermott 1995)
+**Status**: Pending
+**File**: `025_drm_false_memory_pending.md`
 **Duration**: 4 days
 **Priority**: Medium (validates schema-based reconstruction)
 
@@ -116,8 +121,9 @@ These tasks provide comprehensive psychological validation of M17's dual memory 
 
 ---
 
-### Task 022: Spacing Effect Validation (Cepeda et al. 2006 Meta-Analysis)
-**Status**: Pending (task file to be created)
+### Task 026: Spacing Effect Validation (Cepeda et al. 2006 Meta-Analysis)
+**Status**: Pending
+**File**: `026_spacing_effect_pending.md`
 **Duration**: 3 days
 **Priority**: Medium (validates rehearsal and consolidation interaction)
 
@@ -137,8 +143,9 @@ These tasks provide comprehensive psychological validation of M17's dual memory 
 
 ---
 
-### Task 023: Pattern Completion Accuracy (Nakazawa et al. 2002)
-**Status**: Pending (task file to be created)
+### Task 027: Pattern Completion Accuracy (Nakazawa et al. 2002)
+**Status**: Pending
+**File**: `027_pattern_completion_pending.md`
 **Duration**: 3 days
 **Priority**: Medium (validates CA3-like pattern completion in concepts)
 
@@ -159,8 +166,9 @@ These tasks provide comprehensive psychological validation of M17's dual memory 
 
 ---
 
-### Task 024: Reconsolidation Dynamics (Lee 2008)
-**Status**: Pending (task file to be created)
+### Task 028: Reconsolidation Dynamics (Lee 2008)
+**Status**: Pending
+**File**: `028_reconsolidation_dynamics_pending.md`
 **Duration**: 4 days
 **Priority**: Medium (validates existing reconsolidation module with dual memory)
 
@@ -182,19 +190,19 @@ These tasks provide comprehensive psychological validation of M17's dual memory 
 
 ## Implementation Strategy
 
-### Phase 1: Core Spreading & Fan Effects (Tasks 017-018)
+### Phase 1: Core Spreading & Fan Effects (Tasks 021-022)
 **Duration**: Week 1
 **Rationale**: Validates M17 Task 007 (fan effect spreading) which is currently in progress
 
-### Phase 2: Consolidation Dynamics (Tasks 019-020)
+### Phase 2: Consolidation Dynamics (Tasks 023-024)
 **Duration**: Week 2
 **Rationale**: Validates M17 Tasks 004-006 (concept formation, binding, consolidation integration)
 
-### Phase 3: Schema & Reconstruction (Tasks 021, 023)
+### Phase 3: Schema & Reconstruction (Tasks 025, 027)
 **Duration**: Week 3
 **Rationale**: Tests emergent properties of dual memory for false memory and pattern completion
 
-### Phase 4: Learning Phenomena (Tasks 022, 024)
+### Phase 4: Learning Phenomena (Tasks 026, 028)
 **Duration**: Week 4
 **Rationale**: Validates interaction of consolidation with spacing and reconsolidation
 
@@ -293,10 +301,10 @@ engram-core/
 
 ### M17 Task Dependencies
 
-- **Task 017**: Requires M17 Tasks 001-007 (dual memory types, spreading, fan effect)
-- **Task 018**: Requires M17 Tasks 001-007 (dual memory types, bindings, fan effect)
-- **Task 019**: Requires M17 Tasks 001-006 (dual memory types, consolidation)
-- **Task 020**: Requires M17 Tasks 004-006 (concept formation, bindings, consolidation)
+- **Task 021**: Requires M17 Tasks 001-007 (dual memory types, spreading, fan effect)
+- **Task 022**: Requires M17 Tasks 001-007 (dual memory types, bindings, fan effect)
+- **Task 023**: Requires M17 Tasks 001-006 (dual memory types, consolidation)
+- **Task 024**: Requires M17 Tasks 004-006 (concept formation, bindings, consolidation)
 
 ### External Dependencies
 
@@ -357,10 +365,10 @@ engram-core/
 
 | Phase | Tasks | Duration | Key Milestone |
 |-------|-------|----------|---------------|
-| Phase 1 | 017-018 | Week 1 | Spreading activation validated |
-| Phase 2 | 019-020 | Week 2 | Consolidation validated |
-| Phase 3 | 021, 023 | Week 3 | Schema effects validated |
-| Phase 4 | 022, 024 | Week 4 | Learning phenomena validated |
+| Phase 1 | 021-022 | Week 1 | Spreading activation validated |
+| Phase 2 | 023-024 | Week 2 | Consolidation validated |
+| Phase 3 | 025, 027 | Week 3 | Schema effects validated |
+| Phase 4 | 026, 028 | Week 4 | Learning phenomena validated |
 | Phase 5 | Integration | Week 5 | Complete validation suite |
 
 **Total Duration**: 5 weeks (1.25 months)
@@ -369,7 +377,7 @@ engram-core/
 
 ## References
 
-### Core Papers (Replicated in Tasks 017-024)
+### Core Papers (Replicated in Tasks 021-028)
 
 1. Neely, J. H. (1977). Semantic priming and retrieval from lexical memory. *Journal of Experimental Psychology: General*, 106(3), 226-254.
 2. Anderson, J. R. (1974). Retrieval of propositional information from long-term memory. *Cognitive Psychology*, 6(4), 451-474.
@@ -389,11 +397,11 @@ engram-core/
 
 ## Next Steps
 
-1. **Immediate**: Complete M17 Task 007 (Fan Effect Spreading) to unblock Tasks 017-018
-2. **Week 1**: Implement Task 017 (Semantic Priming) as foundational validation
-3. **Week 2**: Implement Task 018 (Fan Effect) and validate M17 spreading activation
-4. **Week 3**: Begin Task 019 (Consolidation Timeline) for longitudinal validation
+1. **Immediate**: Complete M17 Task 007 (Fan Effect Spreading) to unblock Tasks 021-022
+2. **Week 1**: Implement Task 021 (Semantic Priming) as foundational validation
+3. **Week 2**: Implement Task 022 (Fan Effect) and validate M17 spreading activation
+4. **Week 3**: Begin Task 023 (Consolidation Timeline) for longitudinal validation
 5. **Month 2**: Complete remaining tasks and integrate into CI/CD pipeline
 
-**Status**: 4 detailed task specifications complete, 4 more to be created
-**Next Task**: Task 017 (Semantic Priming Validation) - awaits M17 Task 007 completion
+**Status**: All 8 task specifications complete (021-028)
+**Next Task**: Task 021 (Semantic Priming Validation) - awaits M17 Task 007 completion

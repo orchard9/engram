@@ -27,14 +27,14 @@ The existing M18 README.md focuses on performance infrastructure (load testing, 
 - NUMA/cache optimization (tasks 010-013)
 - Regression prevention (tasks 014-016)
 
-**This Plan (Production Readiness)**:
+**This Plan (Production Readiness - M18.1)**:
 - End-to-end workflows (tasks 101-103)
-- Chaos engineering (tasks 104-106)
-- Operational procedures (tasks 107-109)
-- Performance SLOs (tasks 110-112)
-- API compatibility (tasks 113-115)
+- Chaos engineering (tasks 104-108)
+- Operational readiness (tasks 109-111)
+- Performance SLOs (tasks 112-114)
+- API compatibility (task 115)
 
-**Recommendation**: Integrate both plans, renumber production readiness tasks as 101-115 to avoid conflicts, or split into M18 (Performance) and M18.1 (Production Readiness).
+**Action Taken**: Production readiness tasks renumbered as 101-115, organized as M18.1 milestone. Graph validation integrated into M18 as tasks 017-020. Cognitive validation in M18 as tasks 021-028.
 
 ## Task Catalog (Production Readiness)
 
