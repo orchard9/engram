@@ -223,7 +223,7 @@ pub struct DirectionStats {
 }
 
 impl DirectionStats {
-    fn record(&mut self, direction: SpreadingDirection) {
+    const fn record(&mut self, direction: SpreadingDirection) {
         match direction {
             SpreadingDirection::Upward => self.upward += 1,
             SpreadingDirection::Downward => self.downward += 1,
@@ -263,6 +263,7 @@ impl HierarchicalSpreading {
     /// Uses breadth-first traversal with priority queue to ensure strong activations
     /// spread before weak ones. Paths are tracked using `Arc<Vec<NodeId>>` to minimize
     /// cloning overhead - only the Arc is cloned when extending paths.
+    #[must_use]
     pub fn spread_hierarchical(&self, seeds: Vec<(NodeId, f32)>) -> HierarchicalSpreadResult {
         let mut frontier = BinaryHeap::new();
         let visited = DashMap::new();
@@ -299,10 +300,10 @@ impl HierarchicalSpreading {
             }
 
             // Skip if already visited with higher activation
-            if let Some(prev_activation) = visited.get(&current.node_id) {
-                if *prev_activation >= current.activation {
-                    continue;
-                }
+            if let Some(prev_activation) = visited.get(&current.node_id)
+                && *prev_activation >= current.activation
+            {
+                continue;
             }
 
             visited.insert(current.node_id.clone(), current.activation);
