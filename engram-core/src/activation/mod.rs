@@ -1191,6 +1191,73 @@ impl SpreadingResults {
     }
 }
 
+/// Configuration for Anderson (1974) ACT-R fan effect during spreading activation.
+///
+/// The fan effect models retrieval-stage interference where activation spreading
+/// weakens as the number of associations increases, matching empirical data showing
+/// ~70ms RT increase per additional association.
+#[derive(Clone, Debug)]
+pub struct FanEffectConfig {
+    /// Enable fan effect computation during spreading (default: false)
+    pub enabled: bool,
+
+    /// Base retrieval time for fan=1 in milliseconds (default: 1150.0ms per Anderson 1974)
+    pub base_retrieval_time_ms: f32,
+
+    /// Time increase per additional association in milliseconds (default: 70.0ms per Anderson 1974)
+    pub time_per_association_ms: f32,
+
+    /// Use sqrt divisor instead of linear (default: false)
+    /// Linear: activation / fan (matches psychological data)
+    /// Sqrt: activation / sqrt(fan) (softer falloff for large fans)
+    pub use_sqrt_divisor: bool,
+
+    /// Boost factor for episode→concept spreading (default: 1.2)
+    /// Episodes activate concepts more strongly than concepts activate episodes
+    pub upward_spreading_boost: f32,
+
+    /// Minimum fan value, cannot be zero (default: 1)
+    pub min_fan: usize,
+}
+
+impl Default for FanEffectConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            base_retrieval_time_ms: 1150.0,
+            time_per_association_ms: 70.0,
+            use_sqrt_divisor: false,
+            upward_spreading_boost: 1.2,
+            min_fan: 1,
+        }
+    }
+}
+
+impl FanEffectConfig {
+    /// Calculate the activation divisor based on fan count
+    ///
+    /// Linear mode: divisor = fan (default, matches Anderson 1974)
+    /// Sqrt mode: divisor = sqrt(fan) (softer falloff)
+    #[must_use]
+    pub fn activation_divisor(&self, fan: usize) -> f32 {
+        let fan_f32 = fan.max(self.min_fan) as f32;
+        if self.use_sqrt_divisor {
+            fan_f32.sqrt()
+        } else {
+            fan_f32
+        }
+    }
+
+    /// Calculate simulated retrieval time based on fan count
+    ///
+    /// Formula: RT = base_time + (fan - 1) × time_per_association
+    #[must_use]
+    pub fn retrieval_time_ms(&self, fan: usize) -> f32 {
+        let fan_f32 = fan.max(self.min_fan) as f32;
+        self.base_retrieval_time_ms + (fan_f32 - 1.0) * self.time_per_association_ms
+    }
+}
+
 #[doc = include_str!("doc/parallel_spreading_config.md")]
 /// Configuration for high-performance parallel spreading
 #[derive(Clone, Debug)]
@@ -1276,6 +1343,10 @@ pub struct ParallelSpreadingConfig {
     /// Maximum duration to wait for spreading completion before timing out.
     /// If None, uses a computed timeout based on available parallelism.
     pub completion_timeout: Option<Duration>,
+
+    // Fan effect configuration
+    /// Configuration for Anderson (1974) ACT-R fan effect during spreading activation
+    pub fan_effect_config: FanEffectConfig,
 }
 
 impl Default for ParallelSpreadingConfig {
@@ -1320,6 +1391,7 @@ impl Default for ParallelSpreadingConfig {
             pool_max_chunks: 16,           // Max 128KB total
             adaptive_batcher_config: None, // Disabled by default
             completion_timeout: None,      // Use computed timeout by default
+            fan_effect_config: FanEffectConfig::default(), // Disabled by default
         }
     }
 }

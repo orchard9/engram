@@ -114,3 +114,4 @@ engram-core/benches/regression/results/
 engram-core/benches/regression/baselines.json.backup.*
 zig/.zig-cache/
 /build
+*.rlib
