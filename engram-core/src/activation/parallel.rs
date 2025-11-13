@@ -709,9 +709,36 @@ impl ParallelSpreadingEngine {
         }
 
         // Get neighbors and create new tasks
-        if let Some(neighbors) =
+        if let Some(mut neighbors) =
             ActivationGraphExt::get_neighbors(&*context.memory_graph, &task.target_node)
         {
+            // Apply fan effect if enabled
+            let config_snapshot = context.config();
+            if config_snapshot.fan_effect_config.enabled {
+                let fan = neighbors.len().max(1);
+                let divisor = config_snapshot.fan_effect_config.activation_divisor(fan);
+
+                // Determine if this is an Episode or Concept node for asymmetric spreading
+                // Simple heuristic: check if node ID starts with "concept:" or "episode:"
+                let is_episode = task.target_node.starts_with("episode:");
+                let is_concept = task.target_node.starts_with("concept:");
+
+                // Apply fan effect to neighbor weights
+                for edge in &mut neighbors {
+                    if is_concept {
+                        // Concept → Episodes: Apply fan divisor (concepts have many episode associations)
+                        edge.weight /= divisor;
+                    } else if is_episode {
+                        // Episode → Concepts: Apply upward boost (stronger abstraction)
+                        edge.weight *= config_snapshot.fan_effect_config.upward_spreading_boost;
+                    } else {
+                        // Unknown type: Apply standard fan divisor
+                        edge.weight /= divisor;
+                    }
+                }
+            }
+            drop(config_snapshot);
+
             let decay_factor = decay_function.apply(task.depth + 1);
             let next_tier = StorageTier::from_depth(task.depth + 1);
             let prefetch_lookahead = prefetch_lookahead_default;
@@ -855,8 +882,33 @@ impl ParallelSpreadingEngine {
             self.memory_graph
                 .register_hot_handle(node_id.clone(), hot_handle);
 
-            if let Some(neighbors) = ActivationGraphExt::get_neighbors(&*self.memory_graph, node_id)
+            if let Some(mut neighbors) =
+                ActivationGraphExt::get_neighbors(&*self.memory_graph, node_id)
             {
+                // Apply fan effect if enabled
+                if config_guard.fan_effect_config.enabled {
+                    let fan = neighbors.len().max(1);
+                    let divisor = config_guard.fan_effect_config.activation_divisor(fan);
+
+                    // Determine node type for asymmetric spreading
+                    let is_episode = node_id.starts_with("episode:");
+                    let is_concept = node_id.starts_with("concept:");
+
+                    // Apply fan effect to neighbor weights
+                    for edge in &mut neighbors {
+                        if is_concept {
+                            // Concept → Episodes: Apply fan divisor
+                            edge.weight /= divisor;
+                        } else if is_episode {
+                            // Episode → Concepts: Apply upward boost
+                            edge.weight *= config_guard.fan_effect_config.upward_spreading_boost;
+                        } else {
+                            // Unknown type: Apply standard fan divisor
+                            edge.weight /= divisor;
+                        }
+                    }
+                }
+
                 let decay_factor = config_guard.decay_function.apply(1);
                 let next_tier = StorageTier::from_depth(1);
 
@@ -2034,5 +2086,385 @@ mod tests {
         );
 
         engine.shutdown().expect("shutdown should succeed");
+    }
+
+    // ============================================================
+    // Fan Effect Tests (Task 007)
+    // ============================================================
+
+    #[test]
+    #[serial(parallel_engine)]
+    fn test_fan_effect_config_defaults() {
+        use crate::activation::FanEffectConfig;
+
+        let config = FanEffectConfig::default();
+
+        // Verify Anderson (1974) parameters
+        assert!(!config.enabled, "Should be disabled by default");
+        assert!((config.base_retrieval_time_ms - 1150.0).abs() < f32::EPSILON);
+        assert!((config.time_per_association_ms - 70.0).abs() < f32::EPSILON);
+        assert!(!config.use_sqrt_divisor);
+        assert!((config.upward_spreading_boost - 1.2).abs() < f32::EPSILON);
+        assert_eq!(config.min_fan, 1);
+    }
+
+    #[test]
+    #[serial(parallel_engine)]
+    fn test_retrieval_time_simulation() {
+        use crate::activation::FanEffectConfig;
+
+        let config = FanEffectConfig::default();
+        let mut retrieval_times = Vec::new();
+
+        // Collect retrieval times for fan 1-5
+        for fan in 1..=5 {
+            let rt = config.retrieval_time_ms(fan);
+            retrieval_times.push((fan, rt));
+        }
+
+        // Verify Anderson (1974) empirical data:
+        // Fan 1: 1159ms, Fan 2: 1236ms (+77ms), Fan 3: 1305ms (+69ms)
+        // Average slope: ~70ms per association
+        assert!(
+            (retrieval_times[0].1 - 1150.0).abs() < 10.0,
+            "Fan 1 should be ~1150ms"
+        );
+
+        // Verify linear relationship with ~70ms slope
+        for i in 1..retrieval_times.len() {
+            let slope = retrieval_times[i].1 - retrieval_times[i - 1].1;
+            assert!(
+                (slope - 70.0).abs() < 5.0,
+                "Slope between fan {i} and {} should be ~70ms, got {slope:.1}ms",
+                i + 1
+            );
+        }
+    }
+
+    #[test]
+    #[serial(parallel_engine)]
+    fn test_fan_divisor_linear_vs_sqrt() {
+        use crate::activation::FanEffectConfig;
+
+        // Linear mode (default)
+        let linear_config = FanEffectConfig {
+            enabled: true,
+            use_sqrt_divisor: false,
+            ..FanEffectConfig::default()
+        };
+
+        // Sqrt mode
+        let sqrt_config = FanEffectConfig {
+            enabled: true,
+            use_sqrt_divisor: true,
+            ..FanEffectConfig::default()
+        };
+
+        // Compare divisors for different fan counts
+        for fan in [1, 2, 4, 9, 16] {
+            let linear = linear_config.activation_divisor(fan);
+            let sqrt = sqrt_config.activation_divisor(fan);
+
+            assert!(
+                (linear - fan as f32).abs() < f32::EPSILON,
+                "Linear divisor should equal fan"
+            );
+            assert!(
+                (sqrt - (fan as f32).sqrt()).abs() < f32::EPSILON,
+                "Sqrt divisor should equal sqrt(fan)"
+            );
+
+            // Sqrt should be softer falloff for fan > 1
+            if fan > 1 {
+                assert!(
+                    sqrt < linear,
+                    "Sqrt divisor should be less than linear for fan > 1"
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[serial(parallel_engine)]
+    fn test_asymmetric_episode_concept_spreading() {
+        let mut config = fast_parallel_config();
+        config.fan_effect_config.enabled = true;
+        config.fan_effect_config.upward_spreading_boost = 1.2;
+
+        // Create graph with episode and concept nodes
+        let graph = Arc::new(create_activation_graph());
+        let episode_id = format!(
+            "episode:test_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let concept_id = format!(
+            "concept:test_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+
+        // Episode -> Concept edge
+        ActivationGraphExt::add_edge(
+            &*graph,
+            episode_id.clone(),
+            concept_id.clone(),
+            0.5,
+            EdgeType::Excitatory,
+        );
+
+        // Concept -> Episode edge (reverse)
+        ActivationGraphExt::add_edge(
+            &*graph,
+            concept_id.clone(),
+            episode_id.clone(),
+            0.5,
+            EdgeType::Excitatory,
+        );
+
+        // Add embeddings
+        let embedding = [0.1f32; 768];
+        ActivationGraphExt::set_embedding(&*graph, &episode_id, &embedding);
+        ActivationGraphExt::set_embedding(&*graph, &concept_id, &embedding);
+
+        let engine = ParallelSpreadingEngine::new(config, graph).unwrap();
+
+        // Spread from episode (should get 1.2x boost)
+        let episode_results = engine
+            .spread_activation(&[(episode_id.clone(), 1.0)])
+            .unwrap();
+
+        // Spread from concept (should get fan divisor applied)
+        let concept_results = engine
+            .spread_activation(&[(concept_id.clone(), 1.0)])
+            .unwrap();
+
+        // Get activation of target nodes
+        let concept_activation = episode_results
+            .activations
+            .iter()
+            .find(|a| a.memory_id == concept_id)
+            .map_or(0.0, |a| a.activation_level.load(Ordering::Relaxed));
+
+        let episode_activation = concept_results
+            .activations
+            .iter()
+            .find(|a| a.memory_id == episode_id)
+            .map_or(0.0, |a| a.activation_level.load(Ordering::Relaxed));
+
+        // Episode → Concept should be stronger due to upward boost
+        assert!(
+            concept_activation > episode_activation,
+            "Episode→Concept ({concept_activation:.3}) should be stronger than Concept→Episode ({episode_activation:.3})"
+        );
+
+        engine.shutdown().unwrap();
+    }
+
+    #[test]
+    #[serial(parallel_engine)]
+    fn test_anderson_person_location_paradigm() {
+        let mut config = fast_parallel_config();
+        config.fan_effect_config.enabled = true;
+        config.max_depth = 2;
+
+        let graph = Arc::new(create_activation_graph());
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        // Low fan: "The doctor is in the park" (doctor→1 location, park→1 person)
+        let doctor = format!("concept:doctor_{timestamp}");
+        let park = format!("concept:park_{timestamp}");
+        let doctor_park = format!("episode:doctor_park_{timestamp}");
+
+        // High fan: "The lawyer is in the church/park/store" (lawyer→3 locations)
+        let lawyer = format!("concept:lawyer_{timestamp}");
+        let church = format!("concept:church_{timestamp}");
+        let store = format!("concept:store_{timestamp}");
+        let lawyer_church = format!("episode:lawyer_church_{timestamp}");
+        let lawyer_park = format!("episode:lawyer_park_{timestamp}");
+        let lawyer_store = format!("episode:lawyer_store_{timestamp}");
+
+        // Add edges for doctor (fan=1)
+        ActivationGraphExt::add_edge(
+            &*graph,
+            doctor.clone(),
+            doctor_park.clone(),
+            0.8,
+            EdgeType::Excitatory,
+        );
+        ActivationGraphExt::add_edge(
+            &*graph,
+            park.clone(),
+            doctor_park.clone(),
+            0.8,
+            EdgeType::Excitatory,
+        );
+
+        // Add edges for lawyer (fan=3)
+        ActivationGraphExt::add_edge(
+            &*graph,
+            lawyer.clone(),
+            lawyer_church.clone(),
+            0.8,
+            EdgeType::Excitatory,
+        );
+        ActivationGraphExt::add_edge(
+            &*graph,
+            lawyer.clone(),
+            lawyer_park.clone(),
+            0.8,
+            EdgeType::Excitatory,
+        );
+        ActivationGraphExt::add_edge(
+            &*graph,
+            lawyer.clone(),
+            lawyer_store.clone(),
+            0.8,
+            EdgeType::Excitatory,
+        );
+
+        // Add embeddings
+        let embedding = [0.1f32; 768];
+        for node in [
+            &doctor,
+            &park,
+            &lawyer,
+            &church,
+            &store,
+            &doctor_park,
+            &lawyer_church,
+            &lawyer_park,
+            &lawyer_store,
+        ] {
+            ActivationGraphExt::set_embedding(&*graph, node, &embedding);
+        }
+
+        let engine = ParallelSpreadingEngine::new(config, graph).unwrap();
+
+        // Spread from doctor (fan=1)
+        let doctor_results = engine.spread_activation(&[(doctor, 1.0)]).unwrap();
+
+        // Spread from lawyer (fan=3)
+        let lawyer_results = engine.spread_activation(&[(lawyer, 1.0)]).unwrap();
+
+        // Get activation of episodes
+        let doctor_episode_activation = doctor_results
+            .activations
+            .iter()
+            .find(|a| a.memory_id == doctor_park)
+            .map_or(0.0, |a| a.activation_level.load(Ordering::Relaxed));
+
+        let lawyer_episode_activation = lawyer_results
+            .activations
+            .iter()
+            .filter(|a| a.memory_id.starts_with("episode:lawyer"))
+            .map(|a| a.activation_level.load(Ordering::Relaxed))
+            .max_by(|a, b| a.partial_cmp(b).unwrap())
+            .unwrap_or(0.0);
+
+        // Doctor should spread stronger activation than lawyer due to lower fan
+        assert!(
+            doctor_episode_activation > lawyer_episode_activation,
+            "Doctor (fan=1, act={doctor_episode_activation:.3}) should spread stronger than lawyer (fan=3, act={lawyer_episode_activation:.3})"
+        );
+
+        // Lawyer should spread ~1/3 activation per episode due to fan=3
+        let expected_lawyer_ratio = 1.0 / 3.0;
+        let ratio = lawyer_episode_activation / doctor_episode_activation;
+        assert!(
+            (ratio - expected_lawyer_ratio).abs() < 0.3,
+            "Lawyer activation ratio should be ~{expected_lawyer_ratio:.2}, got {ratio:.2}"
+        );
+
+        engine.shutdown().unwrap();
+    }
+
+    #[test]
+    #[serial(parallel_engine)]
+    fn test_fan_effect_disabled_by_default() {
+        let config = fast_parallel_config();
+        assert!(
+            !config.fan_effect_config.enabled,
+            "Fan effect should be disabled by default"
+        );
+
+        let (graph, node_a, _node_b, _node_c) = create_test_graph();
+        let engine = ParallelSpreadingEngine::new(config, graph).unwrap();
+
+        // Spread activation should work normally without fan effect
+        let results = engine.spread_activation(&[(node_a, 1.0)]).unwrap();
+        assert!(!results.activations.is_empty());
+
+        engine.shutdown().unwrap();
+    }
+
+    #[test]
+    #[serial(parallel_engine)]
+    fn test_fan_effect_with_high_fan_node() {
+        let mut config = fast_parallel_config();
+        config.fan_effect_config.enabled = true;
+        config.max_depth = 2;
+
+        let graph = Arc::new(create_activation_graph());
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        // Create a hub node with high fan (10 neighbors)
+        let hub = format!("concept:hub_{timestamp}");
+        for i in 0..10 {
+            let neighbor = format!("episode:neighbor_{i}_{timestamp}");
+            ActivationGraphExt::add_edge(
+                &*graph,
+                hub.clone(),
+                neighbor.clone(),
+                0.5,
+                EdgeType::Excitatory,
+            );
+
+            // Add embeddings
+            let embedding = [0.1f32; 768];
+            ActivationGraphExt::set_embedding(&*graph, &neighbor, &embedding);
+        }
+
+        let embedding = [0.1f32; 768];
+        ActivationGraphExt::set_embedding(&*graph, &hub, &embedding);
+
+        let engine = ParallelSpreadingEngine::new(config, graph).unwrap();
+
+        // Spread from hub (fan=10)
+        let results = engine.spread_activation(&[(hub, 1.0)]).unwrap();
+
+        // Each neighbor should receive ~1/10 activation
+        let neighbor_activations: Vec<f32> = results
+            .activations
+            .iter()
+            .filter(|a| a.memory_id.starts_with("episode:neighbor"))
+            .map(|a| a.activation_level.load(Ordering::Relaxed))
+            .collect();
+
+        assert_eq!(
+            neighbor_activations.len(),
+            10,
+            "Should have 10 neighbors activated"
+        );
+
+        // Check that activations are reduced by fan divisor (approximately 1/10)
+        for activation in neighbor_activations {
+            assert!(
+                activation < 0.2,
+                "Neighbor activation should be < 0.2 due to fan=10, got {activation:.3}"
+            );
+        }
+
+        engine.shutdown().unwrap();
     }
 }

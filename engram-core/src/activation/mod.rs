@@ -1387,10 +1387,10 @@ impl Default for ParallelSpreadingConfig {
             enable_gpu: false,
             gpu_threshold: 64,
             enable_memory_pool: true,
-            pool_chunk_size: 8192,         // 8KB per chunk
-            pool_max_chunks: 16,           // Max 128KB total
-            adaptive_batcher_config: None, // Disabled by default
-            completion_timeout: None,      // Use computed timeout by default
+            pool_chunk_size: 8192,                         // 8KB per chunk
+            pool_max_chunks: 16,                           // Max 128KB total
+            adaptive_batcher_config: None,                 // Disabled by default
+            completion_timeout: None,                      // Use computed timeout by default
             fan_effect_config: FanEffectConfig::default(), // Disabled by default
         }
     }
