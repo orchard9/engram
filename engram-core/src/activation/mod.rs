@@ -75,6 +75,9 @@ pub mod test_isolation;
 pub mod test_support;
 pub mod traversal;
 
+/// Hierarchical spreading with path tracking for dual memory architecture
+pub mod hierarchical;
+
 pub mod visualization;
 
 pub use auto_tuning::{AutoTuneAuditEntry, SpreadingAutoTuner};
@@ -110,6 +113,10 @@ pub use adaptive_batcher::{
 pub use memory_pool::{
     ActivationMemoryPool, ActivationRecordPool, ActivationRecordPoolStats, LocalMemoryPool,
     PoolStats,
+};
+pub use hierarchical::{
+    DirectionStats, HierarchicalSpreading, HierarchicalSpreadingConfig,
+    HierarchicalSpreadResult, SpreadingDirection,
 };
 
 // HNSW integration
