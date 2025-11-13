@@ -1354,6 +1354,10 @@ pub struct ParallelSpreadingConfig {
     // Fan effect configuration
     /// Configuration for Anderson (1974) ACT-R fan effect during spreading activation
     pub fan_effect_config: FanEffectConfig,
+
+    // Hierarchical spreading configuration
+    /// Configuration for asymmetric hierarchical spreading (upward/downward/lateral)
+    pub hierarchical_config: HierarchicalSpreadingConfig,
 }
 
 impl Default for ParallelSpreadingConfig {
@@ -1399,6 +1403,7 @@ impl Default for ParallelSpreadingConfig {
             adaptive_batcher_config: None,                 // Disabled by default
             completion_timeout: None,                      // Use computed timeout by default
             fan_effect_config: FanEffectConfig::default(), // Disabled by default
+            hierarchical_config: HierarchicalSpreadingConfig::default(), // Enabled by default
         }
     }
 }

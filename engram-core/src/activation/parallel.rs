@@ -712,23 +712,41 @@ impl ParallelSpreadingEngine {
         if let Some(mut neighbors) =
             ActivationGraphExt::get_neighbors(&*context.memory_graph, &task.target_node)
         {
-            // Apply fan effect if enabled
+            // Apply hierarchical spreading and fan effect if enabled
             let config_snapshot = context.config();
+
+            // Determine node type once for both hierarchical and fan effect
+            let source_is_episode = task.target_node.starts_with("episode:");
+            let source_is_concept = task.target_node.starts_with("concept:");
+
+            // Apply hierarchical spreading strengths (enabled by default)
+            if config_snapshot.hierarchical_config.enable_path_tracking {
+                use crate::activation::SpreadingDirection;
+
+                for edge in &mut neighbors {
+                    let target_is_episode = edge.target.starts_with("episode:");
+                    let direction = SpreadingDirection::from_node_types(
+                        source_is_episode,
+                        target_is_episode,
+                    );
+
+                    // Apply directional strength multiplier
+                    let strength = direction.base_strength(&config_snapshot.hierarchical_config);
+                    edge.weight *= strength;
+                }
+            }
+
+            // Apply fan effect if enabled
             if config_snapshot.fan_effect_config.enabled {
                 let fan = neighbors.len().max(1);
                 let divisor = config_snapshot.fan_effect_config.activation_divisor(fan);
 
-                // Determine if this is an Episode or Concept node for asymmetric spreading
-                // Simple heuristic: check if node ID starts with "concept:" or "episode:"
-                let is_episode = task.target_node.starts_with("episode:");
-                let is_concept = task.target_node.starts_with("concept:");
-
                 // Apply fan effect to neighbor weights
                 for edge in &mut neighbors {
-                    if is_concept {
+                    if source_is_concept {
                         // Concept → Episodes: Apply fan divisor (concepts have many episode associations)
                         edge.weight /= divisor;
-                    } else if is_episode {
+                    } else if source_is_episode {
                         // Episode → Concepts: Apply upward boost (stronger abstraction)
                         edge.weight *= config_snapshot.fan_effect_config.upward_spreading_boost;
                     } else {
@@ -885,21 +903,38 @@ impl ParallelSpreadingEngine {
             if let Some(mut neighbors) =
                 ActivationGraphExt::get_neighbors(&*self.memory_graph, node_id)
             {
+                // Determine node type once for both hierarchical and fan effect
+                let source_is_episode = node_id.starts_with("episode:");
+                let source_is_concept = node_id.starts_with("concept:");
+
+                // Apply hierarchical spreading strengths (enabled by default)
+                if config_guard.hierarchical_config.enable_path_tracking {
+                    use crate::activation::SpreadingDirection;
+
+                    for edge in &mut neighbors {
+                        let target_is_episode = edge.target.starts_with("episode:");
+                        let direction = SpreadingDirection::from_node_types(
+                            source_is_episode,
+                            target_is_episode,
+                        );
+
+                        // Apply directional strength multiplier
+                        let strength = direction.base_strength(&config_guard.hierarchical_config);
+                        edge.weight *= strength;
+                    }
+                }
+
                 // Apply fan effect if enabled
                 if config_guard.fan_effect_config.enabled {
                     let fan = neighbors.len().max(1);
                     let divisor = config_guard.fan_effect_config.activation_divisor(fan);
 
-                    // Determine node type for asymmetric spreading
-                    let is_episode = node_id.starts_with("episode:");
-                    let is_concept = node_id.starts_with("concept:");
-
                     // Apply fan effect to neighbor weights
                     for edge in &mut neighbors {
-                        if is_concept {
+                        if source_is_concept {
                             // Concept → Episodes: Apply fan divisor
                             edge.weight /= divisor;
-                        } else if is_episode {
+                        } else if source_is_episode {
                             // Episode → Concepts: Apply upward boost
                             edge.weight *= config_guard.fan_effect_config.upward_spreading_boost;
                         } else {
@@ -2464,6 +2499,74 @@ mod tests {
                 "Neighbor activation should be < 0.2 due to fan=10, got {activation:.3}"
             );
         }
+
+        engine.shutdown().unwrap();
+    }
+
+    #[test]
+    #[serial(parallel_engine)]
+    fn test_hierarchical_spreading_integrated_by_default() {
+        let mut config = fast_parallel_config();
+        config.max_depth = 3; // Allow multi-hop spreading
+
+        // Verify hierarchical config is present and enabled by default
+        assert!(config.hierarchical_config.enable_path_tracking);
+        assert!((config.hierarchical_config.upward_strength - 0.8).abs() < f32::EPSILON);
+        assert!((config.hierarchical_config.downward_strength - 0.6).abs() < f32::EPSILON);
+        assert!((config.hierarchical_config.lateral_strength - 0.4).abs() < f32::EPSILON);
+
+        let graph = Arc::new(create_activation_graph());
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+
+        // Test upward spreading (episode → concept)
+        let episode_up = format!("episode:up_{timestamp}");
+        let concept_up = format!("concept:up_{timestamp}");
+
+        ActivationGraphExt::add_edge(&*graph, episode_up.clone(), concept_up.clone(), 1.0, EdgeType::Excitatory);
+
+        // Test downward spreading (concept → episode)
+        let concept_down = format!("concept:down_{timestamp}");
+        let episode_down = format!("episode:down_{timestamp}");
+
+        ActivationGraphExt::add_edge(&*graph, concept_down.clone(), episode_down.clone(), 1.0, EdgeType::Excitatory);
+
+        // Add embeddings
+        let embedding = [0.1f32; 768];
+        for node in [&episode_up, &concept_up, &concept_down, &episode_down] {
+            ActivationGraphExt::set_embedding(&*graph, node, &embedding);
+        }
+
+        let engine = ParallelSpreadingEngine::new(config, graph).unwrap();
+
+        // Test upward spreading
+        let upward_result = engine.spread_activation(&[(episode_up.clone(), 1.0)]).unwrap();
+        let upward_activation = upward_result
+            .activations
+            .iter()
+            .find(|a| a.memory_id == concept_up)
+            .map_or(0.0, |a| a.activation_level.load(Ordering::Relaxed));
+
+        // Test downward spreading
+        let downward_result = engine.spread_activation(&[(concept_down.clone(), 1.0)]).unwrap();
+        let downward_activation = downward_result
+            .activations
+            .iter()
+            .find(|a| a.memory_id == episode_down)
+            .map_or(0.0, |a| a.activation_level.load(Ordering::Relaxed));
+
+        // Verify both activated
+        assert!(upward_activation > 0.0, "Upward spreading should activate concept");
+        assert!(downward_activation > 0.0, "Downward spreading should activate episode");
+
+        // Upward (0.8) should produce stronger activation than downward (0.6)
+        // Even accounting for decay, the base strength difference should be visible
+        assert!(
+            upward_activation > downward_activation,
+            "Upward spreading (0.8) should be stronger than downward (0.6): up={upward_activation:.3}, down={downward_activation:.3}"
+        );
 
         engine.shutdown().unwrap();
     }
