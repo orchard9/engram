@@ -78,6 +78,9 @@ pub mod traversal;
 /// Hierarchical spreading with path tracking for dual memory architecture
 pub mod hierarchical;
 
+/// Blended recall with dual-process integration
+pub mod blended_recall;
+
 pub mod visualization;
 
 pub use auto_tuning::{AutoTuneAuditEntry, SpreadingAutoTuner};
@@ -110,13 +113,17 @@ pub use adaptive_batcher::{
     AdaptiveBatcher, AdaptiveBatcherConfig, AdaptiveBatcherMetrics, AdaptiveBatcherSnapshot,
     AdaptiveMode, BandwidthClass, Observation, TopologyFingerprint,
 };
+pub use blended_recall::{
+    BlendMode, BlendedRankedMemory, BlendedRecallConfig, BlendedRecallEngine, BlendedRecallMetrics,
+    ConceptContribution, RecallProvenance, RecallSource,
+};
+pub use hierarchical::{
+    DirectionStats, HierarchicalSpreadResult, HierarchicalSpreading, HierarchicalSpreadingConfig,
+    SpreadingDirection,
+};
 pub use memory_pool::{
     ActivationMemoryPool, ActivationRecordPool, ActivationRecordPoolStats, LocalMemoryPool,
     PoolStats,
-};
-pub use hierarchical::{
-    DirectionStats, HierarchicalSpreading, HierarchicalSpreadingConfig,
-    HierarchicalSpreadResult, SpreadingDirection,
 };
 
 // HNSW integration

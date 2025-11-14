@@ -725,10 +725,8 @@ impl ParallelSpreadingEngine {
 
                 for edge in &mut neighbors {
                     let target_is_episode = edge.target.starts_with("episode:");
-                    let direction = SpreadingDirection::from_node_types(
-                        source_is_episode,
-                        target_is_episode,
-                    );
+                    let direction =
+                        SpreadingDirection::from_node_types(source_is_episode, target_is_episode);
 
                     // Apply directional strength multiplier
                     let strength = direction.base_strength(&config_snapshot.hierarchical_config);
@@ -2525,13 +2523,25 @@ mod tests {
         let episode_up = format!("episode:up_{timestamp}");
         let concept_up = format!("concept:up_{timestamp}");
 
-        ActivationGraphExt::add_edge(&*graph, episode_up.clone(), concept_up.clone(), 1.0, EdgeType::Excitatory);
+        ActivationGraphExt::add_edge(
+            &*graph,
+            episode_up.clone(),
+            concept_up.clone(),
+            1.0,
+            EdgeType::Excitatory,
+        );
 
         // Test downward spreading (concept → episode)
         let concept_down = format!("concept:down_{timestamp}");
         let episode_down = format!("episode:down_{timestamp}");
 
-        ActivationGraphExt::add_edge(&*graph, concept_down.clone(), episode_down.clone(), 1.0, EdgeType::Excitatory);
+        ActivationGraphExt::add_edge(
+            &*graph,
+            concept_down.clone(),
+            episode_down.clone(),
+            1.0,
+            EdgeType::Excitatory,
+        );
 
         // Add embeddings
         let embedding = [0.1f32; 768];
@@ -2542,7 +2552,9 @@ mod tests {
         let engine = ParallelSpreadingEngine::new(config, graph).unwrap();
 
         // Test upward spreading
-        let upward_result = engine.spread_activation(&[(episode_up.clone(), 1.0)]).unwrap();
+        let upward_result = engine
+            .spread_activation(&[(episode_up.clone(), 1.0)])
+            .unwrap();
         let upward_activation = upward_result
             .activations
             .iter()
@@ -2550,7 +2562,9 @@ mod tests {
             .map_or(0.0, |a| a.activation_level.load(Ordering::Relaxed));
 
         // Test downward spreading
-        let downward_result = engine.spread_activation(&[(concept_down.clone(), 1.0)]).unwrap();
+        let downward_result = engine
+            .spread_activation(&[(concept_down.clone(), 1.0)])
+            .unwrap();
         let downward_activation = downward_result
             .activations
             .iter()
@@ -2558,8 +2572,14 @@ mod tests {
             .map_or(0.0, |a| a.activation_level.load(Ordering::Relaxed));
 
         // Verify both activated
-        assert!(upward_activation > 0.0, "Upward spreading should activate concept");
-        assert!(downward_activation > 0.0, "Downward spreading should activate episode");
+        assert!(
+            upward_activation > 0.0,
+            "Upward spreading should activate concept"
+        );
+        assert!(
+            downward_activation > 0.0,
+            "Downward spreading should activate episode"
+        );
 
         // Upward (0.8) should produce stronger activation than downward (0.6)
         // Even accounting for decay, the base strength difference should be visible

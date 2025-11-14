@@ -4,8 +4,7 @@
 //! hierarchies with minimal allocation overhead through Arc-based path storage.
 
 use crate::activation::{
-    ActivationGraphExt, MemoryGraph, NodeId, SpreadingMetrics,
-    storage_aware::StorageTier,
+    ActivationGraphExt, MemoryGraph, NodeId, SpreadingMetrics, storage_aware::StorageTier,
 };
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
@@ -93,10 +92,10 @@ impl SpreadingDirection {
     #[must_use]
     pub const fn from_node_types(source_is_episode: bool, target_is_episode: bool) -> Self {
         match (source_is_episode, target_is_episode) {
-            (true, false) => Self::Upward,     // Episode → Concept
-            (false, true) => Self::Downward,   // Concept → Episode
-            (false, false) => Self::Lateral,   // Concept → Concept
-            (true, true) => Self::Episodic,    // Episode → Episode
+            (true, false) => Self::Upward,   // Episode → Concept
+            (false, true) => Self::Downward, // Concept → Episode
+            (false, false) => Self::Lateral, // Concept → Concept
+            (true, true) => Self::Episodic,  // Episode → Episode
         }
     }
 }
@@ -316,23 +315,20 @@ impl HierarchicalSpreading {
             let current_is_episode = current.node_id.contains("episode");
 
             // Get neighbors and calculate spreading
-            if let Some(neighbors) = ActivationGraphExt::get_neighbors(&*self.memory_graph, &current.node_id) {
+            if let Some(neighbors) =
+                ActivationGraphExt::get_neighbors(&*self.memory_graph, &current.node_id)
+            {
                 for edge in neighbors {
                     // Determine target node type and spreading direction
                     let target_is_episode = edge.target.contains("episode");
-                    let direction = SpreadingDirection::from_node_types(
-                        current_is_episode,
-                        target_is_episode,
-                    );
+                    let direction =
+                        SpreadingDirection::from_node_types(current_is_episode, target_is_episode);
 
                     direction_stats.record(direction);
 
                     // Calculate spread strength with direction and depth decay
-                    let spread_strength = self.calculate_spread_strength(
-                        direction,
-                        edge.weight,
-                        current.depth + 1,
-                    );
+                    let spread_strength =
+                        self.calculate_spread_strength(direction, edge.weight, current.depth + 1);
 
                     let new_activation = current.activation * spread_strength;
 
@@ -422,7 +418,7 @@ impl HierarchicalSpreading {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::activation::{create_activation_graph, EdgeType};
+    use crate::activation::{EdgeType, create_activation_graph};
 
     #[test]
     fn test_spreading_direction_classification() {
@@ -515,21 +511,12 @@ mod tests {
         let graph = Arc::new(create_activation_graph());
         let spreading = HierarchicalSpreading::new(config, graph);
 
-        let strength_depth0 = spreading.calculate_spread_strength(
-            SpreadingDirection::Upward,
-            1.0,
-            0,
-        );
-        let strength_depth1 = spreading.calculate_spread_strength(
-            SpreadingDirection::Upward,
-            1.0,
-            1,
-        );
-        let strength_depth2 = spreading.calculate_spread_strength(
-            SpreadingDirection::Upward,
-            1.0,
-            2,
-        );
+        let strength_depth0 =
+            spreading.calculate_spread_strength(SpreadingDirection::Upward, 1.0, 0);
+        let strength_depth1 =
+            spreading.calculate_spread_strength(SpreadingDirection::Upward, 1.0, 1);
+        let strength_depth2 =
+            spreading.calculate_spread_strength(SpreadingDirection::Upward, 1.0, 2);
 
         // Verify exponential decay
         assert!((strength_depth0 - 0.8).abs() < 0.01); // base upward strength
@@ -541,8 +528,8 @@ mod tests {
     fn test_max_path_length_truncation() {
         let config = HierarchicalSpreadingConfig {
             max_path_length: 4,
-            max_depth: 7, // Allow deep enough to reach episode5
-            depth_decay_base: 0.95, // Reduce decay to maintain activation
+            max_depth: 7,                // Allow deep enough to reach episode5
+            depth_decay_base: 0.95,      // Reduce decay to maintain activation
             activation_threshold: 0.001, // Lower threshold
             ..Default::default()
         };
@@ -567,7 +554,10 @@ mod tests {
         // Verify path length bounded for reached nodes
         if let Some(paths) = result.paths {
             for entry in paths.iter() {
-                assert!(entry.value().len() <= 4, "Path length should be truncated to max_path_length");
+                assert!(
+                    entry.value().len() <= 4,
+                    "Path length should be truncated to max_path_length"
+                );
             }
         }
     }
@@ -598,8 +588,16 @@ mod tests {
         let result = spreading.spread_hierarchical(seeds);
 
         // Get activations
-        let concept_activation = result.activations.get("concept1").map(|v| *v).unwrap_or(0.0);
-        let episode_activation = result.activations.get("episode2").map(|v| *v).unwrap_or(0.0);
+        let concept_activation = result
+            .activations
+            .get("concept1")
+            .map(|v| *v)
+            .unwrap_or(0.0);
+        let episode_activation = result
+            .activations
+            .get("episode2")
+            .map(|v| *v)
+            .unwrap_or(0.0);
 
         // Upward (episode→concept) should be stronger than downward (concept→episode)
         // With depth decay: upward = 0.8 * 1.0 * 0.8^1 = 0.64
