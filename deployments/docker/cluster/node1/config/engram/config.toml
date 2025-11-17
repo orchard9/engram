@@ -1,0 +1,45 @@
+[feature_flags]
+spreading_api_beta = true
+
+[server]
+http_bind = "0.0.0.0"
+
+[memory_spaces]
+default_space = "default"
+bootstrap_spaces = ["default"]
+
+[persistence]
+data_root = "/data"
+hot_capacity = 100_000
+warm_capacity = 1_000_000
+cold_capacity = 10_000_000
+
+[cluster]
+enabled = true
+node_id = "engram-node1"
+
+[cluster.discovery]
+type = "static"
+seed_nodes = [
+    "engram-node1:7946",
+    "engram-node2:7946",
+    "engram-node3:7946",
+]
+
+[cluster.swim]
+ping_interval = "1s"
+ack_timeout = "600ms"
+suspicion_timeout = "2s"
+indirect_probes = 1
+gossip_batch = 4
+
+[cluster.replication]
+factor = 2
+timeout = "1s"
+placement = "random"
+
+[cluster.network]
+swim_bind = "0.0.0.0:7946"
+api_bind = "0.0.0.0:50051"
+max_message_size = 4194304
+connection_pool_size = 2

@@ -314,4 +314,10 @@ impl LazyColumn {
 4. **Documentation**: Complete API documentation and performance guide
 5. **Deployment Preparation**: Production readiness validation
 
+## Implementation Notes (Milestone Update)
+
+- Columnar buffers now use an `AlignedColumn` allocator that enforces 64-byte alignment. AVX2/AVX-512 kernels can stream column slices without misalignment penalties.
+- Compression mode routes writes through a deterministic product-quantizer. Each embedding is encoded into `[u8; 96]` codes derived from a Blake3-seeded centroid table, and norms are cached for accurate cosine scoring.
+- Added a Criterion harness (`cargo bench --bench cold_tier_columnar`) that compares the full-precision and PQ-compressed flows. CSV/JSON reports are emitted under `engram-core/benches/reports/` so perf regressions are visible in git history.
+
 This research-driven approach ensures the columnar storage implementation achieves both theoretical performance gains and practical production benefits through systematic optimization of memory layout, SIMD operations, and query execution patterns.

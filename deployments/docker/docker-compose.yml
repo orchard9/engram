@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   engram:
     build:
@@ -102,7 +100,7 @@ services:
       - "9090:9090"
     volumes:
       - prometheus-data:/prometheus
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../prometheus:/etc/prometheus:ro
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
@@ -124,8 +122,8 @@ services:
       - "3000:3000"
     volumes:
       - grafana-data:/var/lib/grafana
-      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
-      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ../grafana/provisioning:/etc/grafana/provisioning:ro
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
       GF_INSTALL_PLUGINS: ${GRAFANA_PLUGINS:-}

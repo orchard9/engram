@@ -9,7 +9,14 @@ use dashmap::DashMap;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
+#[cfg(feature = "dual_memory_types")]
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+
+#[cfg(feature = "dual_memory_types")]
+use crate::memory_graph::BindingIndex;
+#[cfg(feature = "dual_memory_cache")]
+use crate::optimization::DualMemoryCache;
 use std::time::{Duration, Instant};
 
 const METRIC_SPREADING_LATENCY_HOT: &str = "engram_spreading_latency_hot_seconds";
@@ -1473,6 +1480,10 @@ pub struct ActivationGraph {
     uuid_mappings: DashMap<uuid::Uuid, NodeId>,
     embeddings: DashMap<NodeId, [f32; 768]>,
     hot_handles: DashMap<NodeId, Arc<CacheOptimizedNode>>,
+    #[cfg(feature = "dual_memory_cache")]
+    dual_memory_cache: Arc<DualMemoryCache>,
+    #[cfg(feature = "dual_memory_types")]
+    binding_index: OnceLock<Arc<BindingIndex>>,
 }
 
 impl std::ops::Deref for ActivationGraph {
@@ -1480,6 +1491,40 @@ impl std::ops::Deref for ActivationGraph {
 
     fn deref(&self) -> &Self::Target {
         &self.graph
+    }
+}
+
+impl ActivationGraph {
+    #[cfg(feature = "dual_memory_cache")]
+    #[must_use]
+    /// Provides access to the shared dual-memory cache instance.
+    pub const fn dual_memory_cache(&self) -> &Arc<DualMemoryCache> {
+        &self.dual_memory_cache
+    }
+
+    #[cfg(feature = "dual_memory_types")]
+    /// Attach a binding index so association queries can leverage cached fan-out counts.
+    pub fn attach_binding_index(&self, binding_index: &Arc<BindingIndex>) {
+        if self.binding_index.set(Arc::clone(binding_index)).is_ok() {
+            #[cfg(feature = "dual_memory_cache")]
+            {
+                binding_index.attach_fan_out_cache(self.dual_memory_cache());
+            }
+        }
+    }
+
+    #[cfg(feature = "dual_memory_types")]
+    fn binding_index(&self) -> Option<&Arc<BindingIndex>> {
+        self.binding_index.get()
+    }
+
+    fn parse_uuid_component(node_id: &NodeId) -> Option<uuid::Uuid> {
+        if let Ok(uuid) = uuid::Uuid::parse_str(node_id) {
+            return Some(uuid);
+        }
+        node_id
+            .rsplit_once(':')
+            .and_then(|(_, suffix)| uuid::Uuid::parse_str(suffix).ok())
     }
 }
 
@@ -1501,6 +1546,10 @@ pub fn create_activation_graph() -> MemoryGraph {
         uuid_mappings: DashMap::new(),
         embeddings: DashMap::new(),
         hot_handles: DashMap::new(),
+        #[cfg(feature = "dual_memory_cache")]
+        dual_memory_cache: Arc::new(DualMemoryCache::new()),
+        #[cfg(feature = "dual_memory_types")]
+        binding_index: OnceLock::new(),
     }
 }
 
@@ -1563,6 +1612,18 @@ pub trait ActivationGraphExt {
 
     /// Retrieve the cached hot node handle for a node if present.
     fn get_hot_handle(&self, node_id: &NodeId) -> Option<Arc<CacheOptimizedNode>>;
+
+    /// Check if a node is an episode (vs concept).
+    ///
+    /// Currently determined via node ID prefix heuristics, which keeps hot paths
+    /// inexpensive while a proper binding index feed is designed.
+    fn is_episode_node(&self, node_id: &NodeId) -> bool;
+
+    /// Get the number of associations for a node.
+    ///
+    /// Placeholder implementation until the binding index is fully wired into the
+    /// activation graph. Returns 0 so callers fall back to neighbor counts.
+    fn get_association_count(&self, node_id: &NodeId) -> usize;
 }
 
 impl ActivationGraphExt for ActivationGraph {
@@ -1671,6 +1732,49 @@ impl ActivationGraphExt for ActivationGraph {
             .get(node_id)
             .map(|entry| entry.value().clone())
     }
+
+    fn is_episode_node(&self, node_id: &NodeId) -> bool {
+        #[cfg(feature = "dual_memory_types")]
+        {
+            if let Some(uuid) = Self::parse_uuid_component(node_id) {
+                if let Some(index) = self.binding_index() {
+                    if index.is_episode_id(&uuid) {
+                        return true;
+                    }
+                    if index.is_concept_id(&uuid) {
+                        return false;
+                    }
+                }
+            }
+        }
+
+        // Fall back to prefix-based detection for unit tests or when binding metadata
+        // has not been attached yet.
+        node_id.starts_with("episode")
+    }
+
+    fn get_association_count(&self, node_id: &NodeId) -> usize {
+        #[cfg(any(feature = "dual_memory_cache", feature = "dual_memory_types"))]
+        {
+            if let Some(uuid) = Self::parse_uuid_component(node_id) {
+                #[cfg(feature = "dual_memory_cache")]
+                if let Some(fan_out) = self.dual_memory_cache().get_fan_out(&uuid) {
+                    return fan_out as usize;
+                }
+
+                #[cfg(feature = "dual_memory_types")]
+                if let Some(index) = self.binding_index() {
+                    let count = index.association_count(&uuid);
+                    #[cfg(feature = "dual_memory_cache")]
+                    if count > 0 {
+                        self.dual_memory_cache().cache_fan_out(&uuid, count as u32);
+                    }
+                    return count;
+                }
+            }
+        }
+        0
+    }
 }
 
 #[cfg(test)]
@@ -1680,6 +1784,12 @@ mod tests {
     use super::{
         ActivationGraphExt, ActivationRecord, ActivationRecordPoolStats, create_activation_graph,
     };
+    #[cfg(feature = "dual_memory_types")]
+    use crate::memory::bindings::ConceptBinding;
+    #[cfg(feature = "dual_memory_types")]
+    use crate::memory_graph::BindingIndex;
+    #[cfg(feature = "dual_memory_types")]
+    use std::sync::Arc;
 
     #[test]
     fn test_embedding_storage_and_retrieval() {
@@ -1721,6 +1831,40 @@ mod tests {
             graph.get_hot_handle(&"hot-node".to_string()).is_none(),
             "handle should be cleared"
         );
+    }
+
+    #[cfg(feature = "dual_memory_types")]
+    #[test]
+    fn association_count_reads_binding_index() {
+        let graph = create_activation_graph();
+        let binding_index = Arc::new(BindingIndex::new(0.1));
+        let episode_id = uuid::Uuid::new_v4();
+        let concept_id = uuid::Uuid::new_v4();
+        binding_index.add_binding(ConceptBinding::new(episode_id, concept_id, 0.8, 0.5));
+        graph.attach_binding_index(&binding_index);
+
+        let episode_node = format!("episode:{episode_id}");
+        let concept_node = format!("concept:{concept_id}");
+
+        assert_eq!(graph.get_association_count(&concept_node), 1);
+        assert_eq!(graph.get_association_count(&episode_node), 1);
+    }
+
+    #[cfg(feature = "dual_memory_types")]
+    #[test]
+    fn is_episode_node_prefers_binding_metadata() {
+        let graph = create_activation_graph();
+        let binding_index = Arc::new(BindingIndex::new(0.1));
+        let episode_id = uuid::Uuid::new_v4();
+        let concept_id = uuid::Uuid::new_v4();
+        binding_index.add_binding(ConceptBinding::new(episode_id, concept_id, 0.7, 0.4));
+        graph.attach_binding_index(&binding_index);
+
+        let episode_node = format!("episode:{episode_id}");
+        let concept_node = format!("concept:{concept_id}");
+
+        assert!(graph.is_episode_node(&episode_node));
+        assert!(!graph.is_episode_node(&concept_node));
     }
 
     #[test]

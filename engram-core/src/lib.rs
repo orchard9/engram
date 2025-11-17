@@ -24,10 +24,12 @@ pub mod activation;
 #[cfg(feature = "security")]
 pub mod auth;
 pub mod batch;
+pub mod cluster;
 pub mod cognitive;
 #[cfg(feature = "pattern_completion")]
 pub mod completion;
 pub mod compute;
+pub mod confidence;
 pub mod consolidation;
 pub mod cue;
 #[cfg(feature = "psychological_decay")]
@@ -46,6 +48,12 @@ pub mod memory_graph;
 #[cfg(feature = "monitoring")]
 pub mod metrics;
 mod numeric;
+#[cfg(any(
+    feature = "dual_memory_cache",
+    feature = "simd_concepts",
+    feature = "numa_aware"
+))]
+pub mod optimization;
 pub mod query;
 pub mod registry;
 #[cfg(feature = "security")]

@@ -1,6 +1,10 @@
 [feature_flags]
 spreading_api_beta = true
 
+[server]
+# Bind address for the HTTP API listener (IP only, port configured via CLI flag)
+http_bind = "127.0.0.1"
+
 [memory_spaces]
 default_space = "default"
 bootstrap_spaces = ["default"]
@@ -14,3 +18,54 @@ data_root = "~/.local/share/engram"
 hot_capacity = 100_000
 warm_capacity = 1_000_000
 cold_capacity = 10_000_000
+
+[cluster]
+enabled = false
+node_id = ""
+
+[cluster.discovery]
+type = "static"
+seed_nodes = []
+
+[cluster.swim]
+ping_interval = "1s"
+ack_timeout = "600ms"
+suspicion_timeout = "2s"
+indirect_probes = 3
+gossip_batch = 6
+
+[cluster.replication]
+factor = 2
+timeout = "1s"
+placement = "random"
+jump_buckets = 16384
+rack_penalty = 0.5
+zone_penalty = 0.35
+lag_threshold = "5s"
+catch_up_batch_bytes = 2097152
+compression = "none"
+io_uring_enabled = false
+
+[cluster.network]
+swim_bind = "0.0.0.0:7946"
+api_bind = "0.0.0.0:50051"
+max_message_size = 4194304
+connection_pool_size = 4
+# advertise_addr = "192.168.1.50:7946" # Set when swim_bind uses 0.0.0.0 or when running in containers/cloud
+
+[cluster.partition]
+majority_threshold = 0.6
+detection_window = "10s"
+check_interval = "2s"
+
+[router]
+connection_pool_size = 4
+request_timeout_ms = 3000
+max_retries = 3
+retry_base_delay_ms = 50
+retry_max_delay_ms = 500
+circuit_breaker_failure_threshold = 5
+circuit_breaker_reset_ms = 5000
+replica_fallback_enabled = true
+replica_fallback_lag_sequences = 32
+default_read_strategy = "nearest_replica"

@@ -1,49 +1,42 @@
 # Task 011: Consolidate Memory Graph Abstractions
 
+## Status: COMPLETE ✅
+
 ## Problem
 Multiple overlapping implementations of memory/graph storage exist without clear separation of concerns, causing 30% development velocity loss and high maintenance risk.
 
 ## Current State
-- `MemoryGraph` in `src/graph.rs:10` uses HashMap for simple storage
-- `MemoryGraph` in `src/activation/mod.rs:377` uses DashMap for parallel activation  
-- `MemoryStore` in `src/store.rs:75` has yet another memory management approach
-- `MemoryNode` in `src/lib.rs:280` adds another abstraction layer
+- `engram-core/src/memory_graph/traits.rs` defines the canonical `MemoryBackend`/`GraphBackend` traits consumed by storage, activation, and recall layers.
+- `UnifiedMemoryGraph` lives in `engram-core/src/memory_graph/graph.rs` and exposes helper constructors plus backend-specific impls.
+- `engram-core/src/graph.rs`, `engram-core/src/activation/mod.rs`, and `engram-core/src/store.rs` now reuse the unified type with deprecation wrappers for the legacy APIs.
 
 ## Progress Update
 
 ### Completed (100%):
-- ✅ Created unified trait architecture in `src/memory_graph/`
-- ✅ Implemented `MemoryBackend` and `GraphBackend` traits
-- ✅ Created HashMapBackend (single-threaded)
-- ✅ Created DashMapBackend (lock-free concurrent)
-- ✅ Created InfallibleBackend (graceful degradation)
-- ✅ Implemented UnifiedMemoryGraph generic wrapper
-- ✅ Module structure created and integrated
-- ✅ Migrated existing graph.rs to use UnifiedMemoryGraph with deprecation warnings
-- ✅ Updated activation/mod.rs to use unified DashMapBackend
-- ✅ Migrated store.rs to use InfallibleBackend
-- ✅ Added comprehensive migration tests
-- ✅ Added backward compatibility support
-- ✅ Created factory functions for easy migration
-- ✅ Cleaned up all duplicate implementations
+- ✅ Created unified trait architecture under `engram-core/src/memory_graph/`
+- ✅ Implemented `MemoryBackend` and `GraphBackend` traits with `MemoryError` covering storage/index failures
+- ✅ Added production-ready backends: `HashMapBackend`, `DashMapBackend`, `InfallibleBackend` (`engram-core/src/memory_graph/backends/`)
+- ✅ Implemented `UnifiedMemoryGraph` generic wrapper (single entry point for store/activation/tests)
+- ✅ Wired `engram-core/src/graph.rs`, `src/activation/mod.rs`, and `src/store.rs` to use UnifiedMemoryGraph + deprecation shims for the old API
+- ✅ Added migration + regression coverage in `engram-core/src/memory_graph/tests.rs`
+- ✅ Created helper constructors (`UnifiedMemoryGraph::concurrent()` etc.) to keep call-sites terse during migration
 
-### Completed Consolidation:
-All three overlapping memory graph implementations have been consolidated into a single unified architecture:
-1. `src/graph.rs` - Now uses UnifiedMemoryGraph with backward compatibility
-2. `src/activation/mod.rs` - Uses UnifiedMemoryGraph<DashMapBackend> 
-3. `src/store.rs` - Uses UnifiedMemoryGraph<InfallibleBackend>
+### Consolidation Rollout
+All overlapping memory graph implementations now defer to `UnifiedMemoryGraph`:
+1. `engram-core/src/graph.rs` – `create_simple_graph`/`create_concurrent_graph` just wrap the new helpers and mark the legacy type as deprecated.
+2. `engram-core/src/activation/mod.rs` – Spreading/recall jobs store the `UnifiedMemoryGraph<DashMapBackend>` and leverage trait methods for neighbor traversals.
+3. `engram-core/src/store.rs` – `MemoryStore` owns a `UnifiedMemoryGraph<InfallibleBackend>` so API behavior matches storage guarantees.
 
 ### Key Improvements:
-- Single source of truth for memory graph operations
-- Backend can be swapped without changing client code
-- Maintained backward compatibility with deprecation warnings
-- Zero technical debt - all duplicate code removed
-- Type-safe trait-based architecture
-- Performance optimized for each use case
+- Single source of truth for graph operations with backend-specific optimizations
+- Backends can be swapped without touching client code (dashmap vs hashmap vs infallible)
+- Maintained backward compatibility via deprecated type aliases and helper constructors
+- Removed duplicate graph implementations, reducing maintenance debt
+- Trait-based API enables additional backends (HNSW, persistence) without churn
 
 ## Implementation Plan
 
-### Step 1: Create Unified Memory Trait (src/memory/traits.rs)
+### Step 1: Create Unified Memory Trait (src/memory_graph/traits.rs)
 ```rust
 // Create new file: src/memory/traits.rs
 pub trait MemoryBackend: Send + Sync {
@@ -63,7 +56,7 @@ pub trait GraphBackend: MemoryBackend {
 }
 ```
 
-### Step 2: Implement Backend Adapters (src/memory/backends/)
+### Step 2: Implement Backend Adapters (src/memory_graph/backends/)
 
 #### HashMap Backend (src/memory/backends/hashmap.rs)
 ```rust

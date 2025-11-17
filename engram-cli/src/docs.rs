@@ -814,6 +814,14 @@ impl OperationalDocs {
 
             ### 19. Cluster Communication Issues
 
+            > **Heads up**
+            >
+            > DNS-based discovery requires compiling Engram with the
+            > `cluster_discovery_dns` feature flag (enabled in official builds but
+            > optional for custom binaries). The `consul` discovery mode is
+            > intentionally deferred until the control-plane milestone, so stick
+            > with static seeds or DNS SRV for now.
+
             **SYMPTOM**: Nodes cannot communicate in cluster mode
 
             **QUICK CHECK**:

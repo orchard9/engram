@@ -2,7 +2,7 @@
 
 ## Task Completion Status: COMPLETE
 
-All 4 production-grade Grafana dashboards have been successfully created and validated.
+All 10 production-grade Grafana dashboards have been successfully created and validated.
 
 ## Files Created
 
@@ -11,14 +11,20 @@ All 4 production-grade Grafana dashboards have been successfully created and val
 2. `/Users/jordan/Workspace/orchard9/engram/deployments/grafana/dashboards/memory-operations.json` (25KB, 9 panels)
 3. `/Users/jordan/Workspace/orchard9/engram/deployments/grafana/dashboards/storage-tiers.json` (28KB, 10 panels)
 4. `/Users/jordan/Workspace/orchard9/engram/deployments/grafana/dashboards/api-performance.json` (33KB, 14 panels)
+5. `/Users/jordan/Workspace/orchard9/engram/deployments/grafana/dashboards/cluster-health.json` (13KB, 7 panels)
+6. `/Users/jordan/Workspace/orchard9/engram/deployments/grafana/dashboards/tenant-utilization.json` (14KB, 5 panels)
+7. `/Users/jordan/Workspace/orchard9/engram/deployments/grafana/dashboards/replication-wal.json` (15KB, 6 panels)
+8. `/Users/jordan/Workspace/orchard9/engram/deployments/grafana/dashboards/chaos-readiness.json` (12KB, 5 panels)
+9. `/Users/jordan/Workspace/orchard9/engram/deployments/grafana/dashboards/capacity-forecast.json` (11KB, 4 panels)
+10. `/Users/jordan/Workspace/orchard9/engram/deployments/grafana/dashboards/api-clients.json` (14KB, 5 panels)
 
 ### Documentation
-5. `/Users/jordan/Workspace/orchard9/engram/deployments/grafana/dashboards/README.md` (comprehensive guide)
+11. `/Users/jordan/Workspace/orchard9/engram/deployments/grafana/dashboards/README.md` (comprehensive guide)
 
 ## Validation Results
 
 ### JSON Syntax
-✓ All 4 dashboard files have valid JSON syntax
+✓ All 10 dashboard files have valid JSON syntax
 ✓ Verified with `jq` JSON parser
 
 ### Panel IDs
@@ -123,6 +129,58 @@ All 4 production-grade Grafana dashboards have been successfully created and val
 - Per-operation performance breakdown
 - Rate limiting visibility
 - GPU acceleration monitoring
+
+### 5. Cluster Health & Membership Dashboard
+**Purpose**: Monitor multi-node deployments with per-instance availability and latency insights.
+
+**Highlights**:
+- Active node stat derived from `sum(up)`
+- Per-instance uptime traces for spotting flapping nodes
+- Latency per tier (hot/warm/cold) and guardrail violations
+- Activation pool utilization/hit rate and consolidation freshness
+- Inline Prometheus alert table for EngramDown/HealthProbeFailure
+
+### 6. Tenant Utilization Dashboard
+**Purpose**: Provide tenancy-aware throughput, latency, storage, and error insight for `memory_space` isolation.
+
+**Highlights**:
+- Top-10 activation throughput ranking via `topk`
+- Latency percentiles scoped to `memory_space`
+- Storage/episode footprint per tenant for quota tracking
+- Error budget consumption trends per tenant
+
+### 7. Replication & WAL Dashboard
+**Purpose**: Track durability pipeline health from WAL ingest through compaction and recovery.
+
+**Highlights**:
+- WAL lag + recovery quantiles by instance
+- Compaction throughput/success metrics and bytes reclaimed
+- Storage savings plus WAL recovery failure monitor
+
+### 8. Chaos Readiness Dashboard
+**Purpose**: Validate chaos drill coverage (network partitions, latency spikes, resource pressure).
+
+**Highlights**:
+- Live Prometheus alert table for the four critical chaos alerts
+- Stress latency views using `engram_memory_operation_duration_seconds_bucket`
+- Resource pressure (activation pool utilization/hit rate) and failures
+
+### 9. Capacity & Cost Forecast Dashboard
+**Purpose**: Forecast storage demand and cost using `predict_linear` and per-tier cost multipliers.
+
+**Highlights**:
+- Actual usage vs. forecast for hot/warm/cold tiers
+- Estimated spend overlays
+- Capacity utilization vs. tier limits
+
+### 10. API Client Insights Dashboard
+**Purpose**: Offer per-client throughput, latency, quota, and error visibility.
+
+**Highlights**:
+- Throughput per client+operation
+- Error-rate ratio per client
+- Latency P95 plus quota utilization gauges
+- Client/operation heatmap for traffic mix
 
 ## Technical Implementation Details
 

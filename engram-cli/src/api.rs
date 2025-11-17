@@ -7,12 +7,18 @@ use axum::response::sse::{Event, KeepAlive};
 use axum::{
     Router,
     extract::{Path, Query, State},
-    http::{HeaderMap, StatusCode},
+    http::{HeaderMap, HeaderValue, StatusCode, header::RETRY_AFTER},
     response::{IntoResponse, Json, Sse},
     routing::{get, post},
 };
-use chrono::{DateTime, Utc};
-use engram_proto::{Confidence, ConsolidationState, Memory, MemoryType};
+use chrono::{DateTime, TimeZone, Utc};
+use engram_proto::{
+    Confidence, ConsolidationState, Cue as ProtoCue, EmbeddingCue as ProtoEmbeddingCue,
+    Episode as ProtoEpisode, Memory, MemoryType, RecallRequest as ProtoRecallRequest,
+    RecallResponse as ProtoRecallResponse, RememberRequest as ProtoRememberRequest,
+    SemanticCue as ProtoSemanticCue, cue::CueType as ProtoCueType, remember_request,
+};
+use prost_types::Timestamp;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
@@ -21,12 +27,22 @@ use tokio_stream::{Stream, wrappers::ReceiverStream};
 use tracing::{Span, info};
 use utoipa::{IntoParams, ToSchema};
 
+use crate::admin::rebalance::{
+    migrate_space_handler, rebalance_status_handler, trigger_rebalance_handler,
+};
+use crate::cluster::{ClusterState, RouteDecision};
 use crate::grpc::MemoryService;
+use crate::http::cluster::{cluster_health, cluster_nodes};
 use crate::openapi::create_swagger_ui;
+use crate::router::{
+    ReadPlan, ReadRoutingStrategy, Router as ClusterRouter, RouterBreakerState, RouterError,
+    RouterHealthSnapshot,
+};
 use engram_core::{
     Confidence as CoreConfidence, Cue as CoreCue, Episode, MemorySpaceError, MemorySpaceId,
     MemorySpaceRegistry, MemoryStore, SpaceSummary, TierCounts,
     activation::{AutoTuneAuditEntry, RecallMode, SpreadingAutoTuner},
+    cluster::{ClusterError, PartitionAwareConfidence, PartitionState},
     completion::{ConsolidationStats as CoreConsolidationStats, SemanticPattern},
     memory::EpisodeBuilder as CoreEpisodeBuilder,
     metrics::{
@@ -81,6 +97,12 @@ pub struct ApiState {
     pub session_manager: Arc<SessionManager>,
     /// Observation queue for streaming ingestion
     pub observation_queue: Arc<ObservationQueue>,
+    /// Optional cluster context for distributed deployments.
+    pub cluster: Option<Arc<ClusterState>>,
+    /// Optional router used to proxy requests to remote primaries.
+    pub router: Option<Arc<ClusterRouter>>,
+    /// Optional confidence adjuster that accounts for partitions.
+    pub partition_confidence: Option<Arc<PartitionAwareConfidence>>,
 }
 
 /// Auto-tuning response payload used by the REST API and OpenAPI schema.
@@ -143,6 +165,51 @@ pub struct SpaceHealthMetrics {
     pub consolidation_rate: f64,
 }
 
+/// Cluster membership snapshot for health responses.
+#[derive(Serialize, ToSchema, Clone, Debug)]
+pub struct ClusterHealthMetrics {
+    /// Local node identifier.
+    pub node_id: String,
+    /// Number of alive peers.
+    pub alive: usize,
+    /// Number of peers under suspicion.
+    pub suspect: usize,
+    /// Number of confirmed dead peers.
+    pub dead: usize,
+    /// Nodes that have gracefully left the cluster.
+    pub left: usize,
+    /// Total number of peers tracked.
+    pub total: usize,
+    /// Optional router health summary.
+    pub router: Option<RouterHealthMetrics>,
+}
+
+/// Router health snapshot surfaced via health endpoints.
+#[derive(Serialize, ToSchema, Clone, Debug)]
+pub struct RouterHealthMetrics {
+    /// Total routed requests since startup.
+    pub requests_total: u64,
+    /// Retry attempts performed by the router.
+    pub retries_total: u64,
+    /// Replica fallbacks performed for writes.
+    pub replica_fallback_total: u64,
+    /// Currently open circuit breakers.
+    pub open_breakers: usize,
+    /// Detailed breaker state for non-closed breakers.
+    pub breakers: Vec<RouterBreakerMetrics>,
+}
+
+/// Per-node breaker status entry.
+#[derive(Serialize, ToSchema, Clone, Debug)]
+pub struct RouterBreakerMetrics {
+    /// Node identifier.
+    pub node_id: String,
+    /// Breaker state label (`open` or `half_open`).
+    pub state: String,
+    /// Optional milliseconds until the breaker attempts recovery.
+    pub retry_after_ms: Option<u64>,
+}
+
 /// Enhanced health response with per-space metrics.
 #[derive(Serialize, ToSchema, Clone, Debug)]
 pub struct HealthResponse {
@@ -154,6 +221,8 @@ pub struct HealthResponse {
     pub checks: Vec<serde_json::Value>,
     /// Per-space health metrics
     pub spaces: Vec<SpaceHealthMetrics>,
+    /// Optional cluster membership snapshot
+    pub cluster: Option<ClusterHealthMetrics>,
 }
 
 impl ApiState {
@@ -166,12 +235,17 @@ impl ApiState {
         metrics: Arc<MetricsRegistry>,
         auto_tuner: Arc<SpreadingAutoTuner>,
         shutdown_tx: Arc<tokio::sync::watch::Sender<bool>>,
+        cluster: Option<Arc<ClusterState>>,
+        router: Option<Arc<ClusterRouter>>,
+        partition_confidence: Option<Arc<PartitionAwareConfidence>>,
     ) -> Self {
         let memory_service = Arc::new(MemoryService::new(
             Arc::clone(&store),
             Arc::clone(&metrics),
             Arc::clone(&registry),
             default_space.clone(),
+            cluster.clone(),
+            router.clone(),
         ));
 
         // Create streaming infrastructure
@@ -188,6 +262,81 @@ impl ApiState {
             shutdown_tx,
             session_manager,
             observation_queue,
+            cluster,
+            router,
+            partition_confidence,
+        }
+    }
+
+    /// Determine how writes should be routed for the given memory space.
+    pub fn route_for_write(&self, space_id: &MemorySpaceId) -> Result<RouteDecision, ApiError> {
+        if let Some(router) = &self.router {
+            return router.route_write(space_id).map_err(ApiError::from);
+        }
+
+        if let Some(cluster) = &self.cluster {
+            return cluster.route_for_space(space_id).map_err(ApiError::from);
+        }
+
+        Ok(RouteDecision::Local)
+    }
+
+    /// Ensure the current node can accept writes for the requested memory space.
+    pub fn ensure_cluster_accepts_writes(&self, space_id: &MemorySpaceId) -> Result<(), ApiError> {
+        if let Some(cluster) = &self.cluster {
+            let stats = cluster.membership.stats();
+            if stats.suspect > 0 || stats.dead > 0 {
+                return Err(ApiError::SystemError(
+                    "cluster membership is unstable; retry after gossip converges".into(),
+                ));
+            }
+            if let PartitionState::Partitioned {
+                reachable_nodes,
+                total_nodes,
+                ..
+            } = cluster.partition_state()
+            {
+                return Err(ApiError::from(ClusterError::Partitioned {
+                    reachable_nodes,
+                    total_nodes,
+                }));
+            }
+            cluster
+                .ensure_local_primary(space_id)
+                .map_err(ApiError::from)
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Apply the partition-aware penalty to a confidence value if configured.
+    #[must_use]
+    pub fn adjusted_confidence(&self, base: f32) -> f32 {
+        self.partition_confidence
+            .as_ref()
+            .map_or(base, |adjuster| adjuster.adjust_confidence(base))
+    }
+}
+
+impl From<RouterHealthSnapshot> for RouterHealthMetrics {
+    fn from(snapshot: RouterHealthSnapshot) -> Self {
+        Self {
+            requests_total: snapshot.requests_total,
+            retries_total: snapshot.retries_total,
+            replica_fallback_total: snapshot.replica_fallback_total,
+            open_breakers: snapshot.open_breakers,
+            breakers: snapshot
+                .breakers
+                .into_iter()
+                .map(|breaker| RouterBreakerMetrics {
+                    node_id: breaker.node_id,
+                    state: match breaker.state {
+                        RouterBreakerState::Open => "open".to_string(),
+                        RouterBreakerState::HalfOpen => "half_open".to_string(),
+                    },
+                    retry_after_ms: breaker.retry_after_ms,
+                })
+                .collect(),
         }
     }
 }
@@ -207,6 +356,337 @@ fn embedding_to_array(embedding: &[f32]) -> Result<[f32; 768], ApiError> {
     let mut array = [0.0f32; 768];
     array.copy_from_slice(embedding);
     Ok(array)
+}
+
+fn build_remember_response(
+    memory_id: impl AsRef<str>,
+    observed_at: DateTime<Utc>,
+    stored_at: DateTime<Utc>,
+    actual_confidence: f32,
+    auto_links: Vec<AutoLink>,
+    auto_link_enabled: bool,
+    confidence_reasoning: String,
+) -> RememberResponse {
+    let memory_id = memory_id.as_ref();
+    RememberResponse {
+        memory_id: memory_id.to_string(),
+        storage_confidence: ConfidenceInfo {
+            value: actual_confidence,
+            category: confidence_category(actual_confidence).to_string(),
+            reasoning: confidence_reasoning,
+        },
+        consolidation_state: format!("{:?}", ConsolidationState::Recent),
+        observed_at,
+        stored_at,
+        links: Some(RememberLinks {
+            consolidation: Some("/api/v1/consolidations".to_string()),
+        }),
+        auto_links,
+        system_message: build_system_message(memory_id, actual_confidence, auto_link_enabled),
+    }
+}
+
+fn build_episode_response(
+    episode_id: impl AsRef<str>,
+    observed_at: DateTime<Utc>,
+    stored_at: DateTime<Utc>,
+    actual_confidence: f32,
+    confidence_reasoning: String,
+) -> RememberResponse {
+    let episode_id = episode_id.as_ref();
+    RememberResponse {
+        memory_id: episode_id.to_string(),
+        storage_confidence: ConfidenceInfo {
+            value: actual_confidence,
+            category: confidence_category(actual_confidence).to_string(),
+            reasoning: confidence_reasoning,
+        },
+        consolidation_state: format!("{:?}", ConsolidationState::Recent),
+        observed_at,
+        stored_at,
+        links: Some(RememberLinks {
+            consolidation: Some("/api/v1/consolidations".to_string()),
+        }),
+        auto_links: vec![],
+        system_message: format!(
+            "Episode '{episode_id}' successfully encoded with {actual_confidence:.2} activation. Rich episodes consolidate better over time."
+        ),
+    }
+}
+
+fn build_system_message(
+    memory_id: &str,
+    actual_confidence: f32,
+    auto_link_enabled: bool,
+) -> String {
+    format!(
+        "Memory '{}' successfully encoded with {:.2} activation. {}",
+        memory_id,
+        actual_confidence,
+        if auto_link_enabled {
+            "Automatic linking enabled - similar memories will be connected during consolidation."
+        } else {
+            "Consider enabling auto-linking to discover related memories."
+        }
+    )
+}
+
+#[derive(Clone)]
+enum RecallCueSpec {
+    Semantic {
+        query: String,
+        threshold: f32,
+    },
+    Embedding {
+        threshold: f32,
+        vector: Vec<f32>,
+        array: Box<[f32; 768]>,
+    },
+}
+
+impl RecallCueSpec {
+    fn from_query(params: &RecallQuery) -> Result<Self, ApiError> {
+        let threshold = params.threshold.unwrap_or(0.5);
+        if let Some(query) = &params.query {
+            return Ok(Self::Semantic {
+                query: query.clone(),
+                threshold,
+            });
+        }
+        if let Some(embedding_str) = &params.embedding {
+            let vector: Vec<f32> = serde_json::from_str(embedding_str).map_err(|_| {
+                ApiError::InvalidInput(
+                    "Invalid embedding format. Expected JSON array of floats.".to_string(),
+                )
+            })?;
+            let array = embedding_to_array(&vector)?;
+            return Ok(Self::Embedding {
+                threshold,
+                vector,
+                array: Box::new(array),
+            });
+        }
+        Err(ApiError::InvalidInput(
+            "Recall requires either a text query or embedding vector. Memory retrieval needs a cue - what are you trying to remember?"
+                .to_string(),
+        ))
+    }
+
+    fn to_core_cue(&self) -> CoreCue {
+        match self {
+            Self::Semantic { query, threshold } => CoreCue::semantic(
+                "http_query".to_string(),
+                query.clone(),
+                CoreConfidence::exact(*threshold),
+            ),
+            Self::Embedding {
+                array, threshold, ..
+            } => CoreCue::embedding(
+                "http_embedding_query".to_string(),
+                **array,
+                CoreConfidence::exact(*threshold),
+            ),
+        }
+    }
+
+    fn to_proto_cue(&self) -> ProtoCue {
+        match self {
+            Self::Semantic { query, threshold } => ProtoCue {
+                id: "http_query".to_string(),
+                cue_type: Some(ProtoCueType::Semantic(ProtoSemanticCue {
+                    query: query.clone(),
+                    fuzzy_threshold: 0.5,
+                    required_tags: vec![],
+                    excluded_tags: vec![],
+                })),
+                threshold: Some(Confidence::new(*threshold)),
+                max_results: 0,
+                spread_activation: false,
+                activation_decay: 0.0,
+            },
+            Self::Embedding {
+                vector, threshold, ..
+            } => ProtoCue {
+                id: "http_embedding_query".to_string(),
+                cue_type: Some(ProtoCueType::Embedding(ProtoEmbeddingCue {
+                    vector: vector.clone(),
+                    similarity_threshold: 0.0,
+                })),
+                threshold: Some(Confidence::new(*threshold)),
+                max_results: 0,
+                spread_activation: false,
+                activation_decay: 0.0,
+            },
+        }
+    }
+}
+
+fn build_query_analysis(params: &RecallQuery, effective_mode: RecallMode) -> QueryAnalysis {
+    let understood_intent = params.query.as_ref().map_or_else(
+        || {
+            if params.embedding.is_some() {
+                "Embedding-based recall request".to_string()
+            } else {
+                "Recall request without textual cue".to_string()
+            }
+        },
+        std::clone::Clone::clone,
+    );
+
+    let search_strategy = match (effective_mode, params.embedding.is_some()) {
+        (RecallMode::Similarity, true) => "Vector similarity with contextual dilation".to_string(),
+        (RecallMode::Similarity, false) => "Similarity-first recall using lexical cues".to_string(),
+        (RecallMode::Spreading, _) => "Spreading activation across cognitive graph".to_string(),
+        (RecallMode::Hybrid, _) => "Hybrid recall blending similarity and spreading".to_string(),
+    };
+
+    let cognitive_load = if params.max_results.unwrap_or(10) > 20 {
+        "Medium".to_string()
+    } else {
+        "Low".to_string()
+    };
+
+    let mut suggestions = Vec::new();
+    if !params.trace_activation.unwrap_or(false)
+        && matches!(effective_mode, RecallMode::Spreading | RecallMode::Hybrid)
+    {
+        suggestions.push("Set trace_activation=true to inspect activation flow".to_string());
+    }
+    if params.max_results.unwrap_or(10) < 10 {
+        suggestions.push("Increase max_results to surface broader associations".to_string());
+    }
+    if suggestions.is_empty() {
+        suggestions.push("Apply tag filters to focus on specific episodic clusters".to_string());
+    }
+
+    QueryAnalysis {
+        understood_intent,
+        search_strategy,
+        cognitive_load,
+        suggestions,
+    }
+}
+
+fn build_proto_recall_request(
+    space_id: &MemorySpaceId,
+    params: &RecallQuery,
+    cue: &RecallCueSpec,
+) -> ProtoRecallRequest {
+    ProtoRecallRequest {
+        memory_space_id: space_id.as_str().to_string(),
+        cue: Some(cue.to_proto_cue()),
+        max_results: params.max_results.unwrap_or(10) as i32,
+        include_metadata: params.include_metadata.unwrap_or(false),
+        trace_activation: params.trace_activation.unwrap_or(false),
+    }
+}
+
+fn proto_memory_type_label(value: i32) -> &'static str {
+    match MemoryType::try_from(value).unwrap_or(MemoryType::Unspecified) {
+        MemoryType::Episodic => "Episodic",
+        MemoryType::Procedural => "Procedural",
+        MemoryType::Semantic => "Semantic",
+        _ => "Unspecified",
+    }
+}
+
+fn timestamp_to_datetime(ts: &Timestamp) -> Option<DateTime<Utc>> {
+    Utc.timestamp_opt(ts.seconds, ts.nanos as u32).single()
+}
+
+fn memory_result_from_proto(memory: &Memory) -> MemoryResult {
+    let confidence_value = memory
+        .confidence
+        .as_ref()
+        .map_or(0.5, |confidence| confidence.value);
+    let confidence_reasoning = memory
+        .confidence
+        .as_ref()
+        .and_then(|confidence| {
+            if confidence.reasoning.is_empty() {
+                None
+            } else {
+                Some(confidence.reasoning.clone())
+            }
+        })
+        .unwrap_or_else(|| "Routed recall confidence estimate".to_string());
+
+    MemoryResult {
+        id: memory.id.clone(),
+        content: memory.content.clone(),
+        confidence: build_confidence_info(confidence_value, confidence_reasoning),
+        activation_level: memory.activation,
+        similarity_score: memory.activation,
+        retrieval_path: Some("Remote routed recall".to_string()),
+        observed_at: memory
+            .created_at
+            .as_ref()
+            .and_then(timestamp_to_datetime)
+            .unwrap_or_else(Utc::now),
+        last_access: memory.last_access.as_ref().and_then(timestamp_to_datetime),
+        tags: memory.tags.clone(),
+        memory_type: proto_memory_type_label(memory.memory_type).to_string(),
+        relevance_explanation: format!(
+            "Activation {:.2} reported by remote primary",
+            memory.activation
+        ),
+    }
+}
+
+fn recall_response_from_proto(
+    proto: &ProtoRecallResponse,
+    served_by: Option<&str>,
+    params: &RecallQuery,
+    start_time: std::time::Instant,
+) -> RecallResponse {
+    let mut vivid = Vec::new();
+    let mut associated = Vec::new();
+    for memory in proto.memories.iter().take(params.max_results.unwrap_or(10)) {
+        let result = memory_result_from_proto(memory);
+        if result.confidence.value > 0.7 {
+            vivid.push(result);
+        } else {
+            associated.push(result);
+        }
+    }
+
+    let processing_time = u64::try_from(start_time.elapsed().as_millis()).unwrap_or(u64::MAX);
+    let recall_confidence = proto.recall_confidence.as_ref().map_or_else(
+        || build_confidence_info(0.75, "Remote router recall"),
+        |confidence| build_confidence_info(confidence.value, confidence.reasoning.clone()),
+    );
+
+    let metadata = if params.include_metadata.unwrap_or(false) {
+        proto.metadata.as_ref().map(|meta| RecallMetadata {
+            total_memories_searched: meta.total_activated as usize,
+            activation_spread_hops: meta.activation_path.len(),
+            processing_time_ms: meta.recall_time_ms as u64,
+            memory_system_load: format!("{} activations", meta.avg_activation),
+        })
+    } else {
+        None
+    };
+
+    let system_message = served_by.map_or_else(
+        || format!("Recall completed in {processing_time}ms via distributed router."),
+        |node| {
+            format!(
+                "Recall completed via node {node} in {processing_time}ms. Results merged from replica routing.",
+            )
+        },
+    );
+
+    RecallResponse {
+        memories: RecallResults {
+            vivid,
+            associated,
+            reconstructed: Vec::new(),
+        },
+        recall_confidence,
+        query_analysis: build_query_analysis(params, RecallMode::Similarity),
+        metadata,
+        system_message,
+    }
 }
 
 fn parse_recall_mode(value: &str) -> Result<RecallMode, ApiError> {
@@ -427,6 +907,15 @@ pub async fn create_memory_space(
 ) -> Result<impl IntoResponse, ApiError> {
     let space_id = MemorySpaceId::try_from(payload.id.as_str())
         .map_err(|err| ApiError::from(MemorySpaceError::from(err)))?;
+    match state.route_for_write(&space_id)? {
+        RouteDecision::Local => {}
+        RouteDecision::Remote { primary, .. } => {
+            return Err(ApiError::SystemError(format!(
+                "Memory space '{}' is owned by node '{}'. Target that node or enable distributed routing.",
+                space_id, primary.id
+            )));
+        }
+    }
 
     let handle = state
         .registry
@@ -496,7 +985,7 @@ fn health_check_to_json(check: &HealthCheck) -> serde_json::Value {
 // ================================================================================================
 
 /// Request to remember a new memory with cognitive-friendly fields
-#[derive(Debug, Deserialize, ToSchema, IntoParams)]
+#[derive(Debug, Deserialize, Serialize, ToSchema, IntoParams, Clone)]
 pub struct RememberMemoryRequest {
     /// Human-readable identifier for this memory
     pub id: Option<String>,
@@ -523,7 +1012,7 @@ pub struct RememberMemoryRequest {
 }
 
 /// Request to remember an episode with contextual information
-#[derive(Debug, Deserialize, ToSchema, IntoParams)]
+#[derive(Debug, Deserialize, ToSchema, IntoParams, Clone)]
 pub struct RememberEpisodeRequest {
     /// Human-readable identifier for this episode
     pub id: Option<String>,
@@ -1098,20 +1587,18 @@ pub async fn remember_memory(
     // Generate ID if not provided
     let memory_id = request
         .id
+        .clone()
         .unwrap_or_else(|| format!("mem_{}", &uuid::Uuid::new_v4().to_string()[..8]));
 
     // Create embedding if not provided (placeholder - would use actual embedding service)
-    let embedding_vec = request.embedding.unwrap_or_else(|| {
-        // Simple content-based embedding placeholder
-        vec![0.5; 768] // Standard embedding dimension
-    });
-
+    let embedding_vec = request.embedding.clone().unwrap_or_else(|| vec![0.5; 768]);
     let embedding_array = embedding_to_array(&embedding_vec)?;
 
     // Create confidence with reasoning
     let confidence_value = request.confidence.unwrap_or(0.7);
     let confidence_reasoning = request
         .confidence_reasoning
+        .clone()
         .unwrap_or_else(|| "Default confidence for user-provided memory".to_string());
     let confidence = Confidence::new(confidence_value).with_reasoning(confidence_reasoning.clone());
 
@@ -1125,17 +1612,23 @@ pub async fn remember_memory(
     };
 
     // Create memory object for response
-    let memory = Memory::new(memory_id.clone(), embedding_vec)
+    let memory = Memory::new(memory_id.clone(), embedding_vec.clone())
         .with_content(&request.content)
         .with_confidence(confidence)
         .with_type(memory_type);
 
     // Add tags if provided
-    let _memory = if let Some(tags) = request.tags {
-        tags.into_iter().fold(memory, engram_proto::Memory::add_tag)
+    let _memory = if let Some(tags) = request.tags.as_ref() {
+        tags.iter()
+            .cloned()
+            .fold(memory, engram_proto::Memory::add_tag)
     } else {
         memory
     };
+
+    let auto_link_enabled = request.auto_link.unwrap_or(false);
+    let link_threshold = request.link_threshold.unwrap_or(0.7);
+    let observed_at = request.timestamp.unwrap_or_else(Utc::now);
 
     // Extract memory space ID with fallback to default
     let space_id = extract_memory_space_id(
@@ -1145,6 +1638,81 @@ pub async fn remember_memory(
         &state.default_space,
     )?;
     Span::current().record("memory_space_id", space_id.as_str());
+
+    let route = state.route_for_write(&space_id)?;
+
+    if let RouteDecision::Remote { .. } = route {
+        let router = state
+            .router
+            .as_ref()
+            .ok_or_else(|| ApiError::SystemError("cluster router unavailable".into()))?;
+
+        let mut proto_memory = Memory::new(memory_id.clone(), embedding_vec.clone())
+            .with_content(request.content.clone())
+            .with_confidence(
+                Confidence::new(confidence_value).with_reasoning(confidence_reasoning.clone()),
+            )
+            .with_type(match request.memory_type.as_deref() {
+                Some("episodic") => MemoryType::Episodic,
+                Some("procedural") => MemoryType::Procedural,
+                _ => MemoryType::Semantic,
+            });
+
+        if let Some(tags) = &request.tags {
+            for tag in tags {
+                proto_memory = proto_memory.add_tag(tag.clone());
+            }
+        }
+
+        let proto_request = ProtoRememberRequest {
+            memory_space_id: space_id.as_str().to_string(),
+            memory_type: Some(remember_request::MemoryType::Memory(proto_memory)),
+            auto_link: auto_link_enabled,
+            link_threshold,
+        };
+
+        let (remote_response, _) = router
+            .proxy_write(&space_id, &route, proto_request, router.default_deadline())
+            .await
+            .map_err(ApiError::from)?;
+
+        let actual_confidence = remote_response
+            .storage_confidence
+            .as_ref()
+            .map_or(confidence_value, |c| c.value);
+        let reasoning_override = remote_response
+            .storage_confidence
+            .as_ref()
+            .and_then(|c| {
+                if c.reasoning.is_empty() {
+                    None
+                } else {
+                    Some(c.reasoning.clone())
+                }
+            })
+            .unwrap_or_else(|| confidence_reasoning.clone());
+
+        let auto_links = if auto_link_enabled {
+            vec![AutoLink {
+                target_memory_id: "example_linked_memory".to_string(),
+                similarity_score: link_threshold + 0.1,
+                link_reason: "Semantic similarity detected in content patterns".to_string(),
+            }]
+        } else {
+            vec![]
+        };
+
+        let response = build_remember_response(
+            &memory_id,
+            observed_at,
+            Utc::now(),
+            actual_confidence,
+            auto_links,
+            auto_link_enabled,
+            reasoning_override,
+        );
+        return Ok((StatusCode::CREATED, Json(response)));
+    }
 
     // Get space-specific store handle from registry
     let handle = state
@@ -1160,7 +1728,6 @@ pub async fn remember_memory(
         .map_err(ApiError::SystemError)?;
 
     // Store in MemoryStore as an episode
-    let observed_at = request.timestamp.unwrap_or_else(Utc::now);
     let episode = Episode::new(
         memory_id.clone(),
         observed_at,
@@ -1185,13 +1752,16 @@ pub async fn remember_memory(
         )));
     }
 
+    if let Some(cluster) = &state.cluster {
+        cluster.record_local_write(&space_id).await;
+    }
+
     // Create auto-links if enabled
-    let auto_links = if request.auto_link.unwrap_or(false) {
-        let threshold = request.link_threshold.unwrap_or(0.7);
+    let auto_links = if auto_link_enabled {
         // Placeholder for auto-linking logic
         vec![AutoLink {
             target_memory_id: "example_linked_memory".to_string(),
-            similarity_score: threshold + 0.1,
+            similarity_score: link_threshold + 0.1,
             link_reason: "Semantic similarity detected in content patterns".to_string(),
         }]
     } else {
@@ -1200,31 +1770,15 @@ pub async fn remember_memory(
 
     let stored_at = Utc::now();
     let actual_confidence = store_result.activation.value();
-    let response = RememberResponse {
-        memory_id: memory_id.clone(),
-        storage_confidence: ConfidenceInfo {
-            value: actual_confidence,
-            category: confidence_category(actual_confidence).to_string(),
-            reasoning: confidence_reasoning,
-        },
-        consolidation_state: format!("{:?}", ConsolidationState::Recent),
+    let response = build_remember_response(
+        memory_id.clone(),
         observed_at,
         stored_at,
-        links: Some(RememberLinks {
-            consolidation: Some("/api/v1/consolidations".to_string()),
-        }),
+        actual_confidence,
         auto_links,
-        system_message: format!(
-            "Memory '{}' successfully encoded with {:.2} activation. {}",
-            memory_id,
-            actual_confidence,
-            if request.auto_link.unwrap_or(false) {
-                "Automatic linking enabled - similar memories will be connected during consolidation."
-            } else {
-                "Consider enabling auto-linking to discover related memories."
-            }
-        ),
-    };
+        auto_link_enabled,
+        confidence_reasoning,
+    );
 
     info!("Successfully stored memory: {}", memory_id);
     Ok((StatusCode::CREATED, Json(response)))
@@ -1259,6 +1813,10 @@ pub async fn remember_episode(
         ));
     }
 
+    let embedding_vec = request.embedding.clone().unwrap_or_else(|| vec![0.6; 768]);
+    let embedding_array = embedding_to_array(&embedding_vec)?;
+    let auto_link_enabled = request.auto_link.unwrap_or(false);
+
     // Extract memory space from request (header > query > body > default)
     let space_id = extract_memory_space_id(
         &headers,
@@ -1267,6 +1825,73 @@ pub async fn remember_episode(
         &state.default_space,
     )?;
     Span::current().record("memory_space_id", space_id.as_str());
+
+    let route = state.route_for_write(&space_id)?;
+
+    // Generate ID if not provided
+    let episode_id = request
+        .id
+        .clone()
+        .unwrap_or_else(|| format!("ep_{}", &uuid::Uuid::new_v4().to_string()[..8]));
+    let importance = request.importance.unwrap_or(0.5).clamp(0.0, 1.0);
+    let encoding_confidence = CoreConfidence::exact(importance);
+
+    if let RouteDecision::Remote { .. } = route {
+        let router = state
+            .router
+            .as_ref()
+            .ok_or_else(|| ApiError::SystemError("cluster router unavailable".into()))?;
+
+        let mut proto_episode = ProtoEpisode::new(
+            episode_id.clone(),
+            request.when,
+            request.what.clone(),
+            embedding_vec.clone(),
+        )
+        .with_importance(importance);
+
+        if let Some(location) = &request.where_location {
+            proto_episode = proto_episode.at_location(location.clone());
+        }
+        if let Some(participants) = &request.who {
+            proto_episode = proto_episode.with_people(participants.clone());
+        }
+
+        let proto_request = ProtoRememberRequest {
+            memory_space_id: space_id.as_str().to_string(),
+            memory_type: Some(remember_request::MemoryType::Episode(proto_episode)),
+            auto_link: auto_link_enabled,
+            link_threshold: 0.7,
+        };
+
+        let (remote_response, _) = router
+            .proxy_write(&space_id, &route, proto_request, router.default_deadline())
+            .await
+            .map_err(ApiError::from)?;
+
+        let actual_confidence = remote_response
+            .storage_confidence
+            .as_ref()
+            .map_or(importance, |c| c.value);
+        let reasoning = remote_response
+            .storage_confidence
+            .as_ref()
+            .and_then(|c| if c.reasoning.is_empty() { None } else { Some(c.reasoning.clone()) })
+            .unwrap_or_else(|| {
+                format!(
+                    "Episodic memory stored with activation {actual_confidence:.2}, rich context aids consolidation"
+                )
+            });
+
+        let response = build_episode_response(
+            episode_id.clone(),
+            request.when,
+            Utc::now(),
+            actual_confidence,
+            reasoning,
+        );
+        return Ok((StatusCode::CREATED, Json(response)));
+    }
 
     // Get space-specific store handle from registry
     let handle = state.registry.create_or_get(&space_id).await?;
@@ -1278,18 +1903,6 @@ pub async fn remember_episode(
             "Internal error: {e}. This indicates a registry bug - please report."
         ))
     })?;
-
-    // Generate ID if not provided
-    let episode_id = request
-        .id
-        .unwrap_or_else(|| format!("ep_{}", &uuid::Uuid::new_v4().to_string()[..8]));
-
-    // Create embedding if not provided
-    let embedding_vec = request.embedding.unwrap_or_else(|| vec![0.6; 768]);
-    let embedding_array = embedding_to_array(&embedding_vec)?;
-
-    let encoding_confidence =
-        CoreConfidence::exact(request.importance.unwrap_or(0.5).clamp(0.0, 1.0));
 
     let builder = CoreEpisodeBuilder::new()
         .id(episode_id.clone())
@@ -1304,7 +1917,7 @@ pub async fn remember_episode(
         builder
     };
 
-    let builder = if let Some(participants) = request.who {
+    let builder = if let Some(participants) = request.who.clone() {
         builder.who(participants)
     } else {
         builder
@@ -1329,28 +1942,21 @@ pub async fn remember_episode(
         )));
     }
 
+    if let Some(cluster) = &state.cluster {
+        cluster.record_local_write(&space_id).await;
+    }
+
     let actual_confidence = store_result.activation.value();
     let stored_at = Utc::now();
-    let response = RememberResponse {
-        memory_id: episode_id.clone(),
-        storage_confidence: ConfidenceInfo {
-            value: actual_confidence,
-            category: confidence_category(actual_confidence).to_string(),
-            reasoning: format!(
-                "Episodic memory stored with activation {actual_confidence:.2}, rich context aids consolidation"
-            ),
-        },
-        consolidation_state: format!("{:?}", ConsolidationState::Recent),
-        observed_at: request.when,
+    let response = build_episode_response(
+        episode_id.clone(),
+        request.when,
         stored_at,
-        links: Some(RememberLinks {
-            consolidation: Some("/api/v1/consolidations".to_string()),
-        }),
-        auto_links: vec![],
-        system_message: format!(
-            "Episode '{episode_id}' successfully encoded with {actual_confidence:.2} activation. Rich episodes consolidate better over time."
+        actual_confidence,
+        format!(
+            "Episodic memory stored with activation {actual_confidence:.2}, rich context aids consolidation"
         ),
-    };
+    );
 
     info!("Successfully stored episode: {}", episode_id);
     Ok((StatusCode::CREATED, Json(response)))
@@ -1400,46 +2006,35 @@ pub async fn recall_memories(
         ))
     })?;
 
-    // Validate query
-    if params.query.is_none() && params.embedding.is_none() {
-        return Err(ApiError::InvalidInput(
-            "Recall requires either a text query or embedding vector. Memory retrieval needs a cue - what are you trying to remember?".to_string()
-        ));
-    }
+    let cue_spec = RecallCueSpec::from_query(&params)?;
+    let cue = cue_spec.to_core_cue();
 
-    // Parse embedding if provided
-    let embedding_vector = if let Some(emb_str) = &params.embedding {
-        match serde_json::from_str::<Vec<f32>>(emb_str) {
-            Ok(vec) => Some(vec),
-            Err(_) => {
-                return Err(ApiError::InvalidInput(
-                    "Invalid embedding format. Expected JSON array of floats.".to_string(),
-                ));
-            }
+    let remote_plan = if let Some(router) = &state.router {
+        let plan = router
+            .route_read(&space_id, ReadRoutingStrategy::NearestReplica)
+            .map_err(ApiError::from)?;
+        match plan {
+            ReadPlan::Local => None,
+            other @ ReadPlan::Remote(_) => Some((Arc::clone(router), other)),
         }
     } else {
         None
     };
 
-    // Create search cue
-    let cue = if let Some(query) = &params.query {
-        CoreCue::semantic(
-            "http_query".to_string(),
-            query.clone(),
-            CoreConfidence::exact(params.threshold.unwrap_or(0.5)),
-        )
-    } else if let Some(embedding) = embedding_vector {
-        let embedding_array: [f32; 768] = embedding_to_array(&embedding)?;
-        CoreCue::embedding(
-            "http_embedding_query".to_string(),
-            embedding_array,
-            CoreConfidence::exact(params.threshold.unwrap_or(0.5)),
-        )
-    } else {
-        return Err(ApiError::InvalidInput(
-            "No valid search cue provided".to_string(),
-        ));
-    };
+    if let Some((router, plan)) = remote_plan {
+        let proto_request = build_proto_recall_request(&space_id, &params, &cue_spec);
+        let (proto_response, served_by) = router
+            .proxy_read(&space_id, plan, proto_request, router.default_deadline())
+            .await
+            .map_err(ApiError::from)?;
+        let response = recall_response_from_proto(
+            &proto_response,
+            served_by.as_ref().map(|node| node.id.as_str()),
+            &params,
+            start_time,
+        );
+        return Ok(Json(response));
+    }
 
     // Determine recall mode override if provided
     let requested_mode = if let Some(mode_str) = &params.mode {
@@ -1546,59 +2141,7 @@ pub async fn recall_memories(
                 }
             },
         },
-        query_analysis: {
-            let understood_intent = if let Some(query) = &params.query {
-                query.clone()
-            } else if params.embedding.is_some() {
-                "Embedding-based recall request".to_string()
-            } else {
-                "Recall request without textual cue".to_string()
-            };
-
-            let search_strategy = match (effective_mode, params.embedding.is_some()) {
-                (RecallMode::Similarity, true) => {
-                    "Vector similarity with contextual dilation".to_string()
-                }
-                (RecallMode::Similarity, false) => {
-                    "Similarity-first recall using lexical cues".to_string()
-                }
-                (RecallMode::Spreading, _) => {
-                    "Spreading activation across cognitive graph".to_string()
-                }
-                (RecallMode::Hybrid, _) => {
-                    "Hybrid recall blending similarity and spreading".to_string()
-                }
-            };
-
-            let cognitive_load = if params.max_results.unwrap_or(10) > 20 {
-                "Medium".to_string()
-            } else {
-                "Low".to_string()
-            };
-
-            let mut suggestions = Vec::new();
-            if !params.trace_activation.unwrap_or(false)
-                && matches!(effective_mode, RecallMode::Spreading | RecallMode::Hybrid)
-            {
-                suggestions
-                    .push("Set trace_activation=true to inspect activation flow".to_string());
-            }
-            if params.max_results.unwrap_or(10) < 10 {
-                suggestions
-                    .push("Increase max_results to surface broader associations".to_string());
-            }
-            if suggestions.is_empty() {
-                suggestions
-                    .push("Apply tag filters to focus on specific episodic clusters".to_string());
-            }
-
-            QueryAnalysis {
-                understood_intent,
-                search_strategy,
-                cognitive_load,
-                suggestions,
-            }
-        },
+        query_analysis: build_query_analysis(&params, effective_mode),
         metadata: if params.include_metadata.unwrap_or(false) {
             Some(RecallMetadata {
                 total_memories_searched: total_memories,
@@ -2687,11 +3230,30 @@ pub async fn system_health(State(state): State<ApiState>) -> Result<impl IntoRes
 
     let checks: Vec<_> = report.checks.iter().map(health_check_to_json).collect();
 
+    let router_metrics = state
+        .router
+        .as_ref()
+        .map(|router| RouterHealthMetrics::from(router.health_snapshot()));
+
+    let cluster_snapshot = state.cluster.as_ref().map(|cluster| {
+        let cluster_stats = cluster.membership.stats();
+        ClusterHealthMetrics {
+            node_id: cluster.node_id.clone(),
+            alive: cluster_stats.alive,
+            suspect: cluster_stats.suspect,
+            dead: cluster_stats.dead,
+            left: cluster_stats.left,
+            total: cluster_stats.total(),
+            router: router_metrics.clone(),
+        }
+    });
+
     let response = HealthResponse {
         status: format_health_status(report.status).to_string(),
         timestamp: Utc::now().to_rfc3339(),
         checks,
         spaces: space_metrics,
+        cluster: cluster_snapshot,
     };
 
     let status_code = match overall_status {
@@ -2909,6 +3471,13 @@ pub enum ApiError {
     ConsolidationNotFound(String),
     /// Internal system error occurred
     SystemError(String),
+    /// Cluster temporarily unavailable.
+    ServiceUnavailable {
+        /// Error message surfaced to clients.
+        message: String,
+        /// Suggested retry interval in seconds.
+        retry_after: u64,
+    },
     /// Data validation failed
     ValidationError(String),
     /// Request timeout
@@ -3021,20 +3590,94 @@ impl ApiError {
     }
 }
 
+impl From<ClusterError> for ApiError {
+    fn from(err: ClusterError) -> Self {
+        match err {
+            ClusterError::NotPrimary {
+                space,
+                owner,
+                local,
+            } => Self::SystemError(format!(
+                "Memory space '{space}' is owned by node '{owner}'. Local node '{local}' refused \
+                 the write to prevent split-brain. Route the request to {owner} or enable the distributed router."
+            )),
+            ClusterError::InsufficientHealthyNodes {
+                required,
+                available,
+            } => Self::SystemError(format!(
+                "Cluster requires {required} healthy nodes for this write but only {available} are alive. \
+                     Wait for peers to recover or reduce cluster.replication.factor."
+            )),
+            ClusterError::Partitioned {
+                reachable_nodes,
+                total_nodes,
+            } => Self::ServiceUnavailable {
+                message: format!(
+                    "Cluster is partitioned from the majority (reachable {reachable_nodes} / {total_nodes}). Local-only operations are available until connectivity is restored."
+                ),
+                retry_after: 5,
+            },
+            ClusterError::SplitBrain { space_id, .. } => Self::SystemError(format!(
+                "Split-brain guard rejected writes for memory space '{space_id}'. Route requests to the elected primary once the partition heals."
+            )),
+            ClusterError::Configuration(reason) => Self::SystemError(reason),
+            other => Self::SystemError(other.to_string()),
+        }
+    }
+}
+
+impl From<RouterError> for ApiError {
+    fn from(err: RouterError) -> Self {
+        match err {
+            RouterError::CircuitOpen {
+                node_id,
+                retry_after,
+            } => Self::ServiceUnavailable {
+                message: format!(
+                    "Remote node '{node_id}' is overloaded; circuit breaker open. Retry once it recovers."
+                ),
+                retry_after: retry_after.as_secs().max(1),
+            },
+            RouterError::DeadlineExceeded { node_id } => Self::timeout(
+                format!("Remote routing to node '{node_id}' exceeded the configured deadline."),
+                "Reduce payload size or increase router.request_timeout_ms",
+                "engram config set router.request_timeout_ms 5000",
+            ),
+            RouterError::NoHealthyReplicas { space } => Self::ServiceUnavailable {
+                message: format!(
+                    "No healthy replicas available for memory space '{space}'. Wait for replication to catch up."
+                ),
+                retry_after: 5,
+            },
+            RouterError::RemoteRpc { node_id, status } => {
+                Self::SystemError(format!("Remote RPC via node '{node_id}' failed: {status}"))
+            }
+            RouterError::Connect { node_id, error } => {
+                Self::SystemError(format!("Failed to connect to node '{node_id}': {error}"))
+            }
+            RouterError::LocalOnly => Self::SystemError(
+                "Router attempted to handle a local-only request remotely.".to_string(),
+            ),
+        }
+    }
+}
+
 impl IntoResponse for ApiError {
     fn into_response(self) -> axum::response::Response {
-        let (status, error_code, message, educational_context) = match self {
+        let (status, error_code, message, educational_context, retry_after) = match self {
             Self::InvalidInput(msg) => (
                 StatusCode::BAD_REQUEST,
                 "INVALID_MEMORY_INPUT",
                 msg,
-                "Memory operations require well-formed inputs. Check the API documentation for proper request structure.".to_string()
+                "Memory operations require well-formed inputs. Check the API documentation for proper request structure.".to_string(),
+                None,
             ),
             Self::MemoryNotFound(id) => (
                 StatusCode::NOT_FOUND,
                 "MEMORY_NOT_FOUND", 
                 format!("Memory '{id}' not found in the cognitive graph"),
-                "Memory retrieval failed - the requested memory may have been forgotten or never encoded. Try a broader search query.".to_string()
+                "Memory retrieval failed - the requested memory may have been forgotten or never encoded. Try a broader search query.".to_string(),
+                None,
             ),
             Self::ConsolidationNotFound(id) => (
                 StatusCode::NOT_FOUND,
@@ -3042,54 +3685,70 @@ impl IntoResponse for ApiError {
                 format!("Consolidated belief '{id}' not available"),
                 "Consolidation snapshots are generated from current episodic memories. Ensure the contributing episodes still exist or regenerate the snapshot."
                     .to_string(),
+                None,
             ),
             Self::SystemError(msg) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "MEMORY_SYSTEM_ERROR",
                 msg,
-                "The memory system encountered an internal error. Cognitive processes may be temporarily disrupted.".to_string()
+                "The memory system encountered an internal error. Cognitive processes may be temporarily disrupted.".to_string(),
+                None,
+            ),
+            Self::ServiceUnavailable { message, retry_after } => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "MEMORY_CLUSTER_UNAVAILABLE",
+                message,
+                "Cluster partition detected. Route requests to a reachable primary or retry once connectivity returns.".to_string(),
+                Some(retry_after),
             ),
             Self::ValidationError(msg) => (
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "MEMORY_VALIDATION_ERROR",
                 msg,
-                "Memory content validation failed. Ensure your input follows cognitive encoding principles.".to_string()
+                "Memory content validation failed. Ensure your input follows cognitive encoding principles.".to_string(),
+                None,
             ),
             Self::Timeout { message, suggestion, example } => (
                 StatusCode::REQUEST_TIMEOUT,
                 "QUERY_TIMEOUT",
                 message,
-                format!("Suggestion: {}\nExample: {}", suggestion, example)
+                format!("Suggestion: {}\nExample: {}", suggestion, example),
+                None,
             ),
             Self::NotFound { message, suggestion, example } => (
                 StatusCode::NOT_FOUND,
                 "RESOURCE_NOT_FOUND",
                 message,
-                format!("Suggestion: {}\nExample: {}", suggestion, example)
+                format!("Suggestion: {}\nExample: {}", suggestion, example),
+                None,
             ),
             Self::BadRequest { message, suggestion, example } => (
                 StatusCode::BAD_REQUEST,
                 "BAD_REQUEST",
                 message,
-                format!("Suggestion: {}\nExample: {}", suggestion, example)
+                format!("Suggestion: {}\nExample: {}", suggestion, example),
+                None,
             ),
             Self::NotImplemented { message, suggestion, example } => (
                 StatusCode::NOT_IMPLEMENTED,
                 "NOT_IMPLEMENTED",
                 message,
-                format!("Suggestion: {}\nExample: {}", suggestion, example)
+                format!("Suggestion: {}\nExample: {}", suggestion, example),
+                None,
             ),
             Self::CompactionInProgress => (
                 StatusCode::CONFLICT,
                 "COMPACTION_IN_PROGRESS",
                 "Compaction operation already in progress".to_string(),
-                "A compaction operation is currently running. Wait for it to complete before triggering another.".to_string()
+                "A compaction operation is currently running. Wait for it to complete before triggering another.".to_string(),
+                None,
             ),
             Self::FeatureNotEnabled(msg) => (
                 StatusCode::NOT_IMPLEMENTED,
                 "FEATURE_NOT_ENABLED",
                 msg,
-                "This feature requires additional build flags. Consult the deployment documentation for details.".to_string()
+                "This feature requires additional build flags. Consult the deployment documentation for details.".to_string(),
+                None,
             ),
         };
 
@@ -3111,7 +3770,13 @@ impl IntoResponse for ApiError {
             }
         });
 
-        (status, Json(error_response)).into_response()
+        let mut response = (status, Json(error_response)).into_response();
+        if let Some(seconds) = retry_after
+            && let Ok(value) = HeaderValue::from_str(&seconds.to_string())
+        {
+            response.headers_mut().insert(RETRY_AFTER, value);
+        }
+        response
     }
 }
 
@@ -4109,6 +4774,14 @@ pub fn create_api_routes() -> Router<ApiState> {
             axum::routing::delete(delete_memory_by_id),
         )
         .route("/api/v1/memories/search", get(search_memories_rest))
+        // Cluster inspection
+        .route("/cluster/health", get(cluster_health))
+        .route("/cluster/nodes", get(cluster_nodes))
+        .route(
+            "/cluster/rebalance",
+            get(rebalance_status_handler).post(trigger_rebalance_handler),
+        )
+        .route("/cluster/migrate", post(migrate_space_handler))
         // System health and introspection
         .route("/api/v1/system/health", get(system_health))
         .route("/api/v1/system/spreading/config", get(spreading_config))

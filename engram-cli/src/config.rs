@@ -1,8 +1,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::router::RouterConfig;
 use anyhow::{Context, Result, anyhow};
-use engram_core::MemorySpaceId;
+use engram_core::{MemorySpaceId, cluster::config::ClusterConfig};
 use serde::{Deserialize, Serialize};
 
 const DEFAULT_CONFIG: &str = include_str!("../config/default.toml");
@@ -15,6 +16,12 @@ pub struct CliConfig {
     pub memory_spaces: MemorySpacesConfig,
     #[serde(default)]
     pub persistence: PersistenceConfig,
+    #[serde(default)]
+    pub cluster: ClusterConfig,
+    #[serde(default)]
+    pub server: ServerConfig,
+    #[serde(default)]
+    pub router: RouterConfig,
 }
 
 impl Default for CliConfig {
@@ -29,6 +36,9 @@ impl CliConfig {
         self.feature_flags.merge(&other.feature_flags);
         self.memory_spaces.merge(&other.memory_spaces);
         self.persistence.merge(&other.persistence);
+        self.cluster = other.cluster.clone();
+        self.server.merge(&other.server);
+        self.router = other.router.clone();
     }
 }
 
@@ -131,6 +141,29 @@ impl Default for PersistenceConfig {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ServerConfig {
+    pub http_bind: String,
+}
+
+impl Default for ServerConfig {
+    fn default() -> Self {
+        Self {
+            http_bind: "127.0.0.1".to_string(),
+        }
+    }
+}
+
+impl ServerConfig {
+    #[allow(clippy::missing_const_for_fn)]
+    fn merge(&mut self, other: &Self) {
+        if !other.http_bind.is_empty() {
+            self.http_bind.clone_from(&other.http_bind);
+        }
+    }
+}
+
 pub struct ConfigManager {
     path: PathBuf,
     config: CliConfig,
@@ -202,6 +235,7 @@ impl ConfigManager {
                     .collect::<Vec<_>>()
                     .join(","),
             ),
+            "server.http_bind" => Some(self.config.server.http_bind.clone()),
             _ => None,
         }
     }
@@ -229,6 +263,13 @@ impl ConfigManager {
                 } else {
                     spaces
                 };
+                Ok(())
+            }
+            "server.http_bind" => {
+                if value.trim().is_empty() {
+                    return Err(anyhow!("server.http_bind cannot be empty"));
+                }
+                self.config.server.http_bind = value.trim().to_string();
                 Ok(())
             }
             _ => Err(anyhow!("unknown configuration key: {key}")),

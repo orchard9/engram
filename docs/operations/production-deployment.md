@@ -120,6 +120,33 @@ docker stats engram
 
 ```
 
+#### Gossip advertise address
+
+Distributed deployments must ensure each node advertises a routable address for SWIM membership gossip. When `[cluster.network].swim_bind` uses `0.0.0.0`, set `[cluster.network].advertise_addr = "<host-ip>:7946"` in `engram.toml` or export `ENGRAM_CLUSTER_ADVERTISE_ADDR` before starting the server. Containerized clusters that rely on the static seed list can keep using the auto-detection fallback, but any environment tweaks (different networks, custom seeds, Kubernetes host networking) should explicitly set the advertise address so peers never learn `0.0.0.0`.
+
+#### Cluster config template
+
+The repository ships with `engram-cli/config/cluster.toml`, a ready-to-use template for multi-node deployments. Copy it to your config directory (typically `~/.config/engram/config.toml` or `$XDG_CONFIG_HOME/engram/config.toml`) and adjust the seed list plus `advertise_addr` for your environment. The template keeps single-node defaults in `config/default.toml`, so you can layer the cluster file on top without rewriting every setting.
+
+#### Placement and rebalance controls
+
+The `[cluster.replication]` section now exposes jump-hash and diversity knobs to keep assignments stable when nodes join or leave. `jump_buckets` controls how many virtual buckets the planner hashes through (higher values further smooth reassignments), while `rack_penalty` and `zone_penalty` weight the rendezvous scores so that replicas prefer distinct racks/zones before falling back to the next-best candidate.
+
+During operations you can inspect and steer the rebalance coordinator without leaving the HTTP API:
+
+- `GET /cluster/rebalance` returns cached assignment counts per node plus the most recent migration plans.
+- `POST /cluster/rebalance` rescans all cached spaces and queues migrations for any that need to move to a new primary.
+
+#### Replication monitoring
+
+- `/cluster/health` now includes a `replication` block summarizing each `(space, replica)` pair. The API exposes the local and replicated sequence plus the current lag so you can spot slow followers.
+- `engram status --json` surfaces the same data for CLI workflows; look for replicas whose lag exceeds the configured `cluster.replication.lag_threshold`.
+- The gRPC service exposes `ApplyReplicationBatch` and `GetReplicationStatus` for automation. Operators normally won't call them directly—the runtime streams batches automatically—but they are useful for integration tests and observability tooling.
+- Tune `[cluster.replication]` in `config.toml` (batch size, compression, lag threshold) to balance WAN bandwidth and recovery speed. Changes take effect on restart.
+- `POST /cluster/migrate` with `{ "space": "<id>" }` forces a single memory space to migrate immediately, which is handy when soaking a new node before bringing the rest of the cluster online.
+
+These hooks mirror the gRPC RPCs (`RebalanceSpaces`, `MigrateSpace`) so automation can consume the same workflow Engram’s CLI uses.
+
 ## docker-compose Deployment
 
 ### Basic Stack

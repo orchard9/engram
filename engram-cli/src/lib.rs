@@ -4,17 +4,27 @@
 #![allow(clippy::multiple_crate_versions)] // Dependencies control their own versions
 #![allow(clippy::uninlined_format_args)] // TODO: Update format strings in future cleanup
 
+/// Administrative HTTP/gRPC helpers.
+pub mod admin;
 pub mod api;
 pub mod benchmark_simple;
 pub mod cli;
+/// Cluster initialization helpers for CLI/server startup.
+pub mod cluster;
 #[allow(missing_docs)]
 pub mod config;
 pub mod docs;
 pub mod grpc;
 pub mod handlers;
+/// HTTP endpoint helpers split into smaller modules.
+pub mod http;
 pub mod interactive;
 pub mod openapi;
 pub mod output;
+#[cfg(feature = "memory_mapped_persistence")]
+/// Replication runtime wiring for distributed deployments.
+pub mod replication;
+pub mod router;
 
 use anyhow::Result;
 use std::time::Duration;

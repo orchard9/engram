@@ -4,7 +4,7 @@
 //! This enables compatibility with Prometheus scrapers while preserving the
 //! streaming-first architecture and JSON endpoint for SSE consumers.
 
-use super::streaming::{AggregatedMetrics, WindowSnapshot};
+use super::streaming::{AggregatedMetrics, MetricAggregate, WindowSnapshot};
 use std::fmt::Write as FmtWrite;
 
 /// Convert aggregated metrics snapshot to Prometheus text format
@@ -139,6 +139,29 @@ pub fn to_prometheus_text(metrics: &AggregatedMetrics) -> String {
         "Pool cache hit rate (0.0-1.0)",
         snapshot,
         "engram_spreading_pool_hit_rate",
+    );
+
+    // Export cluster placement/rebalance metrics
+    export_counter(
+        &mut output,
+        "engram_cluster_assignments_total",
+        "Space assignment computations",
+        snapshot,
+        "engram_cluster_assignments_total",
+    );
+    export_counter(
+        &mut output,
+        "engram_cluster_rebalance_plans_total",
+        "Migration plans emitted by the rebalance coordinator",
+        snapshot,
+        "engram_cluster_rebalance_plans_total",
+    );
+    export_gauge(
+        &mut output,
+        "engram_cluster_spaces_per_node",
+        "Cached primary spaces per node",
+        snapshot,
+        "engram_cluster_spaces_per_node",
     );
 
     // Export consolidation metrics
@@ -452,13 +475,25 @@ fn export_counter(
     snapshot: &WindowSnapshot,
     metric_key: &str,
 ) {
-    if let Some(aggregate) = snapshot.get(metric_key) {
-        let _ = writeln!(output, "# HELP {name} {help}");
-        let _ = writeln!(output, "# TYPE {name} counter");
-        let sum = aggregate.sum as u64;
-        let _ = writeln!(output, "{name} {sum}");
-        let _ = writeln!(output);
+    let series = collect_metric_series(snapshot, metric_key);
+    if series.is_empty() {
+        return;
     }
+
+    let _ = writeln!(output, "# HELP {name} {help}");
+    let _ = writeln!(output, "# TYPE {name} counter");
+
+    for metric in series {
+        write_sample(
+            output,
+            name,
+            &metric.labels,
+            None,
+            metric.aggregate.sum as u64,
+        );
+    }
+
+    let _ = writeln!(output);
 }
 
 /// Export a gauge metric
@@ -469,13 +504,19 @@ fn export_gauge(
     snapshot: &WindowSnapshot,
     metric_key: &str,
 ) {
-    if let Some(aggregate) = snapshot.get(metric_key) {
-        let _ = writeln!(output, "# HELP {name} {help}");
-        let _ = writeln!(output, "# TYPE {name} gauge");
-        let mean = aggregate.mean;
-        let _ = writeln!(output, "{name} {mean}");
-        let _ = writeln!(output);
+    let series = collect_metric_series(snapshot, metric_key);
+    if series.is_empty() {
+        return;
     }
+
+    let _ = writeln!(output, "# HELP {name} {help}");
+    let _ = writeln!(output, "# TYPE {name} gauge");
+
+    for metric in series {
+        write_sample(output, name, &metric.labels, None, metric.aggregate.mean);
+    }
+
+    let _ = writeln!(output);
 }
 
 /// Export a histogram metric with buckets
@@ -494,34 +535,161 @@ fn export_histogram(
     snapshot: &WindowSnapshot,
     metric_key: &str,
 ) {
-    if let Some(aggregate) = snapshot.get(metric_key) {
-        let _ = writeln!(output, "# HELP {name} {help}");
-        let _ = writeln!(output, "# TYPE {name} histogram");
+    let series = collect_metric_series(snapshot, metric_key);
+    if series.is_empty() {
+        return;
+    }
 
-        // Generate histogram buckets from quantile data
-        // Buckets: min, p50, p90, p95, p99, max, +Inf
-        // P95 approximated as midpoint between P90 and P99
+    let _ = writeln!(output, "# HELP {name} {help}");
+    let _ = writeln!(output, "# TYPE {name} histogram");
+
+    let bucket_metric = format!("{name}_bucket");
+    let sum_metric = format!("{name}_sum");
+    let count_metric = format!("{name}_count");
+
+    for metric in series {
+        let aggregate = metric.aggregate;
         let p95_approx = aggregate.p90 + (aggregate.p99 - aggregate.p90) * 0.5;
 
         let buckets = [
-            (aggregate.min, (aggregate.count as f64 * 0.01) as usize), // ~1% below min
-            (aggregate.p50, (aggregate.count as f64 * 0.50) as usize), // 50th percentile
-            (aggregate.p90, (aggregate.count as f64 * 0.90) as usize), // 90th percentile
-            (p95_approx, (aggregate.count as f64 * 0.95) as usize), // 95th percentile (interpolated)
-            (aggregate.p99, (aggregate.count as f64 * 0.99) as usize), // 99th percentile
-            (aggregate.max, aggregate.count),                       // max value
+            (aggregate.min, (aggregate.count as f64 * 0.01) as usize),
+            (aggregate.p50, (aggregate.count as f64 * 0.50) as usize),
+            (aggregate.p90, (aggregate.count as f64 * 0.90) as usize),
+            (p95_approx, (aggregate.count as f64 * 0.95) as usize),
+            (aggregate.p99, (aggregate.count as f64 * 0.99) as usize),
+            (aggregate.max, aggregate.count),
         ];
 
         for (le, cumulative_count) in buckets {
-            let _ = writeln!(output, "{name}_bucket{{le=\"{le}\"}} {cumulative_count}");
+            write_sample(
+                output,
+                &bucket_metric,
+                &metric.labels,
+                Some(("le", format!("{le}"))),
+                cumulative_count,
+            );
         }
 
-        // +Inf bucket contains all observations
-        let _ = writeln!(output, "{name}_bucket{{le=\"+Inf\"}} {}", aggregate.count);
-        let _ = writeln!(output, "{name}_sum {}", aggregate.sum);
-        let _ = writeln!(output, "{name}_count {}", aggregate.count);
-        let _ = writeln!(output);
+        write_sample(
+            output,
+            &bucket_metric,
+            &metric.labels,
+            Some(("le", "+Inf".to_string())),
+            aggregate.count,
+        );
+        write_sample(output, &sum_metric, &metric.labels, None, aggregate.sum);
+        write_sample(output, &count_metric, &metric.labels, None, aggregate.count);
     }
+
+    let _ = writeln!(output);
+}
+
+struct MetricSeries<'a> {
+    aggregate: &'a MetricAggregate,
+    labels: Vec<(String, String)>,
+}
+
+fn collect_metric_series<'a>(
+    snapshot: &'a WindowSnapshot,
+    metric_key: &str,
+) -> Vec<MetricSeries<'a>> {
+    snapshot
+        .iter()
+        .filter_map(|(series, aggregate)| {
+            let parsed = ParsedMetricName::new(series);
+            if parsed.base == metric_key {
+                Some(MetricSeries {
+                    aggregate,
+                    labels: parsed.labels,
+                })
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+struct ParsedMetricName<'a> {
+    base: &'a str,
+    labels: Vec<(String, String)>,
+}
+
+impl<'a> ParsedMetricName<'a> {
+    fn new(name: &'a str) -> Self {
+        if let Some(start) = name.find('{')
+            && let Some(end) = name.rfind('}')
+        {
+            let base = &name[..start];
+            let label_str = &name[start + 1..end];
+            let labels = parse_label_pairs(label_str);
+            return Self { base, labels };
+        }
+        Self {
+            base: name,
+            labels: Vec::new(),
+        }
+    }
+}
+
+fn parse_label_pairs(input: &str) -> Vec<(String, String)> {
+    input
+        .split(',')
+        .filter_map(|segment| {
+            let segment = segment.trim();
+            if segment.is_empty() {
+                return None;
+            }
+            let eq = segment.find('=')?;
+            let key = segment[..eq].trim().to_string();
+            let value = segment[eq + 1..].trim().to_string();
+            Some((key, value))
+        })
+        .collect()
+}
+
+fn write_sample<T: std::fmt::Display>(
+    output: &mut String,
+    metric: &str,
+    labels: &[(String, String)],
+    extra_label: Option<(&str, String)>,
+    value: T,
+) {
+    output.push_str(metric);
+
+    if !labels.is_empty() || extra_label.is_some() {
+        output.push('{');
+        let mut first = true;
+        for (key, val) in labels {
+            if !first {
+                output.push(',');
+            }
+            first = false;
+            push_label(output, key, val);
+        }
+        if let Some((extra_key, extra_val)) = extra_label {
+            if !first {
+                output.push(',');
+            }
+            push_label(output, extra_key, &extra_val);
+        }
+        output.push('}');
+    }
+
+    let _ = writeln!(output, " {value}");
+}
+
+fn push_label(output: &mut String, key: &str, value: &str) {
+    output.push_str(key);
+    output.push_str("=\"");
+    for ch in value.chars() {
+        match ch {
+            '\\' => output.push_str("\\\\"),
+            '"' => output.push_str("\\\""),
+            '\n' => output.push_str("\\n"),
+            _ => output.push(ch),
+        }
+    }
+    output.push('"');
 }
 
 #[cfg(test)]
@@ -599,6 +767,39 @@ mod tests {
         assert!(output.contains("engram_spreading_latency_hot_seconds_bucket{le=\"+Inf\"} 1000"));
         assert!(output.contains("engram_spreading_latency_hot_seconds_sum 45.5"));
         assert!(output.contains("engram_spreading_latency_hot_seconds_count 1000"));
+    }
+
+    #[test]
+    fn test_counter_export_with_labels() {
+        let mut snapshot = BTreeMap::new();
+        snapshot.insert(
+            "engram_spreading_latency_budget_violations_total{memory_space=tenant-a}",
+            MetricAggregate {
+                count: 5,
+                sum: 5.0,
+                mean: 1.0,
+                min: 1.0,
+                max: 1.0,
+                p50: 1.0,
+                p90: 1.0,
+                p99: 1.0,
+            },
+        );
+
+        let metrics = AggregatedMetrics {
+            schema_version: Some("1.0.0".to_string()),
+            one_second: BTreeMap::new(),
+            ten_seconds: BTreeMap::new(),
+            one_minute: BTreeMap::new(),
+            five_minutes: snapshot,
+            spreading: None,
+        };
+
+        let output = to_prometheus_text(&metrics);
+
+        assert!(output.contains(
+            "engram_spreading_latency_budget_violations_total{memory_space=\"tenant-a\"} 5"
+        ));
     }
 
     #[test]

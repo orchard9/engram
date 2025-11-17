@@ -48,6 +48,9 @@ async fn create_test_router() -> Router {
         metrics,
         auto_tuner,
         Arc::new(shutdown_tx),
+        None,
+        None,
+        None,
     );
 
     create_api_routes().with_state(api_state)

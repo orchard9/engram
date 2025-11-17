@@ -48,6 +48,9 @@ async fn setup_test_state() -> ApiState {
         metrics,
         auto_tuner,
         Arc::new(shutdown_tx),
+        None,
+        None,
+        None,
     )
 }
 

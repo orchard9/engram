@@ -7,6 +7,13 @@
 use crate::{Confidence, Cue, Episode};
 
 #[cfg(feature = "smt_verification")]
+use crate::confidence::dual_memory::DualMemoryConfidence;
+#[cfg(feature = "smt_verification")]
+use crate::confidence::verification::{
+    blend_bonus_bounds_result, cycle_convergence_result, propagation_monotonicity_result,
+};
+
+#[cfg(feature = "smt_verification")]
 use dashmap::DashMap;
 #[cfg(feature = "smt_verification")]
 use z3::ast::{Ast, Real};
@@ -121,6 +128,107 @@ impl SMTVerificationSuite {
         }
 
         Ok(proofs)
+    }
+
+    /// Verify dual-memory confidence axioms (monotonicity, blend bounds, cycle convergence).
+    pub fn verify_dual_memory_axioms(&self) -> Result<Vec<VerificationProof>, VerificationError> {
+        let proofs = vec![
+            self.verify_dual_memory_propagation_monotonicity()?,
+            self.verify_dual_memory_blend_bonus_bounds()?,
+            self.verify_dual_memory_cycle_convergence()?,
+        ];
+
+        Ok(proofs)
+    }
+
+    fn verify_dual_memory_propagation_monotonicity(
+        &self,
+    ) -> Result<VerificationProof, VerificationError> {
+        let cache_key = "dual_memory_propagation_monotonicity";
+        if let Some(cached) = self.proof_cache.get(cache_key) {
+            return Ok(cached.clone());
+        }
+
+        let model = DualMemoryConfidence::default();
+        let result = propagation_monotonicity_result(&self.context, model.binding_decay());
+        let verified = matches!(result, SatResult::Unsat);
+
+        if !verified {
+            return Err(VerificationError::PropertyViolated {
+                property: "Dual-memory propagation monotonicity".to_string(),
+            });
+        }
+
+        let proof = VerificationProof {
+            property_name: "Dual-memory: propagated confidence never exceeds source".to_string(),
+            verified,
+            sat_result: format!("{result:?}"),
+            timestamp: std::time::SystemTime::now(),
+        };
+
+        self.proof_cache
+            .insert(cache_key.to_string(), proof.clone());
+        Ok(proof)
+    }
+
+    fn verify_dual_memory_blend_bonus_bounds(
+        &self,
+    ) -> Result<VerificationProof, VerificationError> {
+        let cache_key = "dual_memory_blend_bonus_bounds";
+        if let Some(cached) = self.proof_cache.get(cache_key) {
+            return Ok(cached.clone());
+        }
+
+        let model = DualMemoryConfidence::default();
+        let result =
+            blend_bonus_bounds_result(&self.context, model.blend_bonus_multiplier(), 0.7, 0.3);
+        let verified = matches!(result, SatResult::Unsat);
+
+        if !verified {
+            return Err(VerificationError::PropertyViolated {
+                property: "Dual-memory blend bonus bounds".to_string(),
+            });
+        }
+
+        let proof = VerificationProof {
+            property_name: "Dual-memory: convergent evidence bonus bounded by max input"
+                .to_string(),
+            verified,
+            sat_result: format!("{result:?}"),
+            timestamp: std::time::SystemTime::now(),
+        };
+
+        self.proof_cache
+            .insert(cache_key.to_string(), proof.clone());
+        Ok(proof)
+    }
+
+    fn verify_dual_memory_cycle_convergence(&self) -> Result<VerificationProof, VerificationError> {
+        let cache_key = "dual_memory_cycle_convergence";
+        if let Some(cached) = self.proof_cache.get(cache_key) {
+            return Ok(cached.clone());
+        }
+
+        let model = DualMemoryConfidence::default();
+        let result = cycle_convergence_result(&self.context, model.binding_decay(), 0.8);
+        let verified = matches!(result, SatResult::Unsat);
+
+        if !verified {
+            return Err(VerificationError::PropertyViolated {
+                property: "Dual-memory cycle convergence".to_string(),
+            });
+        }
+
+        let proof = VerificationProof {
+            property_name: "Dual-memory: cycle propagation converges when decay < 1".to_string(),
+            verified,
+            sat_result: format!("{result:?}"),
+            timestamp: std::time::SystemTime::now(),
+        };
+
+        self.proof_cache
+            .insert(cache_key.to_string(), proof.clone());
+        Ok(proof)
     }
 
     /// Verify Axiom 1: 0 ≤ P(A) ≤ 1

@@ -108,7 +108,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "engram_spreading_latency_hot_seconds{quantile=\"0.5\"}",
+          "expr": "engram_spreading_latency_hot_seconds{quantile=\"0.5\", instance=~\"$instance\"}",
           "legendFormat": "Hot P50",
           "refId": "A"
         },
@@ -117,7 +117,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "engram_spreading_latency_hot_seconds{quantile=\"0.9\"}",
+          "expr": "engram_spreading_latency_hot_seconds{quantile=\"0.9\", instance=~\"$instance\"}",
           "legendFormat": "Hot P90",
           "refId": "B"
         },
@@ -126,7 +126,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "engram_spreading_latency_hot_seconds{quantile=\"0.99\"}",
+          "expr": "engram_spreading_latency_hot_seconds{quantile=\"0.99\", instance=~\"$instance\"}",
           "legendFormat": "Hot P99",
           "refId": "C"
         }
@@ -217,7 +217,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "engram_spreading_latency_warm_seconds{quantile=\"0.5\"}",
+          "expr": "engram_spreading_latency_warm_seconds{quantile=\"0.5\", instance=~\"$instance\"}",
           "legendFormat": "Warm P50",
           "refId": "A"
         },
@@ -226,7 +226,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "engram_spreading_latency_warm_seconds{quantile=\"0.9\"}",
+          "expr": "engram_spreading_latency_warm_seconds{quantile=\"0.9\", instance=~\"$instance\"}",
           "legendFormat": "Warm P90",
           "refId": "B"
         },
@@ -235,7 +235,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "engram_spreading_latency_warm_seconds{quantile=\"0.99\"}",
+          "expr": "engram_spreading_latency_warm_seconds{quantile=\"0.99\", instance=~\"$instance\"}",
           "legendFormat": "Warm P99",
           "refId": "C"
         },
@@ -244,7 +244,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "engram_spreading_latency_cold_seconds{quantile=\"0.5\"}",
+          "expr": "engram_spreading_latency_cold_seconds{quantile=\"0.5\", instance=~\"$instance\"}",
           "legendFormat": "Cold P50",
           "refId": "D"
         },
@@ -253,7 +253,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "engram_spreading_latency_cold_seconds{quantile=\"0.9\"}",
+          "expr": "engram_spreading_latency_cold_seconds{quantile=\"0.9\", instance=~\"$instance\"}",
           "legendFormat": "Cold P90",
           "refId": "E"
         },
@@ -262,7 +262,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "engram_spreading_latency_cold_seconds{quantile=\"0.99\"}",
+          "expr": "engram_spreading_latency_cold_seconds{quantile=\"0.99\", instance=~\"$instance\"}",
           "legendFormat": "Cold P99",
           "refId": "F"
         }
@@ -353,7 +353,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "rate(engram_spreading_activations_total[5m])",
+          "expr": "rate(engram_spreading_activations_total{instance=~\"$instance\"}[5m])",
           "legendFormat": "Total Activations",
           "refId": "A"
         },
@@ -362,7 +362,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "rate(engram_consolidation_runs_total[5m])",
+          "expr": "rate(engram_consolidation_runs_total{instance=~\"$instance\"}[5m])",
           "legendFormat": "Consolidation Runs",
           "refId": "B"
         },
@@ -371,7 +371,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "rate(engram_compaction_success_total[5m])",
+          "expr": "rate(engram_compaction_success_total{instance=~\"$instance\"}[5m])",
           "legendFormat": "Compaction Success",
           "refId": "C"
         }
@@ -462,7 +462,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "engram_consolidation_citations_current",
+          "expr": "engram_consolidation_citations_current{instance=~\"$instance\"}",
           "legendFormat": "Total Citations",
           "refId": "A"
         },
@@ -471,7 +471,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "rate(engram_compaction_episodes_removed[5m])",
+          "expr": "rate(engram_compaction_episodes_removed{instance=~\"$instance\"}[5m])",
           "legendFormat": "Episodes Removed/sec",
           "refId": "B"
         }
@@ -538,7 +538,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "engram_adaptive_batch_hot_confidence",
+          "expr": "engram_adaptive_batch_hot_confidence{instance=~\"$instance\"}",
           "legendFormat": "Hot Tier",
           "refId": "A"
         },
@@ -547,7 +547,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "engram_adaptive_batch_warm_confidence",
+          "expr": "engram_adaptive_batch_warm_confidence{instance=~\"$instance\"}",
           "legendFormat": "Warm Tier",
           "refId": "B"
         },
@@ -556,7 +556,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "engram_adaptive_batch_cold_confidence",
+          "expr": "engram_adaptive_batch_cold_confidence{instance=~\"$instance\"}",
           "legendFormat": "Cold Tier",
           "refId": "C"
         }
@@ -647,7 +647,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "engram_consolidation_novelty_gauge",
+          "expr": "engram_consolidation_novelty_gauge{instance=~\"$instance\"}",
           "legendFormat": "Novelty Delta",
           "refId": "A"
         },
@@ -656,7 +656,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "engram_consolidation_novelty_variance",
+          "expr": "engram_consolidation_novelty_variance{instance=~\"$instance\"}",
           "legendFormat": "Novelty Variance",
           "refId": "B"
         },
@@ -665,7 +665,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "engram_consolidation_citation_churn",
+          "expr": "engram_consolidation_citation_churn{instance=~\"$instance\"}",
           "legendFormat": "Citation Churn",
           "refId": "C"
         }
@@ -756,7 +756,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "adaptive_batch_hot_size",
+          "expr": "adaptive_batch_hot_size{instance=~\"$instance\"}",
           "legendFormat": "Hot Tier Batch",
           "refId": "A"
         },
@@ -765,7 +765,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "adaptive_batch_warm_size",
+          "expr": "adaptive_batch_warm_size{instance=~\"$instance\"}",
           "legendFormat": "Warm Tier Batch",
           "refId": "B"
         },
@@ -774,7 +774,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "adaptive_batch_cold_size",
+          "expr": "adaptive_batch_cold_size{instance=~\"$instance\"}",
           "legendFormat": "Cold Tier Batch",
           "refId": "C"
         }
@@ -869,7 +869,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "rate(engram_spreading_latency_budget_violations_total[5m])",
+          "expr": "rate(engram_spreading_latency_budget_violations_total{instance=~\"$instance\"}[5m])",
           "legendFormat": "SLO Violations",
           "refId": "A"
         },
@@ -878,7 +878,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "rate(adaptive_guardrail_hits_total[5m])",
+          "expr": "rate(adaptive_guardrail_hits_total{instance=~\"$instance\"}[5m])",
           "legendFormat": "Guardrail Hits",
           "refId": "B"
         }
@@ -977,7 +977,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "engram_consolidation_freshness_seconds",
+          "expr": "engram_consolidation_freshness_seconds{instance=~\"$instance\"}",
           "legendFormat": "Snapshot Age",
           "refId": "A"
         }
@@ -1013,6 +1013,52 @@
         "regex": "",
         "skipUrlSync": false,
         "type": "datasource"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(up, instance)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Instance",
+        "multi": true,
+        "name": "instance",
+        "options": [],
+        "query": "label_values(up, instance)",
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "query"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(engram_spreading_activations_total, memory_space)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Memory Space",
+        "multi": true,
+        "name": "memory_space",
+        "options": [],
+        "query": "label_values(engram_spreading_activations_total, memory_space)",
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "query"
       }
     ]
   },

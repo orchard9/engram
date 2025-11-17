@@ -1,6 +1,6 @@
 # Task 003: Network Partition Handling and Recovery
 
-**Status**: Pending
+**Status**: Complete
 **Estimated Duration**: 3 days
 **Dependencies**: Task 001 (SWIM membership), Task 002 (Discovery)
 **Owner**: TBD
@@ -9,53 +9,58 @@
 
 Implement graceful degradation during network partitions, local-only recall when partitioned, partition healing mechanisms, and split-brain prevention. This task ensures Engram remains available during network failures while maintaining correctness guarantees.
 
+## Implementation Notes
+
+- Implemented `ClusterConfig.partition` plus the `PartitionDetector`, `AntiEntropySync`, and vector-clock split-brain guards inside `engram-core::cluster`, exposing the `PartitionState` snapshots to other components.
+- Extended `ClusterState`, the CLI runtime, and router so remote routing is denied whenever the detector reports a partition, while local writes tick the per-space vector clocks.
+- Updated the HTTP API and gRPC surfaces to return structured 503 responses (with `Retry-After`) when partitioned, surfaced the partition state on `/cluster/health`, and introduced `PartitionAwareConfidence` so queries degrade their confidence scores during outages.
+- Added unit coverage for the detector, vector clocks, confidence penalty, and executed `cargo test -p engram-cli http_api_tests` to exercise the HTTP surface end-to-end.
+
 ## Technical Specification
 
 ### Partition Detection
 
 Network partitions manifest as:
-1. SWIM failure detection marks nodes as suspect/dead
-2. Inability to reach majority of cluster
-3. Gossip protocol stops converging
+1. SWIM marks most peers suspect/dead, reducing replica availability
+2. Placement planning hits `ClusterError::InsufficientHealthyNodes`
+3. Gossip convergence stalls (members remain suspect beyond `suspicion_timeout`)
 
-Detection mechanism:
+Add `engram-core/src/cluster/partition.rs` to build a `PartitionDetector` that wraps `SwimMembership` and emits `PartitionState` updates. The detector should:
+
+- read `ClusterConfig.partition` (new struct) for `majority_threshold`, `detection_window`, and `check_interval`
+- compute reachability using `SwimMembership::stats()` plus `members.iter()`
+- expose `Arc<RwLock<PartitionState>>` so APIs/routers can inspect the latest state
 
 ```rust
-// engram-core/src/cluster/partition.rs
-
-use std::collections::HashSet;
-use std::sync::Arc;
-use tokio::sync::RwLock;
-
 pub struct PartitionDetector {
     membership: Arc<SwimMembership>,
     partition_state: Arc<RwLock<PartitionState>>,
     config: PartitionConfig,
 }
 
-#[derive(Debug, Clone)]
-pub struct PartitionConfig {
-    /// Threshold for considering cluster partitioned (default: 0.5)
-    /// If we can't reach >50% of nodes, we're partitioned
-    pub majority_threshold: f64,
+impl PartitionDetector {
+    pub fn new(membership: Arc<SwimMembership>, config: PartitionConfig) -> Self { /* ... */ }
 
-    /// How long to wait before declaring partition (default: 10s)
-    pub detection_window: Duration,
-
-    /// How often to check for partition (default: 5s)
-    pub check_interval: Duration,
-}
-
-impl Default for PartitionConfig {
-    fn default() -> Self {
-        Self {
-            majority_threshold: 0.5,
-            detection_window: Duration::from_secs(10),
-            check_interval: Duration::from_secs(5),
+    pub async fn start(self: Arc<Self>) {
+        let mut ticker = tokio::time::interval(self.config.check_interval);
+        loop {
+            ticker.tick().await;
+            self.check_partition_status().await;
         }
     }
-}
 
+    async fn check_partition_status(&self) {
+        let stats = self.compute_reachability();
+        let ratio = stats.reachable_nodes as f64 / stats.total_nodes as f64;
+        let is_partitioned = ratio < self.config.majority_threshold;
+        // update PartitionState + call hooks
+    }
+}
+```
+
+`PartitionState` drives user-facing behavior:
+
+```rust
 #[derive(Debug, Clone)]
 pub enum PartitionState {
     /// Connected to majority of cluster
@@ -190,14 +195,14 @@ impl PartitionDetector {
         }
 
         ReachabilityStats {
-            total_nodes: total,
+            total_nodes: total.max(1),
             reachable_nodes: reachable,
             newly_reachable,
         }
     }
 
     async fn on_partition_detected(&self) {
-        // Enter read-only mode for non-local writes
+        // Enter read-only mode for non-local writes via ClusterState/ApiState glue
         // Continue serving local reads with confidence penalty
         info!("Entering partition mode: local-only operations");
 
@@ -242,53 +247,12 @@ struct ReachabilityStats {
 
 ### Local-Only Recall
 
-During partition, serve queries from local data only:
+Do not introduce a new guard type. Instead:
 
-```rust
-// engram-core/src/cluster/local_mode.rs
-
-pub struct LocalModeGuard {
-    detector: Arc<PartitionDetector>,
-    local_spaces: Arc<RwLock<HashSet<String>>>,
-}
-
-impl LocalModeGuard {
-    pub async fn can_serve_query(&self, space_id: &str) -> bool {
-        if !self.detector.is_partitioned().await {
-            // Not partitioned, can route anywhere
-            return true;
-        }
-
-        // During partition, only serve if we have local data
-        let local = self.local_spaces.read().await;
-        if local.contains(space_id) {
-            true
-        } else {
-            warn!(
-                "Cannot serve query for space {} during partition",
-                space_id
-            );
-            false
-        }
-    }
-
-    pub async fn can_write(&self, space_id: &str) -> Result<(), ClusterError> {
-        if !self.detector.is_partitioned().await {
-            return Ok(());
-        }
-
-        // During partition, only write to spaces we're primary for
-        let local = self.local_spaces.read().await;
-        if local.contains(space_id) {
-            Ok(())
-        } else {
-            Err(ClusterError::PartitionedFromPrimary {
-                space_id: space_id.to_string(),
-            })
-        }
-    }
-}
-```
+- Teach `ClusterState::route_for_space` to consult `PartitionState` via `PartitionDetector`. If partitioned, skip the remote proxy path and surface `ClusterError::Partitioned` with `reachable_nodes`/`total_nodes`.
+- In `ApiState::route_for_write` and gRPC `plan_route`, return a `503 Service Unavailable` with `Retry-After` and metadata describing the partition.
+- Reads remain allowed when the requested space is owned locally; otherwise return the same structured error so clients can retry their primary. Use `SpaceAssignmentPlanner` to determine ownership.
+- Record partition events in metrics (`engram_cluster_partition_state`, counters for detected/healed) so `/cluster/health` and Grafana panels highlight the state change.
 
 ### Confidence Penalty During Partition
 

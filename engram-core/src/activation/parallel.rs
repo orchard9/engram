@@ -712,48 +712,78 @@ impl ParallelSpreadingEngine {
         if let Some(mut neighbors) =
             ActivationGraphExt::get_neighbors(&*context.memory_graph, &task.target_node)
         {
-            // Apply hierarchical spreading and fan effect if enabled
+            use crate::activation::ActivationGraphExt;
+
+            // Extract config values early and release lock
             let config_snapshot = context.config();
+            let hierarchical_enabled = config_snapshot.hierarchical_config.enable_path_tracking;
+            let fan_effect_enabled = config_snapshot.fan_effect_config.enabled;
+            let upward_spreading_boost = config_snapshot.fan_effect_config.upward_spreading_boost;
 
-            // Determine node type once for both hierarchical and fan effect
-            let source_is_episode = task.target_node.starts_with("episode:");
-            let source_is_concept = task.target_node.starts_with("concept:");
+            // Pre-compute fan divisor if fan effect enabled
+            // Use BindingIndex for accurate association counting
+            let fan_divisor = if fan_effect_enabled {
+                let fan = {
+                    let association_count = context
+                        .memory_graph
+                        .get_association_count(&task.target_node);
+                    // Fallback to neighbor count if no binding index entries (backward compatibility)
+                    if association_count > 0 {
+                        association_count
+                    } else {
+                        neighbors.len().max(1)
+                    }
+                };
+                config_snapshot.fan_effect_config.activation_divisor(fan)
+            } else {
+                1.0 // Not used, but avoids Option overhead
+            };
 
-            // Apply hierarchical spreading strengths (enabled by default)
-            if config_snapshot.hierarchical_config.enable_path_tracking {
+            // Clone hierarchical config if needed (small struct)
+            let hierarchical_config = if hierarchical_enabled {
+                Some(config_snapshot.hierarchical_config.clone())
+            } else {
+                None
+            };
+            drop(config_snapshot); // Release config lock immediately
+
+            // Determine source node type once
+            let source_is_episode = context.memory_graph.is_episode_node(&task.target_node);
+            let source_is_concept = !source_is_episode;
+
+            // Single fused loop: apply both hierarchical spreading and fan effect
+            if hierarchical_enabled || fan_effect_enabled {
                 use crate::activation::SpreadingDirection;
 
                 for edge in &mut neighbors {
-                    let target_is_episode = edge.target.starts_with("episode:");
-                    let direction =
-                        SpreadingDirection::from_node_types(source_is_episode, target_is_episode);
+                    // Apply hierarchical spreading strengths (enabled by default)
+                    if let Some(ref h_config) = hierarchical_config {
+                        let target_is_episode = context.memory_graph.is_episode_node(&edge.target);
+                        let direction = SpreadingDirection::from_node_types(
+                            source_is_episode,
+                            target_is_episode,
+                        );
 
-                    // Apply directional strength multiplier
-                    let strength = direction.base_strength(&config_snapshot.hierarchical_config);
-                    edge.weight *= strength;
-                }
-            }
+                        // Apply directional strength multiplier
+                        let strength = direction.base_strength(h_config);
+                        edge.weight *= strength;
+                    }
 
-            // Apply fan effect if enabled
-            if config_snapshot.fan_effect_config.enabled {
-                let fan = neighbors.len().max(1);
-                let divisor = config_snapshot.fan_effect_config.activation_divisor(fan);
-
-                // Apply fan effect to neighbor weights
-                for edge in &mut neighbors {
-                    if source_is_concept {
-                        // Concept → Episodes: Apply fan divisor (concepts have many episode associations)
-                        edge.weight /= divisor;
-                    } else if source_is_episode {
-                        // Episode → Concepts: Apply upward boost (stronger abstraction)
-                        edge.weight *= config_snapshot.fan_effect_config.upward_spreading_boost;
-                    } else {
-                        // Unknown type: Apply standard fan divisor
-                        edge.weight /= divisor;
+                    // Apply fan effect in same iteration
+                    if fan_effect_enabled {
+                        if source_is_concept {
+                            // Concept → Episodes: Apply fan divisor (concepts have many episode associations)
+                            edge.weight /= fan_divisor;
+                        } else if source_is_episode {
+                            // Episode → Concepts: Apply upward boost (stronger abstraction)
+                            edge.weight *= upward_spreading_boost;
+                        } else {
+                            // Unknown type: Apply standard fan divisor
+                            edge.weight /= fan_divisor;
+                        }
                     }
                 }
             }
-            drop(config_snapshot);
 
             let decay_factor = decay_function.apply(task.depth + 1);
             let next_tier = StorageTier::from_depth(task.depth + 1);
@@ -901,43 +931,71 @@ impl ParallelSpreadingEngine {
             if let Some(mut neighbors) =
                 ActivationGraphExt::get_neighbors(&*self.memory_graph, node_id)
             {
-                // Determine node type once for both hierarchical and fan effect
-                let source_is_episode = node_id.starts_with("episode:");
-                let source_is_concept = node_id.starts_with("concept:");
+                use crate::activation::ActivationGraphExt;
 
-                // Apply hierarchical spreading strengths (enabled by default)
-                if config_guard.hierarchical_config.enable_path_tracking {
+                // Extract config values to minimize lock duration
+                let hierarchical_enabled = config_guard.hierarchical_config.enable_path_tracking;
+                let fan_effect_enabled = config_guard.fan_effect_config.enabled;
+                let upward_spreading_boost = config_guard.fan_effect_config.upward_spreading_boost;
+
+                // Pre-compute fan divisor if fan effect enabled
+                // Use BindingIndex for accurate association counting
+                let fan_divisor = if fan_effect_enabled {
+                    let fan = {
+                        let association_count = self.memory_graph.get_association_count(node_id);
+                        // Fallback to neighbor count if no binding index entries (backward compatibility)
+                        if association_count > 0 {
+                            association_count
+                        } else {
+                            neighbors.len().max(1)
+                        }
+                    };
+                    config_guard.fan_effect_config.activation_divisor(fan)
+                } else {
+                    1.0 // Not used, but avoids Option overhead
+                };
+
+                // Clone hierarchical config if needed (small struct)
+                let hierarchical_config = if hierarchical_enabled {
+                    Some(config_guard.hierarchical_config.clone())
+                } else {
+                    None
+                };
+
+                // Determine source node type once
+                let source_is_episode = self.memory_graph.is_episode_node(node_id);
+                let source_is_concept = !source_is_episode;
+
+                // Single fused loop: apply both hierarchical spreading and fan effect
+                if hierarchical_enabled || fan_effect_enabled {
                     use crate::activation::SpreadingDirection;
 
                     for edge in &mut neighbors {
-                        let target_is_episode = edge.target.starts_with("episode:");
-                        let direction = SpreadingDirection::from_node_types(
-                            source_is_episode,
-                            target_is_episode,
-                        );
+                        // Apply hierarchical spreading strengths (enabled by default)
+                        if let Some(ref h_config) = hierarchical_config {
+                            let target_is_episode = self.memory_graph.is_episode_node(&edge.target);
+                            let direction = SpreadingDirection::from_node_types(
+                                source_is_episode,
+                                target_is_episode,
+                            );
 
-                        // Apply directional strength multiplier
-                        let strength = direction.base_strength(&config_guard.hierarchical_config);
-                        edge.weight *= strength;
-                    }
-                }
+                            // Apply directional strength multiplier
+                            let strength = direction.base_strength(h_config);
+                            edge.weight *= strength;
+                        }
 
-                // Apply fan effect if enabled
-                if config_guard.fan_effect_config.enabled {
-                    let fan = neighbors.len().max(1);
-                    let divisor = config_guard.fan_effect_config.activation_divisor(fan);
-
-                    // Apply fan effect to neighbor weights
-                    for edge in &mut neighbors {
-                        if source_is_concept {
-                            // Concept → Episodes: Apply fan divisor
-                            edge.weight /= divisor;
-                        } else if source_is_episode {
-                            // Episode → Concepts: Apply upward boost
-                            edge.weight *= config_guard.fan_effect_config.upward_spreading_boost;
-                        } else {
-                            // Unknown type: Apply standard fan divisor
-                            edge.weight /= divisor;
+                        // Apply fan effect in same iteration
+                        if fan_effect_enabled {
+                            if source_is_concept {
+                                // Concept → Episodes: Apply fan divisor
+                                edge.weight /= fan_divisor;
+                            } else if source_is_episode {
+                                // Episode → Concepts: Apply upward boost
+                                edge.weight *= upward_spreading_boost;
+                            } else {
+                                // Unknown type: Apply standard fan divisor
+                                edge.weight /= fan_divisor;
+                            }
                         }
                     }
                 }
@@ -2552,9 +2610,7 @@ mod tests {
         let engine = ParallelSpreadingEngine::new(config, graph).unwrap();
 
         // Test upward spreading
-        let upward_result = engine
-            .spread_activation(&[(episode_up.clone(), 1.0)])
-            .unwrap();
+        let upward_result = engine.spread_activation(&[(episode_up, 1.0)]).unwrap();
         let upward_activation = upward_result
             .activations
             .iter()
@@ -2562,9 +2618,7 @@ mod tests {
             .map_or(0.0, |a| a.activation_level.load(Ordering::Relaxed));
 
         // Test downward spreading
-        let downward_result = engine
-            .spread_activation(&[(concept_down.clone(), 1.0)])
-            .unwrap();
+        let downward_result = engine.spread_activation(&[(concept_down, 1.0)]).unwrap();
         let downward_activation = downward_result
             .activations
             .iter()

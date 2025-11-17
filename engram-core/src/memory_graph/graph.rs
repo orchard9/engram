@@ -329,6 +329,51 @@ impl<B: GraphBackend> UnifiedMemoryGraph<B> {
     }
 }
 
+/// Methods for dual memory backends (episode/concept discrimination)
+#[cfg(feature = "dual_memory_types")]
+impl<B> UnifiedMemoryGraph<B>
+where
+    B: crate::memory_graph::DualMemoryBackend,
+{
+    /// Get the memory node type for a given node ID
+    ///
+    /// This provides efficient type discrimination without string parsing heuristics.
+    /// Uses the backend's type index for O(1) lookup.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Some(MemoryNodeType))` if the node exists and has type information
+    /// - `Ok(None)` if the node doesn't exist
+    /// - `Err(MemoryError)` if the backend encounters a storage error
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// use engram_core::memory::MemoryNodeType;
+    ///
+    /// if let Some(node_type) = graph.get_node_type(&node_id)? {
+    ///     match node_type {
+    ///         MemoryNodeType::Episode { .. } => {
+    ///             // Apply upward spreading strength
+    ///         }
+    ///         MemoryNodeType::Concept { .. } => {
+    ///             // Apply downward spreading strength
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    #[must_use = "Handle the result to detect backend failures"]
+    pub fn get_node_type(
+        &self,
+        id: &Uuid,
+    ) -> Result<Option<crate::memory::MemoryNodeType>, MemoryError> {
+        match self.backend.get_node_typed(id)? {
+            Some(node) => Ok(Some(node.node_type)),
+            None => Ok(None),
+        }
+    }
+}
+
 /// Convenience constructors for common backend configurations
 impl UnifiedMemoryGraph<crate::memory_graph::backends::HashMapBackend> {
     /// Create a simple single-threaded memory graph

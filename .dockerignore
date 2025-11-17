@@ -1,0 +1,13 @@
+/target
+**/target
+/tmp
+/tmp-loadtests
+/tmp/**
+.DS_Store
+.git
+.gitignore
+**/*.log
+**/__pycache__
+node_modules
+venv
+.env

@@ -6,6 +6,8 @@
 mod support;
 
 use criterion::{Criterion, black_box};
+use std::fs;
+use std::time::Duration;
 use support::ann_common::BenchmarkFramework;
 use support::datasets::DatasetLoader;
 use support::engram_ann::EngramAnnIndex;
@@ -30,11 +32,25 @@ pub fn run_benchmarks(c: &mut Criterion) {
                 AnnoyAnnIndex::new(768, 50).expect("Failed to create Annoy index"),
             ));
 
-            black_box(
-                framework
-                    .run_comparison()
-                    .expect("Benchmark comparison failed"),
-            );
+            let results = framework
+                .run_comparison()
+                .expect("Benchmark comparison failed");
+
+            let report_dir = "engram-core/benches/reports";
+            fs::create_dir_all(report_dir).expect("failed to create ANN report directory");
+            let csv_path = format!("{report_dir}/ann_comparison.csv");
+            let json_path = format!("{report_dir}/ann_comparison.json");
+            results
+                .export_csv(&csv_path)
+                .expect("failed to export ANN CSV report");
+            results
+                .export_json(&json_path)
+                .expect("failed to export ANN JSON report");
+            results
+                .assert_thresholds(0.90, Duration::from_micros(1_000))
+                .expect("ANN benchmark thresholds violated");
+
+            black_box(results);
         });
     });
 }

@@ -671,6 +671,85 @@ engram_storage_compaction_ratio{tier="cold",space="default"}
 
 ---
 
+---
+
+## Cluster Configuration
+
+Distributed deployments share a common cluster configuration block that toggles
+SWIM membership, peer discovery, and network binding.
+
+### `cluster.enabled`
+
+**Type:** `bool`
+**Default:** `false`
+
+Set to `true` to enable multi-node operation. When disabled the server stays in
+single-node mode and ignores the rest of the cluster settings.
+
+### `cluster.discovery.type`
+
+**Type:** `"static" | "dns" | "consul"`
+
+- `static` (default) – bootstrap peers from the `seed_nodes` array. Best for
+  bare-metal or docker-compose deployments.
+- `dns` – resolve peers via DNS SRV records (*requires the
+  `cluster_discovery_dns` feature; release binaries enable it but custom builds
+  must opt in with `--features cluster_discovery_dns`*).
+- `consul` – intentionally deferred until the control-plane milestone. The CLI
+  validator treats it as an error today so operators do not attempt
+  half-implemented registry flows.
+
+### `cluster.static.seed_nodes`
+
+**Type:** `array<string>`
+
+List of `host:port` peers contacted during bootstrap. Validation ensures each
+entry parses as a socket address or resolves via DNS.
+
+### `cluster.dns`
+
+**Fields:**
+
+- `service` – DNS SRV service name (for example
+  `engram-cluster.default.svc.cluster.local`).
+- `port` – gossip port override when the SRV record omits one.
+- `refresh_interval` – how frequently the resolver polls DNS for updates (TOML
+  duration string such as `"30s"`).
+
+> ⚠️ DNS discovery requires the binary to include the `cluster_discovery_dns`
+> feature. CI and release targets enable it by default, but source builds may
+> choose a smaller feature set—`engram config validate` and `engram status
+> --json` surface the mismatch before you start the daemon.
+
+### `cluster.network`
+
+- `swim_bind` – gossip bind address. When it is `0.0.0.0` or `[::]`, you must
+  set `advertise_addr` so peers learn a routable host.
+- `api_bind` – internal API bind address shared with peers for proxying.
+- `advertise_addr` – optional override for the address shared with peers. This
+  is required when the daemon listens on a wildcard, RFC1918, or NATed address.
+- `connection_pool_size` – reused gRPC connections per remote node.
+
+### Example
+
+```toml
+[cluster]
+enabled = true
+
+[cluster.discovery]
+type = "dns"
+service = "engram-cluster.default.svc.cluster.local"
+port = 7946
+refresh_interval = "30s"
+
+[cluster.network]
+swim_bind = "0.0.0.0:7946"
+api_bind = "0.0.0.0:50051"
+advertise_addr = "10.0.5.24:7946"
+```
+
+---
+
 ## Spreading Activation Configuration
 
 Spreading activation is how Engram traverses the cognitive graph, propagating activation from seed memories to related concepts. Think of it like neural activation spreading through a brain network.
@@ -1890,3 +1969,61 @@ engram config migrate old.toml new.toml
 - [Reference: CLI](/docs/reference/cli.md) - Command-line options
 
 - [Operations: Performance Tuning](/docs/operations/performance-tuning.md) - Performance optimization
+
+## Cluster Replication Configuration
+
+Distributed deployments rely on the `[cluster.replication]` table for placement and streaming behavior.
+
+### `cluster.replication.factor`
+
+**Type:** `integer` — **Default:** `2`
+
+Number of replicas per memory space (excluding the primary). Increase for higher durability at the cost of additional storage and replication bandwidth.
+
+### `cluster.replication.timeout`
+
+**Type:** `duration string` — **Default:** `"1s"`
+
+Upper bound for write acknowledgements. Writes are accepted optimistically, but this timeout bounds how long the primary waits for replica confirmations before logging a warning.
+
+### `cluster.replication.placement`
+
+**Type:** `string` (`random`, `rackaware`, `zoneaware`)
+
+Replica diversity strategy. Default `random` is topology agnostic; rack/zone aware penalties spread replicas across failure domains recorded on `NodeInfo`.
+
+### `cluster.replication.jump_buckets`
+
+**Type:** `integer`
+
+Number of virtual buckets used by jump-consistent hashing. Higher values smooth redistribution when nodes join/leave (16,384 is typically sufficient for thousands of spaces).
+
+### `cluster.replication.rack_penalty` / `zone_penalty`
+
+**Type:** `float` in `[0.0, 1.0]`
+
+Penalty multipliers applied when a candidate replica shares the same rack/zone as a previously-selected node. Lower values strongly discourage co-locating replicas.
+
+### `cluster.replication.lag_threshold`
+
+**Type:** `duration string` — **Default:** `"5s"`
+
+Maximum acceptable replication lag before Engram emits warnings and surfaces red indicators in `/cluster/health`. When the local → replica sequence gap exceeds this threshold, operators should investigate network partitions or slow disks.
+
+### `cluster.replication.catch_up_batch_bytes`
+
+**Type:** `integer` (bytes) — **Default:** `2_097_152`
+
+Target payload size for each replication batch. Larger values improve throughput when recovering a replica, while smaller values minimize steady-state latency.
+
+### `cluster.replication.compression`
+
+**Type:** `string` (`none`, `lz4`, `zstd`) — **Default:** `none`
+
+Compression algorithm applied to replication batches. Leave `none` for low-latency LANs. Use `lz4` or `zstd` when WAN bandwidth is constrained.
+
+### `cluster.replication.io_uring_enabled`
+
+**Type:** `bool` — **Default:** `false`
+
+Enables io_uring fast paths when running on Linux kernels that support it. Set to `false` on macOS or kernels older than 5.10.

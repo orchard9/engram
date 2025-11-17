@@ -28,6 +28,7 @@
 //! Promotes mature ProtoConcepts to `DualMemoryNode::Concept` for graph insertion.
 
 use crate::EMBEDDING_DIM;
+use crate::compute::cosine_similarity_batch_768;
 use crate::consolidation::BiologicalClusterer;
 use crate::memory::types::Episode;
 
@@ -809,6 +810,35 @@ impl ConceptFormationEngine {
     #[must_use]
     pub fn get_proto_concept(&self, signature: ConceptSignature) -> Option<ProtoConcept> {
         self.proto_pool.get(&signature).map(|entry| entry.clone())
+    }
+
+    /// Compute pairwise cosine similarities among episode embeddings in parallel.
+    #[must_use]
+    pub fn parallel_similarity_pairs(episodes: &[Episode]) -> Vec<(usize, usize, f32)> {
+        use rayon::prelude::*;
+        let len = episodes.len();
+        (0..len)
+            .into_par_iter()
+            .flat_map(|i| {
+                let episodes_ref = episodes;
+                ((i + 1)..len).into_par_iter().map(move |j| {
+                    let sim = crate::compute::cosine_similarity_768(
+                        &episodes_ref[i].embedding,
+                        &episodes_ref[j].embedding,
+                    );
+                    (i, j, sim)
+                })
+            })
+            .collect()
+    }
+
+    /// Compute the similarity between a concept centroid and multiple episode embeddings.
+    #[must_use]
+    pub fn batch_episode_to_concept_similarity(
+        episode_embeddings: &[[f32; EMBEDDING_DIM]],
+        concept_centroid: &[f32; EMBEDDING_DIM],
+    ) -> Vec<f32> {
+        cosine_similarity_batch_768(concept_centroid, episode_embeddings)
     }
 }
 

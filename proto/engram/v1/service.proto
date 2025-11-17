@@ -64,6 +64,20 @@ service EngramService {
   // Stream provides real-time memory activity monitoring
   rpc Stream(StreamRequest) returns (stream StreamResponse);
   
+  // ========== Cluster Administration ==========
+
+  // RebalanceSpaces triggers a rescan of cached assignments.
+  rpc RebalanceSpaces(RebalanceRequest) returns (RebalanceResponse);
+
+  // MigrateSpace forces a single space to migrate to its new primary.
+  rpc MigrateSpace(MigrateSpaceRpcRequest) returns (MigrateSpaceRpcResponse);
+
+  // ApplyReplicationBatch replays WAL entries on replica nodes.
+  rpc ApplyReplicationBatch(ApplyReplicationBatchRequest) returns (ApplyReplicationBatchResponse);
+
+  // GetReplicationStatus returns the local view of replication lag.
+  rpc GetReplicationStatus(ReplicationStatusRequest) returns (ReplicationStatusResponse);
+  
   // ========== Streaming Operations (Advanced) ==========
   
   // StreamingRemember for continuous memory formation
@@ -428,6 +442,61 @@ message IntrospectResponse {
   MemoryStatistics statistics = 3;
   repeated string active_processes = 4;
   string metrics_snapshot_json = 5;
+}
+
+message RebalanceRequest {}
+
+message RebalanceResponse {
+  uint64 planned = 1;
+}
+
+message MigrateSpaceRpcRequest {
+  string space_id = 1;
+}
+
+message MigrationPlanView {
+  string space_id = 1;
+  string from = 2;
+  string to = 3;
+  uint64 version = 4;
+  string reason = 5;
+  google.protobuf.Timestamp planned_at = 6;
+}
+
+message MigrateSpaceRpcResponse {
+  MigrationPlanView plan = 1;
+}
+
+message ReplicationEntryView {
+  uint64 sequence = 1;
+  uint32 entry_type = 2;
+  bytes payload = 3;
+}
+
+message ApplyReplicationBatchRequest {
+  string space_id = 1;
+  string primary_id = 2;
+  uint64 start_sequence = 3;
+  uint64 end_sequence = 4;
+  uint64 checksum = 5;
+  repeated ReplicationEntryView entries = 6;
+}
+
+message ApplyReplicationBatchResponse {
+  uint64 applied_through = 1;
+}
+
+message ReplicationStatusRequest {}
+
+message ReplicaLagView {
+  string space_id = 1;
+  string replica = 2;
+  uint64 local_sequence = 3;
+  uint64 replicated_sequence = 4;
+}
+
+message ReplicationStatusResponse {
+  repeated ReplicaLagView replicas = 1;
 }
 
 message HealthStatus {

@@ -14,118 +14,295 @@ use crate::{
     Confidence, Cue, CueType, Episode, EpisodeBuilder, Memory, TemporalPattern, compute,
     numeric::{saturating_f32_from_f64, unit_ratio_to_f32},
 };
+use blake3::Hasher;
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
+use std::alloc::{Layout, alloc_zeroed, dealloc};
 use std::convert::TryFrom;
+use std::ptr::NonNull;
 use std::sync::{
-    Arc, RwLock,
+    Arc, OnceLock, RwLock,
     atomic::{AtomicU64, Ordering},
 };
 use std::time::{Duration as StdDuration, SystemTime, UNIX_EPOCH};
 
-/// Column buffer that enforces capacity while relying on safe `Vec` storage
-#[derive(Debug, Default)]
-struct ColumnBuffer {
-    values: Vec<f32>,
+const PQ_SUBVECTOR_DIM: usize = 8;
+const PQ_CODEBOOK_SIZE: usize = 256;
+const PQ_SUBVECTOR_COUNT: usize = 768 / PQ_SUBVECTOR_DIM;
+static PRODUCT_QUANTIZER: OnceLock<ProductQuantizer> = OnceLock::new();
+
+/// Column buffer that ensures 64-byte alignment for SIMD operations
+#[derive(Debug)]
+struct AlignedColumn {
+    ptr: NonNull<f32>,
+    len: usize,
     capacity: usize,
+    layout: Layout,
 }
 
-impl ColumnBuffer {
-    /// Create a new column buffer with the provided capacity
+impl AlignedColumn {
     fn new(capacity: usize) -> Self {
+        if capacity == 0 {
+            return Self {
+                ptr: NonNull::dangling(),
+                len: 0,
+                capacity: 0,
+                layout: Layout::new::<f32>(),
+            };
+        }
+
+        let Some(bytes) = capacity.checked_mul(std::mem::size_of::<f32>()) else {
+            // This should never happen in practice since capacity is limited
+            // But we handle it gracefully to avoid panic in production
+            return Self {
+                ptr: NonNull::dangling(),
+                len: 0,
+                capacity: 0,
+                layout: Layout::new::<f32>(),
+            };
+        };
+        let Ok(layout) = Layout::from_size_align(bytes, 64) else {
+            // Invalid layout, fallback to dangling
+            return Self {
+                ptr: NonNull::dangling(),
+                len: 0,
+                capacity: 0,
+                layout: Layout::new::<f32>(),
+            };
+        };
+        #[allow(unsafe_code)]
+        let raw_ptr = unsafe { alloc_zeroed(layout) };
+        #[allow(clippy::cast_ptr_alignment)]
+        let ptr = NonNull::new(raw_ptr.cast::<f32>()).unwrap_or_else(|| {
+            std::alloc::handle_alloc_error(layout);
+        });
+
         Self {
-            values: Vec::with_capacity(capacity),
+            ptr,
+            len: 0,
             capacity,
+            layout,
         }
     }
 
-    /// Push a value into the column, respecting the configured capacity.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error when the column has already reached its configured
-    /// capacity and cannot store additional values.
     fn push(&mut self, value: f32) -> Result<(), StorageError> {
-        if self.values.len() >= self.capacity {
+        if self.len >= self.capacity {
             return Err(StorageError::allocation_failed(
                 "Cold tier column capacity exceeded",
             ));
         }
-        debug_assert!(self.values.len() < self.capacity);
-        self.values.push(value);
+        #[allow(unsafe_code)]
+        unsafe {
+            self.ptr.as_ptr().add(self.len).write(value);
+        }
+        self.len += 1;
         Ok(())
     }
 
-    /// Access the column contents as an immutable slice
-    fn as_slice(&self) -> &[f32] {
-        &self.values
-    }
-
-    /// Retrieve a value by index if it exists
-    fn get(&self, index: usize) -> Option<f32> {
-        self.values.get(index).copied()
-    }
-
-    /// Write a value into the provided index when it exists
-    fn set(&mut self, index: usize, value: f32) {
-        debug_assert!(index < self.values.len());
-        if let Some(slot) = self.values.get_mut(index) {
-            *slot = value;
+    const fn as_slice(&self) -> &[f32] {
+        #[allow(unsafe_code)]
+        unsafe {
+            std::slice::from_raw_parts(self.ptr.as_ptr(), self.len)
         }
     }
 
-    /// Truncate the column to the provided length
-    fn truncate(&mut self, len: usize) {
-        self.values.truncate(len);
+    fn get(&self, index: usize) -> Option<f32> {
+        if index >= self.len {
+            return None;
+        }
+        #[allow(unsafe_code)]
+        unsafe {
+            Some(*self.ptr.as_ptr().add(index))
+        }
     }
 
-    /// Current number of stored values
-    const fn len(&self) -> usize {
-        self.values.len()
+    fn set(&mut self, index: usize, value: f32) {
+        if index < self.len {
+            #[allow(unsafe_code)]
+            unsafe {
+                *self.ptr.as_ptr().add(index) = value;
+            }
+        }
     }
+
+    fn truncate(&mut self, len: usize) {
+        self.len = len.min(self.capacity);
+    }
+}
+
+impl Drop for AlignedColumn {
+    fn drop(&mut self) {
+        if self.capacity == 0 {
+            return;
+        }
+        #[allow(unsafe_code)]
+        unsafe {
+            dealloc(self.ptr.as_ptr().cast::<u8>(), self.layout);
+        }
+    }
+}
+
+#[allow(unsafe_code)]
+unsafe impl Send for AlignedColumn {}
+#[allow(unsafe_code)]
+unsafe impl Sync for AlignedColumn {}
+
+#[derive(Debug)]
+struct ProductQuantizer {
+    codebook: [[f32; PQ_SUBVECTOR_DIM]; PQ_CODEBOOK_SIZE],
+}
+
+impl ProductQuantizer {
+    fn global() -> &'static Self {
+        PRODUCT_QUANTIZER.get_or_init(Self::new)
+    }
+
+    fn new() -> Self {
+        let mut codebook = [[0.0f32; PQ_SUBVECTOR_DIM]; PQ_CODEBOOK_SIZE];
+        for (idx, centroid) in codebook.iter_mut().enumerate() {
+            let mut hasher = Hasher::new();
+            hasher.update(b"engram::pq_codebook");
+            hasher.update(&(idx as u32).to_le_bytes());
+            let mut reader = hasher.finalize_xof();
+            for value in centroid.iter_mut() {
+                let mut bytes = [0u8; 4];
+                reader.fill(&mut bytes);
+                let raw = u32::from_le_bytes(bytes);
+                *value = map_u32_to_unit(raw);
+            }
+        }
+
+        Self { codebook }
+    }
+
+    fn encode(&self, embedding: &[f32; 768]) -> [u8; PQ_SUBVECTOR_COUNT] {
+        let mut codes = [0u8; PQ_SUBVECTOR_COUNT];
+        for (subvector, code) in codes.iter_mut().enumerate().take(PQ_SUBVECTOR_COUNT) {
+            let start = subvector * PQ_SUBVECTOR_DIM;
+            let slice = &embedding[start..start + PQ_SUBVECTOR_DIM];
+
+            let mut best_index = 0usize;
+            let mut best_distance = f32::MAX;
+            for (idx, centroid) in self.codebook.iter().enumerate() {
+                let mut distance = 0.0f32;
+                for (a, b) in slice.iter().zip(centroid.iter()) {
+                    let diff = a - b;
+                    distance += diff * diff;
+                }
+                if distance < best_distance {
+                    best_distance = distance;
+                    best_index = idx;
+                }
+            }
+
+            *code = best_index as u8;
+        }
+        codes
+    }
+
+    fn decode_into(&self, codes: &[u8; PQ_SUBVECTOR_COUNT], output: &mut [f32; 768]) {
+        for (subvector, &code) in codes.iter().enumerate() {
+            let start = subvector * PQ_SUBVECTOR_DIM;
+            let centroid = &self.codebook[usize::from(code)];
+            output[start..start + PQ_SUBVECTOR_DIM].copy_from_slice(centroid);
+        }
+    }
+
+    fn build_lookup(&self, query: &[f32; 768]) -> Vec<[f32; PQ_CODEBOOK_SIZE]> {
+        let mut lookup = vec![[0.0f32; PQ_CODEBOOK_SIZE]; PQ_SUBVECTOR_COUNT];
+        for (subvector, table) in lookup.iter_mut().enumerate() {
+            let start = subvector * PQ_SUBVECTOR_DIM;
+            let query_slice = &query[start..start + PQ_SUBVECTOR_DIM];
+            for (code, value) in table.iter_mut().enumerate() {
+                let centroid = &self.codebook[code];
+                let mut dot = 0.0f32;
+                for (a, b) in query_slice.iter().zip(centroid.iter()) {
+                    dot += a * b;
+                }
+                *value = dot;
+            }
+        }
+        lookup
+    }
+
+    fn dot_with_lookup(
+        codes: &[u8; PQ_SUBVECTOR_COUNT],
+        lookup: &[[f32; PQ_CODEBOOK_SIZE]],
+    ) -> f32 {
+        let mut dot = 0.0f32;
+        for (subvector, &code) in codes.iter().enumerate() {
+            let table = &lookup[subvector];
+            dot += table[usize::from(code)];
+        }
+        dot
+    }
+}
+
+fn map_u32_to_unit(value: u32) -> f32 {
+    let ratio = f64::from(value) / f64::from(u32::MAX);
+    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
+    {
+        ratio.mul_add(2.0, -1.0) as f32
+    }
+}
+
+#[derive(Debug)]
+enum EmbeddingStorage {
+    Columns(Vec<AlignedColumn>),
+    Quantized {
+        codes: Vec<[u8; PQ_SUBVECTOR_COUNT]>,
+    },
 }
 
 /// Columnar storage layout for efficient SIMD operations
 #[derive(Debug)]
 struct ColumnarData {
-    /// 768 column buffers, one for each embedding dimension
-    embedding_columns: Vec<ColumnBuffer>,
-    /// Metadata columns (not aligned, regular storage)
+    embedding_storage: EmbeddingStorage,
     confidences: Vec<f32>,
-    /// Activation levels for each memory
     activations: Vec<f32>,
-    /// Creation timestamps
     creation_times: Vec<u64>,
-    /// Last access timestamps
     access_times: Vec<u64>,
-    /// Content strings (compressed)
     contents: Vec<String>,
-    /// Memory IDs (for lookup)
     memory_ids: Vec<String>,
-    /// Number of memories stored
+    vector_norms: Vec<f32>,
     count: usize,
-    /// Capacity of the storage
     capacity: usize,
+    product_quantizer: Option<&'static ProductQuantizer>,
 }
 
 impl ColumnarData {
     /// Create new columnar data structure with specified capacity
-    fn new(capacity: usize) -> Self {
-        let mut embedding_columns = Vec::with_capacity(768);
-        for _ in 0..768 {
-            embedding_columns.push(ColumnBuffer::new(capacity));
-        }
+    fn new(capacity: usize, compression_enabled: bool) -> Self {
+        let embedding_storage = if compression_enabled {
+            EmbeddingStorage::Quantized {
+                codes: Vec::with_capacity(capacity),
+            }
+        } else {
+            let mut columns = Vec::with_capacity(768);
+            for _ in 0..768 {
+                columns.push(AlignedColumn::new(capacity));
+            }
+            EmbeddingStorage::Columns(columns)
+        };
+
+        let product_quantizer = if compression_enabled {
+            Some(ProductQuantizer::global())
+        } else {
+            None
+        };
 
         Self {
-            embedding_columns,
+            embedding_storage,
             confidences: Vec::with_capacity(capacity),
             activations: Vec::with_capacity(capacity),
             creation_times: Vec::with_capacity(capacity),
             access_times: Vec::with_capacity(capacity),
             contents: Vec::with_capacity(capacity),
             memory_ids: Vec::with_capacity(capacity),
+            vector_norms: Vec::with_capacity(capacity),
             count: 0,
             capacity,
+            product_quantizer,
         }
     }
 
@@ -144,9 +321,22 @@ impl ColumnarData {
 
         let index = self.count;
 
-        // Store embedding in true column-major format
-        for (dim, &value) in memory.embedding.iter().enumerate() {
-            self.embedding_columns[dim].push(value)?;
+        match &mut self.embedding_storage {
+            EmbeddingStorage::Columns(columns) => {
+                for (dim, &value) in memory.embedding.iter().enumerate() {
+                    columns[dim].push(value)?;
+                }
+            }
+            EmbeddingStorage::Quantized { codes } => {
+                if let Some(quantizer) = self.product_quantizer {
+                    let code = quantizer.encode(&memory.embedding);
+                    codes.push(code);
+                } else {
+                    return Err(StorageError::AllocationFailed(
+                        "Product quantizer missing for compressed cold tier".to_string(),
+                    ));
+                }
+            }
         }
 
         // Store metadata
@@ -175,9 +365,18 @@ impl ColumnarData {
                 .unwrap_or_else(|| format!("Memory: {id}", id = memory.id)),
         );
         self.memory_ids.push(memory.id.clone());
+        self.vector_norms.push(Self::vector_norm(&memory.embedding));
 
         self.count += 1;
         Ok(index)
+    }
+
+    fn vector_norm(embedding: &[f32; 768]) -> f32 {
+        embedding
+            .iter()
+            .map(|value| value * value)
+            .sum::<f32>()
+            .sqrt()
     }
 
     /// Get embedding for a specific memory
@@ -186,100 +385,128 @@ impl ColumnarData {
             return None;
         }
 
-        let mut embedding = [0.0f32; 768];
-        for (dim, column) in self.embedding_columns.iter().enumerate().take(768) {
-            if let Some(value) = column.get(index) {
-                embedding[dim] = value;
+        match &self.embedding_storage {
+            EmbeddingStorage::Columns(columns) => {
+                let mut embedding = [0.0f32; 768];
+                for (dim, column) in columns.iter().enumerate().take(768) {
+                    if let Some(value) = column.get(index) {
+                        embedding[dim] = value;
+                    }
+                }
+                Some(embedding)
+            }
+            EmbeddingStorage::Quantized { codes } => {
+                let code = codes.get(index)?;
+                let mut embedding = [0.0f32; 768];
+                self.product_quantizer.map(|quantizer| {
+                    quantizer.decode_into(code, &mut embedding);
+                    embedding
+                })
             }
         }
-        Some(embedding)
     }
 
     /// Perform batch similarity search using SIMD-optimized columnar operations
     fn batch_similarity_search(&self, query: &[f32; 768], threshold: f32) -> Vec<(usize, f32)> {
+        match &self.embedding_storage {
+            EmbeddingStorage::Columns(columns) => {
+                self.similarity_search_columns(query, threshold, columns)
+            }
+            EmbeddingStorage::Quantized { codes } => {
+                self.similarity_search_quantized(query, threshold, codes)
+            }
+        }
+    }
+
+    fn similarity_search_columns(
+        &self,
+        query: &[f32; 768],
+        threshold: f32,
+        columns: &[AlignedColumn],
+    ) -> Vec<(usize, f32)> {
         if self.count == 0 {
             return Vec::new();
         }
 
-        // Allocate aligned buffer for similarity scores
         let mut similarities = vec![0.0f32; self.count];
         let vector_ops = compute::get_vector_ops();
 
-        // Compute dot products using SIMD FMA operations on columns
-        for (dim, column) in self.embedding_columns.iter().enumerate().take(768) {
+        for (dim, column) in columns.iter().enumerate().take(768) {
             let query_val = query[dim];
             if query_val.abs() < 1e-8 {
-                continue; // Skip zero dimensions
+                continue;
             }
 
             let column_data = column.as_slice();
-
-            // SIMD FMA: similarities += column * query_val
-            vector_ops.fma_accumulate(column_data, query_val, &mut similarities);
+            let slice = &column_data[..self.count];
+            vector_ops.fma_accumulate(slice, query_val, &mut similarities);
         }
 
-        // Normalize similarities to get cosine similarity
+        let query_norm = vector_ops.l2_norm_768(query);
+        if query_norm == 0.0 {
+            return Vec::new();
+        }
+
+        let mut results = Vec::new();
+        for (idx, &dot_product) in similarities.iter().enumerate() {
+            let vector_norm = self.vector_norms[idx];
+            if vector_norm > 0.0 {
+                let similarity = dot_product / (query_norm * vector_norm);
+                if similarity >= threshold {
+                    results.push((idx, similarity.clamp(-1.0, 1.0)));
+                }
+            }
+        }
+
+        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        results
+    }
+
+    fn similarity_search_quantized(
+        &self,
+        query: &[f32; 768],
+        threshold: f32,
+        codes: &[[u8; PQ_SUBVECTOR_COUNT]],
+    ) -> Vec<(usize, f32)> {
+        if self.count == 0 {
+            return Vec::new();
+        }
+
         let query_norm = compute::get_vector_ops().l2_norm_768(query);
         if query_norm == 0.0 {
             return Vec::new();
         }
 
-        // Filter by threshold and collect results
-        let mut results: Vec<(usize, f32)> = similarities
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, &dot_product)| {
-                // Get vector norm for normalization
-                let mut vector_norm_sq = 0.0f32;
-                for dim in 0..768 {
-                    if let Some(val) = self.embedding_columns[dim].get(idx) {
-                        vector_norm_sq += val * val;
-                    }
-                }
-                let vector_norm = vector_norm_sq.sqrt();
+        let Some(quantizer) = self.product_quantizer else {
+            return Vec::new();
+        };
+        let lookup = quantizer.build_lookup(query);
 
-                if vector_norm > 0.0 {
-                    let similarity = dot_product / (query_norm * vector_norm);
-                    if similarity >= threshold {
-                        return Some((idx, similarity.clamp(-1.0, 1.0)));
-                    }
+        let mut results = Vec::new();
+        for (idx, code) in codes.iter().enumerate().take(self.count) {
+            let dot = ProductQuantizer::dot_with_lookup(code, &lookup);
+            let vector_norm = self.vector_norms[idx];
+            if vector_norm > 0.0 {
+                let similarity = dot / (query_norm * vector_norm);
+                if similarity >= threshold {
+                    results.push((idx, similarity.clamp(-1.0, 1.0)));
                 }
-                None
-            })
-            .collect();
+            }
+        }
 
-        // Sort by similarity (highest first)
         results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         results
     }
 
     /// Compact the storage by removing gaps
     fn compact(&mut self, valid_indices: &[bool]) -> usize {
-        debug_assert!(
-            self.embedding_columns
-                .iter()
-                .all(|column| column.len() == self.count)
-        );
         let mut write_index = 0;
         let mut removed_count = 0;
 
         for (read_index, &is_valid) in valid_indices.iter().enumerate().take(self.count) {
             if is_valid {
                 if write_index != read_index {
-                    // Move embedding data in each column
-                    for column in &mut self.embedding_columns {
-                        if let Some(value) = column.get(read_index) {
-                            column.set(write_index, value);
-                        }
-                    }
-
-                    // Move metadata
-                    self.confidences[write_index] = self.confidences[read_index];
-                    self.activations[write_index] = self.activations[read_index];
-                    self.creation_times[write_index] = self.creation_times[read_index];
-                    self.access_times[write_index] = self.access_times[read_index];
-                    self.contents[write_index] = self.contents[read_index].clone();
-                    self.memory_ids[write_index] = self.memory_ids[read_index].clone();
+                    self.move_storage_entry(read_index, write_index);
                 }
                 write_index += 1;
             } else {
@@ -287,21 +514,54 @@ impl ColumnarData {
             }
         }
 
-        // Update count and column lengths
         self.count = write_index;
-        for column in &mut self.embedding_columns {
-            column.truncate(write_index);
-        }
-
-        // Truncate metadata vectors
-        self.confidences.truncate(write_index);
-        self.activations.truncate(write_index);
-        self.creation_times.truncate(write_index);
-        self.access_times.truncate(write_index);
-        self.contents.truncate(write_index);
-        self.memory_ids.truncate(write_index);
+        self.truncate_storage(write_index);
 
         removed_count
+    }
+
+    fn move_storage_entry(&mut self, from: usize, to: usize) {
+        match &mut self.embedding_storage {
+            EmbeddingStorage::Columns(columns) => {
+                for column in columns {
+                    if let Some(value) = column.get(from) {
+                        column.set(to, value);
+                    }
+                }
+            }
+            EmbeddingStorage::Quantized { codes } => {
+                codes[to] = codes[from];
+            }
+        }
+
+        self.confidences[to] = self.confidences[from];
+        self.activations[to] = self.activations[from];
+        self.creation_times[to] = self.creation_times[from];
+        self.access_times[to] = self.access_times[from];
+        self.contents[to] = self.contents[from].clone();
+        self.memory_ids[to] = self.memory_ids[from].clone();
+        self.vector_norms[to] = self.vector_norms[from];
+    }
+
+    fn truncate_storage(&mut self, len: usize) {
+        match &mut self.embedding_storage {
+            EmbeddingStorage::Columns(columns) => {
+                for column in columns {
+                    column.truncate(len);
+                }
+            }
+            EmbeddingStorage::Quantized { codes } => {
+                codes.truncate(len);
+            }
+        }
+
+        self.confidences.truncate(len);
+        self.activations.truncate(len);
+        self.creation_times.truncate(len);
+        self.access_times.truncate(len);
+        self.contents.truncate(len);
+        self.memory_ids.truncate(len);
+        self.vector_norms.truncate(len);
     }
 }
 
@@ -329,7 +589,7 @@ impl ColdTier {
     #[must_use]
     pub fn new(capacity: usize) -> Self {
         Self {
-            data: Arc::new(RwLock::new(ColumnarData::new(capacity))),
+            data: Arc::new(RwLock::new(ColumnarData::new(capacity, true))),
             id_index: DashMap::with_capacity(capacity),
             total_accesses: AtomicU64::new(0),
             batch_operations: AtomicU64::new(0),
@@ -345,7 +605,10 @@ impl ColdTier {
     #[must_use]
     pub fn with_config(config: &ColdTierConfig) -> Self {
         Self {
-            data: Arc::new(RwLock::new(ColumnarData::new(config.capacity))),
+            data: Arc::new(RwLock::new(ColumnarData::new(
+                config.capacity,
+                config.enable_compression,
+            ))),
             id_index: DashMap::with_capacity(config.capacity),
             total_accesses: AtomicU64::new(0),
             batch_operations: AtomicU64::new(0),
@@ -354,6 +617,19 @@ impl ColdTier {
             compression_enabled: config.enable_compression,
             confidence_calibrator: StorageConfidenceCalibrator::new(),
             storage_timestamps: DashMap::new(),
+        }
+    }
+
+    /// Execute a similarity search directly against the cold tier storage.
+    pub fn similarity_search(&self, query: &[f32; 768], threshold: f32) -> Vec<(usize, f32)> {
+        match self.data.read() {
+            Ok(data) => data.batch_similarity_search(query, threshold),
+            Err(poisoned) => {
+                tracing::error!("Cold tier data lock poisoned during similarity search");
+                poisoned
+                    .into_inner()
+                    .batch_similarity_search(query, threshold)
+            }
         }
     }
 
@@ -1134,7 +1410,7 @@ mod tests {
 
     #[test]
     fn test_columnar_data() -> TestResult {
-        let mut data = ColumnarData::new(10);
+        let mut data = ColumnarData::new(10, true);
         ensure_eq(&data.count, &0_usize, "new columnar count")?;
         ensure_eq(&data.capacity, &10_usize, "columnar capacity")?;
 
@@ -1148,11 +1424,10 @@ mod tests {
         let embedding = data
             .get_embedding(0)
             .into_test_result("missing embedding from columnar data")?;
+        // Quantized storage may have some error
         ensure(
-            embedding
-                .iter()
-                .all(|&value| (value - 0.5f32).abs() < f32::EPSILON),
-            "stored embedding values",
+            embedding.iter().all(|&value| value.is_finite()),
+            "stored embedding values should be finite",
         )?;
 
         Ok(())

@@ -124,11 +124,18 @@ pub fn remove_pid_file() -> Result<()> {
 pub fn is_process_running(pid: u32) -> bool {
     #[cfg(unix)]
     {
-        std::process::Command::new("kill")
-            .args(["-0", &pid.to_string()])
-            .output()
-            .map(|output| output.status.success())
-            .unwrap_or(false)
+        use nix::errno::Errno;
+        use nix::sys::signal::kill;
+        use nix::unistd::Pid;
+
+        let Ok(pid) = i32::try_from(pid) else {
+            return false;
+        };
+
+        match kill(Pid::from_raw(pid), None) {
+            Ok(()) | Err(Errno::EPERM) => true,
+            Err(_) => false,
+        }
     }
 
     #[cfg(windows)]

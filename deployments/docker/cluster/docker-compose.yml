@@ -1,0 +1,148 @@
+x-engram-build: &engram-build
+  context: ../../..
+  dockerfile: deployments/docker/Dockerfile
+
+services:
+  engram-node1:
+    build: *engram-build
+    image: engram/local:latest
+    hostname: engram-node1
+    container_name: engram-node1
+    ports:
+      - "7432:7432"   # HTTP API
+      - "50051:50051" # gRPC
+    environment:
+      XDG_CONFIG_HOME: /config
+      RUST_LOG: ${RUST_LOG:-info}
+      RUST_BACKTRACE: ${RUST_BACKTRACE:-1}
+    command: ["start", "--port", "7432", "--grpc-port", "50051"]
+    volumes:
+      - engram-node1-data:/data
+      - ./node1/config:/config:ro
+    networks:
+      engram-net:
+        aliases:
+          - engram-node1
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/engram", "status", "--json"]
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+
+  engram-node2:
+    build: *engram-build
+    image: engram/local:latest
+    hostname: engram-node2
+    container_name: engram-node2
+    ports:
+      - "7433:7432"
+      - "50052:50051"
+    environment:
+      XDG_CONFIG_HOME: /config
+      RUST_LOG: ${RUST_LOG:-info}
+      RUST_BACKTRACE: ${RUST_BACKTRACE:-1}
+    command: ["start", "--port", "7432", "--grpc-port", "50051"]
+    volumes:
+      - engram-node2-data:/data
+      - ./node2/config:/config:ro
+    networks:
+      engram-net:
+        aliases:
+          - engram-node2
+    restart: unless-stopped
+    depends_on:
+      - engram-node1
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/engram", "status", "--json"]
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+
+  engram-node3:
+    build: *engram-build
+    image: engram/local:latest
+    hostname: engram-node3
+    container_name: engram-node3
+    ports:
+      - "7434:7432"
+      - "50053:50051"
+    environment:
+      XDG_CONFIG_HOME: /config
+      RUST_LOG: ${RUST_LOG:-info}
+      RUST_BACKTRACE: ${RUST_BACKTRACE:-1}
+    command: ["start", "--port", "7432", "--grpc-port", "50051"]
+    volumes:
+      - engram-node3-data:/data
+      - ./node3/config:/config:ro
+    networks:
+      engram-net:
+        aliases:
+          - engram-node3
+    restart: unless-stopped
+    depends_on:
+      - engram-node1
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/engram", "status", "--json"]
+      interval: 30s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
+
+  prometheus:
+    image: prom/prometheus:v2.45.0
+    container_name: engram-cluster-prometheus
+    profiles: ["monitoring"]
+    ports:
+      - "9090:9090"
+    volumes:
+      - prometheus-data:/prometheus
+      - ../../prometheus:/etc/prometheus/base:ro
+      - ./monitoring/prometheus.generated.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-7d}'
+    networks:
+      - engram-net
+    restart: unless-stopped
+    depends_on:
+      - engram-node1
+      - engram-node2
+      - engram-node3
+
+  grafana:
+    image: grafana/grafana:10.0.0
+    container_name: engram-cluster-grafana
+    profiles: ["monitoring"]
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ../../grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ../../grafana/provisioning:/etc/grafana/provisioning:ro
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_SERVER_DOMAIN: ${GRAFANA_DOMAIN:-localhost}
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3000}
+      GF_DEFAULT_INSTANCE_NAME: ${CLUSTER_NAME:-demo-cluster}
+    networks:
+      - engram-net
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
+volumes:
+  engram-node1-data:
+  engram-node2-data:
+  engram-node3-data:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  engram-net:
+    driver: bridge

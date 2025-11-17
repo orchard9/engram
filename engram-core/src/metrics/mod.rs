@@ -10,6 +10,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
+/// Metrics helpers for SWIM cluster observability.
+pub mod cluster;
 pub mod cognitive;
 pub mod cognitive_patterns;
 pub mod completion_metrics;
@@ -22,6 +24,7 @@ pub mod streaming;
 #[cfg(feature = "monitoring")]
 pub mod numa_aware;
 
+pub use cluster::{ClusterMetrics, PartitionStatus};
 pub use cognitive::{CognitiveInsight, CognitiveMetrics, ConsolidationState};
 pub use cognitive_patterns::{
     CognitivePatternMetrics, InterferenceType, PrimingType, RejectionReason,
@@ -54,6 +57,18 @@ const SPREADING_POOL_HIT_RATE: &str = "engram_spreading_pool_hit_rate";
 const SPREADING_LATENCY_HOT: &str = "engram_spreading_latency_hot_seconds";
 const SPREADING_LATENCY_WARM: &str = "engram_spreading_latency_warm_seconds";
 const SPREADING_LATENCY_COLD: &str = "engram_spreading_latency_cold_seconds";
+/// Counts how often the assignment manager computes a new placement.
+pub const CLUSTER_ASSIGNMENTS_TOTAL: &str = "engram_cluster_assignments_total";
+/// Counts how many migration plans the rebalance coordinator has produced.
+pub const CLUSTER_REBALANCE_PLANS_TOTAL: &str = "engram_cluster_rebalance_plans_total";
+/// Gauge tracking the number of cached primaries per node.
+pub const CLUSTER_SPACES_PER_NODE: &str = "engram_cluster_spaces_per_node";
+/// Counter tracking replication traffic (labelled with the direction).
+pub const REPLICATION_BYTES_TOTAL: &str = "engram_replication_bytes_total";
+/// Gauge representing active replication streams.
+pub const REPLICATION_STREAMS: &str = "engram_replication_streams";
+/// Gauge tracking the observed lag per `(space, replica)` pair.
+pub const REPLICATION_LAG_SECONDS: &str = "engram_replication_lag_seconds";
 
 // Embedding infrastructure metrics
 /// Counter tracking episodes stored with embedding provenance.
@@ -107,6 +122,24 @@ pub const CONTENT_COMPACTION_TOTAL: &str = "engram_content_compaction_total";
 pub const CONTENT_COMPACTION_DURATION_MS: &str = "engram_content_compaction_duration_ms";
 /// Total bytes reclaimed by content storage compaction.
 pub const CONTENT_COMPACTION_BYTES_RECLAIMED: &str = "engram_content_compaction_bytes_reclaimed";
+/// Total count of deduplicated memories skipped due to exact match.
+pub const CONTENT_DEDUP_SKIP_TOTAL: &str = "content_dedup_skip_total";
+/// Total count of deduplicated memories where a new entry replaced the existing one.
+pub const CONTENT_DEDUP_REPLACE_TOTAL: &str = "content_dedup_replace_total";
+/// Total count of deduplicated memories merged/composited together.
+pub const CONTENT_DEDUP_MERGE_TOTAL: &str = "content_dedup_merge_total";
+/// Gauge tracking current activation density observed by HNSW dynamics.
+pub const HNSW_DYNAMICS_ACTIVATION_DENSITY: &str = "hnsw_dynamics_activation_density";
+/// Gauge tracking temporal locality factor for HNSW dynamics.
+pub const HNSW_DYNAMICS_TEMPORAL_LOCALITY: &str = "hnsw_dynamics_temporal_locality";
+/// Gauge tracking overconfidence ratio for HNSW circuit breaker decisions.
+pub const HNSW_DYNAMICS_OVERCONFIDENCE_RATIO: &str = "hnsw_dynamics_overconfidence_ratio";
+/// Gauge tracking confidence variance within HNSW activation dynamics.
+pub const HNSW_DYNAMICS_CONFIDENCE_VARIANCE: &str = "hnsw_dynamics_confidence_variance";
+/// Counter recording how often HNSW dynamics performed parameter adaptation.
+pub const HNSW_DYNAMICS_ADAPTATIONS_TOTAL: &str = "hnsw_dynamics_adaptations_total";
+/// Counter recording how often the HNSW dynamics circuit breaker disabled adaptation.
+pub const HNSW_DYNAMICS_DISABLED_TOTAL: &str = "hnsw_dynamics_disabled_total";
 
 // WAL (Write-Ahead Log) metrics
 /// Total number of episodes successfully recovered from WAL during server startup.
@@ -194,6 +227,9 @@ pub struct MetricsRegistry {
     /// Lock-free gauges for instantaneous measurements
     gauges: Arc<LockFreeGauges>,
 
+    /// Cluster-specific metrics (membership + probe latency)
+    cluster: Arc<ClusterMetrics>,
+
     /// Cognitive architecture specific metrics
     cognitive: Arc<CognitiveMetrics>,
 
@@ -216,11 +252,19 @@ impl MetricsRegistry {
     #[must_use]
     pub fn new() -> Self {
         let health = Arc::new(SystemHealth::new());
+        let counters = Arc::new(LockFreeCounters::new());
+        let histograms = Arc::new(LockFreeHistograms::new());
+        let gauges = Arc::new(LockFreeGauges::new());
+        let cluster = Arc::new(ClusterMetrics::new(
+            Arc::clone(&gauges),
+            Arc::clone(&histograms),
+        ));
 
         let registry = Self {
-            counters: Arc::new(LockFreeCounters::new()),
-            histograms: Arc::new(LockFreeHistograms::new()),
-            gauges: Arc::new(LockFreeGauges::new()),
+            counters,
+            histograms,
+            gauges,
+            cluster,
             cognitive: Arc::new(CognitiveMetrics::new()),
             hardware: Arc::new(HardwareMetrics::new()),
             streaming: Arc::new(StreamingAggregator::new()),
@@ -309,20 +353,23 @@ impl MetricsRegistry {
         value: u64,
         labels: &[(&'static str, String)],
     ) {
+        // Always record against the base metric to preserve system-wide aggregates.
+        self.increment_counter(base_name, value);
+
         let labeled_name = encode_metric_name_with_labels(base_name, labels);
+        let leaked_name: &'static str = Box::leak(labeled_name.into_boxed_str());
 
         // Use labeled name with counter storage - this creates a new entry
         // per unique label combination. DashMap handles concurrent access.
         self.counters
             .counters
-            .entry(Box::leak(labeled_name.into_boxed_str()))
+            .entry(leaked_name)
             .or_insert_with(|| CachePadded::new(AtomicU64::new(0)))
             .fetch_add(value, Ordering::Relaxed);
 
         // Stream with labels preserved for multi-tenant aggregation
-        // TODO: Add label support to MetricUpdate when implementing multi-tenant streaming
         self.streaming.queue_update(MetricUpdate::Counter {
-            name: base_name,
+            name: leaked_name,
             value,
             timestamp: Instant::now(),
         });
@@ -345,17 +392,19 @@ impl MetricsRegistry {
         value: f64,
         labels: &[(&'static str, String)],
     ) {
+        self.observe_histogram(base_name, value);
+
         let labeled_name = encode_metric_name_with_labels(base_name, labels);
+        let leaked_name: &'static str = Box::leak(labeled_name.into_boxed_str());
 
         self.histograms
             .histograms
-            .entry(Box::leak(labeled_name.into_boxed_str()))
+            .entry(leaked_name)
             .or_insert_with(|| Arc::new(lockfree::LockFreeHistogram::new()))
             .record(value);
 
-        // TODO: Add label support to MetricUpdate when implementing multi-tenant streaming
         self.streaming.queue_update(MetricUpdate::Histogram {
-            name: base_name,
+            name: leaked_name,
             value,
             timestamp: Instant::now(),
         });
@@ -377,18 +426,20 @@ impl MetricsRegistry {
         value: f64,
         labels: &[(&'static str, String)],
     ) {
+        self.record_gauge(base_name, value);
+
         let labeled_name = encode_metric_name_with_labels(base_name, labels);
+        let leaked_name: &'static str = Box::leak(labeled_name.into_boxed_str());
         let bits = value.to_bits();
 
         self.gauges
             .gauges
-            .entry(Box::leak(labeled_name.into_boxed_str()))
+            .entry(leaked_name)
             .or_insert_with(|| CachePadded::new(AtomicU64::new(0)))
             .store(bits, Ordering::Release);
 
-        // TODO: Add label support to MetricUpdate when implementing multi-tenant streaming
         self.streaming.queue_update(MetricUpdate::Gauge {
-            name: base_name,
+            name: leaked_name,
             value,
             timestamp: Instant::now(),
         });
@@ -402,6 +453,12 @@ impl MetricsRegistry {
     /// Record hardware performance metrics
     pub fn record_hardware(&self, metric: &hardware::HardwareMetric) {
         self.hardware.record(metric);
+    }
+
+    /// Access cluster-specific metrics for membership tracking.
+    #[must_use]
+    pub fn cluster_metrics(&self) -> Arc<ClusterMetrics> {
+        Arc::clone(&self.cluster)
     }
 
     /// Get current system health status
@@ -839,6 +896,12 @@ pub fn record_cognitive(metric: &cognitive::CognitiveMetric) {
     }
 }
 
+/// Obtain the cluster metrics handle if the registry has been initialised.
+#[must_use]
+pub fn cluster_metrics_handle() -> Option<Arc<ClusterMetrics>> {
+    metrics().map(|registry| registry.cluster_metrics())
+}
+
 /// Record when an episode is stored with embedding provenance.
 ///
 /// This increments the `engram_episodes_with_embeddings_total` counter to track
@@ -992,7 +1055,7 @@ mod tests {
         // Verify the labeled metric was recorded
         // Note: We can't directly query labeled metrics through the public API yet,
         // but we verify it doesn't panic and creates entries internally
-        assert_eq!(registry.counters.counters.len(), 1);
+        assert_eq!(registry.counters.counters.len(), 2);
     }
 
     #[test]
@@ -1004,7 +1067,7 @@ mod tests {
         registry.observe_histogram_with_labels("engram_test_histogram", 0.5, &labels);
         registry.observe_histogram_with_labels("engram_test_histogram", 1.0, &labels);
 
-        assert_eq!(registry.histograms.histograms.len(), 1);
+        assert_eq!(registry.histograms.histograms.len(), 2);
     }
 
     #[test]
@@ -1015,7 +1078,7 @@ mod tests {
 
         registry.record_gauge_with_labels("engram_test_gauge", 42.5, &labels);
 
-        assert_eq!(registry.gauges.gauges.len(), 1);
+        assert_eq!(registry.gauges.gauges.len(), 2);
     }
 
     #[test]
@@ -1032,7 +1095,7 @@ mod tests {
         registry.increment_counter_with_labels("engram_memories_total", 20, &labels_b);
 
         // Should create 2 separate counter series
-        assert_eq!(registry.counters.counters.len(), 2);
+        assert_eq!(registry.counters.counters.len(), 3);
     }
 
     #[test]

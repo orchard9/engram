@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use anyhow::Result;
+use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::time::{Duration, Instant};
@@ -53,6 +54,33 @@ pub struct BenchmarkMetrics {
 #[derive(Debug, Clone, Default)]
 pub struct BenchmarkResults {
     results: HashMap<String, HashMap<String, BenchmarkMetrics>>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BenchmarkRecord {
+    implementation: String,
+    dataset: String,
+    build_time_ms: u64,
+    avg_recall: f32,
+    avg_latency_us: u64,
+    p95_latency_us: u64,
+    p99_latency_us: u64,
+    memory_mb: usize,
+}
+
+impl BenchmarkRecord {
+    fn from_metrics(implementation: &str, dataset: &str, metrics: &BenchmarkMetrics) -> Self {
+        Self {
+            implementation: implementation.to_string(),
+            dataset: dataset.to_string(),
+            build_time_ms: metrics.build_time.as_millis() as u64,
+            avg_recall: metrics.avg_recall,
+            avg_latency_us: duration_to_us(metrics.avg_latency),
+            p95_latency_us: duration_to_us(metrics.p95_latency),
+            p99_latency_us: duration_to_us(metrics.p99_latency),
+            memory_mb: metrics.memory_usage / (1024 * 1024),
+        }
+    }
 }
 
 impl BenchmarkResults {
@@ -112,6 +140,58 @@ impl BenchmarkResults {
         }
 
         Ok(())
+    }
+
+    pub fn export_json(&self, path: &str) -> Result<()> {
+        let records = self.serialize_records();
+        if let Some(parent) = std::path::Path::new(path).parent() {
+            if !parent.as_os_str().is_empty() {
+                std::fs::create_dir_all(parent)?;
+            }
+        }
+        std::fs::write(path, serde_json::to_string_pretty(&records)?)?;
+        Ok(())
+    }
+
+    pub fn assert_thresholds(&self, min_recall: f32, max_latency: Duration) -> Result<()> {
+        let max_latency_us = duration_to_us(max_latency);
+        for (implementation, datasets) in &self.results {
+            for (dataset, metrics) in datasets {
+                if metrics.avg_recall < min_recall {
+                    anyhow::bail!(
+                        "{} on {} recall {:.3} below threshold {:.3}",
+                        implementation,
+                        dataset,
+                        metrics.avg_recall,
+                        min_recall
+                    );
+                }
+                if duration_to_us(metrics.avg_latency) > max_latency_us {
+                    anyhow::bail!(
+                        "{} on {} latency {:?} exceeded threshold {:?}",
+                        implementation,
+                        dataset,
+                        metrics.avg_latency,
+                        max_latency
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn serialize_records(&self) -> Vec<BenchmarkRecord> {
+        let mut records = Vec::new();
+        for (implementation, datasets) in &self.results {
+            for (dataset, metrics) in datasets {
+                records.push(BenchmarkRecord::from_metrics(
+                    implementation,
+                    dataset,
+                    metrics,
+                ));
+            }
+        }
+        records
     }
 
     pub const fn data(&self) -> &HashMap<String, HashMap<String, BenchmarkMetrics>> {
@@ -267,4 +347,12 @@ pub fn calculate_recall(results: &[(usize, f32)], ground_truth: &[usize], k: usi
         let result = ratio as f32;
         result
     }
+}
+
+fn duration_to_us(duration: Duration) -> u64 {
+    duration
+        .as_micros()
+        .min(u128::from(u64::MAX))
+        .try_into()
+        .unwrap_or(u64::MAX)
 }

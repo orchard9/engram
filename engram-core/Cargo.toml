@@ -26,6 +26,10 @@ async-trait = "0.1"
 syn = { version = "2.0", features = ["full", "visit"] }
 utoipa = { workspace = true }
 phf = { version = "0.11", features = ["macros"] }
+rand = { workspace = true, features = ["small_rng"] }
+humantime-serde = "1.1"
+trust-dns-resolver = { version = "0.23", optional = true }
+blake3 = "1.5"
 
 # Lock-free concurrent data structures for HNSW
 crossbeam-epoch = "0.9"
@@ -50,14 +54,14 @@ once_cell = "1.19"
 crc32c = { version = "0.6", optional = true }
 page_size = { version = "0.6", optional = true }
 libc = { version = "0.2", optional = true }
-rayon = { version = "1.7", optional = true }
+rayon = { version = "1.7" }
 
 # Compression for persistence
 lz4 = { version = "1.24", optional = true }
 zstd = { version = "0.13", optional = true }
 
 # Async runtime for tiered storage (optional)
-tokio = { version = "1.0", optional = true, features = ["rt", "time", "sync", "macros", "rt-multi-thread"] }
+tokio = { version = "1.0", optional = true, features = ["rt", "time", "sync", "macros", "rt-multi-thread", "net"] }
 
 # Serialization for WAL persistence
 bincode = { version = "1.3", optional = true }
@@ -70,7 +74,6 @@ num-traits = "0.2"
 statrs = { version = "0.16", optional = true }
 libm = { version = "0.2", optional = true }
 rand_distr = { version = "0.4", optional = true }
-rand = { version = "0.8", optional = true }
 
 # Probabilistic query engine and formal verification
 # Note: z3 requires system Z3 library to be installed
@@ -197,6 +200,14 @@ name = "binding_performance"
 harness = false
 required-features = ["dual_memory_types"]
 
+[[bench]]
+name = "hnsw_dynamics"
+harness = false
+
+[[bench]]
+name = "cold_tier_columnar"
+harness = false
+
 # Temporarily disabled - needs API updates for space-partitioned HNSW
 # [[bench]]
 # name = "concurrent_recall"
@@ -207,7 +218,16 @@ required-features = ["dual_memory_types"]
 # harness = false
 
 [features]
-default = ["hnsw_index", "memory_mapped_persistence", "psychological_decay", "probabilistic_queries", "pattern_completion", "monitoring"]
+default = [
+    "hnsw_index",
+    "memory_mapped_persistence",
+    "psychological_decay",
+    "probabilistic_queries",
+    "pattern_completion",
+    "monitoring",
+    "dual_memory_cache",
+    "simd_concepts",
+]
 # For systems where Z3 is available
 full = ["default", "smt_verification"]
 
@@ -231,7 +251,6 @@ memory_mapped_persistence = [
     "crc32c", 
     "page_size",
     "libc",
-    "rayon",
     "lz4",
     "zstd",
     "tokio",
@@ -242,8 +261,7 @@ memory_mapped_persistence = [
 psychological_decay = [
     "statrs",
     "libm", 
-    "rand_distr",
-    "rand"
+    "rand_distr"
 ]
 
 # Probabilistic query engine with formal verification
@@ -256,7 +274,6 @@ probabilistic_queries = [
 pattern_completion = [
     "nalgebra",
     "statrs",
-    "rayon",
     "lru"
 ]
 
@@ -268,6 +285,15 @@ smt_verification = [
 
 # Production monitoring with lock-free metrics and NUMA-aware collection
 monitoring = ["hwlocality"]
+
+# Dual-memory hot-path cache infrastructure
+dual_memory_cache = []
+
+# SIMD helpers for concept traversal
+simd_concepts = ["dual_memory_cache"]
+
+# NUMA-aware placement scaffolding (opt-in)
+numa_aware = []
 
 # Development and testing features
 testing = []
@@ -289,6 +315,9 @@ disable_persistence = []
 
 # Zig performance kernels (Milestone 10)
 zig-kernels = []
+
+# Cluster discovery integrations
+cluster_discovery_dns = ["trust-dns-resolver"]
 
 # Security features (Milestone 16 Task 008)
 security = [

@@ -22,6 +22,36 @@ struct HealthResponse {
     timestamp: String,
     checks: Vec<serde_json::Value>,
     spaces: Vec<SpaceHealthMetrics>,
+    cluster: Option<ClusterHealthOverview>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct ClusterHealthOverview {
+    node_id: String,
+    alive: usize,
+    suspect: usize,
+    dead: usize,
+    left: usize,
+    total: usize,
+    #[serde(default)]
+    router: Option<RouterStatusOverview>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct RouterStatusOverview {
+    requests_total: u64,
+    retries_total: u64,
+    replica_fallback_total: u64,
+    open_breakers: usize,
+    #[serde(default)]
+    breakers: Vec<RouterBreakerStatus>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct RouterBreakerStatus {
+    node_id: String,
+    state: String,
+    retry_after_ms: Option<u64>,
 }
 
 /// Show comprehensive server status with per-space metrics
@@ -54,14 +84,19 @@ pub async fn show_status(space_filter: Option<&str>) -> Result<()> {
     println!("Process ID: {pid}");
     println!("HTTP Port: {port}");
 
-    // Check if process exists
-    if !is_process_running(pid) {
-        println!("Process Status: Not running (zombie PID file)");
-        println!("Cleanup needed: engram stop");
-        return Ok(());
+    let mut process_running = is_process_running(pid);
+    if !process_running && pid == std::process::id() {
+        process_running = true;
     }
 
-    println!("Process Status: Running");
+    if process_running {
+        println!("Process Status: Running");
+    } else {
+        println!("Process Status: Unable to verify (PID: {pid})");
+        println!(
+            "Hint: containerized deployments often restrict PID probes; continuing with HTTP checks"
+        );
+    }
 
     // Check HTTP health
     let client = reqwest::Client::builder()
@@ -89,6 +124,9 @@ pub async fn show_status(space_filter: Option<&str>) -> Result<()> {
         Err(e) => {
             println!("HTTP Health: Unreachable");
             println!("Error: {e}");
+            if !process_running {
+                println!("Cleanup needed: engram stop");
+            }
         }
     }
 
@@ -104,6 +142,40 @@ pub async fn show_status(space_filter: Option<&str>) -> Result<()> {
 /// Print detailed health information with per-space metrics table
 fn print_health_details(health_data: &HealthResponse, space_filter: Option<&str>) {
     println!("\nOverall Status: {}", health_data.status);
+
+    if let Some(cluster) = &health_data.cluster {
+        println!(
+            "Cluster Node: {} | alive {} | suspect {} | dead {} | left {} | total {}",
+            cluster.node_id,
+            cluster.alive,
+            cluster.suspect,
+            cluster.dead,
+            cluster.left,
+            cluster.total
+        );
+
+        if let Some(router) = &cluster.router {
+            println!(
+                "Router: requests {} | retries {} | fallbacks {} | open breakers {}",
+                router.requests_total,
+                router.retries_total,
+                router.replica_fallback_total,
+                router.open_breakers
+            );
+            if !router.breakers.is_empty() {
+                println!("  Breakers:");
+                for breaker in &router.breakers {
+                    match breaker.retry_after_ms {
+                        Some(ms) => println!(
+                            "    - {}: {} (retry in {ms}ms)",
+                            breaker.node_id, breaker.state
+                        ),
+                        None => println!("    - {}: {}", breaker.node_id, breaker.state),
+                    }
+                }
+            }
+        }
+    }
 
     // Filter spaces if requested
     let spaces_to_display: Vec<&SpaceHealthMetrics> = space_filter.map_or_else(

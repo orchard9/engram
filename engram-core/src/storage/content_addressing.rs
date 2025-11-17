@@ -5,11 +5,22 @@
 //! and similarity-based addressing using LSH (Locality-Sensitive Hashing).
 
 use crate::Confidence;
+use blake3::Hasher;
 use dashmap::DashMap;
-#[cfg(test)]
-use std::collections::hash_map::DefaultHasher;
-#[cfg(test)]
-use std::hash::{Hash, Hasher};
+use std::sync::OnceLock;
+
+const EMBEDDING_DIM: usize = 768;
+const LSH_PROJECTION_COUNT: usize = 32;
+const PROJECTION_DOMAIN: &[u8] = b"engram::content_address::projection";
+const HIGH_CONFIDENCE_SCALED: u32 = 900; // Confidence::HIGH.raw() * 1000
+
+static LSH_PROJECTIONS: OnceLock<LshProjectionTable> = OnceLock::new();
+
+#[derive(Debug)]
+struct LshProjectionTable {
+    seeds: [u64; LSH_PROJECTION_COUNT],
+    vectors: [[f32; EMBEDDING_DIM]; LSH_PROJECTION_COUNT],
+}
 
 /// Content address for a memory, combining cryptographic hash and LSH bucket
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -24,31 +35,16 @@ pub struct ContentAddress {
 
 impl ContentAddress {
     /// Create a content address from a 768-dimensional embedding
-    #[inline(always)]
     #[must_use]
-    pub fn from_embedding(embedding: &[f32; 768]) -> Self {
-        // High confidence by default (pre-computed constant)
-        const HIGH_CONF: u32 = 900; // Confidence::HIGH.raw() * 1000
-
-        // Ultra-fast hash: use first 16 floats directly as bytes
-        let mut semantic_hash = [0u8; 32];
-
-        // Cast first 8 floats to bytes for hashing (32 bytes total)
-        // This is much faster than quantization and still provides good uniqueness
-        for (chunk, value) in semantic_hash.chunks_exact_mut(4).zip(embedding.iter()) {
-            chunk.copy_from_slice(&value.to_ne_bytes());
-        }
-
-        // Ultra-fast LSH: XOR first 8 floats as u32 for bucket
-        let mut bucket_iter = embedding.iter().take(8).map(|value| value.to_bits());
-        let lsh_bucket = bucket_iter
-            .next()
-            .map_or(0, |first| bucket_iter.fold(first, |acc, bits| acc ^ bits));
+    pub fn from_embedding(embedding: &[f32; EMBEDDING_DIM]) -> Self {
+        let quantized = quantize_embedding(embedding);
+        let semantic_hash = compute_semantic_hash(&quantized);
+        let lsh_bucket = compute_lsh_bucket(embedding);
 
         Self {
             semantic_hash,
             lsh_bucket,
-            confidence: HIGH_CONF,
+            confidence: HIGH_CONFIDENCE_SCALED,
         }
     }
 
@@ -58,120 +54,16 @@ impl ContentAddress {
         Confidence::from_raw(confidence_from_scaled(self.confidence))
     }
 
-    /// Quantize float embedding to bytes for stable hashing
-    #[cfg(test)]
-    fn quantize_embedding(embedding: &[f32; 768]) -> Vec<u8> {
-        embedding
-            .iter()
-            .map(|&value| quantize_value(value))
-            .collect()
+    /// Expose the deterministic LSH projection seeds for observability.
+    #[must_use]
+    pub fn projection_seeds() -> &'static [u64; LSH_PROJECTION_COUNT] {
+        &projection_table().seeds
     }
 
-    /// Compute semantic hash using simple hash function
-    #[cfg(test)]
+    /// Expose the projection vectors for deterministic replay/testing.
     #[must_use]
-    fn compute_semantic_hash(quantized: &[u8]) -> [u8; 32] {
-        let mut hasher = DefaultHasher::new();
-        quantized.hash(&mut hasher);
-        let hash_value = hasher.finish();
-
-        // Convert u64 hash to [u8; 32] by repeating and mixing
-        let mut result = [0u8; 32];
-        for (i, chunk) in result.chunks_exact_mut(8).enumerate() {
-            let shift = u32::try_from(i * 16).unwrap_or(0);
-            let shifted = hash_value.rotate_left(shift);
-            for (j, byte) in chunk.iter_mut().enumerate() {
-                let offset = u32::try_from(j * 8).unwrap_or(0);
-                let raw = (shifted >> offset) & 0xFF;
-                *byte = u8::try_from(raw).unwrap_or(0);
-            }
-        }
-
-        result
-    }
-
-    /// Fast LSH bucket computation using fewer projections
-    #[cfg(test)]
-    #[must_use]
-    fn compute_lsh_bucket_fast(embedding: &[f32; 768]) -> u32 {
-        let mut bucket = 0u32;
-
-        // Use only 32 projections for speed, sampling evenly across dimensions
-        for bit_idx in 0..32 {
-            let mut dot_product = 0.0f32;
-            let stride = 768 / 32; // Sample every 24th dimension
-
-            for i in 0..32 {
-                let idx = (bit_idx + i * stride) % 768;
-                // Simple hash mixing for pseudo-random projection
-                let bit_component = u32::try_from(bit_idx * 31).unwrap_or(0);
-                let index_component = u32::try_from(i * 17).unwrap_or(0);
-                let mix = bit_component.wrapping_add(index_component) ^ 0xDEEC_E66D;
-                let max_val = f64::from(u32::MAX);
-                let ratio = f64::from(mix) / max_val;
-                #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
-                let random_val = ratio.mul_add(2.0, -1.0) as f32;
-                dot_product += embedding[idx] * random_val;
-            }
-
-            if dot_product > 0.0 {
-                bucket |= 1 << bit_idx;
-            }
-        }
-
-        bucket
-    }
-
-    /// Compute LSH bucket using random projections (original, slower version)
-    #[cfg(test)]
-    #[must_use]
-    fn compute_lsh_bucket(embedding: &[f32; 768]) -> u32 {
-        let mut bucket = 0u32;
-
-        // Use 32 predetermined random projection vectors
-        for bit_idx in 0..32 {
-            let dot_product = Self::random_projection(embedding, bit_idx);
-            if dot_product > 0.0 {
-                bucket |= 1 << bit_idx;
-            }
-        }
-
-        bucket
-    }
-
-    /// Compute dot product with a predetermined random vector
-    #[cfg(test)]
-    #[must_use]
-    fn random_projection(embedding: &[f32; 768], projection_idx: usize) -> f32 {
-        // Use a deterministic pseudo-random sequence for each projection
-        // This ensures consistent hashing across runs
-        let seed = u32::try_from(projection_idx).unwrap_or(u32::MAX);
-        let mut dot_product = 0.0f32;
-
-        for (i, value) in embedding.iter().enumerate() {
-            // Simple deterministic pseudo-random generation
-            let random_component = Self::pseudo_random(seed, i);
-            dot_product += value * random_component;
-        }
-
-        dot_product
-    }
-
-    /// Generate a pseudo-random value for consistent projections
-    #[cfg(test)]
-    #[must_use]
-    fn pseudo_random(seed: u32, index: usize) -> f32 {
-        // Use a simple linear congruential generator
-        let a = 1_664_525u32;
-        let c = 1_013_904_223u32;
-        let m = 2u32.pow(31);
-
-        let index_u32 = u32::try_from(index).unwrap_or(u32::MAX);
-        let x = (a.wrapping_mul(seed.wrapping_add(index_u32)).wrapping_add(c)) % m;
-
-        // Convert to [-1, 1] range
-        #[allow(clippy::cast_precision_loss)]
-        (x as f32 / m as f32).mul_add(2.0, -1.0)
+    pub fn projection_vectors() -> &'static [[f32; EMBEDDING_DIM]; LSH_PROJECTION_COUNT] {
+        &projection_table().vectors
     }
 
     /// Check if two content addresses are in the same LSH bucket
@@ -187,7 +79,6 @@ impl ContentAddress {
     }
 }
 
-#[cfg(test)]
 #[inline]
 #[must_use]
 fn quantize_value(value: f32) -> u8 {
@@ -201,6 +92,85 @@ fn quantize_value(value: f32) -> u8 {
     )]
     {
         rounded as u8
+    }
+}
+
+fn quantize_embedding(embedding: &[f32; EMBEDDING_DIM]) -> [u8; EMBEDDING_DIM] {
+    let mut quantized = [0u8; EMBEDDING_DIM];
+    for (idx, value) in embedding.iter().enumerate() {
+        quantized[idx] = quantize_value(*value);
+    }
+    quantized
+}
+
+fn compute_semantic_hash(quantized: &[u8]) -> [u8; 32] {
+    let mut hasher = Hasher::new();
+    hasher.update(quantized);
+    let hash = hasher.finalize();
+    *hash.as_bytes()
+}
+
+fn compute_lsh_bucket(embedding: &[f32; EMBEDDING_DIM]) -> u32 {
+    let table = projection_table();
+    table
+        .vectors
+        .iter()
+        .enumerate()
+        .fold(0u32, |mut bucket, (bit_idx, projection)| {
+            if dot_product(projection, embedding) >= 0.0 {
+                bucket |= 1 << bit_idx;
+            }
+            bucket
+        })
+}
+
+fn dot_product(a: &[f32; EMBEDDING_DIM], b: &[f32; EMBEDDING_DIM]) -> f32 {
+    a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
+}
+
+fn projection_table() -> &'static LshProjectionTable {
+    LSH_PROJECTIONS.get_or_init(build_projection_table)
+}
+
+#[allow(clippy::large_stack_arrays)]
+fn build_projection_table() -> LshProjectionTable {
+    let mut seeds = [0u64; LSH_PROJECTION_COUNT];
+    let mut vectors = [[0.0f32; EMBEDDING_DIM]; LSH_PROJECTION_COUNT];
+    for bit_idx in 0..LSH_PROJECTION_COUNT {
+        let seed = derive_seed(bit_idx as u64);
+        seeds[bit_idx] = seed;
+        vectors[bit_idx] = build_projection_vector(seed);
+    }
+
+    LshProjectionTable { seeds, vectors }
+}
+
+const fn derive_seed(index: u64) -> u64 {
+    const BASE: u64 = 0xB6E0_C10F_F3A5_A1D3;
+    const STEP: u64 = 0x9E37_79B9_7F4A_7C15;
+    BASE ^ STEP.wrapping_mul(index + 1)
+}
+
+fn build_projection_vector(seed: u64) -> [f32; EMBEDDING_DIM] {
+    let mut vector = [0.0f32; EMBEDDING_DIM];
+    let mut hasher = Hasher::new();
+    hasher.update(PROJECTION_DOMAIN);
+    hasher.update(&seed.to_le_bytes());
+    let mut reader = hasher.finalize_xof();
+    for value in &mut vector {
+        let mut bytes = [0u8; 4];
+        reader.fill(&mut bytes);
+        let raw = u32::from_le_bytes(bytes);
+        *value = map_u32_to_unit(raw);
+    }
+    vector
+}
+
+fn map_u32_to_unit(value: u32) -> f32 {
+    let ratio = f64::from(value) / f64::from(u32::MAX);
+    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
+    {
+        ratio.mul_add(2.0, -1.0) as f32
     }
 }
 
@@ -466,34 +436,33 @@ mod tests {
     #[test]
     fn test_quantization() {
         let embedding = [0.0f32; 768];
-        let quantized = ContentAddress::quantize_embedding(&embedding);
+        let quantized = quantize_embedding(&embedding);
         assert_eq!(quantized[0], 128); // 0.0 maps to middle value
 
         let embedding_max = [1.0f32; 768];
-        let quantized_max = ContentAddress::quantize_embedding(&embedding_max);
+        let quantized_max = quantize_embedding(&embedding_max);
         assert_eq!(quantized_max[0], 255); // 1.0 maps to max value
 
         let embedding_min = [-1.0f32; 768];
-        let quantized_min = ContentAddress::quantize_embedding(&embedding_min);
+        let quantized_min = quantize_embedding(&embedding_min);
         assert_eq!(quantized_min[0], 0); // -1.0 maps to min value
     }
 
     #[test]
     fn test_internal_hash_helpers_are_stable() {
         let embedding = [0.42f32; 768];
-        let quantized = ContentAddress::quantize_embedding(&embedding);
-        let hash = ContentAddress::compute_semantic_hash(&quantized);
+        let quantized = quantize_embedding(&embedding);
+        let hash = compute_semantic_hash(&quantized);
         assert!(hash.iter().any(|byte| *byte != 0));
 
-        let fast_bucket = ContentAddress::compute_lsh_bucket_fast(&embedding);
-        let slow_bucket = ContentAddress::compute_lsh_bucket(&embedding);
-        assert!(fast_bucket.count_ones() <= 32);
-        assert!(slow_bucket.count_ones() <= 32);
+        let bucket_a = compute_lsh_bucket(&embedding);
+        let bucket_b = compute_lsh_bucket(&embedding);
+        assert_eq!(bucket_a, bucket_b);
 
-        let projection = ContentAddress::random_projection(&embedding, 0);
-        assert!(projection.is_finite());
-
-        let pseudo = ContentAddress::pseudo_random(42, 7);
-        assert!((-1.0..=1.0).contains(&pseudo));
+        let seeds = ContentAddress::projection_seeds();
+        assert_eq!(seeds.len(), LSH_PROJECTION_COUNT);
+        let vectors = ContentAddress::projection_vectors();
+        assert_eq!(vectors.len(), LSH_PROJECTION_COUNT);
+        assert!(vectors[0].iter().all(|value| value.is_finite()));
     }
 }

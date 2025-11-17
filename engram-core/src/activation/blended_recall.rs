@@ -286,7 +286,9 @@ pub struct BlendedRecallEngine {
     cognitive_recall: Arc<CognitiveRecall>,
 
     /// Binding index for concept-episode lookups (optional, gated by dual_memory_types)
+    /// NOTE: Currently unused - will be used when semantic pathway is implemented (Task D)
     #[cfg(feature = "dual_memory_types")]
+    #[allow(dead_code)]
     binding_index: Arc<BindingIndex>,
 
     /// Configuration
@@ -356,8 +358,12 @@ impl BlendedRecallEngine {
         );
 
         // Phase 3: Blend results with provenance tracking
-        let blended_results =
-            self.blend_with_provenance(&episodic_pathway, semantic_pathway.as_ref(), &blend_weights, store);
+        let blended_results = self.blend_with_provenance(
+            &episodic_pathway,
+            semantic_pathway.as_ref(),
+            &blend_weights,
+            store,
+        );
 
         // Phase 4: Confidence calibration for blended results
         let mut calibrated_results = Self::calibrate_blended_confidence(blended_results);
@@ -417,8 +423,47 @@ impl BlendedRecallEngine {
 
     /// Execute semantic pathway with timeout
     ///
-    /// Currently stubbed: Requires BindingIndex to implement concept embedding search
-    /// and binding traversal (Task 005 - Binding Formation)
+    /// Implements concept-mediated episode retrieval using semantic similarity.
+    /// This represents the neocortical semantic pathway (System 2) complementing
+    /// the hippocampal episodic pathway (System 1).
+    ///
+    /// # Algorithm (Complementary Learning Systems Theory)
+    ///
+    /// 1. **Concept Search**: Find concepts similar to query embedding
+    ///    - Represents neocortical pattern completion
+    ///    - Uses centroid similarity (slow cortical learning)
+    ///
+    /// 2. **Binding Traversal**: Map concepts → episodes via binding strength
+    ///    - Represents hippocampal-neocortical communication
+    ///    - Weighted by concept coherence and binding strength
+    ///
+    /// 3. **Score Aggregation**: Combine multi-concept evidence
+    ///    - Implements evidence accumulation across semantic space
+    ///    - Biologically plausible weighted voting
+    ///
+    /// # Biological Plausibility
+    ///
+    /// - **Timing**: 8ms default timeout matches slower cortical processing
+    /// - **Coherence gating**: Only high-quality concepts contribute (cortical reliability)
+    /// - **Binding strength**: Models synaptic weight between hippocampus and cortex
+    ///
+    /// # Current Implementation Status
+    ///
+    /// This is a **stub implementation** that returns None because:
+    /// - BindingIndex doesn't have direct access to concept embeddings
+    /// - Requires DualMemoryBackend iteration (Task 009 follow-up)
+    /// - Full implementation deferred to maintain separation of concerns
+    ///
+    /// **Proper Implementation Path**:
+    /// 1. Add `backend: &dyn DualMemoryBackend` parameter to BlendedRecallEngine
+    /// 2. Use `backend.iter_concepts()` to access concept embeddings
+    /// 3. Compute cosine similarity for top-K concepts
+    /// 4. Use `binding_index.get_bindings_from_concept()` for episode mapping
+    ///
+    /// **Why Not Implement Now**:
+    /// - Requires significant API changes to pass backend through recall stack
+    /// - Episodic pathway already works and provides baseline performance
+    /// - Semantic pathway is optional enhancement, not blocking
     fn execute_semantic_pathway_with_timeout(
         cue: &Cue,
         _store: &MemoryStore,
@@ -427,16 +472,52 @@ impl BlendedRecallEngine {
         let start = Instant::now();
 
         // Extract embedding from cue
-        let CueType::Embedding { vector: cue_embedding, .. } = &cue.cue_type else {
+        let CueType::Embedding {
+            vector: cue_embedding,
+            ..
+        } = &cue.cue_type
+        else {
             return None; // Semantic pathway requires embedding
         };
 
-        // Step 1: Find relevant concepts via centroid similarity
-        // Note: This requires BindingIndex to have concept embedding search
-        // For now, we'll return None as this functionality is not yet implemented
-        // TODO: Implement concept search by embedding in BindingIndex
+        // Check timeout before any work
+        if start.elapsed() >= timeout {
+            return None;
+        }
+
+        // STUB: Concept search requires backend access
+        //
+        // Full implementation would:
+        // 1. Iterate concepts from DualDashMapBackend
+        // 2. Compute cosine similarity: dot(cue, concept.centroid) / (norm(cue) * norm(centroid))
+        // 3. Take top max_concepts by similarity
+        // 4. For each concept, get bindings via binding_index.get_bindings_from_concept()
+        // 5. Aggregate episode scores: score = similarity * coherence * binding_strength
+        // 6. Group by episode_id and sum contributions
+        //
+        // Example pseudocode:
+        // ```
+        // let concepts = backend.iter_concepts()
+        //     .map(|c| (c.id, cosine_similarity(cue_embedding, c.centroid), c.coherence))
+        //     .sorted_by_similarity()
+        //     .take(max_concepts);
+        //
+        // let mut episode_scores = HashMap::new();
+        // for (concept_id, similarity, coherence) in concepts {
+        //     let bindings = binding_index.get_bindings_from_concept(&concept_id);
+        //     for binding in bindings {
+        //         let score = similarity * coherence * binding.get_strength();
+        //         episode_scores.entry(binding.episode_id)
+        //             .and_modify(|s| *s += score)
+        //             .or_insert(score);
+        //     }
+        // }
+        // ```
+
         let _ = (cue_embedding, timeout, start);
 
+        // Return None to indicate semantic pathway not executed
+        // Blending logic will handle pure episodic results gracefully
         None
     }
 
@@ -665,8 +746,8 @@ impl BlendedRecallEngine {
                     let convergence_boost = 1.15;
 
                     // Weight by pathway balance (more balanced = more confident)
-                    let balance =
-                        1.0 - ((f32::from(episodic_weight) - f32::from(semantic_weight)).abs() / 100.0);
+                    let balance = 1.0
+                        - ((f32::from(episodic_weight) - f32::from(semantic_weight)).abs() / 100.0);
                     let balance_factor = 1.0 + (balance * 0.1);
 
                     (base_confidence * convergence_boost * balance_factor).min(1.0)
@@ -730,26 +811,94 @@ impl BlendedRecallEngine {
 
     /// Pattern completion from concepts when episodic recall is insufficient
     ///
-    /// This implements pattern completion similar to hippocampal CA3 auto-association,
-    /// using high-coherence concepts to reconstruct episodes that may not have been
-    /// directly retrieved via episodic pathway.
+    /// Implements CA3-inspired pattern completion using semantic concepts to
+    /// reconstruct episodes that were not directly retrieved via episodic pathway.
     ///
-    /// Currently stubbed: Requires BindingIndex to implement concept embedding search
-    /// and binding traversal (Task 005 - Binding Formation)
+    /// # Biological Basis (Hippocampal CA3 Auto-Association)
+    ///
+    /// Models the hippocampal CA3 region's ability to complete partial patterns:
+    /// - **Recurrent collaterals**: CA3-CA3 connections enable pattern completion
+    /// - **Pattern separation threshold**: DG filters input, CA3 completes patterns
+    /// - **Confidence gating**: Only high-coherence concepts trigger completion
+    ///
+    /// # Algorithm
+    ///
+    /// 1. **Detect sparse results**: Trigger if <5 results or low confidence
+    /// 2. **Find completion concepts**: High-coherence concepts matching cue
+    /// 3. **Reconstruct episodes**: Traverse concept → episode bindings
+    /// 4. **Confidence penalty**: Mark as PatternCompleted with reduced confidence
+    ///
+    /// # When Pattern Completion Occurs
+    ///
+    /// - Episodic pathway returns <5 results
+    /// - Top result confidence < completion_threshold (default 0.4)
+    /// - High-quality concepts available (coherence > min_concept_coherence)
+    ///
+    /// # Current Implementation Status
+    ///
+    /// This is a **stub implementation** that passes through existing results because:
+    /// - Requires same backend access as semantic pathway
+    /// - Depends on concept embedding search (not yet available)
+    /// - Pattern completion is optional enhancement for edge cases
+    ///
+    /// **Full Implementation**:
+    /// Would use same approach as semantic pathway stub to find concepts,
+    /// then add new episodes not in existing results, marked with:
+    /// - `provenance.final_source = RecallSource::PatternCompleted`
+    /// - `blended_confidence` reduced by 30% (0.7x factor)
+    /// - `novelty_score` set to indicate reconstruction
     fn pattern_complete_from_concepts(
         results: &[BlendedRankedMemory],
         cue: &Cue,
         _store: &MemoryStore,
     ) -> Vec<BlendedRankedMemory> {
         // Extract embedding from cue
-        let CueType::Embedding { vector: cue_embedding, .. } = &cue.cue_type else {
+        let CueType::Embedding {
+            vector: cue_embedding,
+            ..
+        } = &cue.cue_type
+        else {
             return results.to_vec();
         };
 
-        // For now, return results as-is since concept search is not yet implemented
-        // TODO: Implement concept search and pattern completion
+        // STUB: Pattern completion requires backend access
+        //
+        // Full implementation would:
+        // 1. Check if completion needed (sparse results or low confidence)
+        // 2. Find high-coherence concepts via backend.iter_concepts()
+        // 3. Get episode bindings via binding_index.get_bindings_from_concept()
+        // 4. Filter out episodes already in results
+        // 5. Add new episodes with PatternCompleted provenance
+        // 6. Apply confidence penalty (0.7x) to indicate reconstruction
+        //
+        // Example pseudocode:
+        // ```
+        // if results.len() < 5 || results[0].confidence < 0.4 {
+        //     let high_coherence_concepts = backend.iter_concepts()
+        //         .filter(|c| c.coherence > 0.8)
+        //         .map(|c| (c.id, cosine_similarity(cue_embedding, c.centroid)))
+        //         .sorted_by_similarity()
+        //         .take(5);
+        //
+        //     let existing_ids: HashSet<_> = results.iter().map(|r| &r.base.episode.id).collect();
+        //     let mut completed_results = results.to_vec();
+        //
+        //     for (concept_id, similarity) in high_coherence_concepts {
+        //         let bindings = binding_index.get_bindings_from_concept(&concept_id);
+        //         for binding in bindings {
+        //             if !existing_ids.contains(&binding.episode_id.to_string()) {
+        //                 // Fetch episode from store and create BlendedRankedMemory
+        //                 // with PatternCompleted source and reduced confidence
+        //             }
+        //         }
+        //     }
+        //     return completed_results;
+        // }
+        // ```
+
         let _ = cue_embedding;
 
+        // Return results unmodified (no pattern completion)
         results.to_vec()
     }
 }
@@ -768,11 +917,11 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = BlendedRecallConfig::default();
-        assert_eq!(config.base_episodic_weight, 0.7);
-        assert_eq!(config.base_semantic_weight, 0.3);
+        assert!((config.base_episodic_weight - 0.7).abs() < f32::EPSILON);
+        assert!((config.base_semantic_weight - 0.3).abs() < f32::EPSILON);
         assert!(config.adaptive_weighting);
         assert!(config.enable_pattern_completion);
-        assert_eq!(config.min_concept_coherence, 0.6);
+        assert!((config.min_concept_coherence - 0.6).abs() < f32::EPSILON);
         assert_eq!(config.blend_mode, BlendMode::AdaptiveWeighted);
     }
 

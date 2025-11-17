@@ -1017,94 +1017,27 @@ impl MemoryStore {
 
         for entry in entries {
             let entry_type = WalEntryType::from(entry.header.entry_type);
-            match entry_type {
-                WalEntryType::EpisodeStore => {
-                    match bincode::deserialize::<Episode>(&entry.payload) {
-                        Ok(episode) => {
-                            if self.hot_memories.contains_key(&episode.id) {
-                                tracing::debug!(
-                                    episode_id = %episode.id,
-                                    "Skipping episode already in hot tier"
-                                );
-                                continue;
-                            }
-
-                            let activation = episode.encoding_confidence.raw();
-                            let memory = Memory::from_episode(episode.clone(), activation);
-                            let memory_arc = Arc::new(memory);
-
-                            let content_address =
-                                ContentAddress::from_embedding(&memory_arc.embedding);
-                            let _ = self
-                                .content_index
-                                .insert(content_address, episode.id.clone());
-
-                            self.hot_memories
-                                .insert(episode.id.clone(), Arc::clone(&memory_arc));
-                            self.wal_buffer.insert(episode.id.clone(), episode.clone());
-
-                            {
-                                let mut queue = self.eviction_queue.write();
-                                queue.insert(
-                                    (OrderedFloat(memory_arc.activation()), episode.id.clone()),
-                                    Arc::clone(&memory_arc),
-                                );
-                            }
-
-                            self.memory_count.fetch_add(1, Ordering::Relaxed);
-                            recovered += 1;
-
-                            // Update metrics
-                            crate::metrics::increment_counter(
-                                crate::metrics::WAL_RECOVERY_SUCCESSES_TOTAL,
-                                1,
-                            );
-
-                            tracing::info!(
-                                episode_id = %episode.id,
-                                "Successfully recovered episode from WAL"
-                            );
-                        }
-                        Err(error) => {
-                            failed += 1;
-
-                            tracing::warn!(
-                                ?error,
-                                failed_count = failed,
-                                "Failed to deserialize WAL episode during recovery"
-                            );
-
-                            // Update metrics
-                            crate::metrics::increment_counter(
-                                crate::metrics::WAL_RECOVERY_FAILURES_TOTAL,
-                                1,
-                            );
-                        }
-                    }
+            match self.apply_wal_entry_payload(entry_type, &entry.payload) {
+                Ok(true) => {
+                    recovered += 1;
+                    crate::metrics::increment_counter(
+                        crate::metrics::WAL_RECOVERY_SUCCESSES_TOTAL,
+                        1,
+                    );
                 }
-                WalEntryType::MemoryDelete => {
-                    if let Ok(memory_id) = String::from_utf8(entry.payload.clone()) {
-                        if self.hot_memories.remove(&memory_id).is_some() {
-                            self.memory_count.fetch_sub(1, Ordering::Relaxed);
-                        }
-                        self.wal_buffer.remove(&memory_id);
-                        self.episode_stored_at.remove(&memory_id);
-                        let _ = self.content_index.remove_by_memory_id(&memory_id);
-                        {
-                            let mut queue = self.eviction_queue.write();
-                            queue.retain(|(_, id), _| id != &memory_id);
-                        }
-                    } else {
-                        tracing::warn!("Invalid UTF-8 payload for WAL memory deletion entry");
-                    }
+                Ok(false) => {
+                    tracing::debug!(entry_type = ?entry_type, "Skipping WAL entry type during recovery");
                 }
-                WalEntryType::MemoryUpdate
-                | WalEntryType::Consolidation
-                | WalEntryType::Checkpoint
-                | WalEntryType::CompactionMarker => {
-                    tracing::debug!(
-                        entry_type = ?entry_type,
-                        "Skipping WAL entry type during recovery"
+                Err(error) => {
+                    failed += 1;
+                    tracing::warn!(
+                        ?error,
+                        failed_count = failed,
+                        "Failed to replay WAL entry during recovery"
+                    );
+                    crate::metrics::increment_counter(
+                        crate::metrics::WAL_RECOVERY_FAILURES_TOTAL,
+                        1,
                     );
                 }
             }
@@ -1167,6 +1100,85 @@ impl MemoryStore {
         Ok(recovered)
     }
 
+    #[cfg(feature = "memory_mapped_persistence")]
+    fn apply_wal_entry_payload(
+        &self,
+        entry_type: WalEntryType,
+        payload: &[u8],
+    ) -> Result<bool, crate::storage::StorageError> {
+        match entry_type {
+            WalEntryType::EpisodeStore => {
+                let episode: Episode = bincode::deserialize(payload).map_err(|error| {
+                    crate::storage::StorageError::CorruptionDetected(format!(
+                        "Failed to deserialize WAL episode: {error}"
+                    ))
+                })?;
+                if self.hot_memories.contains_key(&episode.id) {
+                    return Ok(false);
+                }
+
+                let activation = episode.encoding_confidence.raw();
+                let memory = Memory::from_episode(episode.clone(), activation);
+                let memory_arc = Arc::new(memory);
+
+                let content_address = ContentAddress::from_embedding(&memory_arc.embedding);
+                let _ = self
+                    .content_index
+                    .insert(content_address, episode.id.clone());
+
+                self.hot_memories
+                    .insert(episode.id.clone(), Arc::clone(&memory_arc));
+                self.wal_buffer.insert(episode.id.clone(), episode.clone());
+
+                {
+                    let mut queue = self.eviction_queue.write();
+                    queue.insert(
+                        (OrderedFloat(memory_arc.activation()), episode.id.clone()),
+                        Arc::clone(&memory_arc),
+                    );
+                }
+
+                self.memory_count.fetch_add(1, Ordering::Relaxed);
+                tracing::info!(episode_id = %episode.id, "Applied episode from WAL replay");
+                Ok(true)
+            }
+            WalEntryType::MemoryDelete => {
+                let memory_id = String::from_utf8(payload.to_vec()).map_err(|error| {
+                    crate::storage::StorageError::CorruptionDetected(format!(
+                        "Invalid UTF-8 payload for memory deletion entry: {error}"
+                    ))
+                })?;
+                if self.hot_memories.remove(&memory_id).is_some() {
+                    self.memory_count.fetch_sub(1, Ordering::Relaxed);
+                }
+                self.wal_buffer.remove(&memory_id);
+                self.episode_stored_at.remove(&memory_id);
+                let _ = self.content_index.remove_by_memory_id(&memory_id);
+                {
+                    let mut queue = self.eviction_queue.write();
+                    queue.retain(|(_, id), _| id != &memory_id);
+                }
+                tracing::debug!(memory_id = %memory_id, "Applied deletion from WAL replay");
+                Ok(true)
+            }
+            WalEntryType::MemoryUpdate
+            | WalEntryType::Consolidation
+            | WalEntryType::Checkpoint
+            | WalEntryType::CompactionMarker => Ok(false),
+        }
+    }
+
+    #[cfg(feature = "memory_mapped_persistence")]
+    /// Apply a WAL payload received via replication streaming.
+    pub fn apply_replication_entry(
+        &self,
+        entry_type: WalEntryType,
+        payload: &[u8],
+    ) -> Result<(), crate::storage::StorageError> {
+        self.apply_wal_entry_payload(entry_type, payload)?;
+        Ok(())
+    }
+
     /// Store an episode, returning activation level indicating store quality
     ///
     /// # Returns
@@ -1224,21 +1236,28 @@ impl MemoryStore {
             dedup.check_duplicate(&memory, &existing_memories)
         };
 
+        let dedup_action = dedup_result.action.clone();
         let mut memory_id = memory.id.clone();
-        let is_new_memory = match dedup_result.action {
+        let is_new_memory = match dedup_action {
             DeduplicationAction::Skip => {
+                Self::log_dedup_action("skip", &dedup_result);
+                Self::increment_dedup_metric(crate::metrics::CONTENT_DEDUP_SKIP_TOTAL);
                 if dedup_result.existing_id.is_some() {
                     return StoreResult::new(Activation::new(activation * 0.9), true);
                 }
                 true // Not a duplicate, will add new memory
             }
             DeduplicationAction::Replace(existing_id) => {
+                Self::log_dedup_action("replace", &dedup_result);
+                Self::increment_dedup_metric(crate::metrics::CONTENT_DEDUP_REPLACE_TOTAL);
                 self.hot_memories.remove(&existing_id);
                 let _ = self.content_index.remove(&content_address);
                 self.episode_stored_at.remove(&existing_id);
                 false // Replacing existing memory, count stays the same
             }
             DeduplicationAction::Merge(existing_id) => {
+                Self::log_dedup_action("merge", &dedup_result);
+                Self::increment_dedup_metric(crate::metrics::CONTENT_DEDUP_MERGE_TOTAL);
                 if let Some(existing) = self.hot_memories.get(&existing_id) {
                     let merged = {
                         let dedup = self.deduplicator.read();
@@ -1252,7 +1271,23 @@ impl MemoryStore {
                 memory_id = existing_id;
                 true // Fallback case, treat as new
             }
-            _ => true, // Default case, treat as new memory
+            DeduplicationAction::CreateComposite(existing_id) => {
+                Self::log_dedup_action("composite", &dedup_result);
+                Self::increment_dedup_metric(crate::metrics::CONTENT_DEDUP_MERGE_TOTAL);
+                if let Some(existing) = self.hot_memories.get(&existing_id) {
+                    let merged = {
+                        let dedup = self.deduplicator.read();
+                        dedup.merge_memories(&memory, existing.value())
+                    };
+                    let merged_arc = Arc::new(merged);
+                    self.hot_memories
+                        .insert(existing_id.clone(), Arc::clone(&merged_arc));
+                    return StoreResult::new(Activation::new(activation * 0.95), true);
+                }
+                memory_id = existing_id;
+                true
+            }
+            DeduplicationAction::StoreNew => true,
         };
 
         let memory_arc = Arc::new(memory);
@@ -2413,16 +2448,7 @@ impl MemoryStore {
         // This ensures deduplication doesn't prevent recall
         for entry in &self.hot_memories {
             let memory = entry.value();
-            let episode = Episode::new(
-                memory.id.clone(),
-                memory.created_at,
-                memory
-                    .content
-                    .clone()
-                    .unwrap_or_else(|| format!("Memory {id}", id = memory.id)),
-                memory.embedding,
-                memory.confidence,
-            );
+            let episode = Self::memory_to_episode(memory);
             // Only add if not already in WAL buffer
             if !self.wal_buffer.contains_key(&memory.id) {
                 episodes.push((memory.id.clone(), episode));
@@ -2832,16 +2858,7 @@ impl MemoryStore {
             }
             // If not in WAL buffer, try converting from hot_memories
             else if let Some(memory) = self.hot_memories.get(&memory_id) {
-                let episode = Episode::new(
-                    memory.id.clone(),
-                    memory.created_at,
-                    memory
-                        .content
-                        .clone()
-                        .unwrap_or_else(|| format!("Memory {id}", id = memory.id)),
-                    memory.embedding,
-                    memory.confidence,
-                );
+                let episode = Self::memory_to_episode(memory.value());
                 results.push((episode, confidence));
             }
         }
@@ -2871,27 +2888,17 @@ impl MemoryStore {
     /// Recall memory by content address
     pub fn recall_by_content(&self, embedding: &[f32; 768]) -> Option<Episode> {
         let content_address = ContentAddress::from_embedding(embedding);
+        self.get_by_content_address(&content_address)
+            .map(|memory| Self::memory_to_episode(&memory))
+    }
 
-        // Look up memory ID from content index
-        if let Some(memory_id) = self.content_index.get(&content_address) {
-            // Retrieve memory from hot tier
-            if let Some(memory) = self.hot_memories.get(&memory_id) {
-                // Convert Memory to Episode
-                let episode = Episode::new(
-                    memory.id.clone(),
-                    memory.created_at,
-                    memory
-                        .content
-                        .clone()
-                        .unwrap_or_else(|| format!("Memory {id}", id = memory.id)),
-                    memory.embedding,
-                    memory.confidence,
-                );
-                return Some(episode);
-            }
-        }
-
-        None
+    /// Retrieve a memory arc by its content address without scanning the hot map
+    #[must_use]
+    pub fn get_by_content_address(&self, address: &ContentAddress) -> Option<Arc<Memory>> {
+        self.content_index
+            .get(address)
+            .and_then(|memory_id| self.hot_memories.get(&memory_id))
+            .map(|entry| Arc::clone(entry.value()))
     }
 
     /// Retrieve a memory by its unique ID
@@ -2909,21 +2916,9 @@ impl MemoryStore {
     /// in your memory system. This is much faster than semantic search.
     #[must_use]
     pub fn get_by_id(&self, id: &str) -> Option<Episode> {
-        if let Some(memory) = self.hot_memories.get(id) {
-            let episode = Episode::new(
-                memory.id.clone(),
-                memory.created_at,
-                memory
-                    .content
-                    .clone()
-                    .unwrap_or_else(|| format!("Memory {id}", id = memory.id)),
-                memory.embedding,
-                memory.confidence,
-            );
-            return Some(episode);
-        }
-
-        None
+        self.hot_memories
+            .get(id)
+            .map(|memory| Self::memory_to_episode(memory.value()))
     }
 
     /// Find similar content using LSH buckets
@@ -2948,16 +2943,7 @@ impl MemoryStore {
                     crate::compute::cosine_similarity_768(embedding, &memory.embedding);
 
                 if similarity > 0.8 {
-                    let episode = Episode::new(
-                        memory.id.clone(),
-                        memory.created_at,
-                        memory
-                            .content
-                            .clone()
-                            .unwrap_or_else(|| format!("Memory {id}", id = memory.id)),
-                        memory.embedding,
-                        memory.confidence,
-                    );
+                    let episode = Self::memory_to_episode(memory.value());
 
                     results.push((episode, Confidence::exact(similarity)));
                 }
@@ -2974,6 +2960,36 @@ impl MemoryStore {
         results.truncate(max_results);
         results
     }
+
+    fn memory_to_episode(memory: &Memory) -> Episode {
+        Episode::new(
+            memory.id.clone(),
+            memory.created_at,
+            memory
+                .content
+                .clone()
+                .unwrap_or_else(|| format!("Memory {id}", id = memory.id)),
+            memory.embedding,
+            memory.confidence,
+        )
+    }
+
+    fn log_dedup_action(action: &str, result: &crate::storage::DeduplicationResult) {
+        tracing::info!(
+            target = "engram::dedup",
+            action,
+            existing_id = result.existing_id.as_deref().unwrap_or(""),
+            similarity = result.similarity
+        );
+    }
+
+    #[cfg(feature = "monitoring")]
+    fn increment_dedup_metric(name: &'static str) {
+        crate::metrics::increment_counter(name, 1);
+    }
+
+    #[cfg(not(feature = "monitoring"))]
+    fn increment_dedup_metric(_: &'static str) {}
 
     /// Get deduplication statistics
     pub fn deduplication_stats(&self) -> crate::storage::DeduplicationStats {
@@ -3071,6 +3087,34 @@ mod tests {
         }
 
         embedding
+    }
+
+    #[test]
+    fn test_get_by_content_address_retrieves_memory() {
+        let store = MemoryStore::new(16);
+        let embedding = create_test_embedding(0.42);
+        let address = ContentAddress::from_embedding(&embedding);
+        let episode = EpisodeBuilder::new()
+            .id("content-address-test".to_string())
+            .when(Utc::now())
+            .what("testing".to_string())
+            .embedding(embedding)
+            .confidence(Confidence::HIGH)
+            .build();
+        let _ = store.store(episode);
+
+        let retrieved = store.get_by_content_address(&address);
+        assert!(
+            retrieved.is_some(),
+            "Expected memory to be retrievable by content address"
+        );
+        #[allow(clippy::panic)]
+        if let Some(mem) = retrieved {
+            assert_eq!(mem.id, "content-address-test");
+        } else {
+            // This is a test, so panic is acceptable
+            unreachable!("Retrieved value was already asserted to be Some");
+        }
     }
 
     #[test]

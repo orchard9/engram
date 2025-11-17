@@ -1,6 +1,6 @@
 # Task 001: Cluster Membership with SWIM Protocol
 
-**Status**: Pending
+**Status**: In Progress — Core SWIM membership engine is in `engram-core/src/cluster/membership.rs`, wired into CLI startup, exports health/metrics, and now drives deterministic placement decisions plus write gating. Task 001 owns the gossip/runtime pieces; routing fan-out (Task 006) and full rebalancing still stack on top.
 **Estimated Duration**: 3-4 days
 **Dependencies**: None
 **Owner**: TBD
@@ -38,6 +38,20 @@ Traditional heartbeat-based failure detection scales poorly: O(N^2) network traf
 Like neural networks, SWIM is fully decentralized, gracefully degrades on partial failures, provides probabilistic correctness (eventual consistency, not perfect synchrony). Perfect for Engram's cognitive graph architecture.
 
 ## Technical Specification
+
+## Current Status (Nov 2025)
+- ✅ `SwimMembership` lives in `engram-core/src/cluster/membership.rs` with probe planning, suspicion deadlines, rumor sampling, and unit + multi-node integration tests.
+- ✅ `SpaceAssignmentPlanner` ( `engram-core/src/cluster/placement.rs`) consumes SWIM state to choose primary/replica sets so HTTP/gRPC writes refuse to run on non-primary nodes.
+- ✅ `engram-cli` now requires a concrete `cluster.network.advertise_addr` (or the `ENGRAM_CLUSTER_ADVERTISE_ADDR` override) whenever SWIM binds to `0.0.0.0`, and docs/configs explain the requirement for container/cloud users.
+- ✅ Static discovery supports hostnames (`engram-node1:7946`) so Docker compose nodes can bootstrap reliably.
+- ✅ HTTP and gRPC writes now proxy to the planner-selected primary, so operators no longer see `NotPrimary` errors—the distributed router stubs in Task 006 can focus on pooling/fallback logic instead of basic correctness.
+- ⚠️ The router proxy path still needs connection pooling, replica fan-out, and read routing (Task 006) so it’s efficient rather than just correct.
+- ⚠️ Discovery-driven rebalancing, CI promotion for the multi-node SWIM test, and routing table updates remain outstanding.
+
+### Next Steps
+1. Finish Task 006 by adding pooled gRPC connections, replica fan-out, and read routing on top of the new proxy so routing is efficient (not just correct).
+2. Feed the placement snapshots into discovery-driven rebalancing (Task 004) so new nodes can claim ranges without manual intervention.
+3. Promote the docker-compose or Rust integration test into CI so multi-node SWIM convergence/failure detection is exercised regularly.
 
 ### SWIM Protocol Overview
 

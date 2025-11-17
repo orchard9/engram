@@ -4,6 +4,9 @@
 const LANES: usize = 8;
 const TILE_DIM: usize = 96; // 768 / 8 = 96 tiles
 
+#[cfg(all(target_arch = "x86_64", feature = "simd_concepts"))]
+use crate::optimization::batch_fan_effect_division_avx2;
+
 /// Cache-aligned batch structure for SIMD processing (AoSoA layout)
 /// Stores embeddings in Array-of-Structures-of-Arrays format for optimal SIMD access
 pub struct ActivationBatch {
@@ -267,6 +270,40 @@ impl SimdActivationMapper {
 
         // Scalar fallback
         batch_sigmoid_scalar(similarities, temperature, threshold)
+    }
+
+    /// Convert similarities into activations and apply the fan effect penalty.
+    #[must_use]
+    pub fn batch_concept_activation_with_fan_effect(
+        similarities: &[f32],
+        fan_out_counts: &[u32],
+        temperature: f32,
+        threshold: f32,
+    ) -> Vec<f32> {
+        if similarities.len() != fan_out_counts.len() {
+            // Mismatched inputs should degrade gracefully to baseline activations.
+            return Self::batch_sigmoid_activation(similarities, temperature, threshold);
+        }
+
+        let mut activations = Self::batch_sigmoid_activation(similarities, temperature, threshold);
+
+        #[cfg(all(target_arch = "x86_64", feature = "simd_concepts"))]
+        {
+            if is_x86_feature_detected!("avx2") {
+                unsafe {
+                    batch_fan_effect_division_avx2(&mut activations, fan_out_counts);
+                }
+                return activations;
+            }
+        }
+
+        // Scalar fallback when SIMD is unavailable.
+        for (activation, &fan_count) in activations.iter_mut().zip(fan_out_counts) {
+            let denom = (fan_count.max(1) as f32).sqrt().max(1.0);
+            *activation /= denom;
+        }
+
+        activations
     }
 
     /// Fused multiply-add for confidence aggregation with SIMD acceleration.

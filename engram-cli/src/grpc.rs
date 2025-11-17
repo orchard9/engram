@@ -3,27 +3,35 @@
 //! Provides cognitive-friendly service interface with natural language method names
 //! and educational error messages that teach memory system concepts.
 
+use crate::cluster::{ClusterState, RouteDecision};
 use crate::handlers::streaming::StreamingHandlers;
+use crate::router::{ReadPlan, ReadRoutingStrategy, Router as ClusterRouter, RouterError};
+use chrono::{DateTime, Utc};
+#[cfg(feature = "memory_mapped_persistence")]
+use engram_core::storage::wal::WalEntryType;
 use engram_core::{
     Confidence as CoreConfidence, Cue as CoreCue, Episode, MemorySpaceId, MemorySpaceRegistry,
     MemoryStore,
+    cluster::{ClusterError, MigrationPlan, MigrationReason},
     metrics::MetricsRegistry,
     streaming::{ObservationQueue, QueueConfig, SessionManager},
 };
 use engram_proto::cue::CueType;
 use engram_proto::engram_service_server::{EngramService, EngramServiceServer};
 use engram_proto::{
-    AssociateRequest, AssociateResponse, CompleteRequest, CompleteResponse, Confidence,
-    ConfidenceInterval, ConsolidateRequest, ConsolidateResponse, ConsolidationMode,
-    ConsolidationProgress, ConsolidationState, DreamRequest, DreamResponse, ExperienceRequest,
-    ExperienceResponse, FlowStatus, ForgetMode, ForgetRequest, ForgetResponse, HealthStatus,
-    Insight, IntrospectRequest, IntrospectResponse, MemoryFlowRequest, MemoryFlowResponse,
-    MemoryStatistics, ObservationRequest, ObservationResponse, QueryRequest, QueryResponse,
+    ApplyReplicationBatchRequest, ApplyReplicationBatchResponse, AssociateRequest,
+    AssociateResponse, CompleteRequest, CompleteResponse, Confidence, ConfidenceInterval,
+    ConsolidateRequest, ConsolidateResponse, ConsolidationMode, ConsolidationProgress,
+    ConsolidationState, DreamRequest, DreamResponse, ExperienceRequest, ExperienceResponse,
+    FlowStatus, ForgetMode, ForgetRequest, ForgetResponse, HealthStatus, Insight,
+    IntrospectRequest, IntrospectResponse, MemoryFlowRequest, MemoryFlowResponse, MemoryStatistics,
+    MigrateSpaceRpcRequest, MigrateSpaceRpcResponse, MigrationPlanView, ObservationRequest,
+    ObservationResponse, QueryRequest, QueryResponse, RebalanceRequest, RebalanceResponse,
     RecallMetadata, RecallRequest, RecallResponse, RecognizeRequest, RecognizeResponse,
     RememberRequest, RememberResponse, ReminisceRequest, ReminisceResponse, ReplaySequence,
-    StreamEventType, StreamRequest, StreamResponse, StreamingRecallRequest,
-    StreamingRecallResponse, dream_response, flow_control, flow_status, memory_flow_request,
-    memory_flow_response, remember_request,
+    ReplicationStatusRequest, ReplicationStatusResponse, StreamEventType, StreamRequest,
+    StreamResponse, StreamingRecallRequest, StreamingRecallResponse, dream_response, flow_control,
+    flow_status, memory_flow_request, memory_flow_response, remember_request,
 };
 use serde_json::json;
 use std::collections::HashMap;
@@ -45,6 +53,8 @@ pub struct MemoryService {
     default_space: MemorySpaceId,
     /// Streaming handlers for bidirectional gRPC streaming (Milestone 11)
     streaming_handlers: Arc<StreamingHandlers>,
+    cluster: Option<Arc<ClusterState>>,
+    router: Option<Arc<ClusterRouter>>,
 }
 
 impl MemoryService {
@@ -55,6 +65,8 @@ impl MemoryService {
         metrics: Arc<MetricsRegistry>,
         registry: Arc<MemorySpaceRegistry>,
         default_space: MemorySpaceId,
+        cluster: Option<Arc<ClusterState>>,
+        router: Option<Arc<ClusterRouter>>,
     ) -> Self {
         // Initialize streaming components (Milestone 11)
         let session_manager = Arc::new(SessionManager::new());
@@ -71,6 +83,8 @@ impl MemoryService {
             registry,
             default_space,
             streaming_handlers,
+            cluster,
+            router,
         }
     }
 
@@ -123,6 +137,19 @@ impl MemoryService {
         );
         Ok(self.default_space.clone())
     }
+
+    fn plan_route(&self, space_id: &MemorySpaceId) -> Result<RouteDecision, ClusterError> {
+        self.router.as_ref().map_or_else(
+            || {
+                self.cluster
+                    .as_ref()
+                    .map_or(Ok(RouteDecision::Local), |cluster| {
+                        cluster.route_for_space(space_id)
+                    })
+            },
+            |router| router.route_write(space_id),
+        )
+    }
 }
 
 #[tonic::async_trait]
@@ -140,6 +167,24 @@ impl EngramService for MemoryService {
 
         // Extract memory space from request (explicit field or fallback to default)
         let space_id = self.resolve_memory_space(&req.memory_space_id, &metadata)?;
+
+        let route = self
+            .plan_route(&space_id)
+            .map_err(cluster_error_to_status)?;
+
+        if let RouteDecision::Remote { .. } = route {
+            let router = self
+                .router
+                .as_ref()
+                .ok_or_else(|| Status::failed_precondition("cluster router unavailable"))?;
+            let mut remote_request = req.clone();
+            remote_request.memory_space_id = space_id.as_str().to_string();
+            let (response, _) = router
+                .proxy_write(&space_id, &route, remote_request, router.default_deadline())
+                .await
+                .map_err(router_error_to_status)?;
+            return Ok(Response::new(response));
+        }
 
         // Get space-specific store handle from registry
         let handle = self.registry.create_or_get(&space_id).await.map_err(|e| {
@@ -222,6 +267,10 @@ impl EngramService for MemoryService {
             }
         };
 
+        if let Some(cluster) = &self.cluster {
+            cluster.record_local_write(&space_id).await;
+        }
+
         // Create confidence-based response
         let response =
             RememberResponse {
@@ -260,7 +309,7 @@ impl EngramService for MemoryService {
         let store = handle.store();
 
         // Validate cue presence
-        let _cue = req.cue.ok_or_else(|| {
+        let cue_proto = req.cue.clone().ok_or_else(|| {
             Status::invalid_argument(
                 "Recall requires a cue - a trigger for memory retrieval. \
                 Like trying to remember without knowing what you're looking for. \
@@ -269,15 +318,15 @@ impl EngramService for MemoryService {
         })?;
 
         // Parse the cue type and create appropriate CoreCue
-        let core_cue = match &_cue.cue_type {
+        let core_cue = match cue_proto.cue_type {
             Some(CueType::Semantic(semantic)) => {
-                let query = semantic.query.clone();
-                let confidence = _cue.threshold.as_ref().map_or(0.7, |c| c.value);
+                let query = semantic.query;
+                let confidence = cue_proto.threshold.as_ref().map_or(0.7, |c| c.value);
                 CoreCue::semantic(query.clone(), query, CoreConfidence::exact(confidence))
             }
             Some(CueType::Embedding(embedding)) => {
-                let embedding_vec = embedding.vector.clone();
-                let confidence = _cue.threshold.as_ref().map_or(0.7, |c| c.value);
+                let embedding_vec = embedding.vector;
+                let confidence = cue_proto.threshold.as_ref().map_or(0.7, |c| c.value);
 
                 // Convert Vec<f32> to [f32; 768]
                 if embedding_vec.len() != 768 {
@@ -324,6 +373,24 @@ impl EngramService for MemoryService {
                 ));
             }
         };
+
+        if let Some(router) = &self.router {
+            match router
+                .route_read(&space_id, ReadRoutingStrategy::NearestReplica)
+                .map_err(cluster_error_to_status)?
+            {
+                ReadPlan::Local => {}
+                plan @ ReadPlan::Remote(_) => {
+                    let mut remote_request = req.clone();
+                    remote_request.memory_space_id = space_id.as_str().to_string();
+                    let (remote_response, _) = router
+                        .proxy_read(&space_id, plan, remote_request, router.default_deadline())
+                        .await
+                        .map_err(router_error_to_status)?;
+                    return Ok(Response::new(remote_response));
+                }
+            }
+        }
 
         let recall_result = store.recall(&core_cue);
 
@@ -1515,9 +1582,192 @@ impl EngramService for MemoryService {
     ) -> Result<Response<Self::MemoryStreamStream>, Status> {
         todo!("Milestone 11: Streaming memory not yet implemented")
     }
+
+    async fn rebalance_spaces(
+        &self,
+        _request: Request<RebalanceRequest>,
+    ) -> Result<Response<RebalanceResponse>, Status> {
+        let cluster = self
+            .cluster
+            .as_ref()
+            .ok_or_else(|| Status::failed_precondition("cluster mode disabled"))?;
+        let planned = cluster
+            .trigger_rebalance()
+            .await
+            .map_err(cluster_error_to_status)?;
+        Ok(Response::new(RebalanceResponse {
+            planned: planned as u64,
+        }))
+    }
+
+    async fn migrate_space(
+        &self,
+        request: Request<MigrateSpaceRpcRequest>,
+    ) -> Result<Response<MigrateSpaceRpcResponse>, Status> {
+        let cluster = self
+            .cluster
+            .as_ref()
+            .ok_or_else(|| Status::failed_precondition("cluster mode disabled"))?;
+        let req = request.into_inner();
+        if req.space_id.is_empty() {
+            return Err(Status::invalid_argument(
+                "space_id must be provided for migrate_space",
+            ));
+        }
+        let space_id = MemorySpaceId::try_from(req.space_id.as_str()).map_err(|err| {
+            Status::invalid_argument(format!("invalid space id '{}': {err}", req.space_id))
+        })?;
+        let plan = cluster
+            .migrate_space(&space_id)
+            .await
+            .map_err(cluster_error_to_status)?
+            .map(migration_plan_to_proto);
+        Ok(Response::new(MigrateSpaceRpcResponse { plan }))
+    }
+
+    async fn apply_replication_batch(
+        &self,
+        request: Request<ApplyReplicationBatchRequest>,
+    ) -> Result<Response<ApplyReplicationBatchResponse>, Status> {
+        #[cfg(not(feature = "memory_mapped_persistence"))]
+        {
+            return Err(Status::failed_precondition(
+                "replication requires persistent storage support",
+            ));
+        }
+
+        #[cfg(feature = "memory_mapped_persistence")]
+        {
+            let req = request.into_inner();
+            let space_id = MemorySpaceId::try_from(req.space_id.as_str()).map_err(|err| {
+                Status::invalid_argument(format!("invalid space id '{}': {err}", req.space_id))
+            })?;
+            let handle = self
+                .registry
+                .create_or_get(&space_id)
+                .await
+                .map_err(|err| Status::internal(format!("failed to load space: {err}")))?;
+            let store = handle.store();
+            for entry in &req.entries {
+                let entry_type = WalEntryType::from(entry.entry_type);
+                store
+                    .apply_replication_entry(entry_type, &entry.payload)
+                    .map_err(|err| {
+                        Status::internal(format!("failed to apply replication entry: {err}"))
+                    })?;
+            }
+            Ok(Response::new(ApplyReplicationBatchResponse {
+                applied_through: req.end_sequence,
+            }))
+        }
+    }
+
+    async fn get_replication_status(
+        &self,
+        _request: Request<ReplicationStatusRequest>,
+    ) -> Result<Response<ReplicationStatusResponse>, Status> {
+        #[cfg(not(feature = "memory_mapped_persistence"))]
+        {
+            return Ok(Response::new(ReplicationStatusResponse {
+                replicas: Vec::new(),
+            }));
+        }
+
+        #[cfg(feature = "memory_mapped_persistence")]
+        {
+            let cluster = self
+                .cluster
+                .as_ref()
+                .ok_or_else(|| Status::failed_precondition("cluster mode disabled"))?;
+            let replicas = cluster
+                .replication_metadata
+                .as_ref()
+                .map(|metadata| {
+                    metadata
+                        .snapshot()
+                        .into_iter()
+                        .flat_map(|summary| {
+                            summary.replicas.into_iter().map(move |lag| {
+                                engram_proto::ReplicaLagView {
+                                    space_id: summary.space.to_string(),
+                                    replica: lag.replica,
+                                    local_sequence: lag.local_sequence,
+                                    replicated_sequence: lag.replica_sequence,
+                                }
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            Ok(Response::new(ReplicationStatusResponse { replicas }))
+        }
+    }
 }
 
-use chrono::Utc;
+fn cluster_error_to_status(err: ClusterError) -> Status {
+    match err {
+        ClusterError::NotPrimary {
+            owner,
+            space,
+            local,
+        } => Status::failed_precondition(format!(
+            "Memory space '{space}' is owned by node '{owner}'. Local node '{local}' refused the write to prevent split-brain. Route the request to {owner}."
+        )),
+        ClusterError::InsufficientHealthyNodes {
+            required,
+            available,
+        } => Status::unavailable(format!(
+            "Not enough healthy nodes for replication (required {required}, available {available})."
+        )),
+        ClusterError::Partitioned {
+            reachable_nodes,
+            total_nodes,
+        } => Status::unavailable(format!(
+            "Cluster partitioned from majority (reachable {reachable_nodes} / {total_nodes}). Retry the primary once connectivity is restored."
+        )),
+        ClusterError::SplitBrain { space_id, .. } => Status::failed_precondition(format!(
+            "Split-brain guard rejected writes for space '{space_id}'. Route the request to the elected primary."
+        )),
+        ClusterError::Configuration(reason) => Status::failed_precondition(reason),
+        other => Status::internal(other.to_string()),
+    }
+}
+
+fn router_error_to_status(err: RouterError) -> Status {
+    match err {
+        RouterError::CircuitOpen { node_id, .. } => {
+            Status::unavailable(format!("Circuit breaker open for node '{node_id}'"))
+        }
+        RouterError::DeadlineExceeded { node_id } => Status::deadline_exceeded(format!(
+            "Remote routing to node '{node_id}' exceeded the deadline"
+        )),
+        RouterError::NoHealthyReplicas { space } => Status::unavailable(format!(
+            "No healthy replicas available for memory space '{space}'"
+        )),
+        RouterError::RemoteRpc { status, .. } => status,
+        RouterError::Connect { node_id, error } => {
+            Status::unavailable(format!("Failed to connect to node '{node_id}': {error}"))
+        }
+        RouterError::LocalOnly => {
+            Status::failed_precondition("Router attempted to proxy a local-only request")
+        }
+    }
+}
+
+fn migration_plan_to_proto(plan: MigrationPlan) -> MigrationPlanView {
+    let planned_at: DateTime<Utc> = DateTime::<Utc>::from(plan.planned_at);
+    MigrationPlanView {
+        space_id: plan.space.to_string(),
+        from: plan.from.map(|node| node.id).unwrap_or_default(),
+        to: plan.to.id,
+        version: plan.version,
+        reason: match plan.reason {
+            MigrationReason::MembershipChange => "membership_change".to_string(),
+            MigrationReason::Manual => "manual".to_string(),
+        },
+        planned_at: Some(engram_proto::datetime_to_timestamp(planned_at)),
+    }
+}
 
 /// Convert confidence value to protobuf ConfidenceCategory enum
 fn confidence_to_category(value: f32) -> engram_proto::ConfidenceCategory {

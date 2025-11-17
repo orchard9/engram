@@ -38,6 +38,8 @@ async fn start_test_grpc_server() -> u16 {
         metrics,
         Arc::clone(&registry),
         default_space,
+        None,
+        None,
     );
 
     // Find an available port

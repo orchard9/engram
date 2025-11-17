@@ -224,7 +224,7 @@ pub async fn query_handler(
     let execution_time = start.elapsed();
 
     // Convert to response format
-    let response = convert_to_response(result, execution_time.as_millis() as u64);
+    let response = convert_to_response(&state, result, execution_time.as_millis() as u64);
 
     Ok(Json(response))
 }
@@ -273,27 +273,34 @@ fn extract_memory_space_id(
 }
 
 /// Convert ProbabilisticQueryResult to API response format
-fn convert_to_response(result: ProbabilisticQueryResult, execution_time_ms: u64) -> QueryResponse {
+fn convert_to_response(
+    state: &ApiState,
+    result: ProbabilisticQueryResult,
+    execution_time_ms: u64,
+) -> QueryResponse {
     let total_count = result.episodes.len();
 
     let episodes = result
         .episodes
         .into_iter()
-        .map(|(episode, confidence)| EpisodeResult {
-            id: episode.id,
-            when: episode.when.to_rfc3339(),
-            what: episode.what,
-            where_location: episode.where_location,
-            who: episode.who.unwrap_or_default(),
-            confidence: confidence.raw(),
-            confidence_category: confidence_value_to_category(confidence.raw()),
+        .map(|(episode, confidence)| {
+            let adjusted = state.adjusted_confidence(confidence.raw());
+            EpisodeResult {
+                id: episode.id,
+                when: episode.when.to_rfc3339(),
+                what: episode.what,
+                where_location: episode.where_location,
+                who: episode.who.unwrap_or_default(),
+                confidence: adjusted,
+                confidence_category: confidence_value_to_category(adjusted),
+            }
         })
         .collect();
 
     let aggregate_confidence = ConfidenceIntervalResponse {
-        lower_bound: result.confidence_interval.lower.raw(),
-        mean: result.confidence_interval.point.raw(),
-        upper_bound: result.confidence_interval.upper.raw(),
+        lower_bound: state.adjusted_confidence(result.confidence_interval.lower.raw()),
+        mean: state.adjusted_confidence(result.confidence_interval.point.raw()),
+        upper_bound: state.adjusted_confidence(result.confidence_interval.upper.raw()),
         width: result.confidence_interval.width,
     };
 

@@ -61,6 +61,8 @@ pub struct CognitiveBenchmarkSuite {
     replay_mechanism_validator: ReplayValidator,
 }
 ```
+To make these numbers reproducible, the Criterion harness exports CSV/JSON reports to `engram-core/benches/reports/ann_comparison.{csv,json}` after every run (`cargo bench --bench ann_comparison`). CI enforces the `recall@10 ≥ 0.90` and `<1 ms` latency contract via `tests/ann_benchmark_thresholds.rs`, so regressions surface immediately instead of disappearing into log files.
+
 
 The traditional metrics are still there - we need to prove competitive performance on industry benchmarks. But the cognitive evaluation framework adds entirely new dimensions to what "good performance" means.
 

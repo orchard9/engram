@@ -10,15 +10,33 @@ use axum::{
 };
 use chrono::Utc;
 use engram_cli::api::{ApiState, create_api_routes};
+use engram_cli::cluster::ClusterState;
+use engram_cli::router::{Router as ClusterRouter, RouterConfig};
 use engram_core::activation::SpreadingAutoTuner;
 use engram_core::activation::{ActivationRecordPoolStats, SpreadingMetrics};
-use engram_core::{MemorySpaceError, MemorySpaceId, MemorySpaceRegistry, MemoryStore, metrics};
+use engram_core::cluster::config::{PartitionConfig, ReplicationConfig, SwimConfig};
+use engram_core::{
+    MemorySpaceError, MemorySpaceId, MemorySpaceRegistry, MemoryStore,
+    cluster::{
+        MembershipUpdate, NodeInfo, NodeState, PartitionDetector, RebalanceCoordinator,
+        SpaceAssignmentManager, SpaceAssignmentPlanner, SplitBrainDetector, SwimMembership,
+    },
+    metrics,
+};
 use serde_json::{Value, json};
 use std::sync::Arc;
 use tower::ServiceExt; // for `oneshot`
 
 /// Create test router with API routes
 async fn create_test_router() -> Router {
+    build_test_router(None).await
+}
+
+async fn create_test_router_with_cluster(cluster: Arc<ClusterState>) -> Router {
+    build_test_router(Some(cluster)).await
+}
+
+async fn build_test_router(cluster: Option<Arc<ClusterState>>) -> Router {
     let temp_dir = tempfile::tempdir().expect("temp dir");
     let registry = Arc::new(
         MemorySpaceRegistry::new(temp_dir.path(), |_space_id, _directories| {
@@ -44,6 +62,13 @@ async fn create_test_router() -> Router {
     let metrics = metrics::init();
     let auto_tuner = SpreadingAutoTuner::new(0.10, 16);
     let (shutdown_tx, _shutdown_rx) = tokio::sync::watch::channel(false);
+    let router = cluster.as_ref().map(|state| {
+        Arc::new(ClusterRouter::new(
+            Arc::clone(state),
+            RouterConfig::default(),
+        ))
+    });
+
     let api_state = ApiState::new(
         store,
         Arc::clone(&registry),
@@ -51,9 +76,84 @@ async fn create_test_router() -> Router {
         metrics,
         auto_tuner,
         Arc::new(shutdown_tx),
+        cluster.clone(),
+        router,
+        None,
     );
 
     create_api_routes().with_state(api_state)
+}
+
+fn sample_cluster_state() -> Arc<ClusterState> {
+    let local_swim = "127.0.0.1:7946".parse().unwrap();
+    let local_api = "127.0.0.1:50051".parse().unwrap();
+    let local = NodeInfo::new("node-local", local_swim, local_api, None, None);
+    let membership = Arc::new(SwimMembership::new(local.clone(), SwimConfig::default()));
+    membership.apply_updates(vec![
+        MembershipUpdate {
+            node: NodeInfo::new(
+                "node-alpha",
+                "127.0.0.2:7946".parse().unwrap(),
+                "127.0.0.2:50051".parse().unwrap(),
+                None,
+                None,
+            ),
+            state: NodeState::Alive,
+            incarnation: 1,
+        },
+        MembershipUpdate {
+            node: NodeInfo::new(
+                "node-beta",
+                "127.0.0.3:7946".parse().unwrap(),
+                "127.0.0.3:50051".parse().unwrap(),
+                None,
+                None,
+            ),
+            state: NodeState::Suspect,
+            incarnation: 2,
+        },
+        MembershipUpdate {
+            node: NodeInfo::new(
+                "node-gamma",
+                "127.0.0.4:7946".parse().unwrap(),
+                "127.0.0.4:50051".parse().unwrap(),
+                None,
+                None,
+            ),
+            state: NodeState::Dead,
+            incarnation: 3,
+        },
+    ]);
+
+    let replication = ReplicationConfig::default();
+    let planner = Arc::new(SpaceAssignmentPlanner::new(
+        Arc::clone(&membership),
+        &replication,
+    ));
+    let assignments = Arc::new(SpaceAssignmentManager::new(
+        Arc::clone(&planner),
+        &replication,
+    ));
+    let (rebalance, mut plan_rx) =
+        RebalanceCoordinator::new(Arc::clone(&assignments), Arc::clone(&membership), 4);
+    tokio::spawn(async move { while plan_rx.recv().await.is_some() {} });
+    let partition_detector = Arc::new(PartitionDetector::new(
+        Arc::clone(&membership),
+        PartitionConfig::default(),
+    ));
+    let split_brain = Arc::new(SplitBrainDetector::new(local.id.clone()));
+
+    Arc::new(ClusterState {
+        node_id: local.id,
+        membership,
+        assignments,
+        replication,
+        partition_detector,
+        split_brain,
+        rebalance,
+        #[cfg(feature = "memory_mapped_persistence")]
+        replication_metadata: None,
+    })
 }
 
 fn drain_streaming_queue() {
@@ -205,6 +305,146 @@ async fn test_metrics_endpoint_matches_streaming_snapshot_after_reset() {
             }
         }
     }
+}
+
+#[tokio::test]
+async fn cluster_health_requires_cluster_state() {
+    let app = create_test_router().await;
+    let (status, response) = make_request(&app, Method::GET, "/cluster/health", None).await;
+
+    assert_eq!(status, StatusCode::NOT_IMPLEMENTED);
+    assert_eq!(
+        response
+            .get("error")
+            .and_then(|err| err.get("code"))
+            .and_then(Value::as_str),
+        Some("FEATURE_NOT_ENABLED")
+    );
+}
+
+#[tokio::test]
+async fn cluster_health_reports_membership_breakdown() {
+    let cluster_state = sample_cluster_state();
+    let app = create_test_router_with_cluster(cluster_state.clone()).await;
+
+    let (status, response) = make_request(&app, Method::GET, "/cluster/health", None).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        response.get("node_id").and_then(Value::as_str),
+        Some(cluster_state.node_id.as_str())
+    );
+    assert_eq!(
+        response
+            .get("stats")
+            .and_then(|stats| stats.get("alive"))
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        response
+            .get("stats")
+            .and_then(|stats| stats.get("suspect"))
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        response
+            .get("stats")
+            .and_then(|stats| stats.get("dead"))
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        response
+            .get("stats")
+            .and_then(|stats| stats.get("total"))
+            .and_then(Value::as_u64),
+        Some(3)
+    );
+    let assignments = response
+        .get("assignments")
+        .expect("assignments summary missing");
+    assert!(assignments.get("cached_spaces").is_some());
+    let router = response.get("router").expect("router summary missing");
+    assert_eq!(
+        router
+            .get("open_breakers")
+            .and_then(Value::as_u64)
+            .unwrap_or_default(),
+        0
+    );
+    assert!(router.get("requests_total").is_some());
+}
+
+#[tokio::test]
+async fn cluster_nodes_list_memberships() {
+    let cluster_state = sample_cluster_state();
+    let app = create_test_router_with_cluster(cluster_state).await;
+
+    let (status, response) = make_request(&app, Method::GET, "/cluster/nodes", None).await;
+
+    assert_eq!(status, StatusCode::OK);
+    let nodes = response
+        .get("nodes")
+        .and_then(Value::as_array)
+        .expect("nodes array");
+    assert!(
+        nodes
+            .iter()
+            .any(|node| node.get("local") == Some(&json!(true)))
+    );
+    assert!(
+        nodes
+            .iter()
+            .any(|node| node.get("state") == Some(&json!("suspect")))
+    );
+    assert!(
+        nodes
+            .iter()
+            .any(|node| node.get("state") == Some(&json!("dead")))
+    );
+}
+
+#[tokio::test]
+async fn cluster_rebalance_status_is_exposed() {
+    let cluster_state = sample_cluster_state();
+    let app = create_test_router_with_cluster(cluster_state).await;
+
+    let (status, response) = make_request(&app, Method::GET, "/cluster/rebalance", None).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(response.get("recent").is_some());
+}
+
+#[tokio::test]
+async fn cluster_rebalance_trigger_returns_count() {
+    let cluster_state = sample_cluster_state();
+    let app = create_test_router_with_cluster(cluster_state).await;
+
+    let (status, response) = make_request(&app, Method::POST, "/cluster/rebalance", None).await;
+
+    assert_eq!(status, StatusCode::ACCEPTED);
+    assert!(response.get("planned").is_some());
+}
+
+#[tokio::test]
+async fn cluster_migrate_requires_valid_space() {
+    let cluster_state = sample_cluster_state();
+    let app = create_test_router_with_cluster(cluster_state).await;
+
+    let payload = json!({"space": "*invalid*"});
+    let (status, response) =
+        make_request(&app, Method::POST, "/cluster/migrate", Some(payload)).await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        response
+            .get("error")
+            .and_then(|value| value.get("code"))
+            .and_then(Value::as_str),
+        Some("INVALID_MEMORY_INPUT")
+    );
 }
 
 #[tokio::test]

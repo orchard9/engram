@@ -82,6 +82,15 @@ impl MemoryNodeType {
         matches!(self, Self::Concept { .. })
     }
 
+    /// Borrow the concept centroid when available.
+    #[must_use]
+    pub const fn as_concept_centroid(&self) -> Option<&[f32; EMBEDDING_DIM]> {
+        match self {
+            Self::Concept { centroid, .. } => Some(centroid),
+            Self::Episode { .. } => None,
+        }
+    }
+
     /// Get consolidation score if this is an episode (thread-safe)
     #[must_use]
     pub fn consolidation_score(&self) -> Option<f32> {
@@ -346,5 +355,15 @@ impl DualMemoryNode {
     #[must_use]
     pub const fn is_concept(&self) -> bool {
         self.node_type.is_concept()
+    }
+
+    /// Borrow the centroid without repeated pattern matching once callers validated the type.
+    #[inline]
+    pub const fn get_centroid_unchecked(&self) -> &[f32; EMBEDDING_DIM] {
+        match &self.node_type {
+            MemoryNodeType::Concept { centroid, .. } => centroid,
+            #[allow(unsafe_code)]
+            MemoryNodeType::Episode { .. } => unsafe { std::hint::unreachable_unchecked() },
+        }
     }
 }

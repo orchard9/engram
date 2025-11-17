@@ -8,27 +8,38 @@ use anyhow::{Context, Result, anyhow};
 use clap::Parser;
 use engram_cli::{
     api::{ApiState, create_api_routes},
+    cluster::{ClusterContext, ClusterState, initialize_cluster},
     docs::{DocSection, OperationalDocs},
     find_available_port,
     grpc::MemoryService,
+    router::Router,
 };
 #[cfg(feature = "hnsw_index")]
 use engram_core::activation::{RecallConfig, RecallMode, SpreadingAutoTuner};
+use engram_core::cluster::config::{DiscoveryConfig, ReplicationConfig};
 use engram_core::{
-    MemorySpaceError, MemorySpaceId, MemorySpaceRegistry, MemoryStore, SpaceDirectories, metrics,
+    MemorySpaceError, MemorySpaceId, MemorySpaceRegistry, MemoryStore, SpaceDirectories,
+    cluster::{
+        AntiEntropySync, MigrationPlan, MigrationReason, PartitionAwareConfidence,
+        PartitionDetector, RebalanceCoordinator, SpaceAssignmentManager, SplitBrainDetector,
+        SwimHandle, SwimMembership, SwimObserver, SwimRuntime,
+    },
+    metrics::{self, ClusterMetrics},
 };
 use std::fs;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::panic;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::signal;
+use tokio::sync::mpsc;
 use tower_http::cors::{Any, CorsLayer};
 use tracing::{Level, error, info, warn};
 use tracing_subscriber::FmtSubscriber;
 
 // Import from our library
+use engram_cli::cli::validate::{WarningSeverity, validate_cli_config};
 use engram_cli::cli::{
     BackupAction, BenchmarkAction, Cli, Commands, ConfigAction, DiagnoseAction, MemoryAction,
     MigrateAction, OutputFormat, RestoreAction, SpaceAction, ValidateAction, create_memory,
@@ -36,6 +47,9 @@ use engram_cli::cli::{
     remove_pid_file, search_memories, show_status, stop_server, write_pid_file,
 };
 use engram_cli::config::ConfigManager;
+#[cfg(feature = "memory_mapped_persistence")]
+use engram_cli::replication::ReplicationRuntime;
+use serde_json::json;
 
 /// Setup custom panic hook that logs through tracing infrastructure
 ///
@@ -239,7 +253,94 @@ async fn start_server(
     grpc_port: u16,
     cli_config: &engram_cli::config::CliConfig,
 ) -> Result<()> {
+    struct DistributedContext {
+        node_id: String,
+        membership: Arc<SwimMembership>,
+        assignments: Arc<SpaceAssignmentManager>,
+        replication: ReplicationConfig,
+        swim_addr: SocketAddr,
+        partition_detector: Arc<PartitionDetector>,
+        split_brain: Arc<SplitBrainDetector>,
+        rebalance: Arc<RebalanceCoordinator>,
+        migration_rx: Option<mpsc::Receiver<MigrationPlan>>,
+    }
+
     info!(" Starting Engram server...");
+
+    let cluster_context = initialize_cluster(&cli_config.cluster).await?;
+    match &cluster_context {
+        ClusterContext::SingleNode => {
+            info!(" Cluster mode disabled (single-node)");
+        }
+        ClusterContext::Distributed { node_id, seeds, .. } => {
+            info!(node_id = %node_id, seed_count = seeds.len(), " Cluster mode enabled");
+        }
+    }
+
+    let mut distributed = match cluster_context {
+        ClusterContext::SingleNode => None,
+        ClusterContext::Distributed {
+            node_id,
+            membership,
+            assignments,
+            replication,
+            swim_addr,
+            partition_detector,
+            split_brain,
+            rebalance,
+            migration_rx,
+            ..
+        } => Some(DistributedContext {
+            node_id,
+            membership,
+            assignments,
+            replication,
+            swim_addr,
+            partition_detector,
+            split_brain,
+            rebalance,
+            migration_rx: Some(migration_rx),
+        }),
+    };
+
+    #[cfg(feature = "memory_mapped_persistence")]
+    let replication_metadata_handle = if distributed.is_some() {
+        Some(Arc::new(engram_core::cluster::ReplicationMetadata::new()))
+    } else {
+        None
+    };
+
+    #[cfg(feature = "memory_mapped_persistence")]
+    let replication_metadata_for_state = replication_metadata_handle.clone();
+
+    let api_cluster_state: Option<Arc<ClusterState>> = distributed.as_ref().map(|ctx| {
+        Arc::new(ClusterState {
+            node_id: ctx.node_id.clone(),
+            membership: Arc::clone(&ctx.membership),
+            assignments: Arc::clone(&ctx.assignments),
+            replication: ctx.replication.clone(),
+            partition_detector: Arc::clone(&ctx.partition_detector),
+            split_brain: Arc::clone(&ctx.split_brain),
+            rebalance: Arc::clone(&ctx.rebalance),
+            #[cfg(feature = "memory_mapped_persistence")]
+            replication_metadata: replication_metadata_for_state.clone(),
+        })
+    });
+
+    let router_settings = cli_config.router.clone();
+    let api_router = api_cluster_state
+        .as_ref()
+        .map(|state| Arc::new(Router::new(Arc::clone(state), router_settings.clone())));
+
+    let mut swim_handle: Option<SwimHandle> = None;
+    let mut cluster_metrics_task: Option<tokio::task::JoinHandle<()>> = None;
+    let mut partition_monitor_task: Option<tokio::task::JoinHandle<()>> = None;
+    let mut anti_entropy_task: Option<tokio::task::JoinHandle<()>> = None;
+    let mut rebalance_task: Option<tokio::task::JoinHandle<()>> = None;
+    #[cfg(feature = "memory_mapped_persistence")]
+    let mut replication_task: Option<tokio::task::JoinHandle<()>> = None;
+    let mut migration_log_task: Option<tokio::task::JoinHandle<()>> = None;
+    let mut partition_confidence: Option<Arc<PartitionAwareConfidence>> = None;
 
     // Create shutdown signal channel for graceful termination
     // All background tasks subscribe to shutdown_rx to know when to exit
@@ -248,6 +349,7 @@ async fn start_server(
 
     let actual_port = find_available_port(port).await?;
     let actual_grpc_port = find_available_port(grpc_port).await?;
+    let http_bind_address = resolve_http_bind_address(cli_config)?;
 
     if actual_port != port {
         warn!(
@@ -274,6 +376,23 @@ async fn start_server(
             build_memory_space_store(space_id, directories, &registry_flags)
         },
     )?);
+
+    #[cfg(feature = "memory_mapped_persistence")]
+    if let (Some(state), Some(router), Some(metadata)) = (
+        api_cluster_state.as_ref(),
+        api_router.as_ref(),
+        replication_metadata_handle.clone(),
+    ) {
+        let runtime = Arc::new(ReplicationRuntime::new(
+            state.node_id.clone(),
+            Arc::clone(&state.assignments),
+            metadata,
+            Arc::clone(&registry),
+            Arc::clone(router),
+            &state.replication,
+        ));
+        replication_task = Some(runtime.spawn(shutdown_rx.clone()));
+    }
 
     // Recover all existing memory spaces from WAL logs
     #[cfg(feature = "memory_mapped_persistence")]
@@ -410,6 +529,101 @@ async fn start_server(
 
     let metrics = metrics::init();
 
+    if let Some(ctx) = &distributed {
+        let detector = Arc::clone(&ctx.partition_detector);
+        let detector_shutdown = shutdown_rx.clone();
+        partition_monitor_task = Some(tokio::spawn(async move {
+            detector.run(detector_shutdown).await;
+        }));
+
+        let anti_entropy = Arc::new(AntiEntropySync::new(
+            Arc::clone(&ctx.membership),
+            Arc::clone(&ctx.partition_detector),
+        ));
+        let mut anti_shutdown = shutdown_rx.clone();
+        anti_entropy_task = Some(tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+            loop {
+                tokio::select! {
+                    _ = anti_shutdown.changed() => break,
+                    _ = interval.tick() => {
+                        if let Err(err) = anti_entropy.sync_after_partition().await {
+                            warn!("Anti-entropy sync failed: {err}");
+                        }
+                    }
+                }
+            }
+        }));
+
+        rebalance_task = Some(ctx.rebalance.spawn(shutdown_rx.clone()));
+
+        partition_confidence = Some(Arc::new(PartitionAwareConfidence::new(Arc::clone(
+            &ctx.partition_detector,
+        ))));
+    }
+
+    if let Some(ctx) = distributed.as_mut()
+        && let Some(mut rx) = ctx.migration_rx.take()
+    {
+        let mut migration_shutdown = shutdown_rx.clone();
+        migration_log_task = Some(tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = migration_shutdown.changed() => break,
+                    plan = rx.recv() => {
+                        match plan {
+                            Some(plan) => {
+                                let reason = match plan.reason {
+                                    MigrationReason::MembershipChange => "membership_change",
+                                    MigrationReason::Manual => "manual",
+                                };
+                                info!(
+                                    space = %plan.space,
+                                    from = plan.from.as_ref().map_or("unknown", |node| node.id.as_str()),
+                                    to = %plan.to.id,
+                                    version = plan.version,
+                                    reason,
+                                    "Planned migration emitted"
+                                );
+                            }
+                            None => break,
+                        }
+                    }
+                }
+            }
+        }));
+    }
+
+    if let Some(ctx) = &distributed {
+        let cluster_metrics_handle = metrics.cluster_metrics();
+        let observer = Arc::new(MetricsSwimObserver {
+            metrics: Arc::clone(&cluster_metrics_handle),
+        });
+        let handle =
+            SwimRuntime::spawn(Arc::clone(&ctx.membership), ctx.swim_addr, Some(observer)).await?;
+        swim_handle = Some(handle);
+
+        let membership_for_metrics = Arc::clone(&ctx.membership);
+        let mut metrics_shutdown = shutdown_rx.clone();
+        cluster_metrics_task = Some(tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+            loop {
+                tokio::select! {
+                    _ = metrics_shutdown.changed() => break,
+                    _ = interval.tick() => {
+                        let stats = membership_for_metrics.stats();
+                        cluster_metrics_handle.record_membership(
+                            stats.alive,
+                            stats.suspect,
+                            stats.dead,
+                            stats.left,
+                        );
+                    }
+                }
+            }
+        }));
+    }
+
     let auto_tuner = SpreadingAutoTuner::new(0.10, 64);
     let tuner_metrics = Arc::clone(&metrics);
     let tuner_auto = Arc::clone(&auto_tuner);
@@ -489,6 +703,9 @@ async fn start_server(
         Arc::clone(&metrics),
         Arc::clone(&auto_tuner),
         Arc::clone(&shutdown_tx),
+        api_cluster_state.clone(),
+        api_router.clone(),
+        partition_confidence.clone(),
     );
 
     // Clone memory store for gRPC before moving api_state into router
@@ -523,13 +740,10 @@ async fn start_server(
     });
 
     // Start HTTP server
-    let addr = SocketAddr::from(([127, 0, 0, 1], actual_port));
-    let listener = TcpListener::bind(addr).await?;
+    let http_socket = SocketAddr::from((http_bind_address, actual_port));
+    let listener = TcpListener::bind(http_socket).await?;
 
-    info!(
-        " HTTP API server listening on http://127.0.0.1:{}",
-        actual_port
-    );
+    info!(http_bind = %http_bind_address, port = actual_port, " HTTP API server listening");
     info!(" Starting gRPC server on 127.0.0.1:{}", actual_grpc_port);
 
     // Write PID file for server management
@@ -541,6 +755,8 @@ async fn start_server(
         grpc_metrics,
         Arc::clone(&registry),
         default_space_id.clone(),
+        api_cluster_state.clone(),
+        api_router.clone(),
     );
     let grpc_handle = tokio::spawn(async move {
         if let Err(e) = grpc_service.serve(actual_grpc_port).await {
@@ -551,11 +767,12 @@ async fn start_server(
     // Wait for gRPC server to be ready before announcing success
     wait_for_grpc_ready(actual_grpc_port).await?;
 
+    let http_client_host = client_visible_host(http_bind_address);
     println!(" Engram server started successfully!");
-    println!(" HTTP API: http://127.0.0.1:{actual_port}");
+    println!(" HTTP API: http://{http_client_host}:{actual_port}");
     println!(" gRPC: 127.0.0.1:{actual_grpc_port}");
-    println!(" Health: http://127.0.0.1:{actual_port}/health");
-    println!(" API Docs: http://127.0.0.1:{actual_port}/docs");
+    println!(" Health: http://{http_client_host}:{actual_port}/health");
+    println!(" API Docs: http://{http_client_host}:{actual_port}/docs");
     println!();
     println!(" Use 'engram status' to check server health");
     println!(" Use 'engram stop' to shutdown the server");
@@ -567,6 +784,10 @@ async fn start_server(
         .await?;
 
     info!(" HTTP server shutdown complete, cleaning up background tasks");
+
+    if let Some(handle) = swim_handle.as_ref() {
+        handle.request_shutdown();
+    }
 
     // Gracefully shutdown all background tasks with timeout
     let shutdown_timeout = std::time::Duration::from_secs(3);
@@ -587,8 +808,32 @@ async fn start_server(
         warn!(" Background task shutdown timeout, aborting remaining tasks");
     }
 
+    if let Some(task) = cluster_metrics_task {
+        let _ = task.await;
+    }
+    if let Some(task) = partition_monitor_task {
+        let _ = task.await;
+    }
+    if let Some(task) = anti_entropy_task {
+        let _ = task.await;
+    }
+    if let Some(task) = rebalance_task {
+        let _ = task.await;
+    }
+    if let Some(task) = migration_log_task {
+        let _ = task.await;
+    }
+    #[cfg(feature = "memory_mapped_persistence")]
+    if let Some(task) = replication_task {
+        let _ = task.await;
+    }
+
     // Abort gRPC server (doesn't have shutdown signal integration yet)
     grpc_handle.abort();
+
+    if let Some(handle) = swim_handle {
+        handle.wait().await;
+    }
 
     // Cleanup on exit
     remove_pid_file()?;
@@ -610,6 +855,45 @@ fn resolve_data_directory() -> Result<PathBuf> {
         .with_context(|| format!("Failed to create data directory at {}", base_dir.display()))?;
 
     Ok(base_dir)
+}
+
+struct MetricsSwimObserver {
+    metrics: Arc<ClusterMetrics>,
+}
+
+impl SwimObserver for MetricsSwimObserver {
+    fn record_probe_latency(&self, latency: std::time::Duration) {
+        self.metrics.record_probe_latency(latency);
+    }
+}
+
+fn resolve_http_bind_address(cli_config: &engram_cli::config::CliConfig) -> Result<IpAddr> {
+    let override_value = std::env::var("ENGRAM_HTTP_BIND").ok().and_then(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    });
+
+    let source_value = override_value.unwrap_or_else(|| cli_config.server.http_bind.clone());
+
+    source_value.parse::<IpAddr>().with_context(|| {
+        format!(
+            "Invalid HTTP bind address '{source_value}'. Provide an IPv4 or IPv6 address such as 127.0.0.1 or 0.0.0.0"
+        )
+    })
+}
+
+fn client_visible_host(bind_address: IpAddr) -> String {
+    if bind_address.is_unspecified() {
+        "localhost".to_string()
+    } else if matches!(bind_address, IpAddr::V6(_)) {
+        format!("[{bind_address}]")
+    } else {
+        bind_address.to_string()
+    }
 }
 
 fn build_memory_space_store(
@@ -972,55 +1256,153 @@ fn handle_docs_command(section: Option<String>, list: bool, export: Option<Strin
 async fn show_status_json() -> Result<()> {
     use engram_cli::cli::server::{is_process_running, pid_file_path, read_pid_file};
 
+    let config_status = gather_config_status();
+    let mut payload = serde_json::Map::new();
+    payload.insert("config".into(), config_status);
+
     let pid_path = pid_file_path();
 
     if !pid_path.exists() {
-        println!(
-            r#"{{"status": "offline", "health": "not_found", "memory_count": 0, "message": "No server running"}}"#
-        );
+        payload.insert("status".into(), json!("offline"));
+        payload.insert("health".into(), json!("not_found"));
+        payload.insert("memory_count".into(), json!(0));
+        payload.insert("message".into(), json!("No server running"));
+        println!("{}", serde_json::Value::Object(payload));
         return Ok(());
     }
 
-    let Ok((pid, port)) = read_pid_file() else {
-        println!(
-            r#"{{"status": "error", "health": "corrupted", "memory_count": 0, "message": "Server info corrupted"}}"#
-        );
-        return Ok(());
+    let (pid, port) = match read_pid_file() {
+        Ok(info) => info,
+        Err(err) => {
+            payload.insert("status".into(), json!("error"));
+            payload.insert("health".into(), json!("corrupted"));
+            payload.insert("memory_count".into(), json!(0));
+            payload.insert(
+                "message".into(),
+                json!(format!("Server info corrupted: {err}")),
+            );
+            println!("{}", serde_json::Value::Object(payload));
+            return Ok(());
+        }
     };
 
-    if !is_process_running(pid) {
-        println!(
-            r#"{{"status": "offline", "health": "process_dead", "memory_count": 0, "pid": {pid}, "port": {port}, "message": "Process not running"}}"#
-        );
-        return Ok(());
+    let mut process_running = is_process_running(pid);
+    if !process_running && pid == std::process::id() {
+        process_running = true;
     }
 
-    // Try to get health status
+    payload.insert("pid".into(), json!(pid));
+    payload.insert("port".into(), json!(port));
+    payload.insert("process_running".into(), json!(process_running));
+
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(2))
         .build()?;
 
     let health_url = format!("http://127.0.0.1:{port}/health/alive");
 
-    match client.get(&health_url).send().await {
-        Ok(response) if response.status().is_success() => {
-            println!(
-                r#"{{"status": "online", "health": "responsive", "memory_count": 0, "pid": {pid}, "port": {port}}}"#
-            );
-        }
-        Ok(_) => {
-            println!(
-                r#"{{"status": "degraded", "health": "unresponsive", "memory_count": 0, "pid": {pid}, "port": {port}}}"#
-            );
-        }
-        Err(_) => {
-            println!(
-                r#"{{"status": "offline", "health": "unreachable", "memory_count": 0, "pid": {pid}, "port": {port}}}"#
-            );
-        }
+    let (status, health, message) = match client.get(&health_url).send().await {
+        Ok(response) if response.status().is_success() => ("online", "responsive", None),
+        Ok(response) => (
+            "degraded",
+            "unresponsive",
+            Some(format!("HTTP status {}", response.status())),
+        ),
+        Err(err) if process_running => ("degraded", "unreachable", Some(err.to_string())),
+        Err(err) => (
+            "offline",
+            "process_dead",
+            Some(format!("Process not running: {err}")),
+        ),
+    };
+
+    payload.insert("status".into(), json!(status));
+    payload.insert("health".into(), json!(health));
+    payload.insert("memory_count".into(), json!(0));
+    if let Some(message) = message {
+        payload.insert("message".into(), json!(message));
     }
 
+    println!("{}", serde_json::Value::Object(payload));
     Ok(())
+}
+
+fn gather_config_status() -> serde_json::Value {
+    match ConfigManager::load() {
+        Ok(manager) => {
+            let config = manager.config();
+            let warnings = validate_cli_config(config);
+            let mut warning_values = Vec::with_capacity(warnings.len());
+            let mut error_count = 0usize;
+            let mut warn_count = 0usize;
+            let mut cluster_issues = Vec::new();
+
+            for warning in &warnings {
+                match warning.severity {
+                    WarningSeverity::Error => error_count += 1,
+                    WarningSeverity::Warning => warn_count += 1,
+                    WarningSeverity::Info => {}
+                }
+                if warning.message.to_ascii_lowercase().contains("cluster") {
+                    cluster_issues.push(warning.message.clone());
+                }
+                warning_values.push(json!({
+                    "severity": warning_severity_label(&warning.severity),
+                    "message": warning.message.clone(),
+                }));
+            }
+
+            let status = if error_count == 0 { "valid" } else { "invalid" };
+
+            json!({
+                "status": status,
+                "path": manager.path().display().to_string(),
+                "error_count": error_count,
+                "warning_count": warn_count,
+                "warnings": warning_values,
+                "cluster": {
+                    "enabled": config.cluster.enabled,
+                    "discovery": discovery_label(&config.cluster.discovery),
+                    "advertise_addr_set": config.cluster.network.advertise_addr.is_some(),
+                    "issues": cluster_issues,
+                }
+            })
+        }
+        Err(err) => {
+            json!({
+                "status": "error",
+                "path": null,
+                "warnings": [
+                    {
+                        "severity": "error",
+                        "message": format!("failed to load config: {err}"),
+                    }
+                ],
+                "cluster": {
+                    "enabled": false,
+                    "discovery": "static",
+                    "advertise_addr_set": false,
+                    "issues": [format!("failed to load config: {err}")],
+                }
+            })
+        }
+    }
+}
+
+const fn warning_severity_label(severity: &WarningSeverity) -> &'static str {
+    match severity {
+        WarningSeverity::Info => "info",
+        WarningSeverity::Warning => "warning",
+        WarningSeverity::Error => "error",
+    }
+}
+
+const fn discovery_label(discovery: &DiscoveryConfig) -> &'static str {
+    match discovery {
+        DiscoveryConfig::Static { .. } => "static",
+        DiscoveryConfig::Dns { .. } => "dns",
+        DiscoveryConfig::Consul { .. } => "consul",
+    }
 }
 
 async fn handle_query_command(

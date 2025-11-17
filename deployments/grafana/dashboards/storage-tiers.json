@@ -105,7 +105,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "engram_tier_size_bytes{tier=\"hot\"}",
+          "expr": "engram_tier_size_bytes{tier=\"hot\", instance=~\"$instance\"}",
           "legendFormat": "Hot Tier",
           "refId": "A"
         },
@@ -114,7 +114,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "engram_tier_size_bytes{tier=\"warm\"}",
+          "expr": "engram_tier_size_bytes{tier=\"warm\", instance=~\"$instance\"}",
           "legendFormat": "Warm Tier",
           "refId": "B"
         },
@@ -123,7 +123,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "engram_tier_size_bytes{tier=\"cold\"}",
+          "expr": "engram_tier_size_bytes{tier=\"cold\", instance=~\"$instance\"}",
           "legendFormat": "Cold Tier",
           "refId": "C"
         }
@@ -225,7 +225,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "engram_tier_size_bytes{tier=\"hot\"} / engram_tier_capacity_bytes{tier=\"hot\"}",
+          "expr": "engram_tier_size_bytes{tier=\"hot\", instance=~\"$instance\"} / engram_tier_capacity_bytes{tier=\"hot\", instance=~\"$instance\"}",
           "legendFormat": "Hot Tier %",
           "refId": "A"
         },
@@ -234,7 +234,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "engram_tier_size_bytes{tier=\"warm\"} / engram_tier_capacity_bytes{tier=\"warm\"}",
+          "expr": "engram_tier_size_bytes{tier=\"warm\", instance=~\"$instance\"} / engram_tier_capacity_bytes{tier=\"warm\", instance=~\"$instance\"}",
           "legendFormat": "Warm Tier %",
           "refId": "B"
         },
@@ -243,7 +243,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "engram_tier_size_bytes{tier=\"cold\"} / engram_tier_capacity_bytes{tier=\"cold\"}",
+          "expr": "engram_tier_size_bytes{tier=\"cold\", instance=~\"$instance\"} / engram_tier_capacity_bytes{tier=\"cold\", instance=~\"$instance\"}",
           "legendFormat": "Cold Tier %",
           "refId": "C"
         }
@@ -335,7 +335,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "rate(engram_tier_size_bytes{tier=\"hot\"}[5m])",
+          "expr": "rate(engram_tier_size_bytes{tier=\"hot\", instance=~\"$instance\"}[5m])",
           "legendFormat": "Hot Tier Growth",
           "refId": "A"
         },
@@ -344,7 +344,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "rate(engram_tier_size_bytes{tier=\"warm\"}[5m])",
+          "expr": "rate(engram_tier_size_bytes{tier=\"warm\", instance=~\"$instance\"}[5m])",
           "legendFormat": "Warm Tier Growth",
           "refId": "B"
         },
@@ -353,7 +353,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "rate(engram_tier_size_bytes{tier=\"cold\"}[5m])",
+          "expr": "rate(engram_tier_size_bytes{tier=\"cold\", instance=~\"$instance\"}[5m])",
           "legendFormat": "Cold Tier Growth",
           "refId": "C"
         }
@@ -455,7 +455,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "engram_spreading_pool_hit_rate",
+          "expr": "engram_spreading_pool_hit_rate{instance=~\"$instance\"}",
           "legendFormat": "Spreading Pool",
           "refId": "A"
         },
@@ -464,7 +464,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "activation_pool_hit_rate",
+          "expr": "activation_pool_hit_rate{instance=~\"$instance\"}",
           "legendFormat": "Activation Pool",
           "refId": "B"
         }
@@ -556,7 +556,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "engram_wal_compaction_bytes_reclaimed",
+          "expr": "engram_wal_compaction_bytes_reclaimed{instance=~\"$instance\"}",
           "legendFormat": "WAL Reclaimed (cumulative)",
           "refId": "A"
         },
@@ -565,7 +565,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "rate(engram_wal_compaction_bytes_reclaimed[5m])",
+          "expr": "rate(engram_wal_compaction_bytes_reclaimed{instance=~\"$instance\"}[5m])",
           "legendFormat": "WAL Reclaim Rate",
           "refId": "B"
         }
@@ -657,7 +657,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "engram_compaction_storage_saved_bytes",
+          "expr": "engram_compaction_storage_saved_bytes{instance=~\"$instance\"}",
           "legendFormat": "Total Saved (cumulative)",
           "refId": "A"
         },
@@ -666,7 +666,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "rate(engram_compaction_storage_saved_bytes[5m])",
+          "expr": "rate(engram_compaction_storage_saved_bytes{instance=~\"$instance\"}[5m])",
           "legendFormat": "Savings Rate",
           "refId": "B"
         }
@@ -758,7 +758,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "rate(engram_compaction_attempts_total[5m])",
+          "expr": "rate(engram_compaction_attempts_total{instance=~\"$instance\"}[5m])",
           "legendFormat": "Compaction Attempts",
           "refId": "A"
         },
@@ -767,7 +767,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "rate(engram_compaction_success_total[5m])",
+          "expr": "rate(engram_compaction_success_total{instance=~\"$instance\"}[5m])",
           "legendFormat": "Compaction Success",
           "refId": "B"
         },
@@ -776,7 +776,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "rate(engram_wal_compaction_runs_total[5m])",
+          "expr": "rate(engram_wal_compaction_runs_total{instance=~\"$instance\"}[5m])",
           "legendFormat": "WAL Compactions",
           "refId": "C"
         },
@@ -785,7 +785,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "rate(engram_wal_recovery_successes_total[5m])",
+          "expr": "rate(engram_wal_recovery_successes_total{instance=~\"$instance\"}[5m])",
           "legendFormat": "WAL Recoveries",
           "refId": "D"
         }
@@ -877,7 +877,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "engram_wal_recovery_duration_seconds{quantile=\"0.5\"}",
+          "expr": "engram_wal_recovery_duration_seconds{quantile=\"0.5\", instance=~\"$instance\"}",
           "legendFormat": "P50",
           "refId": "A"
         },
@@ -886,7 +886,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "engram_wal_recovery_duration_seconds{quantile=\"0.9\"}",
+          "expr": "engram_wal_recovery_duration_seconds{quantile=\"0.9\", instance=~\"$instance\"}",
           "legendFormat": "P90",
           "refId": "B"
         },
@@ -895,7 +895,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "engram_wal_recovery_duration_seconds{quantile=\"0.99\"}",
+          "expr": "engram_wal_recovery_duration_seconds{quantile=\"0.99\", instance=~\"$instance\"}",
           "legendFormat": "P99",
           "refId": "C"
         }
@@ -987,7 +987,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "engram_compaction_episodes_removed",
+          "expr": "engram_compaction_episodes_removed{instance=~\"$instance\"}",
           "legendFormat": "Episodes Removed (cumulative)",
           "refId": "A"
         },
@@ -996,7 +996,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "rate(engram_compaction_episodes_removed[5m])",
+          "expr": "rate(engram_compaction_episodes_removed{instance=~\"$instance\"}[5m])",
           "legendFormat": "Removal Rate",
           "refId": "B"
         }
@@ -1088,7 +1088,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "rate(adaptive_batch_updates_total[5m])",
+          "expr": "rate(adaptive_batch_updates_total{instance=~\"$instance\"}[5m])",
           "legendFormat": "Adaptive Updates",
           "refId": "A"
         },
@@ -1097,7 +1097,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "rate(adaptive_topology_changes_total[5m])",
+          "expr": "rate(adaptive_topology_changes_total{instance=~\"$instance\"}[5m])",
           "legendFormat": "Topology Changes",
           "refId": "B"
         }
@@ -1133,6 +1133,52 @@
         "regex": "",
         "skipUrlSync": false,
         "type": "datasource"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(up, instance)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Instance",
+        "multi": true,
+        "name": "instance",
+        "options": [],
+        "query": "label_values(up, instance)",
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "query"
+      },
+      {
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "definition": "label_values(engram_spreading_activations_total, memory_space)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Memory Space",
+        "multi": true,
+        "name": "memory_space",
+        "options": [],
+        "query": "label_values(engram_spreading_activations_total, memory_space)",
+        "refresh": 2,
+        "regex": "",
+        "skipUrlSync": false,
+        "type": "query"
       }
     ]
   },

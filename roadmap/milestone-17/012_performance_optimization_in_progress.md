@@ -25,7 +25,7 @@ Before implementation, profile these hot paths using perf/flamegraphs:
 5. **Concept→Episode traversal** - Reverse lookup during pattern completion
 6. **Type discrimination** - Checking node type on every access
 
-### Performance Budgets
+### Performance Budgets & Validation Plan
 Based on existing HotTier performance:
 - Concept centroid lookup: P99 < 100μs (matches current HotTier)
 - Binding strength update: < 10ns (atomic increment, no contention)
@@ -33,6 +33,10 @@ Based on existing HotTier performance:
 - Type discrimination: < 5ns (inline enum match)
 - Concept formation clustering (1000 episodes): < 100ms
 - SIMD batch similarity (16 centroids): < 50μs
+
+Validation steps:
+- Run Criterion benches + perf/flamegraphs on local x86_64 hardware (AVX2 baseline). Capture flamegraphs and cache stats to show sub-5% regression.
+- Document that AVX-512/NUMA-specific measurements are deferred until access to the perf lab; keep `numa-aware` feature off by default until then.
 
 ## Technical Specification
 
@@ -336,6 +340,16 @@ criterion_group!(
     bench_clustering_performance
 );
 criterion_main!(dual_memory_benches);
+
+/// Write initial benchmark baselines for regression detection
+pub fn write_benchmark_baseline(results: &HashMap<String, f64>) {
+    let baseline_path = Path::new("benches/baseline_timings.json");
+    fs::write(
+        baseline_path,
+        serde_json::to_string_pretty(results).expect("serialize baseline"),
+    )
+    .expect("write baseline timings");
+}
 ```
 
 #### 4. `engram-core/src/optimization/numa_aware.rs`
@@ -796,13 +810,20 @@ pub fn check_regression() {
 3. **SIMD alignment**: Concept centroids must be 64-byte aligned for AVX-512
 4. **Arc vs Clone**: Never clone embeddings - always use Arc::clone() for pointer sharing
 
+### Practical Checklist
+1. Update `Cargo.toml` so `dual-memory-cache` and `simd-concepts` are in `default` features; leave `numa-aware` opt-in.
+2. Implement the new cache + SIMD modules, wire them into the activation/consolidation hot paths, and gate NUMA bindings behind the feature flag.
+3. Run perf/criterion locally (`cargo bench -p engram-core dual_memory_regression`) and capture flamegraphs; record initial numbers with `write_benchmark_baseline` so `benches/baseline_timings.json` exists.
+4. Execute `cargo test -p engram-core psychological_validation --features dual_memory_types` plus any new micro-bench smoke tests to ensure regressions stay <5%.
+5. Document in the task notes (and/or PR body) that AVX-512/NUMA validation is pending hardware access if it cannot be run immediately.
+
 ### Feature Flags
 ```toml
 [features]
 # In Cargo.toml
-simd-concepts = []  # Enable SIMD concept operations
-numa-aware = ["libnuma"]  # Enable NUMA memory placement
-dual-memory-cache = []  # Enable DualMemoryCache (may increase memory 10-20%)
+dual-memory-cache = []        # Enabled by default to avoid slow paths
+simd-concepts = ["dual-memory-cache"]  # Built on cache layer, enabled by default
+numa-aware = ["libnuma"]     # Opt-in (Linux-only) until hardware validation runs
 ```
 
 ### Monitoring and Observability
@@ -906,3 +927,21 @@ Observability:
 - Day 4-5: SIMD kernels and parallelization
 - Day 6: Cache optimization and prefetching
 - Day 7: Integration, regression testing, documentation
+
+## Implementation Progress (2025-11-16)
+- Added the `optimization` namespace with a cache-aligned `DualMemoryCache`, SIMD helpers (`simd_concepts.rs`), and NUMA scaffolding (`numa_aware.rs`). The cache tracks concept metadata, centroids, and binding strengths with per-shard DashMaps plus cache statistics for observability.
+- Hooked the new SIMD helpers into `SimdActivationMapper::batch_concept_activation_with_fan_effect` so spreading activation can reuse the batched fan-effect division path when AVX2 is available.
+- Extended `DualMemoryNode`/`MemoryNodeType` with zero-copy centroid accessors (`as_concept_centroid`, `get_centroid_unchecked`) to avoid repeated pattern matching on the hot path.
+- Added Rayon-powered similarity helpers to the concept formation engine plus a `batch_episode_to_concept_similarity` wrapper to reuse the cosine similarity batch kernel.
+- Added Criterion benchmarks under `engram-core/benches/dual_memory_regression.rs` to track centroid lookup and binding update throughput and wired up the new `dual_memory_cache`, `simd_concepts`, and `numa_aware` feature flags (enabled by default except for NUMA).
+- **2025-11-16 regression fix**: Root-caused the 289% P99 spike to the new `ActivationGraph::is_episode_node` integration. The method attempted to hash every `NodeId` into a UUIDv5 and clone entire binding vectors on each neighbor traversal even though the activation graph never populated its internal `BindingIndex`. This meant every lookup missed (still falling back to the `"episode"` prefix) while paying the full hashing/allocation cost per edge. Removed the unused binding-index field, restored the prefix-based classifier, and re-ran the 60s load test (results recorded below) to confirm the hot-path cost returned to baseline.
+- **2025-11-17 fan-effect caching + binding metadata integration**: Activation graph hot paths now attach the real `BindingIndex` and share the cache-aligned `DualMemoryCache`. Fan-out counts are sourced directly from the binding metadata, cached per concept, and reused by the SIMD fan-effect helpers. Added targeted tests (`cargo test -p engram-core --lib activation::tests::association_count_reads_binding_index --features dual_memory_types -- --exact`) to ensure accurate association counts and type detection when the binding index is present.
+- **2025-11-17 competitive validation**: Completed `./scripts/m17_performance_check.sh 012 after --competitive` (P99 0.514 ms @ 1k ops/s, 0 errors) and re-ran Task 007’s baseline script to confirm the cache-backed fan-effect path holds P99 to +1.35%.
+
+### Remaining Work to Close Task 012
+1. **Capture a competitive baseline**
+   - Need a matching `before` run for `scenarios/competitive/hybrid_production_100k.toml` so the delta can be quantified alongside the new “after” numbers.
+
+## Outstanding Issues
+- `cargo test -p engram-core` currently fails on existing activation/metrics suites (engine registry, cycle detection, hierarchical spreading, and Prometheus-style metrics tests) that were already red prior to this work. Logs: `activation::engine_registry::tests::test_single_engine_registration`, `activation::parallel::tests::cycle_detection_penalises_revisits`, `activation::parallel::tests::test_hierarchical_spreading_integrated_by_default`, and the metrics label tests.
+- Binding metadata is now consumed when the runtime attaches a `BindingIndex`; remaining services (CLI orchestration, consolidation) must pass the index into activation graphs to benefit from the cached fan counts.

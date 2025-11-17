@@ -5,9 +5,14 @@
 use crate::config::CliConfig;
 use crate::output::spinner;
 use anyhow::{Context, Result, bail};
-use engram_core::MemorySpaceId;
+use engram_core::{
+    MemorySpaceId,
+    cluster::config::{ClusterConfig, DiscoveryConfig},
+};
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::str::FromStr;
 
 /// Validation warning
 #[derive(Debug)]
@@ -117,7 +122,8 @@ pub fn validate_config(config_file: Option<PathBuf>, deployment: Option<&str>) -
 }
 
 /// Validate CliConfig structure
-fn validate_cli_config(config: &CliConfig) -> Vec<ValidationWarning> {
+#[must_use]
+pub fn validate_cli_config(config: &CliConfig) -> Vec<ValidationWarning> {
     let mut warnings = Vec::new();
 
     // Validate persistence configuration
@@ -128,6 +134,9 @@ fn validate_cli_config(config: &CliConfig) -> Vec<ValidationWarning> {
 
     // Validate feature flags
     validate_feature_flags(&config.feature_flags, &mut warnings);
+
+    // Validate cluster configuration
+    validate_cluster_config(&config.cluster, &mut warnings);
 
     warnings
 }
@@ -356,6 +365,147 @@ fn validate_feature_flags(
     });
 }
 
+fn validate_cluster_config(cluster: &ClusterConfig, warnings: &mut Vec<ValidationWarning>) {
+    let swim_addr = parse_socket_addr(
+        &cluster.network.swim_bind,
+        "cluster.network.swim_bind",
+        warnings,
+    );
+    let _ = parse_socket_addr(
+        &cluster.network.api_bind,
+        "cluster.network.api_bind",
+        warnings,
+    );
+
+    if let Some(addr) = cluster.network.advertise_addr {
+        if addr.ip().is_unspecified() {
+            warnings.push(ValidationWarning {
+                message: format!(
+                    "cluster.network.advertise_addr '{}' is not routable; set it to an interface peers can reach",
+                    addr
+                ),
+                severity: WarningSeverity::Error,
+            });
+        } else {
+            warnings.push(ValidationWarning {
+                message: format!("cluster.network.advertise_addr set to {}", addr),
+                severity: WarningSeverity::Info,
+            });
+        }
+    }
+
+    if !cluster.enabled {
+        warnings.push(ValidationWarning {
+            message: "cluster mode disabled (running single-node)".to_string(),
+            severity: WarningSeverity::Info,
+        });
+        return;
+    }
+
+    if cluster.node_id.trim().is_empty() {
+        warnings.push(ValidationWarning {
+            message: "cluster.node_id not set; a UUID will be generated on startup".to_string(),
+            severity: WarningSeverity::Info,
+        });
+    }
+
+    if cluster.network.advertise_addr.is_none()
+        && swim_addr.is_some_and(|addr| addr.ip().is_unspecified())
+    {
+        warnings.push(ValidationWarning {
+            message: "cluster.network.advertise_addr must be set (or ENGRAM_CLUSTER_ADVERTISE_ADDR exported) when swim_bind uses 0.0.0.0".to_string(),
+            severity: WarningSeverity::Error,
+        });
+    }
+
+    match &cluster.discovery {
+        DiscoveryConfig::Static { seed_nodes } => {
+            validate_seed_nodes(seed_nodes, warnings);
+        }
+        DiscoveryConfig::Dns { service, port, .. } => {
+            if service.trim().is_empty() {
+                warnings.push(ValidationWarning {
+                    message: "cluster.dns.service cannot be empty".to_string(),
+                    severity: WarningSeverity::Error,
+                });
+            }
+            if *port == 0 {
+                warnings.push(ValidationWarning {
+                    message: "cluster.dns.port must be greater than zero".to_string(),
+                    severity: WarningSeverity::Error,
+                });
+            }
+            if !cfg!(feature = "cluster_discovery_dns") {
+                warnings.push(ValidationWarning {
+                    message:
+                        "cluster discovery mode 'dns' requires the cluster_discovery_dns feature"
+                            .to_string(),
+                    severity: WarningSeverity::Error,
+                });
+            }
+        }
+        DiscoveryConfig::Consul { .. } => {
+            warnings.push(ValidationWarning {
+                message:
+                    "cluster discovery mode 'consul' is deferred until the control-plane milestone"
+                        .to_string(),
+                severity: WarningSeverity::Error,
+            });
+        }
+    }
+}
+
+fn parse_socket_addr(
+    value: &str,
+    field: &str,
+    warnings: &mut Vec<ValidationWarning>,
+) -> Option<SocketAddr> {
+    match SocketAddr::from_str(value) {
+        Ok(addr) => Some(addr),
+        Err(err) => {
+            warnings.push(ValidationWarning {
+                message: format!("{field} is not a valid socket address: {err}"),
+                severity: WarningSeverity::Error,
+            });
+            None
+        }
+    }
+}
+
+fn validate_seed_nodes(seed_nodes: &[String], warnings: &mut Vec<ValidationWarning>) {
+    if seed_nodes.is_empty() {
+        warnings.push(ValidationWarning {
+            message: "cluster.discovery.seed_nodes cannot be empty when discovery type is 'static'"
+                .to_string(),
+            severity: WarningSeverity::Error,
+        });
+        return;
+    }
+
+    for (idx, node) in seed_nodes.iter().enumerate() {
+        match node.rsplit_once(':') {
+            Some((host, port_str)) if !host.trim().is_empty() => {
+                if port_str.parse::<u16>().is_err() {
+                    warnings.push(ValidationWarning {
+                        message: format!(
+                            "cluster.discovery.seed_nodes[{idx}] has invalid port: {node}"
+                        ),
+                        severity: WarningSeverity::Error,
+                    });
+                }
+            }
+            _ => {
+                warnings.push(ValidationWarning {
+                    message: format!(
+                        "cluster.discovery.seed_nodes[{idx}] must be in host:port form (got '{node}')"
+                    ),
+                    severity: WarningSeverity::Error,
+                });
+            }
+        }
+    }
+}
+
 /// Deployment-specific validation
 fn validate_deployment_env(config: &CliConfig, env: &str) {
     match env {
@@ -566,6 +716,9 @@ fn get_validate_script() -> String {
 
 fn is_port_available(port: u16) -> bool {
     use std::net::TcpListener;
+    if port == 0 {
+        return true;
+    }
     TcpListener::bind(("127.0.0.1", port)).is_ok()
 }
 
@@ -577,5 +730,63 @@ mod tests {
     fn test_port_availability() {
         // Port 0 should always bind to a free port
         assert!(is_port_available(0));
+    }
+
+    fn wildcard_cluster_config() -> CliConfig {
+        let mut cfg = CliConfig::default();
+        cfg.cluster.enabled = true;
+        cfg.cluster.network.swim_bind = "0.0.0.0:7946".to_string();
+        cfg.cluster.network.api_bind = "0.0.0.0:50051".to_string();
+        cfg.cluster.discovery = DiscoveryConfig::Static {
+            seed_nodes: vec!["127.0.0.1:7946".to_string()],
+        };
+        cfg
+    }
+
+    fn direct_cluster_config() -> CliConfig {
+        let mut cfg = wildcard_cluster_config();
+        cfg.cluster.network.swim_bind = "127.0.0.1:7946".to_string();
+        cfg.cluster.network.api_bind = "127.0.0.1:50051".to_string();
+        cfg.cluster.network.advertise_addr = Some("127.0.0.1:7946".parse().unwrap());
+        cfg
+    }
+
+    #[test]
+    fn cluster_validation_requires_advertise_for_wildcard_bind() {
+        let cfg = wildcard_cluster_config();
+        let warnings = validate_cli_config(&cfg);
+        assert!(warnings.iter().any(|warning| {
+            matches!(warning.severity, WarningSeverity::Error)
+                && warning.message.contains("advertise_addr must be set")
+        }));
+    }
+
+    #[test]
+    fn cluster_validation_rejects_consul_mode() {
+        let mut cfg = direct_cluster_config();
+        cfg.cluster.discovery = DiscoveryConfig::Consul {
+            addr: "http://localhost:8500".to_string(),
+            service_name: "engram".to_string(),
+            tag: None,
+        };
+        let warnings = validate_cli_config(&cfg);
+        assert!(warnings.iter().any(|warning| {
+            matches!(warning.severity, WarningSeverity::Error) && warning.message.contains("consul")
+        }));
+    }
+
+    #[test]
+    fn cluster_validation_requires_static_seeds() {
+        let mut cfg = direct_cluster_config();
+        cfg.cluster.discovery = DiscoveryConfig::Static {
+            seed_nodes: Vec::new(),
+        };
+        let warnings = validate_cli_config(&cfg);
+        assert!(warnings.iter().any(|warning| {
+            matches!(warning.severity, WarningSeverity::Error)
+                && warning
+                    .message
+                    .contains("cluster.discovery.seed_nodes cannot be empty")
+        }));
     }
 }

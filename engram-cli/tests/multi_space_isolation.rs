@@ -56,6 +56,9 @@ async fn create_multi_space_router(data_root: PathBuf) -> (Router, Arc<MemorySpa
         metrics,
         auto_tuner,
         Arc::new(shutdown_tx),
+        None,
+        None,
+        None,
     );
 
     let router = create_api_routes().with_state(api_state);

@@ -407,6 +407,9 @@ impl CognitiveHnswIndex {
             self.graph
                 .search_with_details(query, k, ef, threshold, self.vector_ops.as_ref());
 
+        self.record_activation_from_search(&results.stats, &results.hits);
+        self.maybe_adapt_dynamics();
+
         // Update metrics
         self.metrics
             .searches_performed
@@ -475,6 +478,7 @@ impl CognitiveHnswIndex {
         self.pressure_adapter.adapt_params(pressure, &self.params);
 
         // Cognitive dynamics analysis
+        let activation_density = self.activation_dynamics.compute_activation_density();
         let temporal_locality = self.activation_dynamics.temporal_locality_factor();
         let overconfidence_ratio = self.activation_dynamics.overconfidence_ratio();
         let variance = self.activation_dynamics.confidence_variance();
@@ -487,11 +491,14 @@ impl CognitiveHnswIndex {
                 .record_activation(activation_energy, *confidence);
         }
 
-        // Adapt parameters based on cognitive dynamics (not ML accuracy)
-        if self.should_adapt_dynamics() {
-            self.params
-                .adapt_to_activation_patterns(&self.activation_dynamics);
-        }
+        Self::record_dynamics_metrics(
+            activation_density,
+            temporal_locality,
+            overconfidence_ratio,
+            variance,
+        );
+
+        self.maybe_adapt_dynamics();
 
         // Apply cognitive principles to spreading activation
         let mut max_hops =
@@ -533,12 +540,28 @@ impl CognitiveHnswIndex {
         self.params.dynamics_enabled.store(true, Ordering::Relaxed);
     }
 
+    /// Disable cognitive dynamics adaptation explicitly.
+    pub fn disable_cognitive_adaptation(&self) {
+        self.params.dynamics_enabled.store(false, Ordering::Relaxed);
+    }
+
+    /// Override the search beam width (`ef_search`). Primarily used for testing.
+    pub fn set_search_ef(&self, ef: usize) {
+        self.params.ef_search.store(ef, Ordering::Relaxed);
+    }
+
     /// Circuit breaker: Disable adaptation if system becomes unstable
     pub fn disable_adaptation_on_instability(&self) -> bool {
         let overconfidence = self.activation_dynamics.overconfidence_ratio();
         if overconfidence > 0.5 {
             // >50% overconfident connections
             self.params.dynamics_enabled.store(false, Ordering::Relaxed);
+            tracing::warn!(
+                target = "engram::hnsw",
+                overconfidence,
+                "disabling cognitive adaptation due to overconfidence"
+            );
+            Self::record_dynamics_disabled();
             true // Signal instability detected
         } else {
             false
@@ -616,6 +639,78 @@ impl CognitiveHnswIndex {
 
         result
     }
+
+    fn record_activation_from_search(&self, stats: &SearchStats, hits: &[SearchResult]) {
+        if hits.is_empty() {
+            return;
+        }
+
+        let activation_energy = stats.thoroughness.clamp(0.05, 1.0);
+        for hit in hits.iter().take(32) {
+            self.activation_dynamics
+                .record_activation(activation_energy, hit.confidence);
+        }
+    }
+
+    fn record_dynamics_metrics(
+        activation_density: f32,
+        temporal_locality: f32,
+        overconfidence_ratio: f32,
+        variance: f32,
+    ) {
+        #[cfg(feature = "monitoring")]
+        {
+            crate::metrics::record_gauge(
+                crate::metrics::HNSW_DYNAMICS_ACTIVATION_DENSITY,
+                f64::from(activation_density),
+            );
+            crate::metrics::record_gauge(
+                crate::metrics::HNSW_DYNAMICS_TEMPORAL_LOCALITY,
+                f64::from(temporal_locality),
+            );
+            crate::metrics::record_gauge(
+                crate::metrics::HNSW_DYNAMICS_OVERCONFIDENCE_RATIO,
+                f64::from(overconfidence_ratio),
+            );
+            crate::metrics::record_gauge(
+                crate::metrics::HNSW_DYNAMICS_CONFIDENCE_VARIANCE,
+                f64::from(variance),
+            );
+        }
+
+        tracing::debug!(
+            target = "engram::hnsw",
+            activation_density,
+            temporal_locality,
+            overconfidence_ratio,
+            variance,
+            "updated cognitive dynamics metrics"
+        );
+    }
+
+    fn maybe_adapt_dynamics(&self) {
+        if self.should_adapt_dynamics() {
+            self.params
+                .adapt_to_activation_patterns(&self.activation_dynamics);
+            Self::record_dynamics_adaptation();
+        }
+    }
+
+    #[cfg(feature = "monitoring")]
+    fn record_dynamics_adaptation() {
+        crate::metrics::increment_counter(crate::metrics::HNSW_DYNAMICS_ADAPTATIONS_TOTAL, 1);
+    }
+
+    #[cfg(not(feature = "monitoring"))]
+    fn record_dynamics_adaptation() {}
+
+    #[cfg(feature = "monitoring")]
+    fn record_dynamics_disabled() {
+        crate::metrics::increment_counter(crate::metrics::HNSW_DYNAMICS_DISABLED_TOTAL, 1);
+    }
+
+    #[cfg(not(feature = "monitoring"))]
+    fn record_dynamics_disabled() {}
 
     /// Merge new activations with existing results
     fn merge_activations(

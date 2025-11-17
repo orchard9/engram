@@ -2,51 +2,46 @@
 # Target: <60MB total (6MB base + ~50MB binary)
 # Security: Distroless runtime, non-root user, minimal attack surface
 
-# Stage 1: Dependency caching layer
-# This stage builds only dependencies to maximize Docker layer cache reuse
-FROM rust:1.83-slim AS deps
+# Stage 1: Build the binary
+FROM rust:1.91-slim AS builder
 WORKDIR /build
 
 # Install required build dependencies
 RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
+    libhwloc-dev \
+    libudev-dev \
+    protobuf-compiler \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy only manifests first for maximum cache reuse
-COPY Cargo.toml Cargo.lock ./
-COPY engram-core/Cargo.toml engram-core/
-COPY engram-cli/Cargo.toml engram-cli/
-COPY engram-proto/Cargo.toml engram-proto/
-COPY engram-storage/Cargo.toml engram-storage/
-COPY xtask/Cargo.toml xtask/
-
-# Create dummy source files to build dependencies only
-RUN mkdir -p engram-core/src engram-cli/src engram-proto/src engram-storage/src xtask/src && \
-    echo "fn main() {}" > engram-cli/src/main.rs && \
-    touch engram-core/src/lib.rs engram-proto/src/lib.rs engram-storage/src/lib.rs xtask/src/main.rs && \
-    cargo build --release -p engram-cli && \
-    rm -rf engram-*/src xtask/src
-
-# Stage 2: Build the actual binary
-FROM deps AS builder
-
-# Copy actual source code
+# Copy full workspace
 COPY . .
 
-# Touch main.rs to ensure rebuild with actual source
-RUN touch engram-cli/src/main.rs && \
-    cargo build --release -p engram-cli && \
+RUN cargo build --release -p engram-cli && \
     ls -lh target/release/engram
 
-# Stage 3: Minimal runtime with security hardening
-FROM gcr.io/distroless/cc-debian12:nonroot
+# Stage 2: Minimal runtime with necessary shared libraries
+FROM debian:trixie-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    libhwloc15 \
+    libudev1 \
+    libnuma1 \
+    libpciaccess0 \
+    libxml2 \
+    libx11-6 \
+    libxext6 \
+    libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN useradd -m -u 10001 engram
 
 # Copy binary with proper permissions
-COPY --from=builder --chown=nonroot:nonroot /build/target/release/engram /usr/local/bin/engram
+COPY --from=builder --chown=engram:engram /build/target/release/engram /usr/local/bin/engram
 
-# Use non-root user from distroless image
-USER nonroot:nonroot
+USER engram:engram
 WORKDIR /data
 
 # Expose ports (HTTP API and gRPC)

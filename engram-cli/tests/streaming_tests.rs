@@ -52,6 +52,9 @@ async fn create_test_router() -> Router {
         metrics,
         auto_tuner,
         Arc::new(shutdown_tx),
+        None,
+        None,
+        None,
     );
 
     create_api_routes().with_state(api_state)
@@ -699,6 +702,9 @@ async fn test_end_to_end_sse_event_delivery_after_remember() {
         metrics,
         auto_tuner,
         Arc::new(shutdown_tx),
+        None,
+        None,
+        None,
     );
     let app = create_api_routes().with_state(api_state);
 

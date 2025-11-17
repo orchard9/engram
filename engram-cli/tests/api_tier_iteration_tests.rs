@@ -89,6 +89,9 @@ async fn create_test_router_with_memories(num_memories: usize) -> Router {
         metrics,
         auto_tuner,
         Arc::new(shutdown_tx),
+        None,
+        None,
+        None,
     );
 
     create_api_routes().with_state(api_state)

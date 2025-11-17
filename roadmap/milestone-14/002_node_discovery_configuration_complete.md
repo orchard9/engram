@@ -1,9 +1,29 @@
 # Task 002: Node Discovery and Configuration
 
-**Status**: Pending
+**Status**: Complete — cluster discovery (static + DNS), configuration validation, HTTP inspection routes, and CLI tooling are in place. Consul/registry support remains deferred until the control-plane milestone.
 **Estimated Duration**: 2 days
 **Dependencies**: Task 001 (SWIM membership)
 **Owner**: TBD
+
+## Current Status (Nov 2025)
+- ✅ `ClusterConfig` accepted via CLI config/defaults, including `cluster.discovery` enum.
+- ✅ `ClusterContext` seeds SWIM membership from static seeds or DNS SRV (`engram-cli/src/cluster.rs`).
+- ✅ Docker compose nodes ship `engram.toml` with `seed_nodes = ["engram-node1:7946", ...]` and run healthy under `docker compose up -d`.
+- ⏭️ Consul/registry integration is intentionally deferred; `DiscoveryConfig::Consul` currently returns `DnsUnavailable` and should be documented as such until the control-plane milestone picks it up.
+- ✅ `engram config validate` and `engram status --json` now surface discovery/feature mismatches (advertise address, DNS feature flag, Consul mode rejection) before startup.
+
+### Next Steps
+1. Documented (docs + CLI help) that DNS discovery requires the `cluster_discovery_dns` feature and that Consul is deferred.
+2. Validation tooling now fails fast on discovery/advertise mismatches, and `engram status --json` reports the same issues for automation.
+3. `/cluster/health` + `/cluster/nodes` routes expose membership snapshots rooted in `ClusterState`.
+4. Integration tests cover hostname resolution (`build_discovery`), SWIM bootstrap (`initialize_cluster`), and HTTP cluster endpoints.
+
+## Completion Notes
+
+- Documentation now calls out the DNS feature flag requirement and Consul deferral, and the packaged `cluster.toml` template includes the reminder.
+- `engram config validate` + `engram status --json` lint cluster fields (seed syntax, advertise overrides, feature mismatches) to catch errors before startup.
+- `/cluster/health` and `/cluster/nodes` Axum routes provide operators with SWIM stats + member snapshots, backed by new API tests.
+- Additional tests exercise hostname-based discovery, `initialize_cluster` bootstrap behaviour, and the HTTP inspection surface.
 
 ## Objective
 
@@ -13,7 +33,7 @@ Implement node discovery mechanisms for cluster formation, runtime configuration
 
 ### Discovery Mechanisms
 
-Support three discovery strategies:
+Support two discovery strategies (no external registry/Consul):
 
 #### 1. Static Seed List (Production)
 
@@ -102,61 +122,9 @@ impl DnsDiscovery {
 }
 ```
 
-#### 3. Consul/etcd Integration (Enterprise)
+#### 3. Raft Control Plane (Authoritative State)
 
-For environments with existing service discovery:
-
-```rust
-// engram-core/src/cluster/discovery/consul.rs
-
-use consul::Client as ConsulClient;
-
-pub struct ConsulDiscovery {
-    client: ConsulClient,
-    service_name: String,
-    tag: Option<String>,
-}
-
-impl ConsulDiscovery {
-    pub async fn discover(&self) -> Result<Vec<SocketAddr>, ClusterError> {
-        let services = self.client
-            .catalog()
-            .service(&self.service_name, self.tag.as_deref())
-            .await
-            .map_err(|e| ClusterError::ConsulError(e.to_string()))?;
-
-        let addrs = services
-            .iter()
-            .map(|s| {
-                let ip = s.ServiceAddress.parse().unwrap_or(s.Address.parse().unwrap());
-                SocketAddr::new(ip, s.ServicePort as u16)
-            })
-            .collect();
-
-        Ok(addrs)
-    }
-
-    pub async fn register(&self, node: &NodeInfo) -> Result<(), ClusterError> {
-        let registration = consul::ServiceRegistration {
-            Name: self.service_name.clone(),
-            ID: node.id.clone(),
-            Address: node.addr.ip().to_string(),
-            Port: node.addr.port() as i32,
-            Tags: vec!["engram".to_string()],
-            Check: Some(consul::Check {
-                HTTP: format!("http://{}:{}/health", node.api_addr.ip(), node.api_addr.port()),
-                Interval: "10s".to_string(),
-                ..Default::default()
-            }),
-        };
-
-        self.client.agent().register(registration).await
-            .map_err(|e| ClusterError::ConsulError(e.to_string()))?;
-
-        Ok(())
-    }
-}
-```
+Deferred to the control-plane milestone. For Task 002, document that assignments still rely on the local `SpaceAssignmentPlanner` fed by SWIM membership snapshots.
 
 ### Configuration Management
 
@@ -221,11 +189,7 @@ pub enum DiscoveryConfig {
         #[serde(default = "default_refresh_interval")]
         refresh_interval_sec: u64,
     },
-    Consul {
-        addr: String,
-        service_name: String,
-        tag: Option<String>,
-    },
+    // Removed Consul; Raft control plane relies on static/DNS discovery.
 }
 
 impl Default for DiscoveryConfig {
@@ -339,182 +303,11 @@ fn default_connection_pool_size() -> usize {
 
 ### Health Monitoring
 
-Integrate cluster health into existing metrics system:
-
-```rust
-// engram-core/src/cluster/health.rs
-
-use crate::metrics::health::HealthMetrics;
-use std::sync::Arc;
-
-pub struct ClusterHealth {
-    membership: Arc<SwimMembership>,
-    metrics: Arc<HealthMetrics>,
-}
-
-impl ClusterHealth {
-    pub fn new(membership: Arc<SwimMembership>, metrics: Arc<HealthMetrics>) -> Self {
-        Self { membership, metrics }
-    }
-
-    /// Start background health monitoring
-    pub async fn start_monitoring(&self) {
-        let mut interval = tokio::time::interval(Duration::from_secs(10));
-
-        loop {
-            interval.tick().await;
-            self.collect_health_metrics().await;
-        }
-    }
-
-    async fn collect_health_metrics(&self) {
-        let stats = self.compute_cluster_stats();
-
-        // Update metrics
-        self.metrics.set_cluster_size(stats.total_nodes);
-        self.metrics.set_alive_nodes(stats.alive_nodes);
-        self.metrics.set_suspect_nodes(stats.suspect_nodes);
-        self.metrics.set_dead_nodes(stats.dead_nodes);
-
-        // Check health thresholds
-        if stats.alive_ratio() < 0.5 {
-            error!(
-                "Cluster health critical: only {}/{} nodes alive",
-                stats.alive_nodes, stats.total_nodes
-            );
-        } else if stats.alive_ratio() < 0.8 {
-            warn!(
-                "Cluster health degraded: {}/{} nodes alive",
-                stats.alive_nodes, stats.total_nodes
-            );
-        }
-    }
-
-    fn compute_cluster_stats(&self) -> ClusterStats {
-        let mut stats = ClusterStats::default();
-
-        for entry in self.membership.members.iter() {
-            stats.total_nodes += 1;
-
-            match entry.value().state {
-                NodeState::Alive => stats.alive_nodes += 1,
-                NodeState::Suspect => stats.suspect_nodes += 1,
-                NodeState::Dead | NodeState::Left => stats.dead_nodes += 1,
-            }
-        }
-
-        stats
-    }
-
-    /// Get detailed cluster health report
-    pub fn health_report(&self) -> ClusterHealthReport {
-        let stats = self.compute_cluster_stats();
-
-        ClusterHealthReport {
-            status: if stats.alive_ratio() >= 0.8 {
-                HealthStatus::Healthy
-            } else if stats.alive_ratio() >= 0.5 {
-                HealthStatus::Degraded
-            } else {
-                HealthStatus::Critical
-            },
-            total_nodes: stats.total_nodes,
-            alive_nodes: stats.alive_nodes,
-            suspect_nodes: stats.suspect_nodes,
-            dead_nodes: stats.dead_nodes,
-            nodes: self.membership.members.iter()
-                .map(|e| {
-                    let node = e.value();
-                    NodeHealthInfo {
-                        id: node.id.clone(),
-                        addr: node.addr.to_string(),
-                        state: node.state,
-                        last_seen: node.last_update.elapsed().as_secs(),
-                        spaces: node.spaces.clone(),
-                    }
-                })
-                .collect(),
-        }
-    }
-}
-
-#[derive(Debug, Default)]
-struct ClusterStats {
-    total_nodes: usize,
-    alive_nodes: usize,
-    suspect_nodes: usize,
-    dead_nodes: usize,
-}
-
-impl ClusterStats {
-    fn alive_ratio(&self) -> f64 {
-        if self.total_nodes == 0 {
-            return 1.0;
-        }
-        self.alive_nodes as f64 / self.total_nodes as f64
-    }
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct ClusterHealthReport {
-    pub status: HealthStatus,
-    pub total_nodes: usize,
-    pub alive_nodes: usize,
-    pub suspect_nodes: usize,
-    pub dead_nodes: usize,
-    pub nodes: Vec<NodeHealthInfo>,
-}
-
-#[derive(Debug, Clone, Copy, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum HealthStatus {
-    Healthy,
-    Degraded,
-    Critical,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct NodeHealthInfo {
-    pub id: String,
-    pub addr: String,
-    pub state: NodeState,
-    pub last_seen: u64, // seconds
-    pub spaces: Vec<String>,
-}
-```
+Integrate SWIM/RAFT health into existing metrics system (no Consul hooks).
 
 ### HTTP Endpoint for Cluster Health
 
-Add to existing HTTP API:
-
-```rust
-// engram-cli/src/http/cluster.rs
-
-use axum::{Json, extract::State};
-use std::sync::Arc;
-
-pub async fn cluster_health(
-    State(health): State<Arc<ClusterHealth>>
-) -> Json<ClusterHealthReport> {
-    Json(health.health_report())
-}
-
-pub async fn cluster_nodes(
-    State(membership): State<Arc<SwimMembership>>
-) -> Json<Vec<NodeInfo>> {
-    let nodes = membership.members.iter()
-        .map(|e| e.value().clone())
-        .collect();
-    Json(nodes)
-}
-
-// Add to router
-pub fn cluster_routes() -> Router {
-    Router::new()
-        .route("/cluster/health", get(cluster_health))
-        .route("/cluster/nodes", get(cluster_nodes))
-}
-```
+Expose `/cluster/health` and `/cluster/nodes` via `axum` so operators can query membership/health without shell access. The endpoints should serialize the `ClusterState::membership.stats()` output plus the individual `NodeInfo` snapshots. Wire them into the existing router once the handlers are implemented.
 
 ### Startup Sequence
 
@@ -575,19 +368,6 @@ pub async fn initialize_cluster(config: ClusterConfig) -> Result<ClusterContext,
     // 7. Start SWIM protocol loops
     start_swim_background_tasks(membership.clone()).await;
 
-    // 8. Register with service discovery
-    if let Some(registration) = discovery.supports_registration() {
-        registration.register(&NodeInfo {
-            id: node_id.clone(),
-            addr: swim_addr,
-            api_addr,
-            state: NodeState::Alive,
-            incarnation: 0,
-            last_update: Instant::now(),
-            spaces: vec![],
-        }).await?;
-    }
-
     Ok(ClusterContext::Distributed {
         node_id,
         membership,
@@ -603,9 +383,6 @@ fn create_discovery(config: &DiscoveryConfig) -> Result<Box<dyn Discovery>, Erro
         },
         DiscoveryConfig::Dns { service, port, refresh_interval_sec } => {
             Ok(Box::new(DnsDiscovery::new(service, *port, Duration::from_secs(*refresh_interval_sec))?))
-        },
-        DiscoveryConfig::Consul { addr, service_name, tag } => {
-            Ok(Box::new(ConsulDiscovery::new(addr, service_name, tag.clone())?))
         },
     }
 }
@@ -626,7 +403,7 @@ pub enum ClusterContext {
 1. `engram-core/src/cluster/discovery/mod.rs` - Discovery trait
 2. `engram-core/src/cluster/discovery/static_discovery.rs` - Static seed list
 3. `engram-core/src/cluster/discovery/dns.rs` - DNS SRV discovery
-4. `engram-core/src/cluster/discovery/consul.rs` - Consul integration
+4. `engram-core/src/cluster/raft.rs` - Raft control plane node
 5. `engram-core/src/cluster/health.rs` - Cluster health monitoring
 6. `engram-core/src/cluster/config.rs` - Configuration structs
 7. `engram-cli/src/cluster.rs` - Cluster initialization
@@ -717,11 +494,11 @@ cluster_discovery_consul = ["consul"]
 1. Single-node mode works with `cluster.enabled = false`
 2. Static discovery connects to seed nodes
 3. DNS SRV discovery resolves Kubernetes services
-4. Consul integration registers and discovers nodes
-5. Health monitoring tracks cluster state
-6. HTTP `/cluster/health` endpoint returns accurate status
-7. Configuration validated at startup with helpful errors
-8. Metrics integrated with existing Prometheus/Grafana
+4. Document Raft/control-plane work as future scope (no partial implementations).
+5. Health monitoring tracks cluster state and is exposed through `/cluster/health`.
+6. HTTP `/cluster/health` and `/cluster/nodes` endpoints return accurate status snapshots.
+7. `engram config validate` (and server startup) fail fast on missing advertise addresses or discovery feature mismatches.
+8. Metrics integrate with existing Prometheus/Grafana (cluster series labeled by `node_id`).
 
 ## Performance Targets
 

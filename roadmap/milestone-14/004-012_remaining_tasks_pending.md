@@ -1,54 +1,21 @@
 # Tasks 004-012: Remaining Implementation Tasks
 
-## Task 004: Memory Space Partitioning and Assignment (3 days)
+## Task 004: Memory Space Partitioning and Assignment (✅ Complete)
 
-**See comprehensive specification in**: `roadmap/milestone-14/004_memory_space_partitioning_pending.md`
+**See completion log in**: `roadmap/milestone-14/004_memory_space_partitioning_complete.md`
 
-**Summary**: Implement Jump Consistent Hash-based memory space assignment to cluster nodes with topology-aware replica placement using modified Rendezvous hashing. Includes rebalancing coordinator for zero-downtime migration when nodes join/leave.
-
-**Key Technical Decisions**:
-- Jump Hash for primary assignment (O(ln N), zero memory overhead, perfect distribution)
-- Rendezvous hash with topology penalties for replica selection
-- HDFS-style rack awareness: max 1 replica per rack
-- Rebalancing phases: add replicas → migrate primaries → remove old replicas
-
-**Acceptance Criteria**:
-- Even distribution across nodes (max 20% imbalance)
-- No space downtime during rebalancing
-- Replica placement respects topology constraints
-- Deterministic assignment for same space ID
+- Jump-consistent hashing + rack/zone-aware rendezvous replicas are live in `engram-core/src/cluster/placement.rs`.
+- Cached assignments, rebalance coordinator, admin APIs, and Prometheus metrics shipped; no further work tracked under Task 004.
 
 ---
 
-## Task 005: Replication Protocol for Episodic Memories (4 days)
+## Task 005: Replication Protocol for Episodic Memories (✅ Complete)
 
-**Objective**: Async replication from primary to N replicas for episodic memories.
+**See completion log in**: `roadmap/milestone-14/005_replication_protocol_expansion_complete.md`
 
-**Key Components**:
-- Write-ahead log (WAL) shipping from primary to replicas
-- Async acknowledgment (don't block writes)
-- Lag monitoring and alerting
-- Catchup mechanism for slow replicas
-
-**Protocol**:
-```rust
-// Primary receives write
-1. Append to local WAL
-2. Return success to client immediately
-3. Async: ship WAL entry to replicas
-4. Replicas: apply and ack
-5. Track replication lag per replica
-```
-
-**Files**:
-- `engram-core/src/cluster/replication/mod.rs`
-- `engram-core/src/cluster/replication/wal_shipper.rs`
-- `engram-core/src/cluster/replication/lag_monitor.rs`
-
-**Acceptance Criteria**:
-- Write latency <10ms (async replication)
-- Replication lag <1s under normal load
-- Replica promotion on primary failure <5s
+- WAL streaming, replication metadata, and the CLI runtime ship asynchronous batches for every cached space where the local node is primary.
+- Replicas apply batches via the new `ApplyReplicationBatch` gRPC RPC; `/cluster/health` and `engram status --json` expose per-replica lag, satisfying the original monitoring requirements.
+- Configuration now exposes `lag_threshold`, `catch_up_batch_bytes`, `compression`, and `io_uring_enabled` so operators can tune behavior before enabling replication cluster-wide.
 
 ---
 

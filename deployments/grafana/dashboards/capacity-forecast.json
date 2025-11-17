@@ -1,0 +1,269 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "datasource",
+          "uid": "grafana"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "bytes"
+        }
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(engram_tier_size_bytes{tier=\"hot\"})",
+          "legendFormat": "Hot Tier",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(engram_tier_size_bytes{tier=\"warm\"})",
+          "legendFormat": "Warm Tier",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(engram_tier_size_bytes{tier=\"cold\"})",
+          "legendFormat": "Cold Tier",
+          "refId": "C"
+        }
+      ],
+      "title": "Current Tier Usage",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Predictive capacity demand based on the last 6 hours of growth.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "bytes"
+        }
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "id": 2,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "expr": "predict_linear(sum(engram_tier_size_bytes{tier=\"hot\"}[6h]), 604800)",
+          "legendFormat": "Hot Forecast (7d)",
+          "refId": "A"
+        },
+        {
+          "expr": "predict_linear(sum(engram_tier_size_bytes{tier=\"warm\"}[6h]), 604800)",
+          "legendFormat": "Warm Forecast",
+          "refId": "B"
+        },
+        {
+          "expr": "predict_linear(sum(engram_tier_size_bytes{tier=\"cold\"}[6h]), 604800)",
+          "legendFormat": "Cold Forecast",
+          "refId": "C"
+        }
+      ],
+      "title": "Capacity Forecast (7 days)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "description": "Cost overlay using per-tier $/GB inputs.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "$"
+        }
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 10
+      },
+      "id": 3,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(engram_tier_size_bytes{tier=\"hot\"}) * 0.00000002",
+          "legendFormat": "Hot Cost",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(engram_tier_size_bytes{tier=\"warm\"}) * 0.00000001",
+          "legendFormat": "Warm Cost",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(engram_tier_size_bytes{tier=\"cold\"}) * 0.000000005",
+          "legendFormat": "Cold Cost",
+          "refId": "C"
+        }
+      ],
+      "title": "Storage Spend",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.8
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "unit": "percentunit"
+        }
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 10
+      },
+      "id": 4,
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum(engram_tier_size_bytes{tier=\"hot\"}) / sum(engram_tier_capacity_bytes{tier=\"hot\"})",
+          "legendFormat": "Hot",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(engram_tier_size_bytes{tier=\"warm\"}) / sum(engram_tier_capacity_bytes{tier=\"warm\"})",
+          "legendFormat": "Warm",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(engram_tier_size_bytes{tier=\"cold\"}) / sum(engram_tier_capacity_bytes{tier=\"cold\"})",
+          "legendFormat": "Cold",
+          "refId": "C"
+        }
+      ],
+      "title": "Capacity Utilization",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "1m",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": [
+    "engram",
+    "capacity"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": false,
+          "text": "Prometheus",
+          "value": "Prometheus"
+        },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Datasource",
+        "multi": false,
+        "name": "datasource",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "skipUrlSync": false,
+        "type": "datasource"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": [
+      "1m",
+      "5m",
+      "15m",
+      "30m",
+      "1h"
+    ]
+  },
+  "timezone": "browser",
+  "title": "Engram Capacity & Cost Forecast",
+  "uid": "engram-capacity-forecast"
+}

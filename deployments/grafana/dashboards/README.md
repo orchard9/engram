@@ -80,6 +80,64 @@ Production-grade Grafana dashboards for monitoring Engram memory system operatio
 - Load balancing optimization
 - Rate limiting effectiveness
 
+### 5. Cluster Health & Membership (`cluster-health.json`)
+**Purpose**: Provide a single-pane-of-glass view of multi-node availability, breaker status, and latency budgets.
+
+**Key Metrics**:
+- Node heartbeat via `up{job="engram"}`
+- Hot/warm/cold tier latency percentiles per instance
+- Activation pool utilization/hit rate
+- Consolidation freshness and guardrail violations
+- Active Engram alerts surfaced from Prometheus `ALERTS`
+
+### 6. Tenant Utilization (`tenant-utilization.json`)
+**Purpose**: Break down throughput, latency, and storage usage per `memory_space` to catch noisy neighbors and enforce SLAs.
+
+**Key Metrics**:
+- Top-k activation throughput per tenant
+- Latency percentiles per tier and memory_space
+- Storage footprint (`engram_tier_size_bytes`) per tenant
+- Error/SLO budget consumption per tenant
+- Episode volumes for capacity planning
+
+### 7. Replication & WAL (`replication-wal.json`)
+**Purpose**: Track durability pipeline health including WAL lag, compaction efficiency, and recovery latency.
+
+**Key Metrics**:
+- `engram_wal_lag_seconds` (stat)
+- WAL recovery duration quantiles
+- Compaction attempts/successes and bytes reclaimed
+- Storage saved via compaction
+- WAL recovery failures per instance
+
+### 8. Chaos Readiness (`chaos-readiness.json`)
+**Purpose**: Validate alert coverage during chaos drills (network partitions, CPU spikes, slow queries, memory pressure).
+
+**Key Metrics**:
+- Live Prometheus alert states for critical chaos scenarios
+- Operation latency histograms under stress
+- Resource utilization (pool hit rates, breaker state)
+- Failure counters for consolidation/WAL
+
+### 9. Capacity & Cost Forecast (`capacity-forecast.json`)
+**Purpose**: Forecast tier growth, utilization, and expected storage spend for upcoming weeks.
+
+**Key Metrics**:
+- Current tier usage by bytes
+- `predict_linear` capacity forecast (7-day horizon)
+- Estimated spend using per-tier $/byte multipliers
+- Utilization ratio vs. tier capacity
+
+### 10. API Client Insights (`api-clients.json`)
+**Purpose**: Give customer success and security teams per-client throughput, latency, and quota visibility.
+
+**Key Metrics**:
+- `engram_api_requests_total` per client & operation
+- Error-rate ratio using `engram_api_errors_total`
+- Client latency percentiles (`engram_api_latency_seconds`)
+- Quota utilization (`engram_client_quota_utilization`)
+- Client/operation heatmap for traffic mix
+
 ## Metric Mappings
 
 All dashboards use metrics exported by Engram's Prometheus exporter at `/metrics/prometheus`. Key metric categories:
@@ -143,10 +201,13 @@ Grafana will be available at `http://localhost:3000` (default credentials: admin
 ## Dashboard Features
 
 ### Template Variables
-All dashboards include a `datasource` template variable for selecting the Prometheus data source. Future enhancements will add:
-- `memory_space` - Filter by memory space/tenant
-- `instance` - Filter by Engram instance
-- `tier` - Filter by storage tier (hot/warm/cold)
+All dashboards include the following template variables:
+- `datasource` - Select the Prometheus data source (defaults to the provisioned Engram source)
+- `instance` - Regex filter across Prometheus `instance` labels so you can compare individual Engram nodes
+- `memory_space` - Regex filter for memory-space-aware metrics (tenancy dashboards rely on Engram's `memory_space` label; on boards without that label the filter harmlessly returns "All")
+- `client` - Available on the API Client Insights dashboard for per-client slicing
+
+Future enhancements will add a `tier` template variable for storage dashboards once tier labels are exposed directly in the Prometheus exporter.
 
 ### Refresh Intervals
 - Default: 10 seconds auto-refresh

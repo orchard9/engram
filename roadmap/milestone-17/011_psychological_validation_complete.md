@@ -1180,6 +1180,14 @@ mod ci_integration {
 }
 ```
 
+## Implementation Notes (2025-XX-XX)
+
+- Implemented the full suite of psychological regression tests under `engram-core/tests/psychological/` with deterministic datasets and statistical helpers so every phenomenon reports quantitative evidence (correlation, effect size, p-value).
+- Fast CI suite exercises fan effect replication, Rosch prototype formation, and Neely semantic priming by default via `cargo test -p engram-core psychological_validation --features dual_memory_types`. The spacing/levels/context scenarios remain under `#[ignore]` and can be invoked with `cargo test -p engram-core psychological_validation --features dual_memory_types -- --ignored psychological_validation_full_suite` when the longer run is needed.
+- Added reusable helpers for Pearson correlation, linear regression slope, Welch's t-test, Cohen's d, and η² so future experiments can assert against literature without duplicating math logic.
+- Prototype tests now partition episodes into typical vs atypical exemplars so the concept centroid reflects schema formation, while semantic priming fixtures rely on blended embeddings to control relatedness and SOA effects across 100/250/400/700ms windows.
+- Only new tests and helper modules were added; no runtime code paths changed, so Milestone 17 performance scripts were not re-run for this documentation/testing-focused task.
+
 ## Acceptance Criteria
 
 ### Empirical Correlation Targets

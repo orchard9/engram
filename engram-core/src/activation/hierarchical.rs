@@ -3,9 +3,7 @@
 //! This module implements efficient breadth-first spreading across episode-concept
 //! hierarchies with minimal allocation overhead through Arc-based path storage.
 
-use crate::activation::{
-    ActivationGraphExt, MemoryGraph, NodeId, SpreadingMetrics, storage_aware::StorageTier,
-};
+use crate::activation::{MemoryGraph, NodeId, SpreadingMetrics, storage_aware::StorageTier};
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering as CmpOrdering;
@@ -293,6 +291,8 @@ impl HierarchicalSpreading {
 
         // Breadth-first spreading with priority queue
         while let Some(current) = frontier.pop() {
+            use crate::activation::ActivationGraphExt;
+
             // Check depth limit
             if current.depth >= self.config.max_depth {
                 continue;
@@ -309,10 +309,8 @@ impl HierarchicalSpreading {
             depth_distribution[current.depth] += 1;
             max_depth_reached = max_depth_reached.max(current.depth);
 
-            // Determine if current node is episode or concept
-            // For now, use heuristic: nodes with "episode" prefix are episodes
-            // Will be replaced with actual node type lookup in Task 002
-            let current_is_episode = current.node_id.contains("episode");
+            // Determine if current node is episode or concept using ActivationGraphExt
+            let current_is_episode = self.memory_graph.is_episode_node(&current.node_id);
 
             // Get neighbors and calculate spreading
             if let Some(neighbors) =
@@ -320,7 +318,7 @@ impl HierarchicalSpreading {
             {
                 for edge in neighbors {
                     // Determine target node type and spreading direction
-                    let target_is_episode = edge.target.contains("episode");
+                    let target_is_episode = self.memory_graph.is_episode_node(&edge.target);
                     let direction =
                         SpreadingDirection::from_node_types(current_is_episode, target_is_episode);
 
@@ -418,7 +416,7 @@ impl HierarchicalSpreading {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::activation::{EdgeType, create_activation_graph};
+    use crate::activation::{ActivationGraphExt, EdgeType, create_activation_graph};
 
     #[test]
     fn test_spreading_direction_classification() {
@@ -490,16 +488,19 @@ mod tests {
         assert!(result.activations.contains_key("episode2"));
 
         // Verify upward spreading stronger than downward
-        let concept1_activation = result.activations.get("concept1").unwrap();
-        let episode2_activation = result.activations.get("episode2").unwrap();
-        assert!(*concept1_activation > *episode2_activation);
+        let concept1_activation = result.activations.get("concept1").map_or(0.0, |v| *v);
+        let episode2_activation = result.activations.get("episode2").map_or(0.0, |v| *v);
+        assert!(concept1_activation > 0.0, "concept1 should be activated");
+        assert!(episode2_activation > 0.0, "episode2 should be activated");
+        assert!(concept1_activation > episode2_activation);
 
         // Verify path tracking
-        assert!(result.paths.is_some());
-        let paths = result.paths.as_ref().unwrap();
-        assert!(paths.contains_key("episode1"));
-        assert!(paths.contains_key("concept1"));
-        assert!(paths.contains_key("episode2"));
+        assert!(result.paths.is_some(), "path tracking should be enabled");
+        if let Some(paths) = result.paths.as_ref() {
+            assert!(paths.contains_key("episode1"));
+            assert!(paths.contains_key("concept1"));
+            assert!(paths.contains_key("episode2"));
+        }
     }
 
     #[test]
@@ -553,7 +554,7 @@ mod tests {
 
         // Verify path length bounded for reached nodes
         if let Some(paths) = result.paths {
-            for entry in paths.iter() {
+            for entry in &paths {
                 assert!(
                     entry.value().len() <= 4,
                     "Path length should be truncated to max_path_length"
@@ -588,16 +589,8 @@ mod tests {
         let result = spreading.spread_hierarchical(seeds);
 
         // Get activations
-        let concept_activation = result
-            .activations
-            .get("concept1")
-            .map(|v| *v)
-            .unwrap_or(0.0);
-        let episode_activation = result
-            .activations
-            .get("episode2")
-            .map(|v| *v)
-            .unwrap_or(0.0);
+        let concept_activation = result.activations.get("concept1").map_or(0.0, |v| *v);
+        let episode_activation = result.activations.get("episode2").map_or(0.0, |v| *v);
 
         // Upward (episode→concept) should be stronger than downward (concept→episode)
         // With depth decay: upward = 0.8 * 1.0 * 0.8^1 = 0.64

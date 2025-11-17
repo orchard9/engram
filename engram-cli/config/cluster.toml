@@ -1,0 +1,74 @@
+# Example Engram cluster configuration
+# Copy this file to ~/.config/engram/config.toml (or set XDG_CONFIG_HOME)
+# and adjust the seed list + advertise address for your environment.
+
+[cluster]
+# Enable distributed mode (disable for single-node development)
+enabled = true
+# Optional stable identifier (auto-generated when empty)
+node_id = ""
+
+[cluster.discovery]
+# Static seed list works well for docker-compose or bare metal clusters
+# (The optional DNS SRV strategy below requires the `cluster_discovery_dns`
+# feature when building Engram. Release binaries ship with it enabled, but
+# custom builds must opt in explicitly.)
+type = "static"
+seed_nodes = [
+    "engram-node1:7946",
+    "engram-node2:7946",
+    "engram-node3:7946",
+]
+# The `consul` discovery type is intentionally disabled until the control-plane
+# milestone. Use static or DNS discovery for now.
+
+[cluster.swim]
+# Probe peer every second
+ping_interval = "1s"
+# Declare timeout if ACK not seen within 600ms
+ack_timeout = "600ms"
+# Escalate suspect to dead after 2s of silence
+suspicion_timeout = "2s"
+indirect_probes = 3
+# How many rumors piggyback on each ping/ack
+gossip_batch = 6
+
+[cluster.replication]
+# Number of replicas per space (excluding primary)
+factor = 2
+# Writes wait up to 1s for replica acknowledgements
+timeout = "1s"
+# Replica placement strategy: random | rackaware | zoneaware
+placement = "random"
+# Jump hash virtual bucket count (higher smooths rebalancing impact)
+jump_buckets = 16384
+# Penalty multipliers for diversity scoring (values between 0.0-1.0)
+rack_penalty = 0.5
+zone_penalty = 0.35
+lag_threshold = "5s"
+catch_up_batch_bytes = 2097152
+compression = "none"
+io_uring_enabled = false
+
+[cluster.network]
+# Gossip bind address for SWIM (0.0.0.0 binds all interfaces)
+swim_bind = "0.0.0.0:7946"
+# API bind address used for intra-cluster routing
+api_bind = "0.0.0.0:50051"
+max_message_size = 4194304
+connection_pool_size = 4
+# Always set advertise_addr when swim_bind uses 0.0.0.0, when `swim_bind` points
+# to an RFC1918 address, or when running behind NAT.
+# advertise_addr = "192.168.1.50:7946"
+
+[router]
+connection_pool_size = 4
+request_timeout_ms = 3000
+max_retries = 3
+retry_base_delay_ms = 50
+retry_max_delay_ms = 500
+circuit_breaker_failure_threshold = 5
+circuit_breaker_reset_ms = 5000
+replica_fallback_enabled = true
+replica_fallback_lag_sequences = 32
+default_read_strategy = "nearest_replica"

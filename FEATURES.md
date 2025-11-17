@@ -176,13 +176,13 @@ Every new feature flag must ship with:
 let graph = Arc::new(RwLock::new(create_concurrent_graph()));
 let metrics = engram_core::metrics::init();
 let auto_tuner = SpreadingAutoTuner::new(0.10, 32);
-let state = ApiState::new(graph, metrics, auto_tuner);
+let state = ApiState::new(graph, metrics, auto_tuner, None);
 
 // New (current)
 let store = Arc::new(MemoryStore::new(100_000).with_hnsw_index());
 let metrics = engram_core::metrics::init();
 let auto_tuner = SpreadingAutoTuner::new(0.10, 32);
-let state = ApiState::new(store, metrics, auto_tuner);
+let state = ApiState::new(store, metrics, auto_tuner, None);
 ```
 
 ---

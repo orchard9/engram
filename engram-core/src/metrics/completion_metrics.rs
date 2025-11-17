@@ -798,7 +798,7 @@ mod tests {
 
         // Verify metrics were recorded
         let counter_value = registry.counter_value(COMPLETION_OPERATIONS_TOTAL);
-        assert_eq!(counter_value, 0); // Base name without labels returns 0
+        assert_eq!(counter_value, 1);
 
         // Check that labeled metrics exist (we can't query them directly in tests)
         // but we've verified the recording doesn't panic

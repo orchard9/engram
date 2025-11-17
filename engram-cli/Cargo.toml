@@ -36,9 +36,10 @@ default = ["hnsw_index", "memory_mapped_persistence", "monitoring"]
 hnsw_index = ["engram-core/hnsw_index"]
 memory_mapped_persistence = ["engram-core/memory_mapped_persistence"]
 monitoring = ["engram-core/monitoring"]
+cluster_discovery_dns = ["engram-core/cluster_discovery_dns"]
 
 [dependencies]
-engram-core = { path = "../engram-core", features = ["hnsw_index", "memory_mapped_persistence", "monitoring"] }
+engram-core = { path = "../engram-core", features = ["hnsw_index", "memory_mapped_persistence", "monitoring", "cluster_discovery_dns"] }
 engram-storage = { path = "../engram-storage" }
 engram-proto = { path = "../engram-proto" }
 tonic = "0.13"
@@ -75,6 +76,7 @@ serde_yaml = "0.9"
 regex = "1.10"
 clap_complete = "4.4"
 futures = "0.3"
+dashmap = { workspace = true }
 
 [build-dependencies]
 clap = { workspace = true }
