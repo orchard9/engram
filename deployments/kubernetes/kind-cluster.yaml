@@ -1,0 +1,39 @@
+# Kind cluster configuration for Engram testing
+# Creates a 3-node cluster suitable for testing SWIM membership and replication
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: engram-test
+nodes:
+  # Control plane node
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"
+    extraPortMappings:
+      # HTTP API for node 0
+      - containerPort: 30432
+        hostPort: 7432
+        protocol: TCP
+      # gRPC for node 0
+      - containerPort: 30051
+        hostPort: 50051
+        protocol: TCP
+
+  # Worker node 1
+  - role: worker
+    labels:
+      node.kubernetes.io/instance-type: memory-optimized
+
+  # Worker node 2
+  - role: worker
+    labels:
+      node.kubernetes.io/instance-type: memory-optimized
+
+# Networking configuration
+networking:
+  disableDefaultCNI: false
+  podSubnet: "10.244.0.0/16"
+  serviceSubnet: "10.96.0.0/12"

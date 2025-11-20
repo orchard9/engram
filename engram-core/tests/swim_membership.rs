@@ -48,6 +48,7 @@ async fn start_node(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[serial_test::serial]
 async fn swim_cluster_converges() {
     let config = test_config();
     let nodes: Vec<_> = (0..3).map(make_node).collect();
@@ -75,6 +76,7 @@ async fn swim_cluster_converges() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[serial_test::serial]
 async fn swim_marks_failed_nodes_dead() {
     let config = test_config();
     let nodes: Vec<_> = (0..2).map(make_node).collect();
