@@ -252,12 +252,25 @@ source $HOME/.cargo/env
 - Try broader search terms
 - Memories need time to "settle" (wait 1-2 seconds after storing)
 
-## Alternative: Docker (Zero Install)
+## Alternative: Docker Compose (Zero Install)
+
+Run a 3-node cluster locally:
 
 ```bash
-# Coming soon - track issue #42
-docker run -p 7432:7432 engram/engram:latest
+cd deployments/docker/cluster
+docker compose up -d
+
+# Access node 1
+curl http://localhost:7432/api/v1/system/health
 ```
+
+Cluster includes:
+- 3 Engram nodes with SWIM membership
+- Prometheus/Grafana monitoring (optional: `--profile monitoring`)
+- Persistent volumes for data durability
+- Health checks and automatic recovery
+
+See [Cluster Verification Cookbook](docs/operations/cluster_verification_cookbook.md) for testing scenarios.
 
 ## Get Help
 

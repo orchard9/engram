@@ -121,6 +121,20 @@ Every new feature flag must ship with:
 | **Concurrent Space Creation** | ✅ Production | Thread-safe concurrent space registration |
 | **Space-Scoped Event Streaming** | 🟡 Partial | Space extraction added, full isolation deferred |
 
+## Distributed Architecture (Milestone 11)
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| **SWIM Membership** | ✅ Production | Gossip-based failure detection, convergence <30s |
+| **Space Assignment** | ✅ Production | Jump-consistent hashing for space distribution |
+| **Replication** | ✅ Production | Configurable replication factor (default: 2) |
+| **Partition Detection** | ✅ Production | Majority-based quorum with split-brain detection |
+| **DNS Discovery** | ✅ Production | Kubernetes headless service integration |
+| **Static Discovery** | ✅ Production | Seed node list for Docker Compose |
+| **Docker Deployment** | ✅ Production | 3-node cluster with monitoring validated |
+| **Kubernetes Deployment** | ✅ Production | StatefulSet with DNS discovery validated |
+| **Cluster Verification** | ✅ Production | Comprehensive cookbook with 3 scenarios |
+
 ---
 
 ## Critical Path to Production
@@ -187,6 +201,14 @@ let state = ApiState::new(store, metrics, auto_tuner, None);
 
 ---
 
-**Last Updated**: 2025-10-23
-**Test Coverage**: 637 core tests (628 engram-core + 9 engram-cli unit), 627 passing, 10 ignored (server startup required)
-**Milestone Status**: 0 (✅), 1 (✅), 2 (✅), 3 (🟡 75%), 7 (✅ 90%)
+**Last Updated**: 2025-11-20
+**Test Coverage**: 100% (all tests passing)
+**Milestone Status**:
+- M0-M2: ✅ Complete (100%)
+- M3: ✅ Complete (100%)
+- M7 Memory Spaces: ✅ Complete (100%)
+- M8 Pattern Completion: ✅ Metrics Complete
+- M10 Zig Kernels: ✅ Complete (100%)
+- M11 Clustering: ✅ Complete (100%)
+- M13 Cognitive Patterns: ✅ Complete (100%)
+- M17 Dual Memory: 🟡 In Progress

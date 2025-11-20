@@ -134,29 +134,34 @@ See [Zig Performance Kernels Operations Guide](docs/operations/zig_performance_k
 | **SMT Verification** | ✅ Production | Correctness proofs for probability propagation |
 | **Streaming Monitoring** | ✅ Production | Real-time SSE streams of memory dynamics |
 | **Memory Spaces** | ✅ Production | Multi-tenant isolation with per-space metrics |
+| **Cluster (SWIM)** | ✅ Production | Distributed cluster with gossip membership, replication factor=2, DNS/static discovery |
 | **Zig Performance Kernels** | ✅ Production | SIMD-accelerated operations (15-35% faster) |
 | **Zero-Overhead Metrics** | ✅ Production | Sub-1% monitoring overhead with feature flags |
 
 ## Project Status
 
-**Current Phase**: M14 Prerequisites (Weeks 5-10 - Baseline Measurements)
-**Completed Milestones**: M0-M13, M15-M16 (16/18 milestones complete)
-**Test Health**: 100% (1,035/1,035 passing, zero clippy warnings)
-**Production Ready**: Single-node deployment validated
+**Current Phase**: Milestone 17 (Dual Memory Architecture)
+**Completed Milestones**: M0-M13, M15-M16, M17 (partial) - 17/20 milestones
+**Test Health**: 100% (all tests passing, zero clippy warnings)
+**Production Ready**: Single-node AND cluster deployment validated
 
-**Recent Achievements** (2025-11-01):
-- M13 Cognitive Patterns: Complete with empirical validation
-- Consolidation Determinism: Fixed for distributed architecture readiness
-- Spacing Effect: Critical bug fix in two-component decay model
-- Test Coverage: Achieved 100% test health milestone
+**Recent Achievements** (2025-11-20):
+- M7 Memory Spaces: 100% complete - Multi-tenant isolation with <5% overhead
+- M8 Pattern Completion: Metrics integration complete
+- M11 Cluster: 100% complete - SWIM-based distributed architecture production-ready
+- M17 Dual Memory: In progress - Hierarchical spreading and System 1/2 integration
+- Cluster Deployment: Docker Compose and Kubernetes validated with comprehensive cookbook
+
+**Deployment Options**:
+- Single-node: Production ready
+- Docker Compose: 3-node cluster with monitoring (validated)
+- Kubernetes: StatefulSet with DNS discovery (validated with Kind)
 
 **Next Steps**:
-- Weeks 5-7: Single-node performance baselines on build machine
-- Weeks 7-10: 7-day production soak test with comprehensive monitoring
-- Week 8: Go/No-Go decision for M14 distributed architecture
-- M14: Distributed architecture (6-9 months, prerequisites complete)
+- M17 completion: Dual memory architecture with hierarchical spreading
+- M18-M20: Advanced cognitive features and optimization
 
-See [NEXT_STEPS.md](NEXT_STEPS.md) for detailed execution plan and [roadmap/](roadmap/) for milestone tracking.
+See [roadmap/](roadmap/) for milestone tracking.
 
 ### Memory Spaces (Multi-Tenancy)
 
@@ -204,6 +209,54 @@ curl -H "X-Memory-Space: research" \
 - ✅ Concurrency: Thread-safe concurrent access across spaces
 
 For migration guidance and advanced configuration, see [docs/operations/memory-space-migration.md](docs/operations/memory-space-migration.md).
+
+## Deployment Options
+
+### Docker Compose (3-Node Cluster)
+
+Production-ready cluster deployment with monitoring:
+
+```bash
+cd deployments/docker/cluster
+
+# Build and start 3-node cluster
+docker compose build
+docker compose up -d
+
+# Start with monitoring (Prometheus + Grafana)
+docker compose --profile monitoring up -d
+
+# Verify cluster convergence
+docker exec engram-node1 /usr/local/bin/engram status
+# Expected: Shows cluster members alive: 2
+```
+
+See [Cluster Verification Cookbook](docs/operations/cluster_verification_cookbook.md) for comprehensive testing scenarios.
+
+### Kubernetes (StatefulSet with DNS Discovery)
+
+```bash
+# Create Kind cluster for local testing
+kind create cluster --config deployments/kubernetes/kind-cluster.yaml
+
+# Build and load image
+docker build -f deployments/docker/Dockerfile -t engram/engram:latest .
+kind load docker-image engram/engram:latest
+
+# Deploy 3-node cluster
+kubectl apply -f deployments/kubernetes/engram-cluster.yaml
+
+# Verify cluster formation
+kubectl logs -n engram-cluster engram-0 | grep "cluster"
+```
+
+**Features**:
+- DNS-based peer discovery via headless service
+- StatefulSet ensures stable pod identity
+- Pod anti-affinity distributes nodes across hosts
+- Automatic rejoin after pod deletion
+
+See [deployments/kubernetes/engram-cluster.yaml](deployments/kubernetes/engram-cluster.yaml) for complete manifest.
 
 ## What Makes Engram Different?
 

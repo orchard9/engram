@@ -675,78 +675,149 @@ engram_storage_compaction_ratio{tier="cold",space="default"}
 
 ## Cluster Configuration
 
-Distributed deployments share a common cluster configuration block that toggles
-SWIM membership, peer discovery, and network binding.
+Enable and configure distributed deployment with SWIM membership.
 
 ### `cluster.enabled`
 
 **Type:** `bool`
 **Default:** `false`
+**Valid values:** `true`, `false`
 
-Set to `true` to enable multi-node operation. When disabled the server stays in
-single-node mode and ignores the rest of the cluster settings.
+**Purpose:** Enable distributed cluster mode with SWIM membership protocol.
 
-### `cluster.discovery.type`
+**When to enable:** When deploying 2+ nodes for high availability or horizontal scaling.
 
-**Type:** `"static" | "dns" | "consul"`
+**Impact:**
+- Enabled: Node joins cluster, participates in replication and space assignment
+- Disabled: Single-node mode with no gossip overhead
 
-- `static` (default) – bootstrap peers from the `seed_nodes` array. Best for
-  bare-metal or docker-compose deployments.
-- `dns` – resolve peers via DNS SRV records (*requires the
-  `cluster_discovery_dns` feature; release binaries enable it but custom builds
-  must opt in with `--features cluster_discovery_dns`*).
-- `consul` – intentionally deferred until the control-plane milestone. The CLI
-  validator treats it as an error today so operators do not attempt
-  half-implemented registry flows.
-
-### `cluster.static.seed_nodes`
-
-**Type:** `array<string>`
-
-List of `host:port` peers contacted during bootstrap. Validation ensures each
-entry parses as a socket address or resolves via DNS.
-
-### `cluster.dns`
-
-**Fields:**
-
-- `service` – DNS SRV service name (for example
-  `engram-cluster.default.svc.cluster.local`).
-- `port` – gossip port override when the SRV record omits one.
-- `refresh_interval` – how frequently the resolver polls DNS for updates (TOML
-  duration string such as `"30s"`).
-
-> ⚠️ DNS discovery requires the binary to include the `cluster_discovery_dns`
-> feature. CI and release targets enable it by default, but source builds may
-> choose a smaller feature set—`engram config validate` and `engram status
-> --json` surface the mismatch before you start the daemon.
-
-### `cluster.network`
-
-- `swim_bind` – gossip bind address. When it is `0.0.0.0` or `[::]`, you must
-  set `advertise_addr` so peers learn a routable host.
-- `api_bind` – internal API bind address shared with peers for proxying.
-- `advertise_addr` – optional override for the address shared with peers. This
-  is required when the daemon listens on a wildcard, RFC1918, or NATed address.
-- `connection_pool_size` – reused gRPC connections per remote node.
-
-### Example
-
+**Example:**
 ```toml
 [cluster]
 enabled = true
+node_id = "engram-node-1"
+```
 
+### `cluster.node_id`
+
+**Type:** `string`
+**Default:** Auto-generated UUID
+**Valid values:** Any unique identifier
+
+**Purpose:** Stable node identifier for cluster membership.
+
+**Best practices:**
+- Use hostname or static identifier in production
+- Ensure uniqueness across cluster
+- Do not change after initial deployment
+
+### `cluster.discovery`
+
+**Type:** `object`
+**Default:** Static with empty seed list
+
+**Supported Types:**
+
+**1. Static Discovery (Docker Compose)**
+```toml
+[cluster.discovery]
+type = "static"
+seed_nodes = [
+    "engram-node1:7946",
+    "engram-node2:7946",
+    "engram-node3:7946"
+]
+```
+
+**2. DNS Discovery (Kubernetes)**
+```toml
 [cluster.discovery]
 type = "dns"
-service = "engram-cluster.default.svc.cluster.local"
+service = "engram-headless.engram-cluster.svc.cluster.local"
 port = 7946
 refresh_interval = "30s"
-
-[cluster.network]
-swim_bind = "0.0.0.0:7946"
-api_bind = "0.0.0.0:50051"
-advertise_addr = "10.0.5.24:7946"
 ```
+
+**3. Consul Discovery (Service Registry)**
+```toml
+[cluster.discovery]
+type = "consul"
+addr = "http://consul.service.consul:8500"
+service_name = "engram"
+tag = "production"
+```
+
+### `cluster.swim`
+
+SWIM protocol tuning parameters.
+
+```toml
+[cluster.swim]
+ping_interval = "1s"         # Interval between direct probes
+ack_timeout = "600ms"        # Probe timeout
+suspicion_timeout = "2s"     # Time before suspect → dead
+indirect_probes = 2          # Number of indirect probe requests
+gossip_batch = 6             # Max rumors per message
+```
+
+**Tuning Guidance:**
+- **Low latency networks** (<1ms): Reduce timeouts to 300ms/1s
+- **High latency networks** (>10ms): Increase to 1s/5s
+- **Large clusters** (>10 nodes): Increase `indirect_probes` to 3-4
+
+### `cluster.replication`
+
+Memory space replication configuration.
+
+```toml
+[cluster.replication]
+factor = 2                    # Number of replicas per space
+timeout = "1s"                # Write acknowledgement timeout
+placement = "random"          # random | rack-aware | zone-aware
+lag_threshold = "5s"          # Max acceptable replication lag
+```
+
+**Placement Strategies:**
+- `random`: Uniform distribution (default)
+- `rack-aware`: Avoid same rack
+- `zone-aware`: Avoid same availability zone
+
+### `cluster.network`
+
+Network transport configuration.
+
+```toml
+[cluster.network]
+swim_bind = "0.0.0.0:7946"          # SWIM gossip UDP port
+api_bind = "0.0.0.0:50051"          # gRPC API TCP port
+advertise_addr = "10.0.1.5:7946"    # Optional: externally reachable address
+```
+
+**Advertise Address:**
+- Leave unset for auto-detection (connects to seed to learn local IP)
+- Set explicitly when behind NAT or with multiple network interfaces
+- Can use `ENGRAM_CLUSTER_ADVERTISE_ADDR` environment variable
+
+### `cluster.partition`
+
+Partition detection parameters.
+
+```toml
+[cluster.partition]
+majority_threshold = 0.6      # Minimum reachable percentage
+detection_window = "10s"      # Healthy window before clearing partition
+check_interval = "2s"         # Partition status computation cadence
+```
+
+**Monitoring:**
+- Check `engram_cluster_partition_state` metric
+- Watch logs for "Partition detected" warnings
+- Verify `engram_cluster_members_alive` count
+
+For deployment guides, see:
+- [Cluster Verification Cookbook](../operations/cluster_verification_cookbook.md)
+- [Docker Compose Setup](../../deployments/docker/cluster/README.md)
+- [Kubernetes Manifests](../../deployments/kubernetes/engram-cluster.yaml)
 
 ---
 

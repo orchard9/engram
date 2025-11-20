@@ -186,6 +186,128 @@ engram_spreading_latency_hot_seconds{quantile="0.9"}
 **Expected Range:** Tracks workload characteristics, no fixed range
 **Alert:** None (informational for tuning)
 
+## Cluster Metrics
+
+When cluster mode is enabled (`cluster.enabled = true`), additional metrics track distributed system health.
+
+### SWIM Membership Metrics
+
+**`engram_cluster_members_alive`**
+- **Type**: Gauge
+- **Labels**: `node_id`
+- **Description**: Count of alive cluster members (excluding self)
+- **Healthy Range**: N-1 where N is total cluster size
+- **Alert**: <N-1 indicates node failure or network partition
+
+**`engram_cluster_members_dead`**
+- **Type**: Gauge
+- **Labels**: `node_id`
+- **Description**: Count of dead cluster members
+- **Healthy Range**: 0
+- **Alert**: >0 indicates node failure
+
+**`engram_cluster_members_suspect`**
+- **Type**: Gauge
+- **Labels**: `node_id`
+- **Description**: Count of suspected (failing) members
+- **Healthy Range**: 0
+- **Alert**: >0 indicates network issues or slow nodes
+
+### Replication Metrics
+
+**`engram_replication_lag_seconds`**
+- **Type**: Histogram
+- **Labels**: `space_id`, `replica_node`
+- **Description**: Replication lag for each space replica
+- **Healthy Range**: <1s
+- **Alert**: >5s indicates replication backlog
+
+**`engram_replication_write_success_total`**
+- **Type**: Counter
+- **Labels**: `space_id`
+- **Description**: Successful replicated writes
+- **Use**: Track replication throughput
+
+**`engram_replication_write_failures_total`**
+- **Type**: Counter
+- **Labels**: `space_id`, `error_type`
+- **Description**: Failed replication writes
+- **Alert**: Increasing rate indicates replication issues
+
+### Partition Detection Metrics
+
+**`engram_cluster_partition_state`**
+- **Type**: Gauge (0=connected, 1=partitioned)
+- **Description**: Current partition detection state
+- **Healthy Range**: 0
+- **Alert**: 1 indicates network partition detected
+
+## Cluster Health Dashboards
+
+### Prometheus Queries
+
+**Cluster Convergence Time**:
+```promql
+histogram_quantile(0.99,
+  rate(engram_cluster_convergence_duration_seconds_bucket[5m])
+)
+```
+
+**Replication Health**:
+```promql
+sum(engram_replication_lag_seconds < 1) /
+sum(engram_space_assignment_cache_size) * 100
+```
+
+### Grafana Dashboard
+
+Import the cluster dashboard:
+1. Navigate to http://localhost:3000 (Grafana)
+2. Import dashboard from `deployments/grafana/dashboards/cluster-health.json`
+3. Select Prometheus datasource
+
+**Dashboard Panels**:
+- Cluster membership graph (alive/suspect/dead)
+- Replication lag heatmap by space
+- Space assignment distribution
+- Partition detection timeline
+
+## Alerting Rules
+
+Add to `deployments/prometheus/cluster_alerts.yml`:
+
+```yaml
+groups:
+  - name: cluster_health
+    interval: 30s
+    rules:
+      - alert: NodeDown
+        expr: engram_cluster_members_dead > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Cluster node is dead"
+
+      - alert: ReplicationLagging
+        expr: engram_replication_lag_seconds > 5
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Replication lag detected"
+
+      - alert: NetworkPartition
+        expr: engram_cluster_partition_state == 1
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Network partition detected"
+```
+
+For Docker Compose monitoring setup, see [Cluster Verification Cookbook](cluster_verification_cookbook.md).
+
 ## Common Prometheus Queries
 
 ### Spreading Activation Performance

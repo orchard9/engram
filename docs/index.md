@@ -15,11 +15,17 @@ hero:
 
 features:
   - title: Cognitive Memory
-    details: Store and recall memories with biological plausibility, featuring spreading activation and memory consolidation
+    details: Spreading activation, memory consolidation, and temporal decay following biological principles
+  - title: Multi-Tenant Isolation
+    details: Per-space storage, metrics, and health tracking with <5% overhead
+  - title: Distributed Cluster
+    details: SWIM-based gossip protocol, automatic replication, and DNS/static discovery
   - title: High Performance
-    details: Built in Rust with SIMD optimizations, lock-free data structures, and NUMA-aware memory management
-  - title: Graph Architecture
-    details: Hierarchical Navigable Small World (HNSW) index with probabilistic confidence scoring
+    details: SIMD optimizations, lock-free data structures, optional Zig kernels (15-35% faster)
+  - title: Production Ready
+    details: Docker Compose and Kubernetes deployments with comprehensive verification cookbook
+  - title: Probabilistic Queries
+    details: Confidence intervals, uncertainty quantification, and evidence chains
 ---
 
 ## What is Engram?
