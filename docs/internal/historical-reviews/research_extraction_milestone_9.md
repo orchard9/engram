@@ -79,12 +79,11 @@ CURRENTLY: Minimal spec (735 bytes)
 ENHANCE WITH:
 - Profiling methodology (perf, flamegraph, Instruments)
 - Specific bottleneck targets from research:
-  * String allocations must be <5% of total time
-  * Token matching must be <20% of total time
-  * AST allocation via arena must be <10% of total time
+  - String allocations must be <5% of total time
+  - Token matching must be <20% of total time
+  - AST allocation via arena must be <10% of total time
 - Performance progression milestones
 - Regression detection setup (Criterion + CI)
 - Success criteria: 90μs for complex queries, 45μs for simple
 - Reference to "Performance Matters" talk
 - Flamegraph visualization requirement
-

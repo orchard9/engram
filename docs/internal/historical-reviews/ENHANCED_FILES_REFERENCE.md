@@ -12,21 +12,21 @@ Quick reference for all task files enhanced with research insights.
    - File: `/Users/jordanwashburn/Workspace/orchard9/engram/roadmap/milestone-9/001_parser_infrastructure_pending.md`
    - Research: `zero_copy_parsing_research.md`
    - Key Additions:
-     * Performance targets (64-byte tokenizer, <10μs parse time)
-     * Zero-allocation verification with custom allocator
-     * Compile-time size assertions
-     * CI regression detection
-     * Academic references (Askitis & Sinha 2007, Langdale & Lemire 2019)
+     - Performance targets (64-byte tokenizer, <10μs parse time)
+     - Zero-allocation verification with custom allocator
+     - Compile-time size assertions
+     - CI regression detection
+     - Academic references (Askitis & Sinha 2007, Langdale & Lemire 2019)
 
 2. **Error Recovery and Messages**
    - File: `/Users/jordanwashburn/Workspace/orchard9/engram/roadmap/milestone-9/004_error_recovery_messages_pending.md`
    - Research: `error_messages_that_teach_research.md`
    - Key Additions:
-     * Psychological design principles (tiredness test, stress & cognition)
-     * Empirical error distribution (40% typos, 25% wrong order, 20% invalid ops)
-     * Success metrics (85% first-try fix rate, 3x faster resolution)
-     * Levenshtein distance constraints
-     * Academic references (Arnsten 2009, Marceau et al. 2011)
+     - Psychological design principles (tiredness test, stress & cognition)
+     - Empirical error distribution (40% typos, 25% wrong order, 20% invalid ops)
+     - Success metrics (85% first-try fix rate, 3x faster resolution)
+     - Levenshtein distance constraints
+     - Academic references (Arnsten 2009, Marceau et al. 2011)
 
 3. **Validation Suite**
    - File: `/Users/jordanwashburn/Workspace/orchard9/engram/roadmap/milestone-9/008_validation_suite_pending.md`
@@ -38,12 +38,12 @@ Quick reference for all task files enhanced with research insights.
    - File: `/Users/jordanwashburn/Workspace/orchard9/engram/roadmap/milestone-9/010_performance_optimization_pending.md`
    - Research: `sub_100_microsecond_parse_times_research.md`
    - Key Additions:
-     * Profiling bottleneck breakdown (40% string alloc, 30% token match, 20% AST, 10% error)
-     * Performance progression (450μs → 90μs, 80% improvement)
-     * Specific query type targets (50μs simple, 100μs complex, 200μs large embedding)
-     * Arena allocation strategy
-     * Flamegraph methodology
-     * Academic references (Berger, Matsakis, Gregg)
+     - Profiling bottleneck breakdown (40% string alloc, 30% token match, 20% AST, 10% error)
+     - Performance progression (450μs → 90μs, 80% improvement)
+     - Specific query type targets (50μs simple, 100μs complex, 200μs large embedding)
+     - Arena allocation strategy
+     - Flamegraph methodology
+     - Academic references (Berger, Matsakis, Gregg)
 
 ### Not Yet Enhanced (Research Available)
 
@@ -66,31 +66,31 @@ Quick reference for all task files enhanced with research insights.
    - File: `/Users/jordanwashburn/Workspace/orchard9/engram/roadmap/milestone-10/002_zig_build_system_pending.md`
    - Research: `build_zig_meets_cargo_research.md`
    - Key Additions:
-     * Zero-copy FFI design principles
-     * Memory safety invariants at FFI boundary
-     * C ABI as common ground explanation
-     * Static vs dynamic linking tradeoff
-     * FFI anti-patterns with examples
-     * Performance target (<10ns FFI overhead)
+     - Zero-copy FFI design principles
+     - Memory safety invariants at FFI boundary
+     - C ABI as common ground explanation
+     - Static vs dynamic linking tradeoff
+     - FFI anti-patterns with examples
+     - Performance target (<10ns FFI overhead)
 
 2. **Differential Testing Harness**
    - File: `/Users/jordanwashburn/Workspace/orchard9/engram/roadmap/milestone-10/003_differential_testing_harness_pending.md`
    - Research: `proving_fast_code_is_correct_research.md`
    - Key Additions (captured, not yet applied to file):
-     * Property-based testing strategy
-     * Floating-point epsilon comparison (1e-6)
-     * Edge case discovery methodology
-     * Numerical stability testing
-     * Bug discovery example (zero vector NaN after 2,341 cases)
+     - Property-based testing strategy
+     - Floating-point epsilon comparison (1e-6)
+     - Edge case discovery methodology
+     - Numerical stability testing
+     - Bug discovery example (zero vector NaN after 2,341 cases)
 
 3. **Performance Regression Framework**
    - File: `/Users/jordanwashburn/Workspace/orchard9/engram/roadmap/milestone-10/010_performance_regression_framework_pending.md`
    - Research: `preventing_regressions_research.md`
    - Key Additions (captured, not yet applied to file):
-     * Baseline storage strategy (JSON)
-     * 5% regression threshold
-     * CI integration patterns
-     * Change point detection methodology
+     - Baseline storage strategy (JSON)
+     - 5% regression threshold
+     - CI integration patterns
+     - Change point detection methodology
 
 ### Not Yet Enhanced (Research Available)
 

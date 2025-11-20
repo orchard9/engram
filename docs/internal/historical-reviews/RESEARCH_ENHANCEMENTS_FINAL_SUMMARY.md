@@ -90,10 +90,10 @@ Applied concrete research findings from 60+ research files to enhance task speci
 **After:** 330 lines with empirical profiling data:
 - Baseline: 450μs → Target: 90μs (80% improvement)
 - Profiling bottlenecks identified:
-  * String allocations: 40% → <5% (zero-copy)
-  * Token matching: 30% → <20% (PHF)
-  * AST allocation: 20% → <10% (arena)
-  * Error construction: 10% → lazy
+  - String allocations: 40% → <5% (zero-copy)
+  - Token matching: 30% → <20% (PHF)
+  - AST allocation: 20% → <10% (arena)
+  - Error construction: 10% → lazy
 
 **Added:**
 - Performance progression milestones

@@ -399,18 +399,18 @@ Then update usages:
 
 ## Summary of Recommended Actions
 
-### Immediate (Before Using for Regression Detection):
+### Immediate (Before Using for Regression Detection)
 1. ✅ Create variance validation script
 2. ⚠️ Create hotspot validation script (or document manual process)
 3. ✅ Add degree tracking clarification comments
 4. ✅ Add cosine_similarity precondition docs + debug_assert
 
-### Short-term (Before Task 010 - Regression Framework):
+### Short-term (Before Task 010 - Regression Framework)
 5. ✅ Increase warm-up time to 5s
 6. ✅ Extract magic numbers to constants
 7. ✅ Add decay semantics comment
 
-### Long-term (Future Improvements):
+### Long-term (Future Improvements)
 8. Implement SVG/perf parsing for automated hotspot validation
 9. Add property-based tests for spreading activation
 10. Add hardware counter profiling (cache misses, branch mispredictions)

@@ -282,7 +282,7 @@ From Task 001 specification:
 
 ## Next Steps
 
-### Before Marking Task 001 Complete:
+### Before Marking Task 001 Complete
 
 1. **Execute variance validation:**
    ```bash
@@ -301,13 +301,13 @@ From Task 001 specification:
    - Option A: Implement automated SVG parsing
    - Option B: Document manual validation steps in profiling_results.md
 
-### Before Starting Task 002 (Differential Testing):
+### Before Starting Task 002 (Differential Testing)
 
 1. Extract magic numbers to constants (low priority but good hygiene)
 2. Add decay semantics documentation
 3. Consider adding property-based tests
 
-### Before Task 010 (Regression Framework):
+### Before Task 010 (Regression Framework)
 
 1. Integrate variance validation into CI/CD
 2. Set up baseline comparison workflow
