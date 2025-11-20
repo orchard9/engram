@@ -986,3 +986,48 @@ Correctness:
 - Criterion micro-benchmarks not configured in Cargo.toml (noted for future setup)
 - Pre-existing clippy warnings to be addressed in separate quality improvement task
 - Binding metadata integration needs broader adoption across CLI orchestration and consolidation services
+
+## Critical Bug Fix (2025-11-20 - Post Code Review)
+
+**CRITICAL CORRECTNESS BUG FIXED**: AVX-512 horizontal sum implementation only summed 8 of 16 lanes
+
+**Issue**: The `horizontal_sum_avx512` function in `engram-core/src/optimization/simd_concepts.rs` extracted only lanes 0-7 (via `_mm512_castps512_ps128` and `_mm512_extractf32x4_ps::<1>`), completely missing lanes 8-15 of the 512-bit vector.
+
+**Impact**: On AVX-512 hardware (Intel Xeon Scalable, AMD Zen 4+), all cosine similarity scores would have been **50% wrong**, breaking:
+- Concept centroid matching  
+- Pattern completion via concept similarity
+- Episodic clustering algorithms
+- Hierarchical spreading activation
+
+**Detection**: Caught during comprehensive code review by the verification-testing-lead agent before any production deployment. The bug would have been silent (no errors), just producing incorrect results.
+
+**Fix**: Rewrote `horizontal_sum_avx512` to extract all four 128-bit lanes and sum correctly:
+```rust
+let lane0 = _mm512_castps512_ps128(v);           // Lanes 0-3
+let lane1 = _mm512_extractf32x4_ps::<1>(v);      // Lanes 4-7
+let lane2 = _mm512_extractf32x4_ps::<2>(v);      // Lanes 8-11
+let lane3 = _mm512_extractf32x4_ps::<3>(v);      // Lanes 12-15
+
+// Pairwise addition to combine all lanes
+let sum01 = _mm_add_ps(lane0, lane1);
+let sum23 = _mm_add_ps(lane2, lane3);
+let sum_all = _mm_add_ps(sum01, sum23);
+```
+
+**Validation**: Added comprehensive SIMD correctness testing in `engram-core/tests/optimization_simd_correctness.rs`:
+- Differential testing: SIMD results vs scalar reference (epsilon=1e-5)
+- Test coverage:
+  - `test_avx512_concept_similarity_vs_scalar`: Validates cosine similarity correctness
+  - `test_avx512_orthogonal_vectors`: Edge case for zero similarity
+  - `test_avx2_binding_decay_vs_scalar`: Decay function correctness
+  - `test_avx2_fan_effect_vs_scalar`: Fan-effect division correctness
+  - `test_simd_fallback_paths`: Non-x86 scalar fallback validation
+  - `test_binding_decay_edge_cases`: Zero/full decay edge cases
+  - `test_fan_effect_zero_fan_out`: Zero fan-out clamping
+- All tests pass ✅
+
+**Files Changed**:
+- `engram-core/src/optimization/simd_concepts.rs`: Fixed `horizontal_sum_avx512` (lines 10-27)
+- `engram-core/tests/optimization_simd_correctness.rs`: Added 9 correctness tests (228 lines)
+
+**Mitigation**: On most systems (non-AVX-512), the scalar fallback was used, so this bug did not affect production workloads. The fix ensures correctness on high-end server hardware.

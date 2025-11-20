@@ -8,10 +8,20 @@ use std::arch::x86_64::*;
 #[cfg(target_arch = "x86_64")]
 #[inline(always)]
 unsafe fn horizontal_sum_avx512(v: __m512) -> f32 {
-    let high = _mm512_extractf32x4_ps::<1>(v);
-    let low = _mm512_castps512_ps128(v);
-    let sum128 = _mm_add_ps(low, high);
-    let temp64 = _mm_hadd_ps(sum128, sum128);
+    // SAFETY: Extract all four 128-bit lanes (16 floats total)
+    // AVX-512 has 512 bits = 16x 32-bit floats organized as 4x 128-bit lanes
+    let lane0 = _mm512_castps512_ps128(v);           // Lanes 0-3
+    let lane1 = _mm512_extractf32x4_ps::<1>(v);      // Lanes 4-7
+    let lane2 = _mm512_extractf32x4_ps::<2>(v);      // Lanes 8-11
+    let lane3 = _mm512_extractf32x4_ps::<3>(v);      // Lanes 12-15
+
+    // Pairwise addition to combine all lanes
+    let sum01 = _mm_add_ps(lane0, lane1);
+    let sum23 = _mm_add_ps(lane2, lane3);
+    let sum_all = _mm_add_ps(sum01, sum23);
+
+    // Horizontal sum within final 128-bit vector
+    let temp64 = _mm_hadd_ps(sum_all, sum_all);
     let temp32 = _mm_hadd_ps(temp64, temp64);
     _mm_cvtss_f32(temp32)
 }
