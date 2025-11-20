@@ -10,10 +10,10 @@ use std::arch::x86_64::*;
 unsafe fn horizontal_sum_avx512(v: __m512) -> f32 {
     // SAFETY: Extract all four 128-bit lanes (16 floats total)
     // AVX-512 has 512 bits = 16x 32-bit floats organized as 4x 128-bit lanes
-    let lane0 = _mm512_castps512_ps128(v);           // Lanes 0-3
-    let lane1 = _mm512_extractf32x4_ps::<1>(v);      // Lanes 4-7
-    let lane2 = _mm512_extractf32x4_ps::<2>(v);      // Lanes 8-11
-    let lane3 = _mm512_extractf32x4_ps::<3>(v);      // Lanes 12-15
+    let lane0 = _mm512_castps512_ps128(v); // Lanes 0-3
+    let lane1 = _mm512_extractf32x4_ps::<1>(v); // Lanes 4-7
+    let lane2 = _mm512_extractf32x4_ps::<2>(v); // Lanes 8-11
+    let lane3 = _mm512_extractf32x4_ps::<3>(v); // Lanes 12-15
 
     // Pairwise addition to combine all lanes
     let sum01 = _mm_add_ps(lane0, lane1);

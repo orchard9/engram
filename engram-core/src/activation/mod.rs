@@ -1736,7 +1736,9 @@ impl ActivationGraphExt for ActivationGraph {
     fn is_episode_node(&self, node_id: &NodeId) -> bool {
         #[cfg(feature = "dual_memory_types")]
         {
-            if let (Some(uuid), Some(index)) = (Self::parse_uuid_component(node_id), self.binding_index()) {
+            if let (Some(uuid), Some(index)) =
+                (Self::parse_uuid_component(node_id), self.binding_index())
+            {
                 if index.is_episode_id(&uuid) {
                     return true;
                 }

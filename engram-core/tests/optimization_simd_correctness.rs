@@ -2,8 +2,8 @@
 //!
 //! Differential testing: SIMD implementations must match scalar reference within epsilon
 
-use engram_core::optimization::simd_concepts;
 use engram_core::EMBEDDING_DIM;
+use engram_core::optimization::simd_concepts;
 
 const EPSILON: f32 = 1e-5; // Relaxed from 1e-6 for floating-point accumulation
 
@@ -183,6 +183,7 @@ fn test_avx2_fan_effect_vs_scalar() {
 }
 
 #[test]
+#[allow(clippy::similar_names)] // centroid1/centroid2/centroids is clear
 fn test_simd_fallback_paths() {
     // Test that non-x86 platforms compile and run scalar fallbacks
     let query = [0.5f32; EMBEDDING_DIM];

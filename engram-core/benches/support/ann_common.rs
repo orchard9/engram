@@ -144,7 +144,10 @@ impl BenchmarkResults {
 
     pub fn export_json(&self, path: &str) -> Result<()> {
         let records = self.serialize_records();
-        if let Some(parent) = std::path::Path::new(path).parent().filter(|p| !p.as_os_str().is_empty()) {
+        if let Some(parent) = std::path::Path::new(path)
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+        {
             std::fs::create_dir_all(parent)?;
         }
         std::fs::write(path, serde_json::to_string_pretty(&records)?)?;
