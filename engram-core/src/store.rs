@@ -1369,14 +1369,20 @@ impl MemoryStore {
                     streaming_delivered = true;
                 }
                 Err(e) => {
-                    streaming_delivered = false;
                     let subscriber_count = tx.receiver_count();
-                    tracing::error!(
-                        memory_id = %memory_id,
-                        subscriber_count = %subscriber_count,
-                        error = ?e,
-                        "CRITICAL streaming failure - event could not be delivered to SSE subscribers"
-                    );
+                    if subscriber_count > 0 {
+                        // Subscribers exist but delivery failed - this is a critical error
+                        streaming_delivered = false;
+                        tracing::error!(
+                            memory_id = %memory_id,
+                            subscriber_count = %subscriber_count,
+                            error = ?e,
+                            "CRITICAL streaming failure - event could not be delivered to SSE subscribers"
+                        );
+                    } else {
+                        // No subscribers - this is expected, not an error
+                        streaming_delivered = true;
+                    }
                 }
             }
         }
@@ -1822,14 +1828,18 @@ impl MemoryStore {
                 };
 
                 if let Err(e) = tx.send(event) {
-                    all_delivered = false;
                     let subscriber_count = tx.receiver_count();
-                    tracing::error!(
-                        memory_id = %episode.id,
-                        subscriber_count = %subscriber_count,
-                        error = ?e,
-                        "CRITICAL streaming failure - recall event could not be delivered to SSE subscribers"
-                    );
+                    if subscriber_count > 0 {
+                        // Subscribers exist but delivery failed - this is a critical error
+                        all_delivered = false;
+                        tracing::error!(
+                            memory_id = %episode.id,
+                            subscriber_count = %subscriber_count,
+                            error = ?e,
+                            "CRITICAL streaming failure - recall event could not be delivered to SSE subscribers"
+                        );
+                    }
+                    // If no subscribers, don't mark as failed - this is expected
                 }
             }
 
@@ -1844,13 +1854,17 @@ impl MemoryStore {
                 };
 
                 if let Err(e) = tx.send(event) {
-                    all_delivered = false;
                     let subscriber_count = tx.receiver_count();
-                    tracing::error!(
-                        subscriber_count = %subscriber_count,
-                        error = ?e,
-                        "CRITICAL streaming failure - activation spread event could not be delivered to SSE subscribers"
-                    );
+                    if subscriber_count > 0 {
+                        // Subscribers exist but delivery failed - this is a critical error
+                        all_delivered = false;
+                        tracing::error!(
+                            subscriber_count = %subscriber_count,
+                            error = ?e,
+                            "CRITICAL streaming failure - activation spread event could not be delivered to SSE subscribers"
+                        );
+                    }
+                    // If no subscribers, don't mark as failed - this is expected
                 }
             }
         }

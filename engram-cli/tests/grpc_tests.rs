@@ -34,7 +34,7 @@ async fn start_test_grpc_server() -> u16 {
 
     let metrics = metrics::init();
     let service = MemoryService::new(
-        Arc::clone(&store),
+        &Arc::clone(&store),
         metrics,
         Arc::clone(&registry),
         default_space,

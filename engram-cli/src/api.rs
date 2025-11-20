@@ -240,7 +240,7 @@ impl ApiState {
         partition_confidence: Option<Arc<PartitionAwareConfidence>>,
     ) -> Self {
         let memory_service = Arc::new(MemoryService::new(
-            Arc::clone(&store),
+            &store,
             Arc::clone(&metrics),
             Arc::clone(&registry),
             default_space.clone(),
@@ -1189,6 +1189,8 @@ pub struct MonitoringQuery {
     pub session_id: Option<String>,
     /// Last sequence number for resumption
     pub last_sequence: Option<u64>,
+    /// Filter events to specific memory space
+    pub space: Option<String>,
 }
 
 /// Query parameters for activation monitoring
@@ -1206,6 +1208,8 @@ pub struct ActivationMonitoringQuery {
     pub time_window: Option<f32>,
     /// Session ID for reconnection
     pub session_id: Option<String>,
+    /// Filter activations to specific memory space
+    pub space: Option<String>,
 }
 
 /// Query parameters for causality tracking
@@ -1223,6 +1227,8 @@ pub struct CausalityMonitoringQuery {
     pub temporal_window: Option<u64>,
     /// Session ID for reconnection
     pub session_id: Option<String>,
+    /// Filter causality to specific memory space
+    pub space: Option<String>,
 }
 
 /// Response for memory remember operations
@@ -3182,11 +3188,19 @@ pub async fn trigger_compaction(_state: State<ApiState>) -> Result<impl IntoResp
     ))
 }
 
+/// Query parameters for health endpoint
+#[derive(Debug, Deserialize, ToSchema, IntoParams)]
+pub struct HealthQuery {
+    /// Optional space filter - if provided, only show metrics for this space
+    pub space: Option<String>,
+}
+
 /// GET /api/v1/system/health - Comprehensive system health with per-space metrics
 #[utoipa::path(
     get,
     path = "/api/v1/system/health",
     tag = "system",
+    params(HealthQuery),
     responses(
         (status = 200, description = "System health information with per-space metrics", body = HealthResponse),
         (status = 500, description = "System health check failed", body = ErrorResponse)
@@ -3195,13 +3209,37 @@ pub async fn trigger_compaction(_state: State<ApiState>) -> Result<impl IntoResp
 /// # Errors
 ///
 /// Returns `ApiError` if system health check fails
-pub async fn system_health(State(state): State<ApiState>) -> Result<impl IntoResponse, ApiError> {
+pub async fn system_health(
+    State(state): State<ApiState>,
+    Query(query): Query<HealthQuery>,
+) -> Result<impl IntoResponse, ApiError> {
     let health_registry = state.metrics.health_registry();
     let overall_status = health_registry.check_all();
     let report = health_registry.health_report();
 
     // Collect per-space health metrics
-    let space_summaries = state.registry.list();
+    // If space filter is provided, only collect metrics for that space
+    let space_summaries = if let Some(ref space_filter) = query.space {
+        // Validate and filter to single space
+        let space_id = MemorySpaceId::try_from(space_filter.as_str()).map_err(|e| {
+            ApiError::ValidationError(format!(
+                "Invalid space filter '{}': {}. Must be 4-64 lowercase alphanumeric characters.",
+                space_filter, e
+            ))
+        })?;
+
+        // Check if space exists
+        state
+            .registry
+            .list()
+            .into_iter()
+            .filter(|summary| summary.id == space_id)
+            .collect::<Vec<_>>()
+    } else {
+        // Return all spaces
+        state.registry.list()
+    };
+
     let mut space_metrics = Vec::new();
 
     for summary in space_summaries {
@@ -4400,6 +4438,7 @@ pub async fn monitor_events(
         min_activation,
         include_causality,
         params.last_sequence.unwrap_or(0),
+        params.space,
     );
 
     Sse::new(stream).keep_alive(KeepAlive::default())
@@ -4435,6 +4474,7 @@ pub async fn monitor_activations(
         frequency,
         time_window,
         include_spreading,
+        params.space,
     );
 
     Sse::new(stream).keep_alive(KeepAlive::default())
@@ -4487,6 +4527,7 @@ pub async fn monitor_causality(
         operation_types,
         temporal_window,
         include_indirect,
+        params.space,
     );
 
     Sse::new(stream).keep_alive(KeepAlive::default())
@@ -4501,6 +4542,7 @@ fn create_monitoring_stream(
     min_activation: f32,
     include_causality: bool,
     last_sequence: u64,
+    space_filter: Option<String>,
 ) -> impl Stream<Item = Result<Event, std::convert::Infallible>> {
     let (tx, rx) = tokio::sync::mpsc::channel(64);
 
@@ -4552,6 +4594,10 @@ fn create_monitoring_stream(
                     }
                 });
 
+                if let Some(ref space) = space_filter {
+                    event_data["space_id"] = json!(space);
+                }
+
                 if let Some(ref focus) = focus_id {
                     event_data["focus_id"] = json!(focus);
                     event_data["focused"] = json!(true);
@@ -4587,6 +4633,7 @@ fn create_activation_monitoring_stream(
     frequency: f32,
     _time_window: f32,
     include_spreading: bool,
+    space_filter: Option<String>,
 ) -> impl Stream<Item = Result<Event, std::convert::Infallible>> {
     let (tx, rx) = tokio::sync::mpsc::channel(128);
 
@@ -4616,6 +4663,10 @@ fn create_activation_monitoring_stream(
                     "pulse_rate": activation_level * 10.0,
                 }
             });
+
+            if let Some(ref space) = space_filter {
+                event_data["space_id"] = json!(space);
+            }
 
             if include_spreading {
                 let spreading_count = (activation_level * 5.0) as usize;
@@ -4657,6 +4708,7 @@ fn create_causality_monitoring_stream(
     operation_types: Vec<String>,
     temporal_window: u64,
     include_indirect: bool,
+    space_filter: Option<String>,
 ) -> impl Stream<Item = Result<Event, std::convert::Infallible>> {
     let (tx, rx) = tokio::sync::mpsc::channel(32);
 
@@ -4689,6 +4741,10 @@ fn create_causality_monitoring_stream(
                 "timestamp": Utc::now().to_rfc3339(), "session_id": session_id, "sequence": event_id,
                 "causal_chain": causal_chain, "latency_ms": rand::random::<u64>() % 100,
             });
+
+            if let Some(ref space) = space_filter {
+                event_data["space_id"] = json!(space);
+            }
 
             if include_indirect && causal_chains.len() > 1 {
                 let indirect_causes = causal_chains

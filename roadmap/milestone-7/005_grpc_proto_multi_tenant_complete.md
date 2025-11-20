@@ -63,11 +63,80 @@ Evolve gRPC contracts and server implementation so clients declare memory spaces
 - CLI/gRPC client wrappers under `engram-cli/src/cli` or `bindings/`.
 
 ## Acceptance Criteria
-1. Protobuf schema compiles; regeneration yields no manual diff aside from expected field additions.
-2. gRPC requests without `memory_space_id` resolve to default space with logged deprecation warning; tests assert warning emitted.
-3. Requests specifying unknown space return `Status::not_found` with actionable error text.
-4. Streaming APIs deliver events only for the requested space and independent backpressure works under concurrent load.
-5. CHANGELOG/README entries describe the change and migration path.
+
+1. ✅ **COMPLETE**: Protobuf schema compiles and regenerates cleanly
+   - Implementation: memory_space_id field added to 10 request messages
+   - Files: Proto definitions updated, Rust code regenerated
+   - Status: No compilation errors
+
+2. ⚠️ **PARTIAL**: gRPC requests without memory_space_id resolve to default
+   - ✅ Implemented: remember() and recall() handlers
+   - ❌ Missing: 9 remaining RPC handlers need space routing
+   - ❌ Missing: Deprecation warning logging
+
+3. ❌ **NOT IMPLEMENTED**: Unknown space error handling
+   - Missing: Status::not_found with actionable error text
+   - Need: Validation in all handlers
+
+4. ❌ **NOT IMPLEMENTED**: Streaming APIs deliver events per space
+   - Missing: Stream isolation implementation
+   - Missing: Concurrent backpressure testing
+   - Missing: Per-space event filtering
+
+5. ❌ **NOT STARTED**: CHANGELOG/README entries
+   - Missing: Proto changelog entry
+   - Missing: Migration path documentation
+
+## Remaining Work (40%)
+
+1. **Complete Remaining gRPC Handlers** (4 hours)
+   - File: engram-cli/src/grpc.rs
+   - Handlers needing update (9 total):
+     - store_memory
+     - search_memories
+     - remove_memory
+     - consolidate
+     - dream
+     - get_activation_stats
+     - stream_events
+     - stream_activations
+     - any other RPCs
+   - Pattern: Extract space from request field → get registry handle → verify_space()
+
+2. **Deprecation Warning System** (2 hours)
+   - File: engram-cli/src/grpc.rs
+   - Action: When memory_space_id field is None, emit warn! log
+   - Message: "gRPC request missing memory_space_id, using default space"
+   - Optional: Add warning to response metadata
+
+3. **Unknown Space Error Handling** (1 hour)
+   - File: engram-cli/src/grpc.rs
+   - Action: Wrap registry.create_or_get() errors
+   - Return: Status::not_found("Space '<id>' not found. Create it first or use default space")
+   - Test: Verify error message in integration tests
+
+4. **Streaming API Isolation** (4 hours)
+   - File: engram-cli/src/grpc.rs
+   - Implementation:
+     - Extract memory_space_id from stream request
+     - Filter events by space before sending
+     - Maintain per-space backpressure state
+   - Test: Concurrent streams from different spaces don't interfere
+
+5. **gRPC Integration Tests** (3 hours)
+   - File: Create engram-cli/tests/grpc_multi_space.rs
+   - Scenarios:
+     - remember/recall with space field
+     - Default fallback without field
+     - Unknown space returns not_found
+     - Stream isolation validation
+   - Framework: tonic test client
+
+6. **Proto Documentation** (1 hour)
+   - File: engram-proto/CHANGELOG.md
+   - Entry: Document memory_space_id field addition
+   - Content: Migration guidance, backward compatibility
+   - File: Update proto comments with usage examples
 
 ## Testing Strategy
 - `engram-proto`: run `cargo test` and optionally `buf lint` (if configured) after regeneration.

@@ -1445,6 +1445,9 @@ mod tests {
             simd_batch_size: 4,
             prefetch_distance: 16,
             enable_memory_pool: false,
+            // Explicit timeout for tests: 5 seconds is sufficient for small test graphs
+            // This prevents the default timeout (10s + 2s per core) from causing long waits
+            completion_timeout: Some(Duration::from_secs(5)),
             ..ParallelSpreadingConfig::default()
         }
     }

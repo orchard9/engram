@@ -233,24 +233,65 @@ ERROR Serialization failed: NaN values in embeddings
 ```
 ERROR Memory space 'tenant_x' not found
 ERROR Failed to initialise memory store for space 'tenant_y'
+ERROR Missing memory space header
+ERROR Invalid space ID: must match ^[a-z0-9_-]+$
 
 ```
 
-**Meaning**: Multi-tenant space isolation is broken.
+**Meaning**: Multi-tenant space isolation is broken or space routing failed.
 
 **Common Causes**:
 
-- Space not created
+- Space not created (automatic creation may be disabled)
 
-- Registry corruption
+- Invalid space ID format (uppercase letters, special characters)
+
+- Registry corruption or initialization failure
 
 - Directory permission mismatch
 
 - HTTP routing not wired (known issue from Milestone 7)
 
+- Missing `X-Memory-Space` header in request
+
 **Recovery Strategy**: ContinueWithoutFeature (fall back to default space), RequiresIntervention (re-create space)
 
 **Resolution**: See Issue #6 (Multi-space isolation)
+
+**Detailed Troubleshooting**:
+
+```bash
+# List all available spaces
+curl http://localhost:7432/api/v1/spaces
+# Or via CLI
+./target/release/engram space list
+
+# Create missing space explicitly
+./target/release/engram space create production
+
+# Verify space isolation
+curl -H "X-Memory-Space: tenant-a" \
+  http://localhost:7432/api/v1/memories/recall?query=test
+
+# Check space directory structure
+ls -la ~/.local/share/engram/
+# Should show: default/, production/, staging/, etc.
+
+# Verify WAL recovery logs on startup
+./target/release/engram start 2>&1 | grep "Recovered"
+# Expected: "Recovered 'space_name': N entries, 0 corrupted"
+
+# Check space-specific metrics
+curl http://localhost:7432/api/v1/system/health | jq '.spaces[] | {space, memories, pressure}'
+```
+
+**Space ID Validation Rules**:
+- Only lowercase letters, digits, underscores, hyphens
+- Length: 1-64 characters
+- Pattern: `^[a-z0-9_-]+$`
+- Examples:
+  - Valid: `production`, `tenant-123`, `team_alpha`
+  - Invalid: `Production` (uppercase), `tenant@123` (@ not allowed), `a` (too short if policy enforces minimum)
 
 ### Pattern 5: Index/Query Failures
 

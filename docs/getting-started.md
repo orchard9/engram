@@ -69,6 +69,61 @@ curl "http://localhost:7432/api/v1/memories/recall?query=programming"
 
 ```
 
+## Memory Spaces (Multi-Tenancy)
+
+Engram supports isolated memory spaces for multi-tenant deployments. Each space maintains separate storage, persistence, and metrics.
+
+### Quick Start with Spaces
+
+```bash
+# List all memory spaces (starts with 'default')
+./target/debug/engram space list
+
+# Create a new memory space
+./target/debug/engram space create research
+
+# Store a memory in the 'research' space
+curl -X POST http://localhost:7432/api/v1/memories/remember \
+  -H "Content-Type: application/json" \
+  -H "X-Memory-Space: research" \
+  -d '{"content": "CRISPR enables precise gene editing", "confidence": 0.95}'
+
+# Recall from the 'research' space
+curl -H "X-Memory-Space: research" \
+  "http://localhost:7432/api/v1/memories/recall?query=gene%20editing"
+
+# Check per-space health metrics
+./target/debug/engram status --space research
+
+```
+
+### Space Routing Options
+
+You can specify memory spaces in three ways:
+
+1. **HTTP Header** (recommended):
+   ```bash
+   curl -H "X-Memory-Space: production" \
+     http://localhost:7432/api/v1/memories/recall?query=data
+   ```
+
+2. **Query Parameter**:
+   ```bash
+   curl "http://localhost:7432/api/v1/memories/recall?space=production&query=data"
+   ```
+
+3. **Environment Variable** (CLI):
+   ```bash
+   export ENGRAM_MEMORY_SPACE=production
+   ./target/debug/engram memory list
+   ```
+
+### Default Space Behavior
+
+When no space is specified, all operations use the `default` space. This ensures backward compatibility with existing single-tenant deployments.
+
+For production multi-tenant deployments, see the [Memory Space Migration Guide](../operations/memory-space-migration.md).
+
 ## Pattern Completion (Beta)
 
 Pattern completion reconstructs missing memory details using hippocampal CA3 attractor dynamics:

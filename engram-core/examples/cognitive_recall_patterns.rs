@@ -66,72 +66,89 @@ fn main() {
 
     // 3. Demonstrate semantic priming (doctor → nurse).
     println!("-- Semantic Priming (doctor → nurse) --");
-    let semantic_recall = build_recall(
-        &seeder,
-        &spreading_engine,
-        RecallMode::Spreading,
-        Duration::from_millis(12),
-    );
-    let doctor_cue = Cue::embedding(
-        "doctor_cue".to_string(),
-        uniform_embedding(0.90),
-        Confidence::from_raw(0.92),
-    );
-    let semantic_results = semantic_recall
-        .recall(&doctor_cue, &store)
-        .expect("semantic recall failed");
-    display_results("Primed results", &semantic_results);
+    {
+        let semantic_recall = build_recall(
+            &seeder,
+            &spreading_engine,
+            RecallMode::Spreading,
+            Duration::from_millis(12),
+        );
+        let doctor_cue = Cue::embedding(
+            "doctor_cue".to_string(),
+            uniform_embedding(0.90),
+            Confidence::from_raw(0.92),
+        );
+        let semantic_results = semantic_recall
+            .recall(&doctor_cue, &store)
+            .expect("semantic recall failed");
+        display_results("Primed results", &semantic_results);
+    }
 
     // 4. Episodic reconstruction from partial cues.
     println!("\n-- Episodic Reconstruction (clinic follow-up) --");
-    let episodic_recall = build_recall(
-        &seeder,
-        &spreading_engine,
-        RecallMode::Hybrid,
-        Duration::from_millis(15),
-    );
-    let clinic_cue = Cue::embedding(
-        "clinic_fragment".to_string(),
-        uniform_embedding(0.76),
-        Confidence::from_raw(0.8),
-    );
-    let episodic_results = episodic_recall
-        .recall(&clinic_cue, &store)
-        .expect("episodic recall failed");
-    display_results("Reconstructed timeline", &episodic_results);
+    {
+        let episodic_recall = build_recall(
+            &seeder,
+            &spreading_engine,
+            RecallMode::Hybrid,
+            Duration::from_millis(15),
+        );
+        let clinic_cue = Cue::embedding(
+            "clinic_fragment".to_string(),
+            uniform_embedding(0.76),
+            Confidence::from_raw(0.8),
+        );
+        let episodic_results = episodic_recall
+            .recall(&clinic_cue, &store)
+            .expect("episodic recall failed");
+        display_results("Reconstructed timeline", &episodic_results);
+    }
 
     // 5. Confidence-guided exploration at a relaxed threshold.
     println!("\n-- Confidence-Guided Exploration --");
-    let mut exploratory_config = RecallConfig {
-        recall_mode: RecallMode::Spreading,
-        min_confidence: 0.25,
-        max_results: 8,
-        time_budget: Duration::from_millis(18),
-        ..RecallConfig::default()
-    };
-    exploratory_config.enable_recency_boost = false;
+    {
+        let mut exploratory_config = RecallConfig {
+            recall_mode: RecallMode::Spreading,
+            min_confidence: 0.25,
+            max_results: 8,
+            time_budget: Duration::from_millis(18),
+            ..RecallConfig::default()
+        };
+        exploratory_config.enable_recency_boost = false;
 
-    let exploratory_recall =
-        build_recall_with_config(&seeder, &spreading_engine, exploratory_config);
+        let exploratory_recall =
+            build_recall_with_config(&seeder, &spreading_engine, exploratory_config);
 
-    let exploration_cue = Cue::embedding(
-        "confidence_probe".to_string(),
-        uniform_embedding(0.72),
-        Confidence::from_raw(0.72),
-    );
+        let exploration_cue = Cue::embedding(
+            "confidence_probe".to_string(),
+            uniform_embedding(0.72),
+            Confidence::from_raw(0.72),
+        );
 
-    let exploration_results = exploratory_recall
-        .recall(&exploration_cue, &store)
-        .expect("exploratory recall failed");
+        let exploration_results = exploratory_recall
+            .recall(&exploration_cue, &store)
+            .expect("exploratory recall failed");
 
-    // Sort by confidence to emphasise ranking rationale.
-    let mut sorted = exploration_results;
-    sorted.sort_by(|a, b| b.confidence.raw().total_cmp(&a.confidence.raw()));
-    display_results("Confidence-ranked", &sorted);
+        // Sort by confidence to emphasise ranking rationale.
+        let mut sorted = exploration_results;
+        sorted.sort_by(|a, b| b.confidence.raw().total_cmp(&a.confidence.raw()));
+        display_results("Confidence-ranked", &sorted);
+    }
 
     println!(
         "\nTip: enable trace_activation_flow and run \"cargo run -p engram-cli --example spreading_visualizer\" \n     to convert deterministic traces into GraphViz diagrams."
     );
+
+    // Clean shutdown of the spreading engine
+    // Try to unwrap the Arc and shutdown cleanly
+    match Arc::try_unwrap(spreading_engine) {
+        Ok(engine) => {
+            engine.shutdown().expect("failed to shutdown spreading engine");
+        }
+        Err(_) => {
+            eprintln!("Warning: Could not shutdown spreading engine (still has active references)");
+        }
+    }
 }
 
 #[cfg(feature = "hnsw_index")]

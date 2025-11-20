@@ -19,6 +19,14 @@ use engram_core::{
         CompletedEpisode, CompletionConfig, CompletionError, HippocampalCompletion, MemorySource,
         PartialEpisode, PatternCompleter,
     },
+    metrics::{
+        completion_metrics::{
+            CA3_CONVERGENCE_ITERATIONS, COMPLETION_CONVERGENCE_FAILURES_TOTAL,
+            COMPLETION_DURATION_SECONDS, COMPLETION_INSUFFICIENT_EVIDENCE_TOTAL,
+            COMPLETION_OPERATIONS_TOTAL, CompletionTimer,
+        },
+        with_space,
+    },
 };
 
 // ================================================================================================
@@ -228,12 +236,18 @@ pub async fn complete_handler(
     headers: HeaderMap,
     Json(req): Json<CompleteRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
+    // Start metrics timer
+    let mut timer = CompletionTimer::new();
+
     // Extract memory space from header or request body
     let space_id = extract_memory_space(
         &headers,
         req.memory_space_id.as_deref(),
         &state.default_space,
     )?;
+
+    // Prepare labels for metrics
+    let labels = with_space(&space_id);
 
     // Get space-specific store handle from registry
     let handle = state.registry.create_or_get(&space_id).await.map_err(|e| {
@@ -254,10 +268,88 @@ pub async fn complete_handler(
     // Create completion engine
     let completion = HippocampalCompletion::new(config);
 
-    // Perform pattern completion
-    let result = completion
-        .complete(&partial)
-        .map_err(|e| map_completion_error(e, &req.partial_episode))?;
+    // Perform pattern completion with error tracking
+    let result = match completion.complete(&partial) {
+        Ok(completed) => {
+            // Record success metrics
+            let success_labels = [
+                ("memory_space", space_id.as_str().to_string()),
+                ("result", "success".to_string()),
+            ];
+            state.metrics.increment_counter_with_labels(
+                COMPLETION_OPERATIONS_TOTAL,
+                1,
+                &success_labels,
+            );
+
+            Ok(completed)
+        }
+        Err(e) => {
+            // Record error-specific metrics
+            match &e {
+                CompletionError::InsufficientPattern => {
+                    state.metrics.increment_counter_with_labels(
+                        COMPLETION_INSUFFICIENT_EVIDENCE_TOTAL,
+                        1,
+                        &labels,
+                    );
+                    let error_labels = [
+                        ("memory_space", space_id.as_str().to_string()),
+                        ("result", "insufficient_evidence".to_string()),
+                    ];
+                    state.metrics.increment_counter_with_labels(
+                        COMPLETION_OPERATIONS_TOTAL,
+                        1,
+                        &error_labels,
+                    );
+                }
+                CompletionError::ConvergenceFailed(iterations) => {
+                    state.metrics.increment_counter_with_labels(
+                        COMPLETION_CONVERGENCE_FAILURES_TOTAL,
+                        1,
+                        &labels,
+                    );
+                    let error_labels = [
+                        ("memory_space", space_id.as_str().to_string()),
+                        ("result", "convergence_failed".to_string()),
+                    ];
+                    state.metrics.increment_counter_with_labels(
+                        COMPLETION_OPERATIONS_TOTAL,
+                        1,
+                        &error_labels,
+                    );
+
+                    // Record iterations histogram even on failure
+                    state.metrics.observe_histogram_with_labels(
+                        CA3_CONVERGENCE_ITERATIONS,
+                        *iterations as f64,
+                        &labels,
+                    );
+                }
+                _ => {
+                    let error_labels = [
+                        ("memory_space", space_id.as_str().to_string()),
+                        ("result", "error".to_string()),
+                    ];
+                    state.metrics.increment_counter_with_labels(
+                        COMPLETION_OPERATIONS_TOTAL,
+                        1,
+                        &error_labels,
+                    );
+                }
+            }
+
+            Err(map_completion_error(e, &req.partial_episode))
+        }
+    }?;
+
+    // Record completion latency
+    let total_duration = timer.finalize();
+    state.metrics.observe_histogram_with_labels(
+        COMPLETION_DURATION_SECONDS,
+        total_duration.as_secs_f64(),
+        &labels,
+    );
 
     // Convert to response format
     let response = convert_to_response(&result);

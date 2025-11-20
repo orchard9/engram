@@ -751,7 +751,7 @@ async fn start_server(
 
     // Start gRPC server in background task
     let grpc_service = MemoryService::new(
-        grpc_memory_store,
+        &grpc_memory_store,
         grpc_metrics,
         Arc::clone(&registry),
         default_space_id.clone(),
