@@ -67,6 +67,7 @@ pub fn pearson_correlation(x: &[f32], y: &[f32]) -> f32 {
 }
 
 /// Linear regression slope (beta) for y = alpha + beta * x
+#[allow(clippy::similar_names)] // Mathematical notation: x, y, xy, x2 are standard
 pub fn linear_regression_slope(x: &[f32], y: &[f32]) -> f32 {
     if x.len() != y.len() || x.len() < 2 {
         return 0.0;

@@ -143,7 +143,9 @@ fn main() {
     // Try to unwrap the Arc and shutdown cleanly
     match Arc::try_unwrap(spreading_engine) {
         Ok(engine) => {
-            engine.shutdown().expect("failed to shutdown spreading engine");
+            engine
+                .shutdown()
+                .expect("failed to shutdown spreading engine");
         }
         Err(_) => {
             eprintln!("Warning: Could not shutdown spreading engine (still has active references)");
