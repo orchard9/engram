@@ -186,6 +186,136 @@ engram_spreading_latency_hot_seconds{quantile="0.9"}
 **Expected Range:** Tracks workload characteristics, no fixed range
 **Alert:** None (informational for tuning)
 
+### Dual Memory Architecture Metrics
+
+These metrics track the health and performance of the episodic-semantic dual-memory system, providing cognitive health visibility for concept formation, binding dynamics, and recall operations.
+
+#### engram_concepts_formed_total
+
+**Type:** Counter
+**Description:** Total concepts formed through episodic clustering
+**Expected Range:** Increases during consolidation runs
+**Alert:** None (informational)
+
+#### engram_concept_avg_coherence
+
+**Type:** Gauge (0.0-1.0)
+**Description:** Average cluster coherence of formed concepts
+**Expected Range:** >0.7 is healthy, <0.5 indicates low-quality concepts
+**Alert:** ConceptCoherenceLow if <0.5 for 10m
+
+Example query:
+```promql
+# Track concept formation quality over time
+engram_concept_avg_coherence
+```
+
+#### engram_concept_avg_member_count
+
+**Type:** Gauge
+**Description:** Average number of episodes per concept
+**Expected Range:** 3-20 episodes is typical (varies by workload)
+**Alert:** None (informational for capacity planning)
+
+#### engram_concept_formation_duration_ms
+
+**Type:** Gauge
+**Description:** Time taken for most recent concept formation cycle
+**Expected Range:** <500ms for typical workloads
+**Alert:** None (monitored for performance tuning)
+
+#### engram_bindings_created_total
+
+**Type:** Counter
+**Description:** Total concept-episode bindings created
+**Expected Range:** Increases during consolidation
+**Alert:** None
+
+#### engram_bindings_strengthened_total
+
+**Type:** Counter
+**Description:** Total bindings strengthened through repeated activation
+**Expected Range:** Increases with recall operations
+**Alert:** None
+
+#### engram_bindings_weakened_total
+
+**Type:** Counter
+**Description:** Total bindings weakened through decay
+**Expected Range:** Increases over time as memories age
+**Alert:** None
+
+#### engram_bindings_pruned_total
+
+**Type:** Counter
+**Description:** Total bindings garbage collected (strength below threshold)
+**Expected Range:** Periodic increases during GC cycles
+**Alert:** BindingPruneRate if pruning > creation for 15m
+
+#### engram_binding_avg_strength
+
+**Type:** Gauge (0.0-1.0)
+**Description:** Exponential moving average of binding strengths
+**Expected Range:** 0.5-0.8 is typical for healthy memory graph
+**Alert:** None (informational)
+
+#### engram_episodic_recall_latency_ms
+
+**Type:** Gauge
+**Description:** Most recent episodic pathway (System 1) recall latency
+**Expected Range:** <100ms for cached memories
+**Alert:** None (tracked via RecallLatencyHigh aggregate)
+
+#### engram_semantic_recall_latency_ms
+
+**Type:** Gauge
+**Description:** Most recent semantic pathway (System 2) recall latency
+**Expected Range:** 100-500ms for concept-mediated retrieval
+**Alert:** None (tracked via RecallLatencyHigh aggregate)
+
+#### engram_blended_recall_latency_ms
+
+**Type:** Gauge
+**Description:** Most recent blended recall (System 1 + System 2) latency
+**Expected Range:** <200ms combined target
+**Alert:** RecallLatencyHigh if >200ms for 5m
+
+Example query:
+```promql
+# Compare recall pathway latencies
+{__name__=~"engram_(episodic|semantic|blended)_recall_latency_ms"}
+```
+
+#### engram_recall_accuracy
+
+**Type:** Gauge (0.0-1.0)
+**Description:** Average confidence of recall results (confidence calibration)
+**Expected Range:** >0.7 is healthy, <0.6 indicates quality issues
+**Alert:** RecallAccuracyLow if <0.6 for 10m
+
+#### engram_recall_precision
+
+**Type:** Gauge (0.0-1.0)
+**Description:** Ratio of convergent retrievals (both pathways agree) to total
+**Expected Range:** >0.6 indicates good pathway convergence
+**Alert:** None (informational for recall quality monitoring)
+
+Example dashboard queries:
+```promql
+# Concept formation rate over time
+rate(engram_concepts_formed_total[5m])
+
+# Binding operation breakdown (stacked area chart)
+rate(engram_bindings_created_total[5m])
+rate(engram_bindings_strengthened_total[5m])
+rate(engram_bindings_weakened_total[5m])
+rate(engram_bindings_pruned_total[5m])
+
+# Recall quality combined view
+engram_recall_accuracy
+engram_recall_precision
+```
+
 ## Cluster Metrics
 
 When cluster mode is enabled (`cluster.enabled = true`), additional metrics track distributed system health.

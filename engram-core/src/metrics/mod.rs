@@ -24,6 +24,9 @@ pub mod streaming;
 #[cfg(feature = "monitoring")]
 pub mod numa_aware;
 
+#[cfg(feature = "dual_memory_types")]
+pub mod dual_memory;
+
 pub use cluster::{ClusterMetrics, PartitionStatus};
 pub use cognitive::{CognitiveInsight, CognitiveMetrics, ConsolidationState};
 pub use cognitive_patterns::{
@@ -32,6 +35,11 @@ pub use cognitive_patterns::{
 pub use completion_metrics::{
     CalibrationMonitor, CompletionMetricsRecorder, CompletionResourceMonitor, CompletionTimer,
     ComponentLatencies, ResourceSnapshot,
+};
+#[cfg(feature = "dual_memory_types")]
+pub use dual_memory::{
+    BindingOperationType, BindingStats, ConceptFormationStats, DualMemoryMetric, DualMemoryMetrics,
+    FanEffectStats, RecallPathway, RecallStats,
 };
 pub use hardware::{CacheLevel, HardwareMetrics, SimdOperation};
 #[cfg(not(test))]

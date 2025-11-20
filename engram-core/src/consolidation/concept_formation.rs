@@ -411,6 +411,9 @@ impl ConceptFormationEngine {
         episodes: &[Episode],
         sleep_stage: SleepStage,
     ) -> Vec<ProtoConcept> {
+        #[cfg(feature = "dual_memory_types")]
+        let start_time = std::time::Instant::now();
+
         // Increment cycle counter
         let current_cycle = self.cycle_count.fetch_add(1, Ordering::SeqCst);
 
@@ -449,6 +452,42 @@ impl ConceptFormationEngine {
 
         // Phase 4: Garbage collect old proto-concepts
         self.garbage_collect_proto_concepts(current_cycle);
+
+        // Phase 5: Record metrics if dual_memory_types feature enabled
+        #[cfg(feature = "dual_memory_types")]
+        {
+            let duration_ms = start_time
+                .elapsed()
+                .as_millis()
+                .try_into()
+                .unwrap_or(u64::MAX);
+
+            // Calculate average coherence and member count
+            let concept_count = new_proto_concepts.len() as u64;
+            if concept_count > 0 {
+                let total_coherence: f32 =
+                    new_proto_concepts.iter().map(|p| p.coherence_score).sum();
+                let avg_coherence = total_coherence / concept_count as f32;
+
+                let total_members: usize = new_proto_concepts
+                    .iter()
+                    .map(|p| p.episode_indices.len())
+                    .sum();
+                let avg_member_count = total_members as f32 / concept_count as f32;
+
+                // Record concept formation metrics
+                if let Some(metrics) = crate::metrics::metrics() {
+                    metrics.increment_counter("engram_concepts_formed_total", concept_count);
+                    metrics.record_gauge("engram_concept_avg_coherence", f64::from(avg_coherence));
+                    metrics.record_gauge(
+                        "engram_concept_avg_member_count",
+                        f64::from(avg_member_count),
+                    );
+                    metrics
+                        .record_gauge("engram_concept_formation_duration_ms", duration_ms as f64);
+                }
+            }
+        }
 
         ready_for_promotion
     }

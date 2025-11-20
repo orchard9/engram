@@ -263,9 +263,9 @@ impl BlendedRecallMetrics {
     /// Record a blended recall with result metadata
     fn record_blended_recall(
         &self,
-        _elapsed: Duration,
-        _episodic_latency: Duration,
-        _semantic_latency: Option<Duration>,
+        #[cfg_attr(not(feature = "dual_memory_types"), allow(unused_variables))] elapsed: Duration,
+        #[cfg_attr(not(feature = "dual_memory_types"), allow(unused_variables))] episodic_latency: Duration,
+        #[cfg_attr(not(feature = "dual_memory_types"), allow(unused_variables))] semantic_latency: Option<Duration>,
         results: &[BlendedRankedMemory],
     ) {
         self.total_recalls
@@ -277,6 +277,35 @@ impl BlendedRecallMetrics {
             convergent_count as u64,
             std::sync::atomic::Ordering::Relaxed,
         );
+
+        // Record global metrics for dual-memory monitoring
+        #[cfg(feature = "dual_memory_types")]
+        if let Some(metrics) = crate::metrics::metrics() {
+            let elapsed_ms = elapsed.as_millis().try_into().unwrap_or(u64::MAX);
+            let episodic_ms = episodic_latency.as_millis().try_into().unwrap_or(u64::MAX);
+
+            metrics.record_gauge("engram_blended_recall_latency_ms", elapsed_ms as f64);
+            metrics.record_gauge("engram_episodic_recall_latency_ms", episodic_ms as f64);
+
+            if let Some(semantic_dur) = semantic_latency {
+                let semantic_ms = semantic_dur.as_millis().try_into().unwrap_or(u64::MAX);
+                metrics.record_gauge("engram_semantic_recall_latency_ms", semantic_ms as f64);
+            }
+
+            // Calculate recall quality metrics if results are non-empty
+            if !results.is_empty() {
+                let avg_confidence: f32 = results
+                    .iter()
+                    .map(|r| r.blended_confidence.raw())
+                    .sum::<f32>()
+                    / results.len() as f32;
+                metrics.record_gauge("engram_recall_accuracy", f64::from(avg_confidence));
+
+                // Precision = convergent / total
+                let precision = convergent_count as f32 / results.len() as f32;
+                metrics.record_gauge("engram_recall_precision", f64::from(precision));
+            }
+        }
     }
 }
 

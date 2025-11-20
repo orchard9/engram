@@ -265,3 +265,67 @@ groups:
           description: "Hit rate is high. Controller may be hitting configuration limits."
           runbook: "https://docs.engram.io/operations/adaptive-batching#frequent-guardrails"
           threshold_rationale: "0.1 hits/sec = controller constrained by guardrails. Info-level for capacity planning, not immediate action."
+
+  # ========== Dual Memory Architecture Health ==========
+  - name: engram_dual_memory_health
+    interval: 30s
+    rules:
+      - alert: ConceptCoherenceLow
+        expr: engram_concept_avg_coherence < 0.5
+        for: 10m
+        labels:
+          severity: warning
+          component: consolidation
+        annotations:
+          summary: "Concept formation quality degraded"
+          description: "Average concept coherence {{ $value }} below threshold for 10 minutes. Target: >0.65 for reliable pattern completion."
+          runbook: "https://docs.engram.io/operations/dual-memory#low-coherence"
+          threshold_rationale: "0.5 coherence = weak concept formation, below CA3 pattern completion threshold (0.65). 10m window filters transient quality drops during cold-start."
+
+      - alert: HighFanOutNodes
+        expr: count(engram_node_degree > 50) > 100
+        for: 5m
+        labels:
+          severity: info
+          component: activation
+        annotations:
+          summary: "Excessive high fan-out nodes detected"
+          description: "{{ $value }} nodes with fan-out >50 may impact spreading activation performance"
+          runbook: "https://docs.engram.io/operations/dual-memory#high-fan-out"
+          threshold_rationale: "Fan-out >50 triggers activation penalty. >100 such nodes = systematic issue. Info-level for capacity planning."
+
+      - alert: BindingPruneRate
+        expr: rate(engram_bindings_pruned_total[5m]) > rate(engram_bindings_created_total[5m])
+        for: 15m
+        labels:
+          severity: warning
+          component: memory_graph
+        annotations:
+          summary: "Binding pruning exceeds creation rate"
+          description: "Memory graph may be shrinking unexpectedly. Pruning: {{ $value }} ops/sec"
+          runbook: "https://docs.engram.io/operations/dual-memory#excessive-pruning"
+          threshold_rationale: "Pruning > creation = net binding loss. 15m for: allows GC cycles without false alarms."
+
+      - alert: RecallLatencyHigh
+        expr: engram_blended_recall_latency_ms > 200
+        for: 5m
+        labels:
+          severity: warning
+          component: recall
+        annotations:
+          summary: "Dual-memory recall latency exceeds SLO"
+          description: "Blended recall latency {{ $value }}ms > 200ms target (System 1+2 combined)"
+          runbook: "https://docs.engram.io/operations/dual-memory#high-recall-latency"
+          threshold_rationale: "200ms = episodic (100ms) + semantic (100ms) pathways. Sustained excess latency indicates performance degradation."
+
+      - alert: RecallAccuracyLow
+        expr: engram_recall_accuracy < 0.6
+        for: 10m
+        labels:
+          severity: warning
+          component: recall
+        annotations:
+          summary: "Recall accuracy below threshold"
+          description: "Average recall confidence {{ $value }} < 0.6 for 10 minutes"
+          runbook: "https://docs.engram.io/operations/dual-memory#low-accuracy"
+          threshold_rationale: "0.6 confidence = minimum acceptable recall quality. 10m window filters transient drops during pattern completion."

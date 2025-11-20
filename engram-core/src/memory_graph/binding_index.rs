@@ -241,6 +241,7 @@ impl BindingIndex {
     /// index.add_binding(binding);
     /// ```
     pub fn add_binding(&self, binding: ConceptBinding) {
+        let binding_strength = binding.get_strength();
         let binding = Arc::new(binding);
         let episode_id = binding.episode_id;
         let concept_id = binding.concept_id;
@@ -268,6 +269,13 @@ impl BindingIndex {
         }
 
         self.binding_count.fetch_add(1, Ordering::Relaxed);
+
+        // Record binding creation metrics
+        #[cfg(feature = "dual_memory_types")]
+        if let Some(metrics) = crate::metrics::metrics() {
+            metrics.increment_counter("engram_bindings_created_total", 1);
+            metrics.record_gauge("engram_binding_avg_strength", f64::from(binding_strength));
+        }
     }
 
     /// Get concepts for an episode (bottom-up access)
@@ -372,7 +380,23 @@ impl BindingIndex {
         if let Some(entry) = self.episode_to_concepts.get(episode_id)
             && let Some(binding) = entry.value().iter().find(|b| b.concept_id == *concept_id)
         {
-            return binding.update_strength(update_fn);
+            let old_strength = binding.get_strength();
+            let updated = binding.update_strength(update_fn);
+
+            #[cfg(feature = "dual_memory_types")]
+            if updated {
+                let new_strength = binding.get_strength();
+                if let Some(metrics) = crate::metrics::metrics() {
+                    if new_strength > old_strength {
+                        metrics.increment_counter("engram_bindings_strengthened_total", 1);
+                    } else if new_strength < old_strength {
+                        metrics.increment_counter("engram_bindings_weakened_total", 1);
+                    }
+                    metrics.record_gauge("engram_binding_avg_strength", f64::from(new_strength));
+                }
+            }
+
+            return updated;
         }
         false
     }
@@ -546,6 +570,15 @@ impl BindingIndex {
                 cache.decrement_fan_out_by(&concept_id, delta);
             }
         }
+
+        // Record binding pruning metrics
+        #[cfg(feature = "dual_memory_types")]
+        if removed > 0 {
+            if let Some(metrics) = crate::metrics::metrics() {
+                metrics.increment_counter("engram_bindings_pruned_total", removed as u64);
+            }
+        }
+
         removed
     }
 
