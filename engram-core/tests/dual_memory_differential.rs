@@ -10,8 +10,8 @@ mod support;
 use chrono::Utc;
 use engram_core::{Confidence, Cue, CueBuilder, MemoryStore};
 use support::dual_memory_fixtures::{
-    assert_overlap_threshold, calculate_overlap, generate_clusterable_episodes,
-    generate_test_episodes, ClusterConfig,
+    ClusterConfig, assert_overlap_threshold, calculate_overlap, generate_clusterable_episodes,
+    generate_test_episodes,
 };
 
 /// Test 1: Recall results equivalence
@@ -38,7 +38,11 @@ fn test_recall_results_equivalent() {
 
     // Query both engines
     let query_embedding = [0.5f32; 768];
-    let cue = Cue::embedding("differential_cue".to_string(), query_embedding, Confidence::MEDIUM);
+    let cue = Cue::embedding(
+        "differential_cue".to_string(),
+        query_embedding,
+        Confidence::MEDIUM,
+    );
 
     let results_single = store_single.recall(&cue);
     let results_dual = store_dual.recall(&cue);
@@ -49,7 +53,11 @@ fn test_recall_results_equivalent() {
         .iter()
         .map(|(e, _)| e.id.clone())
         .collect();
-    let ids_dual: Vec<String> = results_dual.results.iter().map(|(e, _)| e.id.clone()).collect();
+    let ids_dual: Vec<String> = results_dual
+        .results
+        .iter()
+        .map(|(e, _)| e.id.clone())
+        .collect();
 
     // Assert top-10 overlap >= 90%
     assert_overlap_threshold(
@@ -78,7 +86,7 @@ fn test_recall_results_equivalent() {
 /// due to concept generalization providing additional signal.
 #[test]
 fn test_dual_recall_confidence_not_worse() {
-    let episodes = generate_clusterable_episodes(ClusterConfig::default(), 123);
+    let episodes = generate_clusterable_episodes(&ClusterConfig::default(), 123);
 
     let store_single = MemoryStore::new(512);
     let store_dual = MemoryStore::new(512);
@@ -377,8 +385,8 @@ fn test_property_differential_equivalence() {
             );
         }
 
-        // Property 3: Recall returns results
-        let query_embedding = [rng.gen_range(-1.0..1.0); 768];
+        // Property 3: Recall returns results (use actual episode embedding as query)
+        let query_embedding = episodes[0].embedding;
         let cue = CueBuilder::new()
             .id(format!("property_cue_{}", iteration))
             .embedding_search(query_embedding, Confidence::LOW)
@@ -388,15 +396,15 @@ fn test_property_differential_equivalence() {
         let results_single = store_single.recall(&cue);
         let results_dual = store_dual.recall(&cue);
 
-        // Both should return some results
+        // Both should return results when querying with an actual episode embedding
         assert!(
-            !results_single.results.is_empty() || episode_count < 10,
-            "Iteration {}: Single-type should return results",
+            !results_single.results.is_empty(),
+            "Iteration {}: Single-type should return results when querying with actual episode",
             iteration
         );
         assert!(
-            !results_dual.results.is_empty() || episode_count < 10,
-            "Iteration {}: Dual-type should return results",
+            !results_dual.results.is_empty(),
+            "Iteration {}: Dual-type should return results when querying with actual episode",
             iteration
         );
     }
@@ -429,7 +437,11 @@ fn test_temporal_ordering_preserved() {
 
     // Query for recent episodes
     let query_embedding = episodes[90].embedding;
-    let cue = Cue::embedding("temporal_cue".to_string(), query_embedding, Confidence::MEDIUM);
+    let cue = Cue::embedding(
+        "temporal_cue".to_string(),
+        query_embedding,
+        Confidence::MEDIUM,
+    );
 
     let results_single = store_single.recall(&cue);
     let results_dual = store_dual.recall(&cue);
@@ -453,7 +465,10 @@ fn test_temporal_ordering_preserved() {
         .iter()
         .filter(|&&t| t >= recent_threshold)
         .count();
-    let recent_count_dual = times_dual.iter().filter(|&&t| t >= recent_threshold).count();
+    let recent_count_dual = times_dual
+        .iter()
+        .filter(|&&t| t >= recent_threshold)
+        .count();
 
     assert!(
         recent_count_single >= 5 || results_single.results.len() < 5,

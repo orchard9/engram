@@ -28,11 +28,7 @@ fn generate_legacy_memories(count: usize, seed: u64) -> Vec<Memory> {
 
         let confidence = Confidence::exact(rng.gen_range(0.6..0.95));
 
-        let memory = Memory::new(
-            format!("legacy_memory_{}", idx),
-            embedding,
-            confidence,
-        );
+        let memory = Memory::new(format!("legacy_memory_{idx}"), embedding, confidence);
 
         memories.push(memory);
     }
@@ -83,7 +79,11 @@ fn test_legacy_store_recall_still_works() {
 
     // Legacy client recalls memories
     let query_embedding = [0.5f32; 768];
-    let cue = Cue::embedding("legacy_cue".to_string(), query_embedding, Confidence::MEDIUM);
+    let cue = Cue::embedding(
+        "legacy_cue".to_string(),
+        query_embedding,
+        Confidence::MEDIUM,
+    );
 
     let results = store.recall(&cue);
 
@@ -144,12 +144,20 @@ fn test_legacy_and_modern_clients_coexist() {
     assert_eq!(total_count, 200, "Should have 200 total memories");
 
     // Legacy client queries
-    let legacy_cue = Cue::embedding("legacy_query".to_string(), [0.5f32; 768], Confidence::MEDIUM);
+    let legacy_cue = Cue::embedding(
+        "legacy_query".to_string(),
+        [0.5f32; 768],
+        Confidence::MEDIUM,
+    );
 
     let legacy_results = store.recall(&legacy_cue);
 
     // Modern client queries
-    let modern_cue = Cue::embedding("modern_query".to_string(), [0.6f32; 768], Confidence::MEDIUM);
+    let modern_cue = Cue::embedding(
+        "modern_query".to_string(),
+        [0.6f32; 768],
+        Confidence::MEDIUM,
+    );
 
     let modern_results = store.recall(&modern_cue);
 
@@ -204,13 +212,12 @@ fn test_legacy_retrieval_by_id() {
 
     // Legacy client retrieves by ID
     for i in 0..10 {
-        let memory_id = format!("legacy_memory_{}", i);
+        let memory_id = format!("legacy_memory_{i}");
         let retrieved = store.get_episode(&memory_id);
 
         assert!(
             retrieved.is_some(),
-            "Legacy client should retrieve {}",
-            memory_id
+            "Legacy client should retrieve {memory_id}"
         );
 
         let episode = retrieved.unwrap();
@@ -229,25 +236,21 @@ fn test_legacy_confidence_reasonable() {
     let store = MemoryStore::new(512);
 
     // Store memories with known confidence levels
-    let test_confidences = vec![
+    let test_confidences = [
         Confidence::exact(0.9),
         Confidence::exact(0.7),
         Confidence::exact(0.5),
     ];
 
     for (idx, confidence) in test_confidences.iter().enumerate() {
-        let memory = Memory::new(
-            format!("conf_test_{}", idx),
-            [0.5f32; 768],
-            *confidence,
-        );
+        let memory = Memory::new(format!("conf_test_{idx}"), [0.5f32; 768], *confidence);
 
         let episode = engram_core::Episode {
             id: memory.id.clone(),
             when: Utc::now(),
             where_location: None,
             who: None,
-            what: format!("Confidence test {}", idx),
+            what: format!("Confidence test {idx}"),
             embedding: memory.embedding,
             embedding_provenance: None,
             encoding_confidence: memory.confidence,
@@ -319,7 +322,11 @@ fn test_legacy_graceful_degradation() {
     }
 
     // Legacy client should still get results
-    let cue = Cue::embedding("degradation_cue".to_string(), [0.5f32; 768], Confidence::MEDIUM);
+    let cue = Cue::embedding(
+        "degradation_cue".to_string(),
+        [0.5f32; 768],
+        Confidence::MEDIUM,
+    );
 
     let results = store.recall(&cue);
 
@@ -341,9 +348,9 @@ fn test_legacy_graceful_degradation() {
 mod support {
     pub mod dual_memory_fixtures {
         pub fn generate_test_episodes(count: usize, seed: u64) -> Vec<engram_core::Episode> {
+            use chrono::Utc;
             use engram_core::{Confidence, Episode};
             use rand::{Rng, SeedableRng, rngs::StdRng};
-            use chrono::Utc;
 
             let mut rng = StdRng::seed_from_u64(seed);
             let mut episodes = Vec::with_capacity(count);
@@ -364,11 +371,11 @@ mod support {
                 let confidence = Confidence::exact(rng.gen_range(0.6..0.95));
 
                 let episode = Episode {
-                    id: format!("test_episode_{}", idx),
+                    id: format!("test_episode_{idx}"),
                     when: Utc::now(),
                     where_location: None,
                     who: None,
-                    what: format!("Test content {}", idx),
+                    what: format!("Test content {idx}"),
                     embedding,
                     embedding_provenance: None,
                     encoding_confidence: confidence,

@@ -4,7 +4,7 @@
 // and load scenarios. All fixtures use seeded RNGs for reproducibility.
 
 use chrono::{Duration, Utc};
-use engram_core::{Confidence, Episode, Memory, EMBEDDING_DIM};
+use engram_core::{Confidence, EMBEDDING_DIM, Episode, Memory};
 use rand::{Rng, SeedableRng, rngs::StdRng};
 
 /// Configuration for episode cluster generation
@@ -36,7 +36,7 @@ impl Default for ClusterConfig {
 /// Creates episodes with controlled similarity for testing concept formation.
 /// Uses cluster centroids with added noise to simulate natural episode variation.
 #[must_use]
-pub fn generate_clusterable_episodes(config: ClusterConfig, seed: u64) -> Vec<Episode> {
+pub fn generate_clusterable_episodes(config: &ClusterConfig, seed: u64) -> Vec<Episode> {
     let mut rng = StdRng::seed_from_u64(seed);
     let mut episodes = Vec::with_capacity(config.cluster_count * config.episodes_per_cluster);
 
@@ -47,14 +47,11 @@ pub fn generate_clusterable_episodes(config: ClusterConfig, seed: u64) -> Vec<Ep
 
     for (cluster_idx, centroid) in centroids.iter().enumerate() {
         for episode_idx in 0..config.episodes_per_cluster {
-            let episode_id = format!("cluster_{}_episode_{}", cluster_idx, episode_idx);
+            let episode_id = format!("cluster_{cluster_idx}_episode_{episode_idx}");
 
             // Add controlled noise around centroid
-            let embedding = add_controlled_noise(
-                centroid,
-                1.0 - config.intra_cluster_similarity,
-                &mut rng,
-            );
+            let embedding =
+                add_controlled_noise(centroid, 1.0 - config.intra_cluster_similarity, &mut rng);
 
             // Vary temporal properties within cluster
             let time_offset = Duration::minutes(rng.gen_range(0..120));
@@ -67,7 +64,7 @@ pub fn generate_clusterable_episodes(config: ClusterConfig, seed: u64) -> Vec<Ep
                 when,
                 where_location: None,
                 who: None,
-                what: format!("Episode from cluster {} (semantic group)", cluster_idx),
+                what: format!("Episode from cluster {cluster_idx} (semantic group)"),
                 embedding,
                 embedding_provenance: None,
                 encoding_confidence: confidence,
@@ -99,9 +96,9 @@ fn generate_cluster_centroids(count: usize, seed: u64) -> Vec<[f32; EMBEDDING_DI
         let block_start = (cluster_idx * EMBEDDING_DIM / count).min(EMBEDDING_DIM - 64);
         let block_end = (block_start + 128).min(EMBEDDING_DIM);
 
-        for i in block_start..block_end {
-            let phase = (i - block_start) as f32 * 0.1;
-            centroid[i] = (phase.sin() + rng.gen_range(-0.2..0.2)).clamp(-1.0, 1.0);
+        for (offset, value) in centroid[block_start..block_end].iter_mut().enumerate() {
+            let phase = offset as f32 * 0.1;
+            *value = (phase.sin() + rng.gen_range(-0.2..0.2)).clamp(-1.0, 1.0);
         }
 
         // Normalize to unit length
@@ -165,11 +162,11 @@ pub fn generate_test_episodes(count: usize, seed: u64) -> Vec<Episode> {
         let confidence = Confidence::exact(rng.gen_range(0.5..1.0));
 
         let episode = Episode {
-            id: format!("test_episode_{}", idx),
+            id: format!("test_episode_{idx}"),
             when,
             where_location: None,
             who: None,
-            what: format!("Test content for episode {}", idx),
+            what: format!("Test content for episode {idx}"),
             embedding,
             embedding_provenance: None,
             encoding_confidence: confidence,
@@ -236,11 +233,7 @@ pub fn generate_test_query_set(seed: u64) -> Vec<(String, [f32; EMBEDDING_DIM], 
 
 /// Generate episodes with temporal patterns for consolidation testing
 #[must_use]
-pub fn generate_temporal_episodes(
-    count: usize,
-    time_window_hours: i64,
-    seed: u64,
-) -> Vec<Episode> {
+pub fn generate_temporal_episodes(count: usize, time_window_hours: i64, seed: u64) -> Vec<Episode> {
     let mut rng = StdRng::seed_from_u64(seed);
     let mut episodes = Vec::with_capacity(count);
 
@@ -256,11 +249,11 @@ pub fn generate_temporal_episodes(
         let confidence = Confidence::exact(rng.gen_range(0.6..0.95));
 
         let episode = Episode {
-            id: format!("temporal_episode_{}", idx),
+            id: format!("temporal_episode_{idx}"),
             when,
             where_location: None,
             who: None,
-            what: format!("Temporal test content {}", idx),
+            what: format!("Temporal test content {idx}"),
             embedding,
             embedding_provenance: None,
             encoding_confidence: confidence,
@@ -290,11 +283,7 @@ pub fn generate_legacy_memories(count: usize, seed: u64) -> Vec<Memory> {
         let embedding = generate_random_embedding(seed + idx as u64);
         let confidence = Confidence::exact(0.8);
 
-        let memory = Memory::new(
-            format!("legacy_memory_{}", idx),
-            embedding,
-            confidence,
-        );
+        let memory = Memory::new(format!("legacy_memory_{idx}"), embedding, confidence);
 
         memories.push(memory);
     }

@@ -3,12 +3,9 @@
 //! These conversions support gradual migration from pure episodic to dual memory.
 //! Zero-copy semantics are used where possible via Arc and reference counting.
 
-use super::dual_types::DualMemoryNode;
+use super::dual_types::{DualMemoryNode, MemoryNodeType};
 use super::types::{Episode, Memory};
 use uuid::Uuid;
-
-#[cfg(test)]
-use super::dual_types::MemoryNodeType;
 
 impl From<Memory> for DualMemoryNode {
     /// Convert Memory to DualMemoryNode as an Episode.
@@ -58,11 +55,18 @@ impl From<DualMemoryNode> for Memory {
 impl DualMemoryNode {
     /// Convert back to Memory (for backwards compatibility).
     ///
-    /// Concept nodes are represented as Memory with centroid embedding.
+    /// For Episode nodes, the original episode_id is preserved.
+    /// Concept nodes use their UUID as the memory ID.
     /// This enables gradual rollout without breaking existing APIs.
     #[must_use]
     pub fn to_memory(&self) -> Memory {
-        let mut memory = Memory::new(self.id.to_string(), self.embedding, self.confidence);
+        // Preserve original episode ID for episodes, use UUID for concepts
+        let memory_id = match &self.node_type {
+            MemoryNodeType::Episode { episode_id, .. } => episode_id.clone(),
+            MemoryNodeType::Concept { .. } => self.id.to_string(),
+        };
+
+        let mut memory = Memory::new(memory_id, self.embedding, self.confidence);
 
         memory.set_activation(self.activation());
         memory.last_access = self.last_access;

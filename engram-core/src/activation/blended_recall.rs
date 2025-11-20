@@ -264,8 +264,10 @@ impl BlendedRecallMetrics {
     fn record_blended_recall(
         &self,
         #[cfg_attr(not(feature = "dual_memory_types"), allow(unused_variables))] elapsed: Duration,
-        #[cfg_attr(not(feature = "dual_memory_types"), allow(unused_variables))] episodic_latency: Duration,
-        #[cfg_attr(not(feature = "dual_memory_types"), allow(unused_variables))] semantic_latency: Option<Duration>,
+        #[cfg_attr(not(feature = "dual_memory_types"), allow(unused_variables))]
+        episodic_latency: Duration,
+        #[cfg_attr(not(feature = "dual_memory_types"), allow(unused_variables))]
+        semantic_latency: Option<Duration>,
         results: &[BlendedRankedMemory],
     ) {
         self.total_recalls

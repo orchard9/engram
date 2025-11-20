@@ -8,6 +8,7 @@ mod support;
 
 use chrono::Utc;
 use engram_core::{Confidence, Cue, CueBuilder, MemoryStore};
+use std::sync::Arc;
 use std::time::Duration;
 use support::dual_memory_fixtures::generate_test_episodes;
 
@@ -43,9 +44,7 @@ async fn test_concurrent_episode_storage() {
 
     // Wait for all threads to complete
     for handle in handles {
-        handle
-            .await
-            .expect("Thread should complete without panic");
+        handle.await.expect("Thread should complete without panic");
     }
 
     // Verify 8000 episodes stored
@@ -166,10 +165,7 @@ async fn test_mixed_read_write_workload() {
     }
 
     let final_count = store.count();
-    assert!(
-        final_count >= 1000,
-        "Should have at least initial episodes"
-    );
+    assert!(final_count >= 1000, "Should have at least initial episodes");
 
     println!("Mixed workload completed: final_count={}", final_count);
 }
@@ -268,7 +264,11 @@ async fn test_burst_traffic_handling() {
 
     // Phase 3: Verify system still responsive
     let query_embedding = [0.5f32; 768];
-    let cue = Cue::embedding("post_burst_cue".to_string(), query_embedding, Confidence::MEDIUM);
+    let cue = Cue::embedding(
+        "post_burst_cue".to_string(),
+        query_embedding,
+        Confidence::MEDIUM,
+    );
 
     let results = store.recall(&cue);
     assert!(
@@ -305,7 +305,11 @@ fn test_memory_pressure() {
 
     // System should still be responsive
     let query_embedding = [0.5f32; 768];
-    let cue = Cue::embedding("pressure_cue".to_string(), query_embedding, Confidence::MEDIUM);
+    let cue = Cue::embedding(
+        "pressure_cue".to_string(),
+        query_embedding,
+        Confidence::MEDIUM,
+    );
 
     let results = store.recall(&cue);
 
