@@ -8,6 +8,8 @@ Complete gRPC API reference for Engram's cognitive memory operations. This guide
 
 - [Getting Started](#getting-started)
 
+- [Authentication](#authentication)
+
 - [Service Overview](#service-overview)
 
 - [Core Memory Operations](#core-memory-operations)
@@ -78,6 +80,227 @@ Language-specific generation covered in each section below.
 Default: `localhost:50051`
 
 Production: Use TLS with proper certificates (see [Security Guide](/operations/security.md))
+
+## Authentication
+
+gRPC requests require API key authentication when the server has authentication enabled. This uses the same security model as the HTTP API.
+
+### Enabling Authentication
+
+Server-side configuration in `engram.toml`:
+
+```toml
+[security]
+auth_enabled = true
+auth_mode = "api_key"
+
+[security.api_keys]
+storage = "sqlite"
+storage_path = "/var/lib/engram/api_keys.db"
+```
+
+Start the server with gRPC listening:
+
+```bash
+engram start --grpc-port 50051
+# Server will require valid API keys for all requests
+```
+
+### Adding Credentials to Requests
+
+Include your API key in the gRPC metadata with the `authorization` header:
+
+**Format:**
+
+```
+authorization: Bearer engram_key_{id}_{secret}
+```
+
+**Python:**
+
+```python
+import grpc
+
+# Create channel
+channel = grpc.aio.insecure_channel('localhost:50051')
+client = engram_pb2_grpc.EngramServiceStub(channel)
+
+# Add metadata with API key
+metadata = [('authorization', 'Bearer engram_key_abc123_xyz789')]
+
+# Make authenticated request
+response = await client.Remember(request, metadata=metadata)
+```
+
+**Rust:**
+
+```rust
+use tonic::transport::Channel;
+use tonic::Request;
+use tonic::metadata::MetadataValue;
+
+let channel = Channel::from_static("http://localhost:50051").connect().await?;
+let mut client = EngramServiceClient::new(channel);
+
+// Add authorization metadata
+let mut request = Request::new(request);
+request.metadata_mut().insert(
+    "authorization",
+    MetadataValue::from_str("Bearer engram_key_abc123_xyz789")?
+);
+
+let response = client.remember(request).await?;
+```
+
+**Go:**
+
+```go
+import "google.golang.org/grpc/metadata"
+
+ctx := metadata.AppendToOutgoingContext(context.Background(),
+    "authorization", "Bearer engram_key_abc123_xyz789")
+
+response, err := client.Remember(ctx, request)
+```
+
+**TypeScript:**
+
+```typescript
+import { credentials, Metadata } from '@grpc/grpc-js';
+
+const metadata = new Metadata();
+metadata.add('authorization', 'Bearer engram_key_abc123_xyz789');
+
+const call = client.Remember(request, { metadata });
+call.on('data', (response) => {
+    console.log('Stored:', response.memory_id);
+});
+```
+
+**Java:**
+
+```java
+import io.grpc.Metadata;
+
+Metadata metadata = new Metadata();
+Metadata.Key<String> key = Metadata.Key.of("authorization", Metadata.ASCII_STRING_MARSHALLER);
+metadata.put(key, "Bearer engram_key_abc123_xyz789");
+
+// Use interceptor to attach metadata to all calls
+channel = ManagedChannelBuilder
+    .forAddress("localhost", 50051)
+    .usePlaintext()
+    .intercept(new ClientInterceptor() {
+        public <ReqT, RespT> ClientCall<ReqT, RespT> interceptCall(
+            MethodDescriptor<ReqT, RespT> method,
+            CallOptions callOptions,
+            Channel next) {
+            return new SimpleForwardingClientCall<ReqT, RespT>(
+                next.newCall(method, callOptions)) {
+                public void start(Listener<RespT> responseListener, Metadata headers) {
+                    headers.merge(metadata);
+                    super.start(responseListener, headers);
+                }
+            };
+        }
+    })
+    .build();
+```
+
+### Permission Model
+
+Each API key grants specific permissions and space access:
+
+**Memory Operations:**
+- `memory:read` - Read-only operations (Recall, Recognize, Reminisce)
+- `memory:write` - Write operations (Remember, Experience)
+
+**Space Access:**
+- Each key is restricted to specific memory spaces
+- Requesting a space outside the key's allowed spaces returns `PERMISSION_DENIED`
+
+**Example: Key with Limited Permissions**
+
+```bash
+# Create key with only read access
+engram api-key generate \
+  --name "analytics-reader" \
+  --spaces "analytics_space" \
+  --permissions "memory:read"
+
+# This key can call:
+# - Recall, Recognize, Reminisce
+
+# This key cannot call:
+# - Remember, Experience (returns PERMISSION_DENIED)
+```
+
+### Error Handling
+
+Authentication failures return specific gRPC status codes:
+
+| Status Code | Meaning | Resolution |
+|-------------|---------|-----------|
+| `UNAUTHENTICATED` (16) | Missing or invalid credentials | Add `authorization` metadata with valid API key |
+| `UNAUTHENTICATED` (16) | API key format invalid | Verify key format: `engram_key_{id}_{secret}` |
+| `UNAUTHENTICATED` (16) | API key not found | Check key ID exists, not revoked |
+| `UNAUTHENTICATED` (16) | API key expired | Rotate key: `engram api-key rotate <key-id>` |
+| `PERMISSION_DENIED` (7) | Insufficient permissions | Grant required permission to key |
+| `PERMISSION_DENIED` (7) | Space access denied | Add space to key's allowed spaces |
+
+**Python Error Handling:**
+
+```python
+import grpc
+
+try:
+    response = await client.Remember(request, metadata=metadata)
+except grpc.aio.AioRpcError as e:
+    if e.code() == grpc.StatusCode.UNAUTHENTICATED:
+        print(f"Authentication failed: {e.details()}")
+        # Verify API key format and validity
+    elif e.code() == grpc.StatusCode.PERMISSION_DENIED:
+        print(f"Permission denied: {e.details()}")
+        # Check key permissions and space access
+    else:
+        raise
+```
+
+### When Authentication is Disabled
+
+If the server has `auth_enabled = false`, the `authorization` header is optional. This is useful for:
+- Development environments
+- Internal services with network isolation
+- Legacy client support
+
+### Best Practices
+
+1. **Store keys securely** - Use environment variables or secrets manager, never hardcode
+2. **Use short-lived keys** - Set reasonable expiration dates
+3. **Rotate regularly** - Replace old keys with rotated versions
+4. **Monitor usage** - Check audit logs for unusual patterns
+5. **Principle of least privilege** - Grant only required permissions and spaces
+6. **Use TLS in production** - Always use `grpc.secure_channel()` with proper certificates
+
+### Generating API Keys
+
+Create keys for gRPC clients:
+
+```bash
+# Generate key for production gRPC client
+engram api-key generate \
+  --name "grpc-producer" \
+  --spaces "production,analytics" \
+  --permissions "memory:read,memory:write" \
+  --expires-in "90d"
+
+# Output
+# API Key ID: engram_key_abc123def456
+# Secret: xyz789uvw012qrs345
+# Full Key: engram_key_abc123def456_xyz789uvw012qrs345
+#
+# Store this securely. It will not be shown again.
+```
 
 ## Service Overview
 

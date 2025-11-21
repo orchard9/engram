@@ -730,6 +730,12 @@ async fn start_server(
     #[cfg(not(feature = "security"))]
     info!("Security feature not enabled, authentication unavailable");
 
+    // Clone Arc references for gRPC server (before moving into api_state)
+    #[cfg(feature = "security")]
+    let grpc_auth_config = Arc::clone(&auth_config);
+    #[cfg(feature = "security")]
+    let grpc_auth_validator = auth_validator.clone();
+
     // Create API state
     let api_state = ApiState::new(
         Arc::clone(&memory_store),
@@ -803,7 +809,7 @@ async fn start_server(
     // Write PID file for server management
     write_pid_file(actual_port)?;
 
-    // Start gRPC server in background task
+    // Start gRPC server in background task with optional auth interceptor
     let grpc_service = MemoryService::new(
         &grpc_memory_store,
         grpc_metrics,
@@ -812,6 +818,61 @@ async fn start_server(
         api_cluster_state.clone(),
         api_router.clone(),
     );
+
+    #[cfg(feature = "security")]
+    let grpc_handle = {
+        use engram_cli::auth::AuthInterceptor;
+        use engram_proto::engram_service_server::EngramServiceServer;
+
+        tokio::spawn(async move {
+            let addr = format!("0.0.0.0:{actual_grpc_port}")
+                .parse()
+                .expect("valid gRPC address");
+
+            println!("Engram gRPC service listening on {addr}");
+            println!("   Ready for memory operations (Remember, Recall, Recognize)");
+
+            // Create interceptor if auth enabled
+            let interceptor = match grpc_auth_config.auth_mode {
+                engram_cli::config::AuthMode::ApiKey => grpc_auth_validator.as_ref().map_or_else(
+                    || {
+                        warn!("API key auth mode enabled but validator unavailable - gRPC auth disabled");
+                        None
+                    },
+                    |validator| {
+                        Some(AuthInterceptor::new(
+                            Arc::clone(validator),
+                            grpc_auth_config.auth_mode.clone(),
+                        ))
+                    },
+                ),
+                engram_cli::config::AuthMode::None => None,
+            };
+
+            let result = if let Some(interceptor) = interceptor {
+                info!(" gRPC authentication enabled (API key validation)");
+                tonic::transport::Server::builder()
+                    .add_service(EngramServiceServer::with_interceptor(
+                        grpc_service,
+                        interceptor,
+                    ))
+                    .serve(addr)
+                    .await
+            } else {
+                info!(" gRPC authentication disabled");
+                tonic::transport::Server::builder()
+                    .add_service(EngramServiceServer::new(grpc_service))
+                    .serve(addr)
+                    .await
+            };
+
+            if let Err(e) = result {
+                error!(" gRPC server error: {}", e);
+            }
+        })
+    };
+
+    #[cfg(not(feature = "security"))]
     let grpc_handle = tokio::spawn(async move {
         if let Err(e) = grpc_service.serve(actual_grpc_port).await {
             error!(" gRPC server error: {}", e);

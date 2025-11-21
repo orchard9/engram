@@ -161,6 +161,44 @@ impl EngramService for MemoryService {
         request: Request<RememberRequest>,
     ) -> Result<Response<RememberResponse>, Status> {
         let metadata = request.metadata().clone();
+
+        // Extract and validate auth context if present (only when interceptor is active)
+        #[cfg(feature = "security")]
+        if let Some(auth_context) = request.extensions().get::<engram_core::auth::AuthContext>() {
+            // Perform auth checks only when auth context is present
+            // This allows tests and servers without interceptors to work
+            let space_id_for_check = {
+                let req_ref = &request;
+                if let Some(space_str) = req_ref.get_ref().memory_space_id.strip_prefix("spaces/") {
+                    MemorySpaceId::try_from(space_str)
+                        .map_err(|e| Status::invalid_argument(format!("Invalid space ID: {e}")))?
+                } else if !req_ref.get_ref().memory_space_id.is_empty() {
+                    MemorySpaceId::try_from(req_ref.get_ref().memory_space_id.as_str())
+                        .map_err(|e| Status::invalid_argument(format!("Invalid space ID: {e}")))?
+                } else {
+                    self.default_space.clone()
+                }
+            };
+
+            // Check space access
+            if !auth_context.allowed_spaces.contains(&space_id_for_check) {
+                return Err(Status::permission_denied(format!(
+                    "Access denied to memory space: {}",
+                    space_id_for_check
+                )));
+            }
+
+            // Check write permission
+            if !auth_context
+                .permissions
+                .contains(&engram_core::auth::Permission::MemoryWrite)
+            {
+                return Err(Status::permission_denied(
+                    "Missing required permission: MemoryWrite".to_string(),
+                ));
+            }
+        }
+
         let req = request.into_inner();
 
         // Extract memory space from request (explicit field or fallback to default)
@@ -292,6 +330,43 @@ impl EngramService for MemoryService {
         request: Request<RecallRequest>,
     ) -> Result<Response<RecallResponse>, Status> {
         let metadata = request.metadata().clone();
+
+        // Extract and validate auth context if present (only when interceptor is active)
+        #[cfg(feature = "security")]
+        if let Some(auth_context) = request.extensions().get::<engram_core::auth::AuthContext>() {
+            // Perform auth checks only when auth context is present
+            let space_id_for_check = {
+                let req_ref = &request;
+                if let Some(space_str) = req_ref.get_ref().memory_space_id.strip_prefix("spaces/") {
+                    MemorySpaceId::try_from(space_str)
+                        .map_err(|e| Status::invalid_argument(format!("Invalid space ID: {e}")))?
+                } else if !req_ref.get_ref().memory_space_id.is_empty() {
+                    MemorySpaceId::try_from(req_ref.get_ref().memory_space_id.as_str())
+                        .map_err(|e| Status::invalid_argument(format!("Invalid space ID: {e}")))?
+                } else {
+                    self.default_space.clone()
+                }
+            };
+
+            // Check space access
+            if !auth_context.allowed_spaces.contains(&space_id_for_check) {
+                return Err(Status::permission_denied(format!(
+                    "Access denied to memory space: {}",
+                    space_id_for_check
+                )));
+            }
+
+            // Check read permission
+            if !auth_context
+                .permissions
+                .contains(&engram_core::auth::Permission::MemoryRead)
+            {
+                return Err(Status::permission_denied(
+                    "Missing required permission: MemoryRead".to_string(),
+                ));
+            }
+        }
+
         let req = request.into_inner();
 
         // Extract memory space from request (explicit field or fallback to default)

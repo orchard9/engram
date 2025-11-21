@@ -249,6 +249,176 @@ Authentication is automatically bypassed when:
 
 This ensures backward compatibility with existing deployments.
 
+### gRPC Authentication Interceptor
+
+The gRPC server uses Tonic interceptor middleware to enforce authentication for memory operations.
+
+#### Interceptor Architecture
+
+The `AuthInterceptor` validates credentials for all gRPC requests before they reach service methods:
+
+1. **Request arrives** at gRPC service
+2. **Interceptor executes** before service method:
+   - Checks if authentication is enabled (skips if `AuthMode::None`)
+   - Extracts `authorization` header from gRPC metadata
+   - Validates API key format and existence using `ApiKeyValidator`
+   - Bridges async validator with sync interceptor trait using `tokio::task::block_in_place`
+   - Returns `UNAUTHENTICATED` status if validation fails
+   - Inserts `AuthContext` into request extensions for downstream handlers
+3. **Service method executes** with validated auth context:
+   - Service methods check `AuthContext` from request extensions
+   - Verify space access permissions from context
+   - Verify operation permissions (read/write) from context
+   - Returns `PERMISSION_DENIED` status if access is denied
+
+#### Configuration
+
+gRPC authentication uses the same `SecurityConfig` as HTTP:
+
+```toml
+[security]
+auth_enabled = true
+auth_mode = "api_key"
+
+[security.api_keys]
+storage = "sqlite"
+storage_path = "/var/lib/engram/api_keys.db"
+```
+
+When enabled, the gRPC server conditionally applies the interceptor:
+
+```bash
+engram start --grpc-port 50051
+# With auth_enabled=true, gRPC service requires valid API key
+```
+
+#### Metadata Header Format
+
+Include API key in gRPC metadata using the `authorization` header:
+
+```
+authorization: Bearer engram_key_{id}_{secret}
+```
+
+This is identical to HTTP `Authorization` header format.
+
+#### Authentication in Service Methods
+
+Service methods validate auth context for sensitive operations:
+
+**Remember (Write Operation)**
+
+```python
+# Request with valid API key in metadata
+metadata = [('authorization', 'Bearer engram_key_abc123_xyz789')]
+response = client.Remember(request, metadata=metadata)
+
+# Missing authorization header
+# Error: UNAUTHENTICATED - "Missing authorization header"
+
+# Invalid API key
+# Error: UNAUTHENTICATED - "Invalid API key format or value"
+
+# Valid key but expired
+# Error: UNAUTHENTICATED - "API key has expired"
+
+# Valid key but lacks write permission
+# Error: PERMISSION_DENIED - "Missing required permission: MemoryWrite"
+
+# Valid key but no access to specified space
+# Error: PERMISSION_DENIED - "Access denied to memory space: {space_id}"
+```
+
+**Recall (Read Operation)**
+
+```go
+// Include API key in metadata
+ctx := metadata.AppendToOutgoingContext(context.Background(),
+    "authorization", "Bearer engram_key_abc123_xyz789")
+
+response, err := client.Recall(ctx, request)
+
+// Auth validation happens before recall logic executes
+// Invalid credentials return error before searching begins
+```
+
+#### Error Codes
+
+gRPC returns specific status codes for authentication failures:
+
+| Status Code | gRPC Equivalent | Cause | Action |
+|-------------|-----------------|-------|--------|
+| UNAUTHENTICATED | 16 | Missing/invalid auth header | Verify API key format and include in metadata |
+| UNAUTHENTICATED | 16 | API key not found | Check key ID is correct and not revoked |
+| UNAUTHENTICATED | 16 | Key expired | Rotate key using `engram api-key rotate` |
+| PERMISSION_DENIED | 7 | Insufficient permissions | Grant required permission to API key |
+| PERMISSION_DENIED | 7 | Space access denied | Add space to API key's allowed spaces |
+
+#### Performance Characteristics
+
+- **Authentication overhead**: < 1ms (cached) or < 5ms (uncached)
+- **Async-to-sync bridge**: Uses `tokio::task::block_in_place` for efficient integration
+- **Zero-copy state sharing**: Validates once, shares via request extensions
+- **No additional latency** for subsequent authorization checks in service methods
+
+#### Comparison with HTTP Authentication
+
+gRPC and HTTP authentication use identical mechanisms:
+
+| Aspect | HTTP | gRPC |
+|--------|------|------|
+| API Key Format | `engram_key_{id}_{secret}` | `engram_key_{id}_{secret}` |
+| Header Name | `Authorization` | `authorization` |
+| Header Value | `Bearer engram_key_...` | `Bearer engram_key_...` |
+| Validator | `ApiKeyValidator` from core | Same `ApiKeyValidator` |
+| Space Access | `X-Memory-Space-Id` header | `memory_space_id` field in request |
+| Permission Check | Middleware + handlers | Interceptor + service methods |
+| Configuration | `engram.toml` `[security]` | Same configuration |
+| Error Handling | 401/403 HTTP status | UNAUTHENTICATED/PERMISSION_DENIED |
+
+#### Complete Example: Authenticated gRPC Call
+
+```python
+import grpc
+from engram.v1 import engram_pb2, engram_pb2_grpc
+
+# Setup connection with SSL/TLS (production)
+credentials = grpc.ssl_channel_credentials()
+channel = grpc.secure_channel('api.example.com:50051', credentials)
+
+# Add authentication metadata
+def add_auth_metadata(context, callback):
+    metadata = [('authorization', 'Bearer engram_key_abc123_xyz789')]
+    callback(metadata, None)
+
+channel = grpc.intercept_channel(channel, grpc.UnaryClientInterceptor(add_auth_metadata))
+
+client = engram_pb2_grpc.EngramServiceStub(channel)
+
+# Create and send request
+memory = engram_pb2.Memory(
+    content="Engram uses gRPC for high-performance memory operations",
+    embedding=[0.1] * 768,
+    confidence=engram_pb2.Confidence(value=0.95)
+)
+
+request = engram_pb2.RememberRequest(
+    memory_space_id="production_tenant",
+    memory=memory
+)
+
+try:
+    response = client.Remember(request)
+    print(f"Stored: {response.memory_id}")
+except grpc.RpcError as e:
+    if e.code() == grpc.StatusCode.UNAUTHENTICATED:
+        print(f"Auth failed: {e.details()}")
+    elif e.code() == grpc.StatusCode.PERMISSION_DENIED:
+        print(f"Permission denied: {e.details()}")
+    else:
+        print(f"Error: {e.details()}")
+```
+
 ### JWT Token Authentication
 
 #### Configuration
