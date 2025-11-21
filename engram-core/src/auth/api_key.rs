@@ -205,7 +205,7 @@ impl ApiKeyValidator {
         };
 
         self.store
-            .create_key(api_key)
+            .create_key(&api_key)
             .await
             .map_err(|_| AuthError::Argon2("Failed to store key".to_string()))?;
 
@@ -271,7 +271,7 @@ pub trait ApiKeyStore: Send + Sync {
     async fn get_key(&self, key_id: &str) -> Result<ApiKey, String>;
 
     /// Create new API key
-    async fn create_key(&self, key: ApiKey) -> Result<(), String>;
+    async fn create_key(&self, key: &ApiKey) -> Result<(), String>;
 
     /// Update last used timestamp
     async fn update_last_used(&self, key_id: &str) -> Result<(), String>;

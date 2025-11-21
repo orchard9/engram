@@ -16,6 +16,12 @@ pub mod jwt;
 #[cfg(feature = "security")]
 pub mod authorization;
 
+#[cfg(feature = "security")]
+pub mod sqlite_store;
+
+#[cfg(feature = "security")]
+pub use sqlite_store::{ApiKeyInfo, SqliteApiKeyStore};
+
 use crate::MemorySpaceId;
 use thiserror::Error;
 
@@ -100,6 +106,7 @@ pub enum Principal {
 }
 
 /// Permission types
+#[cfg_attr(feature = "security", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Permission {
     /// Read memory operations
