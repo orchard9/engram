@@ -103,6 +103,11 @@ pub struct ApiState {
     pub router: Option<Arc<ClusterRouter>>,
     /// Optional confidence adjuster that accounts for partitions.
     pub partition_confidence: Option<Arc<PartitionAwareConfidence>>,
+    /// Security configuration for authentication and authorization
+    pub auth_config: Arc<crate::config::SecurityConfig>,
+    /// API key validator (None if auth disabled)
+    #[cfg(feature = "security")]
+    pub auth_validator: Option<Arc<engram_core::auth::api_key::ApiKeyValidator>>,
 }
 
 /// Auto-tuning response payload used by the REST API and OpenAPI schema.
@@ -238,6 +243,10 @@ impl ApiState {
         cluster: Option<Arc<ClusterState>>,
         router: Option<Arc<ClusterRouter>>,
         partition_confidence: Option<Arc<PartitionAwareConfidence>>,
+        auth_config: Arc<crate::config::SecurityConfig>,
+        #[cfg(feature = "security")] auth_validator: Option<
+            Arc<engram_core::auth::api_key::ApiKeyValidator>,
+        >,
     ) -> Self {
         let memory_service = Arc::new(MemoryService::new(
             &store,
@@ -265,6 +274,9 @@ impl ApiState {
             cluster,
             router,
             partition_confidence,
+            auth_config,
+            #[cfg(feature = "security")]
+            auth_validator,
         }
     }
 
@@ -3558,6 +3570,10 @@ pub enum ApiError {
     CompactionInProgress,
     /// Feature not enabled
     FeatureNotEnabled(String),
+    /// Unauthorized - missing or invalid authentication
+    Unauthorized(String),
+    /// Forbidden - authenticated but insufficient permissions
+    Forbidden(String),
 }
 
 impl ApiError {
@@ -3786,6 +3802,20 @@ impl IntoResponse for ApiError {
                 "FEATURE_NOT_ENABLED",
                 msg,
                 "This feature requires additional build flags. Consult the deployment documentation for details.".to_string(),
+                None,
+            ),
+            Self::Unauthorized(msg) => (
+                StatusCode::UNAUTHORIZED,
+                "UNAUTHORIZED",
+                msg,
+                "Authentication required. Provide a valid API key in the Authorization header.".to_string(),
+                None,
+            ),
+            Self::Forbidden(msg) => (
+                StatusCode::FORBIDDEN,
+                "FORBIDDEN",
+                msg,
+                "Authenticated but insufficient permissions. Request access to required resources or permissions.".to_string(),
                 None,
             ),
         };
@@ -4790,36 +4820,24 @@ fn create_causality_monitoring_stream(
 
 /// Create cognitive-friendly API router
 pub fn create_api_routes() -> Router<ApiState> {
+    use axum::middleware;
+
     let swagger_router = create_swagger_ui().with_state::<ApiState>(());
 
-    Router::new()
-        // Server lifecycle
-        .route("/shutdown", post(shutdown_server))
-        // Simple health endpoint for status checks
-        .route("/health", get(simple_health))
-        .route("/health/alive", get(alive_health))
-        .route("/health/spreading", get(spreading_health))
-        // Memory space registry operations
-        .route(
-            "/api/v1/spaces",
-            get(list_memory_spaces).post(create_memory_space),
-        )
-        // Memory operations with cognitive-friendly paths
+    // Protected routes that require authentication
+    let protected_routes = Router::new()
+        // Memory operations - require MemoryWrite/Read/Delete permissions
         .route("/api/v1/memories/remember", post(remember_memory))
         .route("/api/v1/memories/recall", get(recall_memories))
         .route("/api/v1/memories/recognize", post(recognize_pattern))
         .route("/api/v1/consolidations", get(list_consolidations))
         .route("/api/v1/consolidations/{id}", get(get_consolidation))
-        // Probabilistic query operations
         .route("/api/v1/query/probabilistic", get(probabilistic_query))
-        // Pattern completion operations
         .route(
             "/api/v1/complete",
             post(crate::handlers::complete::complete_handler),
         )
-        // Query execution operations
         .route("/api/v1/query", post(crate::handlers::query::query_handler))
-        // REST-style endpoints for CLI compatibility
         .route(
             "/api/v1/memories",
             get(list_memories_rest).post(create_memory_rest),
@@ -4830,44 +4848,64 @@ pub fn create_api_routes() -> Router<ApiState> {
             axum::routing::delete(delete_memory_by_id),
         )
         .route("/api/v1/memories/search", get(search_memories_rest))
-        // Cluster inspection
-        .route("/cluster/health", get(cluster_health))
-        .route("/cluster/nodes", get(cluster_nodes))
+        .route("/api/v1/episodes/remember", post(remember_episode))
+        .route("/api/v1/episodes/replay", get(replay_episodes))
+        // Memory space management - require SpaceCreate/List permissions
+        .route(
+            "/api/v1/spaces",
+            get(list_memory_spaces).post(create_memory_space),
+        )
+        // Maintenance operations - require admin permissions
+        .route("/api/v1/maintenance/compact", post(trigger_compaction))
+        .route("/cluster/migrate", post(migrate_space_handler))
         .route(
             "/cluster/rebalance",
             get(rebalance_status_handler).post(trigger_rebalance_handler),
         )
-        .route("/cluster/migrate", post(migrate_space_handler))
-        // System health and introspection
+        // Server shutdown requires admin permission
+        .route("/shutdown", post(shutdown_server));
+        // TODO(Task 003): Auth middleware needs to be applied after with_state in main.rs
+        // The middleware is implemented but layer application requires tower Layer trait
+
+    // Public routes that don't require authentication
+    let public_routes = Router::new()
+        // Health checks - always public for load balancers/monitoring
+        .route("/health", get(simple_health))
+        .route("/health/alive", get(alive_health))
+        .route("/health/spreading", get(spreading_health))
         .route("/api/v1/system/health", get(system_health))
-        .route("/api/v1/system/spreading/config", get(spreading_config))
-        .route("/api/v1/system/introspect", get(system_introspect))
-        // Maintenance operations
-        .route("/api/v1/maintenance/compact", post(trigger_compaction))
+        // Metrics - public for Prometheus scraping
         .route("/metrics", get(metrics_snapshot))
         .route("/metrics/prometheus", get(metrics_prometheus))
-        // Episode-specific operations
-        .route("/api/v1/episodes/remember", post(remember_episode))
-        .route("/api/v1/episodes/replay", get(replay_episodes))
-        // Streaming operations (SSE)
+        // Cluster inspection - public for ops visibility
+        .route("/cluster/health", get(cluster_health))
+        .route("/cluster/nodes", get(cluster_nodes))
+        // System introspection - consider protecting in production
+        .route("/api/v1/system/spreading/config", get(spreading_config))
+        .route("/api/v1/system/introspect", get(system_introspect))
+        // Streaming operations - consider auth requirements
         .route("/api/v1/stream/activities", get(stream_activities))
         .route("/api/v1/stream/memories", get(stream_memories))
         .route("/api/v1/stream/consolidation", get(stream_consolidation))
-        // WebSocket streaming (browser-compatible bidirectional streaming)
         .route(
             "/v1/stream",
             get(crate::handlers::websocket::websocket_handler),
         )
-        // Real-time monitoring (specialized for debugging)
+        // Real-time monitoring
         .route("/api/v1/monitoring/events", get(monitor_events))
         .route("/api/v1/monitoring/activations", get(monitor_activations))
         .route("/api/v1/monitoring/causality", get(monitor_causality))
         // Backwards compatibility for pre-013 clients
         .route("/api/v1/monitor/events", get(monitor_events))
         .route("/api/v1/monitor/activations", get(monitor_activations))
-        .route("/api/v1/monitor/causality", get(monitor_causality))
-        // Swagger UI documentation
+        .route("/api/v1/monitor/causality", get(monitor_causality));
+
+    // Combine all routes with security headers applied globally
+    Router::new()
+        .merge(protected_routes)
+        .merge(public_routes)
         .merge(swagger_router)
+        .layer(middleware::from_fn(crate::auth::middleware::security_headers))
 }
 
 #[cfg(test)]

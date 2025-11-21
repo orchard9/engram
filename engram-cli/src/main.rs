@@ -695,6 +695,38 @@ async fn start_server(
         );
     }
 
+    // Initialize authentication (if security feature enabled)
+    let auth_config = Arc::new(cli_config.security.clone().with_env_overrides());
+
+    #[cfg(feature = "security")]
+    let auth_validator = match auth_config.auth_mode {
+        engram_cli::config::AuthMode::ApiKey => {
+            use engram_core::auth::api_key::ApiKeyValidator;
+            use engram_core::auth::SqliteApiKeyStore;
+
+            info!("Initializing API key authentication");
+            let storage_path = &auth_config.api_keys.storage_path;
+
+            match SqliteApiKeyStore::new(storage_path).await {
+                Ok(store) => {
+                    info!(path = %storage_path.display(), "API key store initialized");
+                    Some(Arc::new(ApiKeyValidator::new(Arc::new(store))))
+                }
+                Err(e) => {
+                    warn!("Failed to initialize API key store: {}. Auth will be disabled.", e);
+                    None
+                }
+            }
+        }
+        engram_cli::config::AuthMode::None => {
+            info!("Authentication disabled");
+            None
+        }
+    };
+
+    #[cfg(not(feature = "security"))]
+    info!("Security feature not enabled, authentication unavailable");
+
     // Create API state
     let api_state = ApiState::new(
         Arc::clone(&memory_store),
@@ -706,6 +738,9 @@ async fn start_server(
         api_cluster_state.clone(),
         api_router.clone(),
         partition_confidence.clone(),
+        auth_config,
+        #[cfg(feature = "security")]
+        auth_validator,
     );
 
     // Clone memory store for gRPC before moving api_state into router

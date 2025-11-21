@@ -7,6 +7,8 @@
 /// Administrative HTTP/gRPC helpers.
 pub mod admin;
 pub mod api;
+/// Authentication and authorization middleware
+pub mod auth;
 pub mod benchmark_simple;
 pub mod cli;
 /// Cluster initialization helpers for CLI/server startup.

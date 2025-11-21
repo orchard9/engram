@@ -32,14 +32,15 @@ name = "consolidation-soak"
 path = "src/bin/consolidation_soak.rs"
 
 [features]
-default = ["hnsw_index", "memory_mapped_persistence", "monitoring"]
+default = ["hnsw_index", "memory_mapped_persistence", "monitoring", "security"]
 hnsw_index = ["engram-core/hnsw_index"]
 memory_mapped_persistence = ["engram-core/memory_mapped_persistence"]
 monitoring = ["engram-core/monitoring"]
 cluster_discovery_dns = ["engram-core/cluster_discovery_dns"]
+security = ["engram-core/security"]
 
 [dependencies]
-engram-core = { path = "../engram-core", features = ["hnsw_index", "memory_mapped_persistence", "monitoring", "cluster_discovery_dns"] }
+engram-core = { path = "../engram-core", features = ["hnsw_index", "memory_mapped_persistence", "monitoring", "cluster_discovery_dns", "security"] }
 engram-storage = { path = "../engram-storage" }
 engram-proto = { path = "../engram-proto" }
 tonic = "0.13"
