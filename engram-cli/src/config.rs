@@ -354,7 +354,8 @@ impl SecurityConfig {
 
         // Override auth mode
         if let Ok(mode) = std::env::var("ENGRAM_AUTH_MODE")
-            && let Ok(auth_mode) = AuthMode::try_from(mode.as_str()) {
+            && let Ok(auth_mode) = AuthMode::try_from(mode.as_str())
+        {
             config.auth_mode = auth_mode;
         }
 
@@ -365,7 +366,8 @@ impl SecurityConfig {
 
         // Override rate limiting
         if let Ok(rate_limit) = std::env::var("ENGRAM_RATE_LIMIT")
-            && let Ok(enabled) = parse_bool(&rate_limit) {
+            && let Ok(enabled) = parse_bool(&rate_limit)
+        {
             config.rate_limiting = enabled;
         }
 
@@ -533,11 +535,17 @@ mod tests {
         assert_eq!(config.auth_mode, AuthMode::None);
         assert!(!config.rate_limiting);
         assert_eq!(config.api_keys.backend, StorageBackend::File);
-        assert_eq!(config.api_keys.storage_path, PathBuf::from("./data/api_keys.db"));
+        assert_eq!(
+            config.api_keys.storage_path,
+            PathBuf::from("./data/api_keys.db")
+        );
         assert_eq!(config.api_keys.rotation_days, 90);
         assert_eq!(config.api_keys.warn_before_expiry_days, 14);
         assert_eq!(config.cors.allowed_origins, vec!["*"]);
-        assert_eq!(config.cors.allowed_methods, vec!["GET", "POST", "DELETE", "OPTIONS"]);
+        assert_eq!(
+            config.cors.allowed_methods,
+            vec!["GET", "POST", "DELETE", "OPTIONS"]
+        );
         assert_eq!(config.cors.max_age_seconds, 3600);
     }
 
@@ -554,7 +562,12 @@ mod tests {
 
         let result = config.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("storage_path cannot be empty"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("storage_path cannot be empty")
+        );
     }
 
     #[test]
@@ -564,7 +577,12 @@ mod tests {
 
         let result = config.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("rotation_days must be greater than 0"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("rotation_days must be greater than 0")
+        );
     }
 
     #[test]
@@ -575,7 +593,12 @@ mod tests {
 
         let result = config.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("must be less than rotation_days"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("must be less than rotation_days")
+        );
     }
 
     #[test]
@@ -585,7 +608,12 @@ mod tests {
 
         let result = config.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("allowed_origins cannot be empty"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("allowed_origins cannot be empty")
+        );
     }
 
     #[test]
@@ -595,7 +623,12 @@ mod tests {
 
         let result = config.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("allowed_methods cannot be empty"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("allowed_methods cannot be empty")
+        );
     }
 
     #[test]
@@ -605,7 +638,12 @@ mod tests {
 
         let result = config.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("max_age_seconds must be greater than 0"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("max_age_seconds must be greater than 0")
+        );
     }
 
     #[test]
@@ -619,7 +657,12 @@ mod tests {
 
         let result = AuthMode::try_from("invalid");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("invalid auth mode"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("invalid auth mode")
+        );
     }
 
     #[test]
@@ -645,7 +688,10 @@ mod tests {
 
         assert_eq!(config.auth_mode, AuthMode::ApiKey);
         assert!(config.rate_limiting);
-        assert_eq!(config.api_keys.storage_path, PathBuf::from("/var/lib/engram/api_keys.db"));
+        assert_eq!(
+            config.api_keys.storage_path,
+            PathBuf::from("/var/lib/engram/api_keys.db")
+        );
         assert_eq!(config.api_keys.rotation_days, 30);
         assert_eq!(config.api_keys.warn_before_expiry_days, 7);
         assert_eq!(config.cors.allowed_origins, vec!["https://example.com"]);
@@ -690,7 +736,10 @@ mod tests {
         let config = SecurityConfig::default();
         let overridden = config.with_env_overrides();
 
-        assert_eq!(overridden.api_keys.storage_path, PathBuf::from("/custom/path/keys.db"));
+        assert_eq!(
+            overridden.api_keys.storage_path,
+            PathBuf::from("/custom/path/keys.db")
+        );
 
         unsafe {
             std::env::remove_var("ENGRAM_API_KEY_PATH");
@@ -838,16 +887,16 @@ mod tests {
         // Only override rotation_days, keep other values
         let other = ApiKeyStorageConfig {
             backend: StorageBackend::File,
-            storage_path: PathBuf::from(""),  // Empty path should not override
+            storage_path: PathBuf::from(""), // Empty path should not override
             rotation_days: 60,
-            warn_before_expiry_days: 0,  // Zero should not override
+            warn_before_expiry_days: 0, // Zero should not override
         };
 
         base.merge(&other);
 
-        assert_eq!(base.storage_path, PathBuf::from("./data/api_keys.db"));  // Kept original
-        assert_eq!(base.rotation_days, 60);  // Updated
-        assert_eq!(base.warn_before_expiry_days, 14);  // Kept original
+        assert_eq!(base.storage_path, PathBuf::from("./data/api_keys.db")); // Kept original
+        assert_eq!(base.rotation_days, 60); // Updated
+        assert_eq!(base.warn_before_expiry_days, 14); // Kept original
     }
 
     #[test]
@@ -857,14 +906,17 @@ mod tests {
         // Only override allowed_origins, keep other values
         let other = CorsConfig {
             allowed_origins: vec!["https://example.com".to_string()],
-            allowed_methods: vec![],  // Empty should not override
-            max_age_seconds: 0,  // Zero should not override
+            allowed_methods: vec![], // Empty should not override
+            max_age_seconds: 0,      // Zero should not override
         };
 
         base.merge(&other);
 
-        assert_eq!(base.allowed_origins, vec!["https://example.com"]);  // Updated
-        assert_eq!(base.allowed_methods, vec!["GET", "POST", "DELETE", "OPTIONS"]);  // Kept original
-        assert_eq!(base.max_age_seconds, 3600);  // Kept original
+        assert_eq!(base.allowed_origins, vec!["https://example.com"]); // Updated
+        assert_eq!(
+            base.allowed_methods,
+            vec!["GET", "POST", "DELETE", "OPTIONS"]
+        ); // Kept original
+        assert_eq!(base.max_age_seconds, 3600); // Kept original
     }
 }
