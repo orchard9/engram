@@ -1,6 +1,7 @@
 //! Integration tests for the `engram space` CLI commands.
 
 use engram_cli::api::{ApiState, create_api_routes};
+use engram_cli::config::SecurityConfig;
 use engram_core::activation::SpreadingAutoTuner;
 use engram_core::{MemorySpaceError, MemorySpaceId, MemorySpaceRegistry, MemoryStore, metrics};
 use std::sync::Arc;
@@ -41,9 +42,11 @@ async fn test_space_list_and_create_commands() {
         metrics,
         auto_tuner,
         Arc::new(shutdown_tx),
-        None,
-        None,
-        None,
+        None,                                // cluster
+        None,                                // router
+        None,                                // partition_confidence
+        Arc::new(SecurityConfig::default()), // auth_config
+        None,                                // auth_validator
     );
 
     // Compose router with the control-plane routes and a simple liveness endpoint.

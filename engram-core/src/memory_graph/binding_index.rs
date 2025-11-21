@@ -573,10 +573,10 @@ impl BindingIndex {
 
         // Record binding pruning metrics
         #[cfg(feature = "dual_memory_types")]
-        if removed > 0 {
-            if let Some(metrics) = crate::metrics::metrics() {
-                metrics.increment_counter("engram_bindings_pruned_total", removed as u64);
-            }
+        if removed > 0
+            && let Some(metrics) = crate::metrics::metrics()
+        {
+            metrics.increment_counter("engram_bindings_pruned_total", removed as u64);
         }
 
         removed

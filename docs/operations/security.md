@@ -110,55 +110,144 @@ Rotate certificates without downtime:
 
 ## Authentication
 
+Engram supports multiple authentication methods for securing API access. Authentication is disabled by default for backward compatibility.
+
+### Enabling Authentication
+
+Configure authentication in `engram.toml`:
+
+```toml
+[security]
+# Enable authentication (default: false)
+auth_enabled = true
+
+# Authentication mode
+auth_mode = "api_key"  # Options: "api_key", "jwt", "oauth2"
+
+# API key settings
+[security.api_keys]
+# Storage backend for API keys
+storage = "sqlite"  # Options: "sqlite", "postgres", "redis"
+storage_path = "/var/lib/engram/api_keys.db"
+
+# Key expiration settings
+default_expiration_days = 365
+allow_permanent_keys = false
+```
+
+When authentication is enabled:
+- Protected endpoints require valid credentials
+- Public endpoints (health, metrics) remain accessible
+- The HTTP server enforces authentication via middleware
+
 ### API Key Authentication
+
+#### Key Format
+
+API keys use the format: `engram_key_{id}_{secret}`
+
+Example: `engram_key_abc123def456_xyz789uvw012qrs345`
 
 #### Generating API Keys
 
 ```bash
+# Generate API key with CLI
 engram api-key generate \
   --name "production-client" \
   --spaces "space1,space2" \
   --permissions "memory:read,memory:write" \
   --expires-in "365d"
-
 ```
 
 Output:
 
 ```
 API Key ID: engram_key_abc123def456
-Secret: xyz789...
-Full Key: engram_key_abc123def456_xyz789...
+Secret: xyz789uvw012qrs345
+Full Key: engram_key_abc123def456_xyz789uvw012qrs345
 
 IMPORTANT: Store this key securely. It will not be shown again.
-
 ```
 
 #### Using API Keys
 
-Include in Authorization header:
+Include the full API key in the Authorization header using Bearer format:
 
 ```bash
-curl -H "Authorization: Bearer engram_key_abc123def456_xyz789..." \
-  https://engram.example.com/api/recall
-
+curl -H "Authorization: Bearer engram_key_abc123def456_xyz789uvw012qrs345" \
+  https://engram.example.com/api/v1/memories/recall
 ```
+
+#### Memory Space Access
+
+Specify the target memory space using the `X-Memory-Space-Id` header:
+
+```bash
+curl -H "Authorization: Bearer engram_key_abc123def456_xyz789uvw012qrs345" \
+     -H "X-Memory-Space-Id: tenant_42_memories" \
+     https://engram.example.com/api/v1/memories/recall
+```
+
+The server validates that the API key has access to the requested memory space. Returns 403 Forbidden if access is denied.
 
 #### Key Management
 
-List keys:
+List active keys:
 
 ```bash
 engram api-key list
-
 ```
 
-Revoke key:
+Show key details:
+
+```bash
+engram api-key show engram_key_abc123def456
+```
+
+Revoke key immediately:
 
 ```bash
 engram api-key revoke engram_key_abc123def456
-
 ```
+
+Rotate key (generates new secret, revokes old):
+
+```bash
+engram api-key rotate engram_key_abc123def456
+```
+
+### HTTP Authentication Middleware
+
+The HTTP server uses Axum middleware to enforce authentication at the route level.
+
+#### Middleware Flow
+
+1. **Request arrives** at protected endpoint
+2. **Security headers middleware** executes first (applies to all responses)
+3. **Authentication middleware** (`require_api_key`) validates credentials:
+   - Extracts `Authorization` header
+   - Validates API key format and existence
+   - Checks key expiration and revocation status
+   - Extracts `X-Memory-Space-Id` header (if present)
+   - Validates space access permissions
+   - Inserts `AuthContext` into request for downstream handlers
+4. **Permission middleware** (optional, route-specific) checks fine-grained permissions
+5. **Request handler** executes with validated auth context
+
+#### Performance Characteristics
+
+- **Cached validations**: < 1ms overhead
+- **Uncached validations**: < 5ms overhead (database lookup)
+- **Zero-copy state sharing**: Uses `Arc` for efficient state cloning
+
+#### Authentication Bypass
+
+Authentication is automatically bypassed when:
+- Security configuration has `auth_enabled = false`
+- Request targets a public endpoint (health, metrics)
+- Middleware detects no validator is configured
+
+This ensures backward compatibility with existing deployments.
 
 ### JWT Token Authentication
 

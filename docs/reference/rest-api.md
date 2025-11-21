@@ -46,29 +46,143 @@ For high-throughput operations (>100/sec) or streaming consolidation, use the [g
 
 ## Authentication
 
-All API requests require authentication via Bearer token:
+Authentication is optional and controlled by the security configuration. When enabled, API requests to protected endpoints require authentication via Bearer token.
+
+### Authentication Status
+
+By default, authentication is disabled for backward compatibility. Check the `/health` endpoint to verify authentication status:
 
 ```bash
-curl -H "Authorization: Bearer ${ENGRAM_API_KEY}" \
+curl http://localhost:8080/health
+# Response indicates if auth is enabled
+```
+
+### Using API Keys (When Enabled)
+
+When authentication is enabled, include the API key in the Authorization header using Bearer format:
+
+```bash
+curl -H "Authorization: Bearer engram_key_{id}_{secret}" \
      -H "Content-Type: application/json" \
      http://localhost:8080/api/v1/memories/recall
-
 ```
+
+The API key format is: `engram_key_{id}_{secret}` where:
+- `{id}` is the key identifier
+- `{secret}` is the cryptographic secret
+
+### Memory Space Access Control
+
+For multi-tenant deployments, specify the memory space using the `X-Memory-Space-Id` header:
+
+```bash
+curl -H "Authorization: Bearer engram_key_{id}_{secret}" \
+     -H "X-Memory-Space-Id: tenant_42_memories" \
+     -H "Content-Type: application/json" \
+     http://localhost:8080/api/v1/memories/recall
+```
+
+The server validates that the authenticated API key has access to the requested memory space. If the header is omitted, the default space associated with the API key is used.
 
 ### Obtaining an API Key
 
-```bash
-# Generate new API key
-engram auth create-key --name "my-application"
+See [Security Configuration](/operations/security.md) for details on generating and managing API keys.
 
-# Output
-API Key: ek_live_1234567890abcdef
-Memory Space: default
-Permissions: read,write,consolidate
+For multi-tenant deployments, each API key is scoped to one or more memory spaces. See [Multi-Tenant Isolation](#multi-tenant-isolation) for details.
 
+### Protected vs Public Endpoints
+
+When authentication is enabled, endpoints are categorized as protected or public:
+
+#### Protected Endpoints (Require Authentication)
+
+These endpoints require valid authentication when auth is enabled:
+
+- `/api/v1/memories/remember` - Store new memories
+- `/api/v1/memories/recall` - Retrieve memories
+- `/api/v1/memories/forget` - Remove memories
+- `/api/v1/memories/recognize` - Recognition checks
+- `/api/v1/memories/search` - Search memories
+- `/api/v1/episodes/remember` - Store episodes
+- `/api/v1/episodes/replay` - Replay episodes
+- `/api/v1/spaces` - Memory space management (GET/POST)
+- `/api/v1/maintenance/compact` - Maintenance operations
+- `/cluster/migrate` - Cluster migration
+- `/cluster/rebalance` - Cluster rebalancing
+- `/shutdown` - Server shutdown
+
+#### Public Endpoints (Always Accessible)
+
+These endpoints remain accessible without authentication:
+
+- `/health`, `/health/alive`, `/health/spreading` - Health checks
+- `/api/v1/system/health` - System health
+- `/metrics`, `/metrics/prometheus` - Metrics endpoints
+- `/cluster/health`, `/cluster/nodes` - Cluster status
+- `/api/v1/system/spreading/config` - Spreading configuration
+- `/api/v1/system/introspect` - System introspection
+- `/api/v1/stream/*` - Streaming endpoints
+- `/api/v1/monitoring/*` - Monitoring endpoints
+
+Public endpoints are designed for load balancers, monitoring systems, and operational visibility.
+
+### Authentication Error Responses
+
+When authentication fails, the API returns standardized error responses:
+
+#### 401 Unauthorized
+
+Returned when authentication is required but missing or invalid:
+
+```json
+{
+  "error": {
+    "code": "UNAUTHORIZED",
+    "message": "Missing Authorization header",
+    "context": "Authentication is required for this endpoint",
+    "suggestion": "Include 'Authorization: Bearer engram_key_{id}_{secret}' header"
+  }
+}
 ```
 
-For multi-tenant deployments, each API key is scoped to a specific memory space. See [Multi-Tenant Isolation](#multi-tenant-isolation) for details.
+Common 401 scenarios:
+- Missing Authorization header
+- Invalid API key format
+- Expired API key
+- Unknown API key
+- Revoked API key
+
+#### 403 Forbidden
+
+Returned when authenticated but lacking required permissions:
+
+```json
+{
+  "error": {
+    "code": "FORBIDDEN",
+    "message": "Access denied to memory space: tenant_42_memories",
+    "context": "Your API key does not have access to this memory space",
+    "suggestion": "Request access to the memory space or use a different API key"
+  }
+}
+```
+
+Common 403 scenarios:
+- Accessing a memory space not in the API key's allowed list
+- Missing required permission for an operation
+- Attempting privileged operations without admin permissions
+
+### Security Headers
+
+All API responses include security headers for defense-in-depth:
+
+```
+X-Content-Type-Options: nosniff
+X-Frame-Options: DENY
+X-XSS-Protection: 1; mode=block
+```
+
+These headers provide protection against common web vulnerabilities even when accessing the API through browsers or web-based clients.
 
 ## Core Memory Operations
 

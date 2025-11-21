@@ -3,6 +3,7 @@
 #![allow(clippy::float_cmp)]
 
 use engram_cli::api::ApiState;
+use engram_cli::config::SecurityConfig;
 use engram_core::{MemorySpaceId, MemorySpaceRegistry, MemoryStore, metrics::MetricsRegistry};
 use engram_proto::engram_service_server::EngramService;
 use engram_proto::{QueryRequest as ProtoQueryRequest, QueryResponse};
@@ -39,9 +40,11 @@ async fn create_test_state() -> ApiState {
         metrics,
         auto_tuner,
         Arc::new(shutdown_tx),
-        None,
-        None,
-        None,
+        None,                                // cluster
+        None,                                // router
+        None,                                // partition_confidence
+        Arc::new(SecurityConfig::default()), // auth_config
+        None,                                // auth_validator
     )
 }
 

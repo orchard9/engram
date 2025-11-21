@@ -467,17 +467,17 @@ impl ApiKeyStore for SqliteApiKeyStore {
 }
 
 #[cfg(test)]
+// Per coding guidelines: unwrap() is allowed in tests (prefer over expect())
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
     use crate::auth::Permission;
     use tempfile::NamedTempFile;
 
     async fn create_test_store() -> (SqliteApiKeyStore, NamedTempFile) {
-        let temp_file = NamedTempFile::new().expect("Failed to create temp file");
+        let temp_file = NamedTempFile::new().unwrap();
         let path = temp_file.path();
-        let store = SqliteApiKeyStore::new(path)
-            .await
-            .expect("Failed to create store");
+        let store = SqliteApiKeyStore::new(path).await.unwrap();
         (store, temp_file)
     }
 
@@ -506,16 +506,10 @@ mod tests {
         let key = create_test_key("test_key_1");
 
         // Create key
-        store
-            .create_key(&key)
-            .await
-            .expect("Failed to create key");
+        store.create_key(&key).await.unwrap();
 
         // Retrieve key
-        let retrieved = store
-            .get_key("test_key_1")
-            .await
-            .expect("Failed to get key");
+        let retrieved = store.get_key("test_key_1").await.unwrap();
 
         assert_eq!(retrieved.key_id, key.key_id);
         assert_eq!(retrieved.secret_hash, key.secret_hash);
@@ -532,19 +526,13 @@ mod tests {
         let (store, _temp) = create_test_store().await;
         let key = create_test_key("test_key_2");
 
-        store.create_key(&key).await.expect("Failed to create key");
+        store.create_key(&key).await.unwrap();
 
         // Update last_used
-        store
-            .update_last_used("test_key_2")
-            .await
-            .expect("Failed to update last_used");
+        store.update_last_used("test_key_2").await.unwrap();
 
         // Verify update
-        let retrieved = store
-            .get_key("test_key_2")
-            .await
-            .expect("Failed to get key");
+        let retrieved = store.get_key("test_key_2").await.unwrap();
         assert!(retrieved.metadata.last_used.is_some());
     }
 
@@ -553,13 +541,10 @@ mod tests {
         let (store, _temp) = create_test_store().await;
         let key = create_test_key("test_key_3");
 
-        store.create_key(&key).await.expect("Failed to create key");
+        store.create_key(&key).await.unwrap();
 
         // Soft delete
-        store
-            .delete_key("test_key_3")
-            .await
-            .expect("Failed to delete key");
+        store.delete_key("test_key_3").await.unwrap();
 
         // Should not be retrievable
         let result = store.get_key("test_key_3").await;
@@ -572,7 +557,7 @@ mod tests {
         let mut key = create_test_key("test_key_4");
         key.metadata.expires_at = Some(Utc::now() - chrono::Duration::hours(1));
 
-        store.create_key(&key).await.expect("Failed to create key");
+        store.create_key(&key).await.unwrap();
 
         // Should not be retrievable (expired)
         let result = store.get_key("test_key_4").await;
@@ -586,11 +571,11 @@ mod tests {
         // Create multiple keys
         for i in 1..=3 {
             let key = create_test_key(&format!("list_key_{i}"));
-            store.create_key(&key).await.expect("Failed to create key");
+            store.create_key(&key).await.unwrap();
         }
 
         // List all keys
-        let keys = store.list_keys().await.expect("Failed to list keys");
+        let keys = store.list_keys().await.unwrap();
         assert_eq!(keys.len(), 3);
     }
 
@@ -601,13 +586,10 @@ mod tests {
         // Create key expiring in 2 days
         let mut key = create_test_key("expiring_key");
         key.metadata.expires_at = Some(Utc::now() + chrono::Duration::days(2));
-        store.create_key(&key).await.expect("Failed to create key");
+        store.create_key(&key).await.unwrap();
 
         // Get keys expiring within 7 days
-        let keys = store
-            .get_expiring_keys(7)
-            .await
-            .expect("Failed to get expiring keys");
+        let keys = store.get_expiring_keys(7).await.unwrap();
         assert_eq!(keys.len(), 1);
         assert_eq!(keys[0].key_id, "expiring_key");
     }
@@ -617,13 +599,13 @@ mod tests {
         let (store, _temp) = create_test_store().await;
         let key = create_test_key("revoke_key");
 
-        store.create_key(&key).await.expect("Failed to create key");
+        store.create_key(&key).await.unwrap();
 
         // Revoke key
         store
             .revoke_key("revoke_key", "Testing revocation")
             .await
-            .expect("Failed to revoke key");
+            .unwrap();
 
         // Should not be retrievable
         let result = store.get_key("revoke_key").await;
@@ -636,35 +618,25 @@ mod tests {
 
         // Create an expired key (would need to be >30 days old to be cleaned up)
         // For testing, we just verify the method works
-        let count = store
-            .cleanup_old_keys()
-            .await
-            .expect("Failed to cleanup keys");
+        let count = store.cleanup_old_keys().await.unwrap();
         assert_eq!(count, 0); // No keys old enough to clean
     }
 
     #[tokio::test]
     async fn test_concurrent_access() {
-        let temp_file = NamedTempFile::new().expect("Failed to create temp file");
+        let temp_file = NamedTempFile::new().unwrap();
         let path = temp_file.path().to_path_buf();
 
         // Create multiple connections to same database
-        let store1 = SqliteApiKeyStore::new(&path)
-            .await
-            .expect("Failed to create store 1");
-        let store2 = SqliteApiKeyStore::new(&path)
-            .await
-            .expect("Failed to create store 2");
+        let store1 = SqliteApiKeyStore::new(&path).await.unwrap();
+        let store2 = SqliteApiKeyStore::new(&path).await.unwrap();
 
         // Write from store1
         let key = create_test_key("concurrent_key");
-        store1.create_key(&key).await.expect("Failed to create key");
+        store1.create_key(&key).await.unwrap();
 
         // Read from store2
-        let retrieved = store2
-            .get_key("concurrent_key")
-            .await
-            .expect("Failed to get key");
+        let retrieved = store2.get_key("concurrent_key").await.unwrap();
         assert_eq!(retrieved.key_id, "concurrent_key");
     }
 }

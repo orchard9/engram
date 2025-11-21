@@ -834,7 +834,7 @@ embedding = embedding / np.linalg.norm(embedding)
 
 ---
 
-### ERR-4004: Authentication Failed
+### ERR-4004: Authentication Failed (401 Unauthorized)
 
 **Category:** Validation
 **HTTP Status:** 401 Unauthorized
@@ -842,42 +842,180 @@ embedding = embedding / np.linalg.norm(embedding)
 
 #### Description
 
-Invalid or missing API key, or token expired.
+Authentication failed due to missing, invalid, expired, or revoked credentials. This error is returned when authentication is enabled and the request cannot be authenticated.
+
+Think of this like trying to enter a secure building without proper ID - the system knows you need credentials, but what you provided isn't valid.
+
+#### Common Scenarios
+
+- **Missing Authorization header** - Request to protected endpoint without credentials
+- **Invalid API key format** - Malformed API key that doesn't match `engram_key_{id}_{secret}`
+- **Expired API key** - API key has exceeded its expiration date
+- **Unknown API key** - API key ID not found in the system
+- **Revoked API key** - API key was explicitly revoked
+
+#### Error Response Example
+
+```json
+{
+  "error": {
+    "code": "UNAUTHORIZED",
+    "message": "Invalid API key format or value",
+    "context": "Authentication is required for this endpoint",
+    "suggestion": "Include 'Authorization: Bearer engram_key_{id}_{secret}' header with a valid API key"
+  }
+}
+```
 
 #### Resolution Steps
 
-1. **Check API key format**
+1. **Verify authentication is required**
 
    ```bash
-   # Valid format: ek_live_<32_hex_chars>
+   # Check if auth is enabled
+   curl http://localhost:8080/health
+   # Look for auth_enabled field in response
+   ```
+
+2. **Check API key format**
+
+   ```bash
+   # Valid format: engram_key_{id}_{secret}
    echo $ENGRAM_API_KEY
-   # Should look like: ek_live_1234567890abcdef...
+   # Should look like: engram_key_abc123def456_xyz789uvw012qrs345
    ```
 
-2. **Verify API key is active**
+3. **Verify API key is active**
 
    ```bash
-   engram auth verify --key "${ENGRAM_API_KEY}"
+   # List active keys (requires admin access)
+   engram api-key list
+
+   # Show specific key details
+   engram api-key show engram_key_abc123def456
    ```
 
-3. **Check token expiration (JWT)**
-
-   ```python
-   import jwt
-
-   token = "eyJ..."
-   decoded = jwt.decode(token, options={"verify_signature": False})
-   exp = decoded['exp']
-
-   if datetime.fromtimestamp(exp) < datetime.now():
-       print("Token expired, need to refresh")
-   ```
-
-4. **Generate new API key**
+4. **Test API key validity**
 
    ```bash
-   engram auth create-key --name "new-key"
+   # Try accessing a protected endpoint
+   curl -H "Authorization: Bearer ${ENGRAM_API_KEY}" \
+        http://localhost:8080/api/v1/memories/recall
+
+   # 200 OK = valid key
+   # 401 = invalid/expired/revoked key
    ```
+
+5. **Generate new API key if needed**
+
+   ```bash
+   engram api-key generate \
+     --name "production-client" \
+     --spaces "default" \
+     --permissions "memory:read,memory:write"
+   ```
+
+#### Related Errors
+
+- [ERR-4005: Insufficient Permissions](#err-4005-insufficient-permissions-403-forbidden) - Authenticated but lacking permissions
+
+---
+
+### ERR-4005: Insufficient Permissions (403 Forbidden)
+
+**Category:** Validation
+**HTTP Status:** 403 Forbidden
+**gRPC Status:** PERMISSION_DENIED
+
+#### Description
+
+Request is authenticated but the credentials lack required permissions. This error is returned when you've proven who you are, but you're not allowed to do what you're trying to do.
+
+Think of this like having a valid building pass that only grants access to certain floors - you're authenticated, but not authorized for this specific action.
+
+#### Common Scenarios
+
+- **Memory space access denied** - API key doesn't have access to the requested memory space
+- **Missing operation permission** - API key lacks the specific permission needed (e.g., trying to delete without `memory:delete`)
+- **Admin operation without admin permission** - Attempting privileged operations like server shutdown
+
+#### Error Response Example
+
+```json
+{
+  "error": {
+    "code": "FORBIDDEN",
+    "message": "Access denied to memory space: tenant_42_memories",
+    "context": "Your API key does not have access to this memory space",
+    "suggestion": "Request access to the memory space or use a different API key with appropriate permissions"
+  }
+}
+```
+
+#### Resolution Steps
+
+1. **Check which memory spaces your key can access**
+
+   ```bash
+   # Show API key details
+   engram api-key show engram_key_abc123def456
+
+   # Output shows:
+   # Allowed Spaces: ["default", "space_alpha"]
+   # Permissions: ["memory:read", "memory:write"]
+   ```
+
+2. **Verify the requested memory space**
+
+   ```bash
+   # Explicit space in header
+   curl -H "Authorization: Bearer ${ENGRAM_API_KEY}" \
+        -H "X-Memory-Space-Id: tenant_42_memories" \
+        http://localhost:8080/api/v1/memories/recall
+
+   # 403 = no access to this space
+   ```
+
+3. **Request access to the memory space**
+
+   ```bash
+   # Contact admin to update API key permissions
+   engram api-key update engram_key_abc123def456 \
+     --add-space tenant_42_memories
+   ```
+
+4. **Check operation-specific permissions**
+
+   ```bash
+   # Trying to delete memories without memory:delete permission
+   # Request permission update from admin
+   engram api-key update engram_key_abc123def456 \
+     --add-permission memory:delete
+   ```
+
+5. **Use a different API key with appropriate access**
+
+   ```bash
+   # Generate key with required permissions
+   engram api-key generate \
+     --name "admin-client" \
+     --spaces "tenant_42_memories" \
+     --permissions "memory:read,memory:write,memory:delete"
+   ```
+
+#### Available Permissions
+
+- `memory:read` - Read memory operations
+- `memory:write` - Write memory operations
+- `memory:delete` - Delete memory operations
+- `space:create` - Create memory spaces
+- `space:delete` - Delete memory spaces
+- `consolidation:trigger` - Trigger consolidation
+- `system:admin` - Administrative operations (shutdown, maintenance)
+
+#### Related Errors
+
+- [ERR-4004: Authentication Failed](#err-4004-authentication-failed-401-unauthorized) - Missing or invalid credentials
 
 ## System Errors (ERR-5xxx)
 
@@ -1077,6 +1215,7 @@ Engram service is temporarily unavailable (startup, shutdown, or overloaded).
 | ERR-4002 | 400 | INVALID_ARGUMENT | Validation | Error | No |
 | ERR-4003 | 400 | INVALID_ARGUMENT | Validation | Error | No |
 | ERR-4004 | 401 | UNAUTHENTICATED | Validation | Error | No |
+| ERR-4005 | 403 | PERMISSION_DENIED | Validation | Error | No |
 | ERR-5001 | 503 | UNAVAILABLE | System | Critical | Yes |
 | ERR-5002 | 500 | INTERNAL | System | Warning | No |
 | ERR-5003 | 429 | RESOURCE_EXHAUSTED | System | Warning | Yes |

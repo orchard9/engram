@@ -11,6 +11,7 @@ use axum::{
 use chrono::Utc;
 use engram_cli::api::{ApiState, create_api_routes};
 use engram_cli::cluster::ClusterState;
+use engram_cli::config::SecurityConfig;
 use engram_cli::router::{Router as ClusterRouter, RouterConfig};
 use engram_core::activation::SpreadingAutoTuner;
 use engram_core::activation::{ActivationRecordPoolStats, SpreadingMetrics};
@@ -76,9 +77,11 @@ async fn build_test_router(cluster: Option<Arc<ClusterState>>) -> Router {
         metrics,
         auto_tuner,
         Arc::new(shutdown_tx),
-        cluster.clone(),
-        router,
-        None,
+        cluster.clone(),                     // cluster
+        router,                              // router
+        None,                                // partition_confidence
+        Arc::new(SecurityConfig::default()), // auth_config
+        None,                                // auth_validator
     );
 
     create_api_routes().with_state(api_state)

@@ -14,6 +14,7 @@ use axum::{
     http::{Method, Request, StatusCode},
 };
 use engram_cli::api::{ApiState, create_api_routes};
+use engram_cli::config::SecurityConfig;
 use engram_core::activation::SpreadingAutoTuner;
 use engram_core::{MemorySpaceError, MemorySpaceId, MemorySpaceRegistry, MemoryStore, metrics};
 use serde_json::{Value, json};
@@ -56,9 +57,11 @@ async fn create_multi_space_router(data_root: PathBuf) -> (Router, Arc<MemorySpa
         metrics,
         auto_tuner,
         Arc::new(shutdown_tx),
-        None,
-        None,
-        None,
+        None,                                // cluster
+        None,                                // router
+        None,                                // partition_confidence
+        Arc::new(SecurityConfig::default()), // auth_config
+        None,                                // auth_validator
     );
 
     let router = create_api_routes().with_state(api_state);

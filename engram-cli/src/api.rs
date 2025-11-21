@@ -233,6 +233,7 @@ pub struct HealthResponse {
 impl ApiState {
     /// Create new API state with memory store
     #[allow(deprecated)] // Constructor needs to initialize the deprecated field during migration
+    #[allow(clippy::too_many_arguments)] // State struct requires all these components
     pub fn new(
         store: Arc<MemoryStore>,
         registry: Arc<MemorySpaceRegistry>,
@@ -4864,8 +4865,6 @@ pub fn create_api_routes() -> Router<ApiState> {
         )
         // Server shutdown requires admin permission
         .route("/shutdown", post(shutdown_server));
-        // TODO(Task 003): Auth middleware needs to be applied after with_state in main.rs
-        // The middleware is implemented but layer application requires tower Layer trait
 
     // Public routes that don't require authentication
     let public_routes = Router::new()
@@ -4900,12 +4899,17 @@ pub fn create_api_routes() -> Router<ApiState> {
         .route("/api/v1/monitor/activations", get(monitor_activations))
         .route("/api/v1/monitor/causality", get(monitor_causality));
 
+    // Note: Auth middleware (require_api_key) is applied in main.rs using from_fn_with_state()
+    // This allows State<ApiState> extraction to work correctly
+
     // Combine all routes with security headers applied globally
     Router::new()
         .merge(protected_routes)
         .merge(public_routes)
         .merge(swagger_router)
-        .layer(middleware::from_fn(crate::auth::middleware::security_headers))
+        .layer(middleware::from_fn(
+            crate::auth::middleware::security_headers,
+        ))
 }
 
 #[cfg(test)]

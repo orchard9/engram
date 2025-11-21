@@ -15,6 +15,7 @@ use axum::{
 };
 use chrono::Utc;
 use engram_cli::api::{ApiState, create_api_routes};
+use engram_cli::config::SecurityConfig;
 use engram_core::activation::SpreadingAutoTuner;
 use engram_core::{
     Confidence, EpisodeBuilder, MemorySpaceError, MemorySpaceId, MemorySpaceRegistry, MemoryStore,
@@ -89,9 +90,11 @@ async fn create_test_router_with_memories(num_memories: usize) -> Router {
         metrics,
         auto_tuner,
         Arc::new(shutdown_tx),
-        None,
-        None,
-        None,
+        None,                                // cluster
+        None,                                // router
+        None,                                // partition_confidence
+        Arc::new(SecurityConfig::default()), // auth_config
+        None,                                // auth_validator
     );
 
     create_api_routes().with_state(api_state)

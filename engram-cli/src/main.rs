@@ -701,8 +701,8 @@ async fn start_server(
     #[cfg(feature = "security")]
     let auth_validator = match auth_config.auth_mode {
         engram_cli::config::AuthMode::ApiKey => {
-            use engram_core::auth::api_key::ApiKeyValidator;
             use engram_core::auth::SqliteApiKeyStore;
+            use engram_core::auth::api_key::ApiKeyValidator;
 
             info!("Initializing API key authentication");
             let storage_path = &auth_config.api_keys.storage_path;
@@ -713,7 +713,10 @@ async fn start_server(
                     Some(Arc::new(ApiKeyValidator::new(Arc::new(store))))
                 }
                 Err(e) => {
-                    warn!("Failed to initialize API key store: {}. Auth will be disabled.", e);
+                    warn!(
+                        "Failed to initialize API key store: {}. Auth will be disabled.",
+                        e
+                    );
                     None
                 }
             }
@@ -749,6 +752,22 @@ async fn start_server(
     let grpc_metrics = Arc::clone(&api_state.metrics);
 
     // Build HTTP API routes
+    // Auth middleware is applied using from_fn_with_state() to allow State extraction
+    #[cfg(feature = "security")]
+    let app = create_api_routes()
+        .layer(axum::middleware::from_fn_with_state(
+            api_state.clone(),
+            engram_cli::auth::middleware::require_api_key,
+        ))
+        .with_state(api_state)
+        .layer(
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods(Any)
+                .allow_headers(Any),
+        );
+
+    #[cfg(not(feature = "security"))]
     let app = create_api_routes().with_state(api_state).layer(
         CorsLayer::new()
             .allow_origin(Any)

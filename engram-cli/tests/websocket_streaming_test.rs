@@ -9,6 +9,7 @@
 //! - Error handling
 
 use engram_cli::api::{ApiState, create_api_routes};
+use engram_cli::config::SecurityConfig;
 use engram_core::{MemorySpaceId, MemorySpaceRegistry, MemoryStore, metrics::MetricsRegistry};
 use futures::{SinkExt, StreamExt};
 use serde_json::json;
@@ -36,7 +37,7 @@ async fn create_test_state() -> ApiState {
     let auto_tuner = engram_core::activation::SpreadingAutoTuner::new(0.1, 1000);
     let (shutdown_tx, _) = tokio::sync::watch::channel(false);
 
-    // Create ApiState using the new constructor (which includes session_manager and observation_queue)
+    // Create ApiState using the new constructor
     ApiState::new(
         store,
         registry,
@@ -44,9 +45,11 @@ async fn create_test_state() -> ApiState {
         metrics,
         auto_tuner,
         Arc::new(shutdown_tx),
-        None,
-        None,
-        None,
+        None,                                // cluster
+        None,                                // router
+        None,                                // partition_confidence
+        Arc::new(SecurityConfig::default()), // auth_config
+        None,                                // auth_validator
     )
 }
 
