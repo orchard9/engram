@@ -347,9 +347,11 @@ fn test_cross_module_flag_compatibility() {
     }
 
     // Query to exercise cross-module code paths
+    // Use actual episode embedding to guarantee a match
+    let query_embedding = episodes[0].embedding;
     let cue = Cue::embedding(
         "cross_module_cue".to_string(),
-        [0.5f32; 768],
+        query_embedding,
         Confidence::MEDIUM,
     );
 
