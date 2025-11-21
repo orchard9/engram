@@ -1,23 +1,25 @@
+# Production configuration example for Engram
+# Copy this file to your config directory and customize as needed
+
 [feature_flags]
 spreading_api_beta = true
 
 [server]
-# Bind address for the HTTP API listener (IP only, port configured via CLI flag)
-http_bind = "127.0.0.1"
+# Bind to all interfaces in production
+http_bind = "0.0.0.0"
 
 [memory_spaces]
 default_space = "default"
 bootstrap_spaces = ["default"]
 
 [persistence]
-# Data root directory for all memory spaces (each space gets a subdirectory)
-# Supports tilde expansion for home directory
-data_root = "~/.local/share/engram"
+# Production data directory
+data_root = "/var/lib/engram"
 
-# Per-space tier capacity limits (number of memories)
-hot_capacity = 100_000
-warm_capacity = 1_000_000
-cold_capacity = 10_000_000
+# Production capacity limits (adjust based on hardware)
+hot_capacity = 500_000
+warm_capacity = 5_000_000
+cold_capacity = 50_000_000
 
 [cluster]
 enabled = false
@@ -35,7 +37,7 @@ indirect_probes = 3
 gossip_batch = 6
 
 [cluster.replication]
-factor = 2
+factor = 3
 timeout = "1s"
 placement = "random"
 jump_buckets = 16384
@@ -43,15 +45,14 @@ rack_penalty = 0.5
 zone_penalty = 0.35
 lag_threshold = "5s"
 catch_up_batch_bytes = 2097152
-compression = "none"
+compression = "lz4"
 io_uring_enabled = false
 
 [cluster.network]
 swim_bind = "0.0.0.0:7946"
 api_bind = "0.0.0.0:50051"
 max_message_size = 4194304
-connection_pool_size = 4
-# advertise_addr = "192.168.1.50:7946" # Set when swim_bind uses 0.0.0.0 or when running in containers/cloud
+connection_pool_size = 8
 
 [cluster.partition]
 majority_threshold = 0.6
@@ -59,30 +60,30 @@ detection_window = "10s"
 check_interval = "2s"
 
 [router]
-connection_pool_size = 4
-request_timeout_ms = 3000
+connection_pool_size = 8
+request_timeout_ms = 5000
 max_retries = 3
-retry_base_delay_ms = 50
-retry_max_delay_ms = 500
-circuit_breaker_failure_threshold = 5
-circuit_breaker_reset_ms = 5000
+retry_base_delay_ms = 100
+retry_max_delay_ms = 1000
+circuit_breaker_failure_threshold = 10
+circuit_breaker_reset_ms = 10000
 replica_fallback_enabled = true
 replica_fallback_lag_sequences = 32
 default_read_strategy = "nearest_replica"
 
 [security]
-# Default to no auth for backward compatibility
-auth_mode = "none"
-rate_limiting = false
+# Enable authentication in production
+auth_mode = "api_key"
+rate_limiting = true
 
 [security.api_keys]
 backend = "file"
-storage_path = "./data/api_keys.db"
-rotation_days = 90
-warn_before_expiry_days = 14
+storage_path = "/var/lib/engram/api_keys.db"
+rotation_days = 30
+warn_before_expiry_days = 7
 
 [security.cors]
-# Allow all origins in development
-allowed_origins = ["*"]
+# Restrict origins to your production domains
+allowed_origins = ["https://app.example.com"]
 allowed_methods = ["GET", "POST", "DELETE", "OPTIONS"]
 max_age_seconds = 3600
