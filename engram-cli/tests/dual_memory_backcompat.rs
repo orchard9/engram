@@ -77,8 +77,8 @@ fn test_legacy_store_recall_still_works() {
 
     assert_eq!(store.count(), 100, "Should have stored 100 memories");
 
-    // Legacy client recalls memories
-    let query_embedding = [0.5f32; 768];
+    // Legacy client recalls memories - use actual episode embedding for query
+    let query_embedding = memories[0].embedding;
     let cue = Cue::embedding(
         "legacy_cue".to_string(),
         query_embedding,
@@ -143,19 +143,19 @@ fn test_legacy_and_modern_clients_coexist() {
     let total_count = store.count();
     assert_eq!(total_count, 200, "Should have 200 total memories");
 
-    // Legacy client queries
+    // Legacy client queries - use actual legacy memory embedding
     let legacy_cue = Cue::embedding(
         "legacy_query".to_string(),
-        [0.5f32; 768],
+        legacy_memories[0].embedding,
         Confidence::MEDIUM,
     );
 
     let legacy_results = store.recall(&legacy_cue);
 
-    // Modern client queries
+    // Modern client queries - use actual modern episode embedding
     let modern_cue = Cue::embedding(
         "modern_query".to_string(),
-        [0.6f32; 768],
+        modern_episodes[0].embedding,
         Confidence::MEDIUM,
     );
 
@@ -321,10 +321,10 @@ fn test_legacy_graceful_degradation() {
         // May degrade but should not panic
     }
 
-    // Legacy client should still get results
+    // Legacy client should still get results - use actual memory embedding
     let cue = Cue::embedding(
         "degradation_cue".to_string(),
-        [0.5f32; 768],
+        memories[0].embedding,
         Confidence::MEDIUM,
     );
 
