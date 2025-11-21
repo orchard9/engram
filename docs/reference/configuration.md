@@ -24,6 +24,10 @@ Configuration spans multiple domains:
 
 - **Persistence** - Tiered storage capacity limits
 
+- **Security** - Authentication, authorization, and CORS
+
+- **Cluster** - Distributed deployment and replication
+
 - **Spreading Activation** - Graph traversal parameters
 
 - **Consolidation** - Memory compression and pattern extraction
@@ -670,6 +674,644 @@ engram_storage_compaction_ratio{tier="cold",space="default"}
 - **Lifecycle:** Define data retention policy
 
 ---
+
+---
+
+## Security Configuration
+
+Controls authentication, authorization, rate limiting, and CORS settings for API access.
+
+### Configuration Structure
+
+Security is configured via the `[security]` section in your configuration file:
+
+```toml
+[security]
+auth_mode = "none"
+rate_limiting = false
+
+[security.api_keys]
+backend = "file"
+storage_path = "./data/api_keys.db"
+rotation_days = 90
+warn_before_expiry_days = 14
+
+[security.cors]
+allowed_origins = ["*"]
+allowed_methods = ["GET", "POST", "DELETE", "OPTIONS"]
+max_age_seconds = 3600
+```
+
+### Security Configuration Fields
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `auth_mode` | string enum | `"none"` | Authentication mode: `"none"` or `"api_key"` |
+| `rate_limiting` | boolean | `false` | Enable rate limiting for API requests |
+| `api_keys.backend` | string enum | `"file"` | Storage backend type (currently only `"file"` supported) |
+| `api_keys.storage_path` | path | `"./data/api_keys.db"` | Path to API key storage database |
+| `api_keys.rotation_days` | integer | `90` | API key rotation period in days |
+| `api_keys.warn_before_expiry_days` | integer | `14` | Days before expiry to warn |
+| `cors.allowed_origins` | array of strings | `["*"]` | Allowed CORS origins |
+| `cors.allowed_methods` | array of strings | `["GET", "POST", "DELETE", "OPTIONS"]` | Allowed HTTP methods |
+| `cors.max_age_seconds` | integer | `3600` | CORS preflight cache duration in seconds |
+
+### `security.auth_mode`
+
+**Type:** `string` (enum)
+**Default:** `"none"`
+**Valid values:** `"none"`, `"api_key"`
+
+**Purpose:** Controls authentication mode for API access.
+
+**Authentication Modes:**
+
+**1. None (Default)**
+```toml
+[security]
+auth_mode = "none"
+```
+
+- No authentication required
+- Suitable for development environments
+- Default for backward compatibility
+- All API requests accepted without credentials
+
+**2. API Key**
+```toml
+[security]
+auth_mode = "api_key"
+```
+
+- Require API key for all requests
+- Keys stored in configured backend
+- Suitable for production deployments
+- Keys passed via `Authorization: Bearer <key>` header
+
+**When to use:**
+
+- **Development:** Use `"none"` for local testing and rapid iteration
+- **Staging:** Use `"api_key"` to validate authentication flow
+- **Production:** Always use `"api_key"` for deployed systems
+- **Multi-tenant:** Use `"api_key"` with per-tenant keys
+
+**Environment Variable Override:**
+
+Set `ENGRAM_AUTH_MODE` to override configuration file:
+
+```bash
+export ENGRAM_AUTH_MODE=api_key
+engram server
+```
+
+**Migration Guide:**
+
+To enable authentication on an existing deployment:
+
+1. Update configuration file to `auth_mode = "api_key"`
+2. Generate initial API keys (see M15 Task 009 tutorials)
+3. Distribute keys to authorized clients
+4. Restart Engram server
+5. Update client applications to include `Authorization` header
+
+**Examples:**
+
+```toml
+# Development: No authentication
+[security]
+auth_mode = "none"
+
+# Production: API key authentication
+[security]
+auth_mode = "api_key"
+```
+
+### `security.rate_limiting`
+
+**Type:** `boolean`
+**Default:** `false`
+
+**Purpose:** Enable rate limiting to prevent API abuse and ensure fair resource allocation.
+
+**When to enable:**
+
+- Production deployments to prevent abuse
+- Multi-tenant systems for fair resource allocation
+- Public-facing APIs to control load
+- Cost management for metered infrastructure
+
+**When to disable:**
+
+- Development environments for rapid iteration
+- Trusted internal deployments
+- Single-tenant dedicated systems
+- Load testing scenarios
+
+**Environment Variable Override:**
+
+```bash
+export ENGRAM_RATE_LIMIT=true
+engram server
+```
+
+**Examples:**
+
+```toml
+# Development: Disabled
+[security]
+rate_limiting = false
+
+# Production: Enabled
+[security]
+rate_limiting = true
+```
+
+### `security.api_keys.backend`
+
+**Type:** `string` (enum)
+**Default:** `"file"`
+**Valid values:** `"file"`
+
+**Purpose:** Storage backend for API keys and metadata.
+
+**Currently Supported:**
+
+- `"file"` - File-based storage using local database
+
+**Future Support (Planned):**
+
+- `"postgres"` - PostgreSQL database
+- `"redis"` - Redis for distributed deployments
+- `"vault"` - HashiCorp Vault integration
+
+**Examples:**
+
+```toml
+[security.api_keys]
+backend = "file"  # Only option currently
+```
+
+### `security.api_keys.storage_path`
+
+**Type:** `string` (path)
+**Default:** `"./data/api_keys.db"`
+**Valid values:** Absolute path or relative to working directory
+
+**Purpose:** File path for API key database.
+
+**Path Guidelines:**
+
+**Development:**
+```toml
+storage_path = "./data/api_keys.db"  # Relative to working directory
+```
+
+**Production:**
+```toml
+storage_path = "/var/lib/engram/api_keys.db"  # Absolute system path
+```
+
+**Docker:**
+```toml
+storage_path = "/data/engram/api_keys.db"  # Mounted volume
+```
+
+**Security Considerations:**
+
+- Ensure parent directory has restrictive permissions (700)
+- File should be readable only by Engram process user
+- Back up regularly as part of disaster recovery
+- Encrypt at rest for compliance requirements
+- Do not store in world-readable locations
+
+**Environment Variable Override:**
+
+```bash
+export ENGRAM_API_KEY_PATH=/secure/path/keys.db
+engram server
+```
+
+**Examples:**
+
+```toml
+# Development
+[security.api_keys]
+storage_path = "./data/api_keys.db"
+
+# Production
+[security.api_keys]
+storage_path = "/var/lib/engram/api_keys.db"
+
+# Docker
+[security.api_keys]
+storage_path = "/data/engram/api_keys.db"
+```
+
+### `security.api_keys.rotation_days`
+
+**Type:** `integer`
+**Default:** `90`
+**Valid range:** `1` - `3650` (10 years)
+
+**Purpose:** Automatic API key rotation period in days. Keys older than this threshold are flagged for rotation.
+
+**Rotation Guidelines by Environment:**
+
+| Environment | Rotation Days | Rationale |
+|-------------|---------------|-----------|
+| Development | 365+ | Convenience, minimal risk |
+| Staging | 90 - 180 | Match production policy |
+| Production (High Security) | 30 - 60 | Frequent rotation, minimize exposure |
+| Production (Standard) | 90 | Balance security and operational overhead |
+| Production (Low Risk) | 180 - 365 | Reduce rotation frequency |
+
+**Compliance Recommendations:**
+
+- **PCI DSS:** 90 days maximum
+- **HIPAA:** 90 days recommended
+- **SOC 2:** 90 days typical
+- **ISO 27001:** 90 days recommended
+- **Custom Policies:** Align with organization standards
+
+**Validation:**
+
+- Must be greater than 0
+- Must be greater than `warn_before_expiry_days`
+
+**Examples:**
+
+```toml
+# High security production
+[security.api_keys]
+rotation_days = 30
+
+# Standard production
+[security.api_keys]
+rotation_days = 90
+
+# Development
+[security.api_keys]
+rotation_days = 365
+```
+
+### `security.api_keys.warn_before_expiry_days`
+
+**Type:** `integer`
+**Default:** `14`
+**Valid range:** `1` - `rotation_days - 1`
+
+**Purpose:** Number of days before expiry to emit warnings. Allows proactive key rotation before expiration.
+
+**Warning Guidelines:**
+
+| Rotation Period | Recommended Warning | Rationale |
+|-----------------|---------------------|-----------|
+| 30 days | 7 days | One week notice |
+| 60 days | 14 days | Two weeks notice |
+| 90 days | 14 - 21 days | Two to three weeks notice |
+| 180+ days | 30 days | One month notice |
+
+**Warning Mechanisms:**
+
+- Server logs warning messages
+- Monitoring metrics exposed
+- API responses include warning headers
+- Automated alerts (if configured)
+
+**Validation:**
+
+- Must be greater than 0
+- Must be less than `rotation_days`
+
+**Examples:**
+
+```toml
+# 30-day rotation with 1-week warning
+[security.api_keys]
+rotation_days = 30
+warn_before_expiry_days = 7
+
+# 90-day rotation with 2-week warning
+[security.api_keys]
+rotation_days = 90
+warn_before_expiry_days = 14
+```
+
+### `security.cors.allowed_origins`
+
+**Type:** `array of strings`
+**Default:** `["*"]`
+**Valid values:** Array of origin URLs or `"*"` wildcard
+
+**Purpose:** Configure allowed origins for Cross-Origin Resource Sharing (CORS).
+
+**Origin Formats:**
+
+- Full URL: `"https://app.example.com"`
+- Wildcard: `"*"` (allow all origins)
+- Subdomain wildcard: `"https://*.example.com"` (not currently supported)
+- Multiple specific origins: `["https://app1.com", "https://app2.com"]`
+
+**Security Guidelines:**
+
+**Development:**
+```toml
+allowed_origins = ["*"]  # Allow all for convenience
+```
+
+**Production:**
+```toml
+allowed_origins = ["https://app.example.com", "https://admin.example.com"]  # Specific domains only
+```
+
+**Validation:**
+
+- Array cannot be empty
+- Each origin must be valid URL or `"*"`
+- Use specific origins in production, never `"*"`
+
+**Security Considerations:**
+
+- Never use `"*"` in production
+- Specify exact domains, including protocol and port
+- Update when adding new frontend applications
+- Review regularly as part of security audits
+
+**Examples:**
+
+```toml
+# Development: Allow all
+[security.cors]
+allowed_origins = ["*"]
+
+# Production: Specific domains
+[security.cors]
+allowed_origins = ["https://app.example.com", "https://admin.example.com"]
+
+# Production: Single domain
+[security.cors]
+allowed_origins = ["https://app.example.com"]
+```
+
+### `security.cors.allowed_methods`
+
+**Type:** `array of strings`
+**Default:** `["GET", "POST", "DELETE", "OPTIONS"]`
+**Valid values:** HTTP method names
+
+**Purpose:** Configure allowed HTTP methods for CORS requests.
+
+**Common Methods:**
+
+- `GET` - Read operations
+- `POST` - Create operations
+- `PUT` - Full update operations
+- `PATCH` - Partial update operations
+- `DELETE` - Delete operations
+- `OPTIONS` - CORS preflight requests (always required)
+- `HEAD` - Metadata requests
+
+**Default Rationale:**
+
+- `GET` - Read memories and query operations
+- `POST` - Create memories and execute operations
+- `DELETE` - Remove memories
+- `OPTIONS` - Required for CORS preflight
+
+**Validation:**
+
+- Array cannot be empty
+- Must include `"OPTIONS"` for CORS to function
+- Methods are case-sensitive (use uppercase)
+
+**Examples:**
+
+```toml
+# Default: Read, create, delete
+[security.cors]
+allowed_methods = ["GET", "POST", "DELETE", "OPTIONS"]
+
+# Read-only API
+[security.cors]
+allowed_methods = ["GET", "HEAD", "OPTIONS"]
+
+# Full CRUD API
+[security.cors]
+allowed_methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+```
+
+### `security.cors.max_age_seconds`
+
+**Type:** `integer`
+**Default:** `3600`
+**Valid range:** `1` - `86400` (24 hours)
+
+**Purpose:** Duration (in seconds) that browsers cache CORS preflight responses.
+
+**Tuning Guidelines:**
+
+| Value | Use Case | Rationale |
+|-------|----------|-----------|
+| 300 - 600 | Frequently changing CORS policy | Short cache for flexibility |
+| 3600 | Standard production | 1-hour cache balances performance and flexibility |
+| 7200 - 86400 | Stable CORS policy | Longer cache reduces preflight overhead |
+
+**Performance Impact:**
+
+- Higher values reduce preflight requests
+- Lower values allow faster CORS policy updates
+- Browsers may enforce lower maximums
+- Consider client request patterns
+
+**Validation:**
+
+- Must be greater than 0
+- Recommend 3600 (1 hour) for most deployments
+- Maximum 86400 (24 hours) per spec
+
+**Examples:**
+
+```toml
+# Aggressive caching (stable policy)
+[security.cors]
+max_age_seconds = 86400  # 24 hours
+
+# Standard (balanced)
+[security.cors]
+max_age_seconds = 3600  # 1 hour
+
+# Conservative (frequently changing)
+[security.cors]
+max_age_seconds = 600  # 10 minutes
+```
+
+## Environment Variable Precedence
+
+Security configuration supports environment variable overrides for operational flexibility:
+
+| Environment Variable | Configuration Key | Type | Example |
+|---------------------|-------------------|------|---------|
+| `ENGRAM_AUTH_MODE` | `security.auth_mode` | string | `export ENGRAM_AUTH_MODE=api_key` |
+| `ENGRAM_API_KEY_PATH` | `security.api_keys.storage_path` | path | `export ENGRAM_API_KEY_PATH=/secure/keys.db` |
+| `ENGRAM_RATE_LIMIT` | `security.rate_limiting` | boolean | `export ENGRAM_RATE_LIMIT=true` |
+
+**Precedence Order (highest to lowest):**
+
+1. Environment variables
+2. User configuration file (`~/.config/engram/config.toml`)
+3. System configuration file (`/etc/engram/config.toml`)
+4. Default configuration (embedded in binary)
+
+## Configuration Examples
+
+### Development Configuration
+
+```toml
+[security]
+# No authentication for local development
+auth_mode = "none"
+rate_limiting = false
+
+[security.api_keys]
+backend = "file"
+storage_path = "./data/api_keys.db"
+rotation_days = 365
+warn_before_expiry_days = 30
+
+[security.cors]
+# Allow all origins for development
+allowed_origins = ["*"]
+allowed_methods = ["GET", "POST", "DELETE", "OPTIONS"]
+max_age_seconds = 3600
+```
+
+### Production Configuration
+
+```toml
+[security]
+# API key authentication required
+auth_mode = "api_key"
+rate_limiting = true
+
+[security.api_keys]
+backend = "file"
+storage_path = "/var/lib/engram/api_keys.db"
+rotation_days = 30
+warn_before_expiry_days = 7
+
+[security.cors]
+# Specific domains only
+allowed_origins = ["https://app.example.com"]
+allowed_methods = ["GET", "POST", "DELETE", "OPTIONS"]
+max_age_seconds = 3600
+```
+
+### Docker Configuration
+
+```toml
+[security]
+auth_mode = "api_key"
+rate_limiting = true
+
+[security.api_keys]
+backend = "file"
+# Mounted volume path
+storage_path = "/data/engram/api_keys.db"
+rotation_days = 90
+warn_before_expiry_days = 14
+
+[security.cors]
+allowed_origins = ["https://app.example.com"]
+allowed_methods = ["GET", "POST", "DELETE", "OPTIONS"]
+max_age_seconds = 3600
+```
+
+## Validation
+
+Security configuration is validated on server startup. Common validation errors:
+
+**Empty API key storage path:**
+```
+Error: api_keys.storage_path cannot be empty
+```
+
+**Invalid rotation period:**
+```
+Error: api_keys.rotation_days must be greater than 0
+```
+
+**Invalid warning period:**
+```
+Error: api_keys.warn_before_expiry_days (30) must be less than rotation_days (30)
+```
+
+**Empty CORS origins:**
+```
+Error: cors.allowed_origins cannot be empty
+```
+
+**Empty CORS methods:**
+```
+Error: cors.allowed_methods cannot be empty
+```
+
+**Invalid max age:**
+```
+Error: cors.max_age_seconds must be greater than 0
+```
+
+## Security Best Practices
+
+1. **Never use `auth_mode = "none"` in production** - Always enable authentication for deployed systems
+
+2. **Use specific CORS origins** - Never use `"*"` wildcard in production environments
+
+3. **Secure API key storage** - Set restrictive file permissions (600) on `storage_path`
+
+4. **Enable rate limiting** - Protect against abuse in production deployments
+
+5. **Regular key rotation** - Follow compliance requirements (typically 30-90 days)
+
+6. **Monitor expiry warnings** - Rotate keys proactively before expiration
+
+7. **Back up API key database** - Include `storage_path` in backup procedures
+
+8. **Use environment variables** - Override sensitive paths via environment in containers
+
+## Migration from No Authentication
+
+To enable authentication on an existing Engram deployment:
+
+1. **Update configuration:**
+   ```toml
+   [security]
+   auth_mode = "api_key"
+   ```
+
+2. **Generate initial API keys** (see security tutorials in M15 Task 009)
+
+3. **Distribute keys to clients** - Share securely via encrypted channels
+
+4. **Update client applications** - Add `Authorization: Bearer <key>` header
+
+5. **Test authentication** - Verify all clients can authenticate
+
+6. **Deploy configuration** - Restart Engram with new configuration
+
+7. **Monitor logs** - Watch for authentication failures
+
+**Backward Compatibility:**
+
+- Default configuration remains `auth_mode = "none"`
+- No breaking changes for existing deployments
+- Explicit opt-in required for authentication
+
+## Related Documentation
+
+- **[Security Tutorials](../tutorials/)** (M15 Task 009) - Step-by-step guides for enabling authentication
+- **[Operations: Security Hardening](../operations/)** - Production security practices
+- **[How-To: Configure for Production](../howto/configure-for-production.md)** - Complete production setup
+- **[Reference: CLI](../reference/cli.md)** - Command-line options for security
 
 ---
 
